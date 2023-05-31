@@ -1,3 +1,5 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 #![allow(missing_docs)] // FIXME
 
 use bytes::Bytes;
@@ -243,4 +245,11 @@ impl Response {
             },
         )
     }
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct ClientRequestAccepts {
+    pub(crate) multipart: bool,
+    pub(crate) json: bool,
+    pub(crate) wildcard: bool,
 }

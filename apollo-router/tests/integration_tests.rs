@@ -17,6 +17,7 @@ use apollo_router::Context;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http::Uri;
@@ -27,6 +28,8 @@ use serde_json_bytes::json;
 use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceExt;
+use walkdir::DirEntry;
+use walkdir::WalkDir;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -204,6 +207,36 @@ async fn simple_queries_should_not_work() {
         actual.errors.len(),
         "CSRF should have rejected this query"
     );
+    assert_eq!(expected_error, actual.errors[0]);
+    assert_eq!(registry.totals(), hashmap! {});
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn empty_posts_should_not_work() {
+    let request = http::Request::builder()
+        .header(
+            CONTENT_TYPE,
+            HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+        )
+        .method(Method::POST)
+        .body(hyper::Body::empty())
+        .unwrap();
+
+    let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
+
+    let actual = query_with_router(router, request.into()).await;
+
+    assert_eq!(1, actual.errors.len());
+
+    let message = "Invalid GraphQL request";
+    let mut extensions_map = serde_json_bytes::map::Map::new();
+    extensions_map.insert("code", "INVALID_GRAPHQL_REQUEST".into());
+    extensions_map.insert("details", "failed to deserialize the request body into JSON: EOF while parsing a value at line 1 column 0".into());
+    let expected_error = graphql::Error::builder()
+        .message(message)
+        .extension_code("INVALID_GRAPHQL_REQUEST")
+        .extensions(extensions_map)
+        .build();
     assert_eq!(expected_error, actual.errors[0]);
     assert_eq!(registry.totals(), hashmap! {});
 }
@@ -488,7 +521,7 @@ async fn missing_variables() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_under_recursion_limit() {
     let config = serde_json::json!({
-        "server": {"experimental_parser_recursion_limit": 12_usize}
+        "preview_operation_limits": {"parser_max_recursion": 12_usize}
     });
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
@@ -509,7 +542,7 @@ async fn query_just_under_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_at_recursion_limit() {
     let config = serde_json::json!({
-        "server": {"experimental_parser_recursion_limit": 11_usize}
+        "preview_operation_limits": {"parser_max_recursion": 5_usize}
     });
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
@@ -521,9 +554,47 @@ async fn query_just_at_recursion_limit() {
     let (actual, registry) = query_rust_with_config(request, config).await;
 
     assert_eq!(1, actual.errors.len());
-    assert!(actual.errors[0]
-        .message
-        .contains("parser limit(11) reached"));
+    assert!(actual.errors[0].message.contains("parser limit(5) reached"));
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn query_just_under_token_limit() {
+    let config = serde_json::json!({
+        "preview_operation_limits": {"parser_max_tokens": 36_usize}
+    });
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
+        .build()
+        .expect("expecting valid request");
+
+    let expected_service_hits = hashmap! {
+        "reviews".to_string() => 1,
+        "accounts".to_string() => 2,
+    };
+
+    let (actual, registry) = query_rust_with_config(request, config).await;
+
+    assert_eq!(0, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn query_just_at_token_limit() {
+    let config = serde_json::json!({
+        "preview_operation_limits": {"parser_max_tokens": 34_usize}
+    });
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
+        .build()
+        .expect("expecting valid request");
+
+    let expected_service_hits = hashmap! {};
+
+    let (actual, registry) = query_rust_with_config(request, config).await;
+
+    assert_eq!(1, actual.errors.len());
+    assert!(actual.errors[0].message.contains("token limit reached"));
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
@@ -856,20 +927,25 @@ async fn query_rust_with_config(
     )
 }
 
-async fn setup_router_and_registry(
+async fn fallible_setup_router_and_registry(
     config: serde_json::Value,
-) -> (router::BoxCloneService, CountingServiceRegistry) {
+) -> Result<(router::BoxCloneService, CountingServiceRegistry), BoxError> {
     let counting_registry = CountingServiceRegistry::new();
     let router = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
         .configuration_json(config)
-        .unwrap()
+        .map_err(|e| Box::new(e) as BoxError)?
         .schema(include_str!("fixtures/supergraph.graphql"))
         .extra_plugin(counting_registry.clone())
         .build_router()
-        .await
-        .unwrap();
-    (router, counting_registry)
+        .await?;
+    Ok((router, counting_registry))
+}
+
+async fn setup_router_and_registry(
+    config: serde_json::Value,
+) -> (router::BoxCloneService, CountingServiceRegistry) {
+    fallible_setup_router_and_registry(config).await.unwrap()
 }
 
 async fn query_with_router(
@@ -993,6 +1069,55 @@ impl ValueExt for Value {
                 }
             }
             (a, b) => a == b,
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn all_stock_router_example_yamls_are_valid() {
+    let example_dir = "../examples";
+    let example_directory_entries: Vec<DirEntry> = WalkDir::new(example_dir)
+        .into_iter()
+        .map(|entry| {
+            entry.unwrap_or_else(|e| panic!("invalid directory entry in {example_dir}: {e}"))
+        })
+        .collect();
+    assert!(
+        !example_directory_entries.is_empty(),
+        "asserting that example_directory_entries is not empty"
+    );
+    for example_directory_entry in example_directory_entries {
+        let entry_path = example_directory_entry.path();
+        let display_path = entry_path.display().to_string();
+        let entry_parent = entry_path
+            .parent()
+            .unwrap_or_else(|| panic!("could not find parent of {display_path}"));
+
+        // skip projects with a `.skipconfigvalidation` file or a `Cargo.toml`
+        // we only want to test stock router binary examples, nothing custom
+        if !entry_parent.join(".skipconfigvalidation").exists()
+            && !entry_parent.join("Cargo.toml").exists()
+        {
+            // if we aren't on a unix machine and a `.unixonly` sibling file exists
+            // don't validate the YAML
+            if !cfg!(target_family = "unix") && entry_parent.join(".unixonly").exists() {
+                break;
+            }
+            if let Some(name) = example_directory_entry.file_name().to_str() {
+                if name.ends_with("yaml") || name.ends_with("yml") {
+                    let raw_yaml = std::fs::read_to_string(entry_path)
+                        .unwrap_or_else(|e| panic!("unable to read {display_path}: {e}"));
+                    {
+                        let yaml = serde_yaml::from_str::<serde_json::Value>(&raw_yaml)
+                            .unwrap_or_else(|e| panic!("unable to parse YAML {display_path}: {e}"));
+                        fallible_setup_router_and_registry(yaml)
+                            .await
+                            .unwrap_or_else(|e| {
+                                panic!("unable to start up router for {display_path}: {e}");
+                            });
+                    }
+                }
+            }
         }
     }
 }

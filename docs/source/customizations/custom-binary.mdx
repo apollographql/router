@@ -4,7 +4,14 @@ title: Creating a custom Apollo Router binary
 
 import ElasticNotice from '../../shared/elastic-notice.mdx';
 
-To use [custom plugins](./native/) that aren't bundled with the default Apollo Router distribution, you need to compile your own custom router binary. This page walks you through creating that binary from scratch and adding a plugin to it.
+> ⚠️ **Native Rust plugins are an advanced feature of the Apollo Router.** We _do not recommend_ creating them for the following reasons:
+>
+> - Native plugins require familiarity with programming in Rust.
+> - Native plugins require compiling a custom router binary from source, which can introduce unexpected behavior in your router that's difficult to diagnose and support.
+>
+> **For most router customizations,** we recommend instead creating a [Rhai script](./rhai/) or [external coprocessor](./coprocessor/). Both of these customization types provide strong separation of concerns and fault isolation.
+>
+> **If a native plugin seems necessary for your use case,** please [open an issue](https://github.com/apollographql/router/issues) so we can investigate adding the required functionality to the stock router binary.
 
 <ElasticNotice />
 
@@ -152,6 +159,24 @@ cargo router plugin remove hello_world
 ```
 
 Note that depending on the structure of your plugin, the command might fail to remove all of its associated files.
+
+## Memory allocator
+
+On Linux the `apollo-router` crate sets [jemalloc](http://jemalloc.net/) 
+as [the global memory allocator for Rust](https://doc.rust-lang.org/std/alloc/index.html#the-global_allocator-attribute)
+to reduce memory fragmentation.
+Future versions may do so on more platforms, or switch to yet a different allocator.
+This is enabled by default and controlled by a `global-allocator` Cargo feature flag.
+If you want to choose a different allocator, disable it in your `Cargo.toml`:
+
+```toml
+[dependencies]
+apollo-router = {version = "[…]", default-features = false}
+```
+
+If you make a library crate, also specify `default-features = false`
+in order to leave the choice open for the eventual executable crate.
+(Cargo default features are only disabled if *all* dependents specify `default-features = false`.)
 
 ## Docker
 

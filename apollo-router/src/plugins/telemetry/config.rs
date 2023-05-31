@@ -54,7 +54,7 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 /// Telemetry configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub struct Conf {
+pub(crate) struct Conf {
     /// Logging configuration
     #[serde(rename = "experimental_logging", default)]
     pub(crate) logging: Logging,
@@ -80,7 +80,7 @@ pub(crate) struct Metrics {
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct MetricsCommon {
     /// Configuration to add custom labels/attributes to metrics
     pub(crate) attributes: Option<MetricsAttributesConf>,
@@ -88,9 +88,17 @@ pub(crate) struct MetricsCommon {
     pub(crate) service_name: Option<String>,
     /// Set a service.namespace attribute in your metrics
     pub(crate) service_namespace: Option<String>,
-    #[serde(default)]
     /// Resources
     pub(crate) resources: HashMap<String, String>,
+    /// Custom buckets for histograms
+    #[serde(default = "default_buckets")]
+    pub(crate) buckets: Vec<f64>,
+}
+
+fn default_buckets() -> Vec<f64> {
+    vec![
+        0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
+    ]
 }
 
 /// Tracing configuration
@@ -611,6 +619,15 @@ impl Conf {
                 (_, SamplerOption::TraceIdRatioBased(ratio)) if ratio == 0.0 => 0.0,
                 (SamplerOption::TraceIdRatioBased(ratio), _) if ratio == 0.0 => 0.0,
                 (_, SamplerOption::Always(Sampler::AlwaysOn)) => 1.0,
+                // the `field_ratio` should be a ratio of the entire set of requests. But FTV1 would only be reported
+                // if a trace was generated with the Apollo exporter, which has its own sampling `global_ratio`.
+                // in telemetry::request_ftv1, we activate FTV1 if the current trace is sampled and depending on
+                // the ratio returned by this function.
+                // This means that:
+                // - field_ratio cannot be larger than global_ratio (see above, we return an error in that case)
+                // - we have to divide field_ratio by global_ratio
+                // Example: we want to measure FTV1 on 30% of total requests, but we the Apollo tracer samples at 50%.
+                // If we measure FTV1 on 60% (0.3 / 0.5) of these sampled requests, that amounts to 30% of the total traffic
                 (
                     SamplerOption::TraceIdRatioBased(global_ratio),
                     SamplerOption::TraceIdRatioBased(field_ratio),

@@ -18,22 +18,19 @@ pub(crate) enum Selection {
         alias: Option<ByteString>,
         selection_set: Option<Vec<Selection>>,
         field_type: FieldType,
-        skip: Skip,
-        include: Include,
+        include_skip: IncludeSkip,
     },
     InlineFragment {
         // Optional in specs but we fill it with the current type if not specified
         type_condition: String,
-        skip: Skip,
-        include: Include,
+        include_skip: IncludeSkip,
         known_type: Option<String>,
         selection_set: Vec<Selection>,
     },
     FragmentSpread {
         name: String,
         known_type: Option<String>,
-        skip: Skip,
-        include: Include,
+        include_skip: IncludeSkip,
     },
 }
 
@@ -56,41 +53,30 @@ impl Selection {
         Ok(match selection {
             // Spec: https://spec.graphql.org/draft/#Field
             hir::Selection::Field(field) => {
-                let skip = field
-                    .directives()
-                    .iter()
-                    .find_map(parse_skip_hir)
-                    .unwrap_or(Skip::No);
-                if skip.statically_skipped() {
-                    return Ok(None);
-                }
-                let include = field
-                    .directives()
-                    .iter()
-                    .find_map(parse_include_hir)
-                    .unwrap_or(Include::Yes);
-                if include.statically_skipped() {
+                let include_skip = IncludeSkip::parse(field.directives());
+                if include_skip.statically_skipped() {
                     return Ok(None);
                 }
                 let field_type = match field.name() {
-                    TYPENAME => FieldType::String,
-                    "__schema" => FieldType::Introspection("__Schema".to_string()),
-                    "__type" => FieldType::Introspection("__Type".to_string()),
+                    TYPENAME => FieldType::new_named("String"),
+                    "__schema" => FieldType::new_named("__Schema"),
+                    "__type" => FieldType::new_named("__Type"),
                     field_name => {
                         let name = current_type
                             .inner_type_name()
                             .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?;
+                        let definitions = &schema.type_system.definitions;
                         //looking into object types
-                        schema
-                            .object_types
+                        definitions
+                            .objects
                             .get(name)
-                            .and_then(|ty| ty.field(field_name))
+                            .and_then(|ty| ty.fields().find(|f| f.name() == field_name))
                             // otherwise, it might be an interface
                             .or_else(|| {
-                                schema
+                                definitions
                                     .interfaces
                                     .get(name)
-                                    .and_then(|ty| ty.field(field_name))
+                                    .and_then(|ty| ty.fields().find(|f| f.name() == field_name))
                             })
                             .ok_or_else(|| {
                                 SpecError::InvalidField(
@@ -98,7 +84,8 @@ impl Selection {
                                     current_type.to_string(),
                                 )
                             })?
-                            .clone()
+                            .ty()
+                            .into()
                     }
                 };
 
@@ -128,26 +115,13 @@ impl Selection {
                     name: field.name().into(),
                     selection_set,
                     field_type,
-                    skip,
-                    include,
+                    include_skip,
                 })
             }
             // Spec: https://spec.graphql.org/draft/#InlineFragment
             hir::Selection::InlineFragment(inline_fragment) => {
-                let skip = inline_fragment
-                    .directives()
-                    .iter()
-                    .find_map(parse_skip_hir)
-                    .unwrap_or(Skip::No);
-                if skip.statically_skipped() {
-                    return Ok(None);
-                }
-                let include = inline_fragment
-                    .directives()
-                    .iter()
-                    .find_map(parse_include_hir)
-                    .unwrap_or(Include::Yes);
-                if include.statically_skipped() {
+                let include_skip = IncludeSkip::parse(inline_fragment.directives());
+                if include_skip.statically_skipped() {
                     return Ok(None);
                 }
 
@@ -159,7 +133,7 @@ impl Selection {
                     .or_else(|| current_type.inner_type_name().map(|s| s.to_string()))
                     .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?;
 
-                let fragment_type = FieldType::Named(type_condition.clone());
+                let fragment_type = FieldType::new_named(type_condition.clone());
 
                 let selection_set = inline_fragment
                     .selection_set()
@@ -174,34 +148,20 @@ impl Selection {
                 Some(Self::InlineFragment {
                     type_condition,
                     selection_set,
-                    skip,
-                    include,
+                    include_skip,
                     known_type,
                 })
             }
             // Spec: https://spec.graphql.org/draft/#FragmentSpread
             hir::Selection::FragmentSpread(fragment_spread) => {
-                let skip = fragment_spread
-                    .directives()
-                    .iter()
-                    .find_map(parse_skip_hir)
-                    .unwrap_or(Skip::No);
-                if skip.statically_skipped() {
-                    return Ok(None);
-                }
-                let include = fragment_spread
-                    .directives()
-                    .iter()
-                    .find_map(parse_include_hir)
-                    .unwrap_or(Include::Yes);
-                if include.statically_skipped() {
+                let include_skip = IncludeSkip::parse(fragment_spread.directives());
+                if include_skip.statically_skipped() {
                     return Ok(None);
                 }
                 Some(Self::FragmentSpread {
                     name: fragment_spread.name().to_owned(),
                     known_type: current_type.inner_type_name().map(|s| s.to_string()),
-                    skip,
-                    include,
+                    include_skip,
                 })
             }
         })
@@ -209,6 +169,15 @@ impl Selection {
 
     pub(crate) fn is_typename_field(&self) -> bool {
         matches!(self, Selection::Field {name, ..} if name.as_str() == TYPENAME)
+    }
+
+    pub(crate) fn output_key_if_typename_field(&self) -> Option<ByteString> {
+        match self {
+            Selection::Field { name, alias, .. } if name.as_str() == TYPENAME => {
+                alias.as_ref().or(Some(name)).cloned()
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn contains_error_path(&self, path: &[PathElement], fragments: &Fragments) -> bool {
@@ -286,70 +255,66 @@ impl Selection {
     }
 }
 
-pub(crate) fn parse_skip_hir(directive: &hir::Directive) -> Option<Skip> {
-    if directive.name() != "skip" {
-        return None;
-    }
-    match directive.argument_by_name("if")? {
-        hir::Value::Boolean(true) => Some(Skip::Yes),
-        hir::Value::Boolean(false) => Some(Skip::No),
-        hir::Value::Variable(variable) => Some(Skip::Variable(variable.name().to_owned())),
-        _ => None,
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub(crate) struct IncludeSkip {
+    include: Condition,
+    skip: Condition,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) enum Skip {
+pub(crate) enum Condition {
     Yes,
     No,
     Variable(String),
 }
 
-impl Skip {
-    pub(crate) fn should_skip(&self, variables: &Object) -> Option<bool> {
+impl IncludeSkip {
+    pub(crate) fn parse(directives: &[hir::Directive]) -> Self {
+        let mut include = None;
+        let mut skip = None;
+        for directive in directives {
+            if include.is_none() && directive.name() == "include" {
+                include = Condition::parse(directive)
+            }
+            if skip.is_none() && directive.name() == "skip" {
+                skip = Condition::parse(directive)
+            }
+        }
+        Self {
+            include: include.unwrap_or(Condition::Yes),
+            skip: skip.unwrap_or(Condition::No),
+        }
+    }
+
+    pub(crate) fn statically_skipped(&self) -> bool {
+        matches!(self.skip, Condition::Yes) || matches!(self.include, Condition::No)
+    }
+
+    pub(crate) fn should_skip(&self, variables: &Object) -> bool {
+        // Using .unwrap_or is legit here because
+        // validate_variables should have already checked that
+        // the variable is present and it is of the correct type
+        self.skip.eval(variables).unwrap_or(false) || !self.include.eval(variables).unwrap_or(true)
+    }
+}
+
+impl Condition {
+    pub(crate) fn parse(directive: &hir::Directive) -> Option<Self> {
+        match directive.argument_by_name("if")? {
+            hir::Value::Boolean(true) => Some(Condition::Yes),
+            hir::Value::Boolean(false) => Some(Condition::No),
+            hir::Value::Variable(variable) => Some(Condition::Variable(variable.name().to_owned())),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn eval(&self, variables: &Object) -> Option<bool> {
         match self {
-            Skip::Yes => Some(true),
-            Skip::No => Some(false),
-            Skip::Variable(variable_name) => variables
+            Condition::Yes => Some(true),
+            Condition::No => Some(false),
+            Condition::Variable(variable_name) => variables
                 .get(variable_name.as_str())
                 .and_then(|v| v.as_bool()),
         }
-    }
-    pub(crate) fn statically_skipped(&self) -> bool {
-        matches!(self, Skip::Yes)
-    }
-}
-
-pub(crate) fn parse_include_hir(directive: &hir::Directive) -> Option<Include> {
-    if directive.name() != "include" {
-        return None;
-    }
-    match directive.argument_by_name("if")? {
-        hir::Value::Boolean(true) => Some(Include::Yes),
-        hir::Value::Boolean(false) => Some(Include::No),
-        hir::Value::Variable(variable) => Some(Include::Variable(variable.name().to_owned())),
-        _ => None,
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) enum Include {
-    Yes,
-    No,
-    Variable(String),
-}
-
-impl Include {
-    pub(crate) fn should_include(&self, variables: &Object) -> Option<bool> {
-        match self {
-            Include::Yes => Some(true),
-            Include::No => Some(false),
-            Include::Variable(variable_name) => variables
-                .get(variable_name.as_str())
-                .and_then(|v| v.as_bool()),
-        }
-    }
-    pub(crate) fn statically_skipped(&self) -> bool {
-        matches!(self, Include::No)
     }
 }

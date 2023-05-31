@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use buildstructor::buildstructor;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use jsonpath_lib::Selector;
@@ -51,10 +52,11 @@ pub struct IntegrationTest {
     _lock: tokio::sync::OwnedMutexGuard<bool>,
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
+    collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
     _subgraphs: wiremock::MockServer,
 }
 
-struct TracedResponder(ResponseTemplate);
+struct TracedResponder(pub(crate) ResponseTemplate);
 
 impl Respond for TracedResponder {
     fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
@@ -76,13 +78,24 @@ impl Respond for TracedResponder {
     }
 }
 
+#[allow(dead_code)]
+pub enum Telemetry {
+    Jaeger,
+    Otlp,
+    Datadog,
+    Zipkin,
+}
+
+#[buildstructor]
 impl IntegrationTest {
-    pub async fn new<P: TextMapPropagator + Send + Sync + 'static>(
-        tracer: opentelemetry::sdk::trace::Tracer,
-        propagator: P,
-        config: &str,
+    #[builder]
+    pub async fn new(
+        config: &'static str,
+        telemetry: Option<Telemetry>,
+        responder: Option<ResponseTemplate>,
+        collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
     ) -> Self {
-        Self::init_telemetry(tracer, propagator);
+        Self::init_telemetry(telemetry);
 
         // Prevent multiple integration tests from running at the same time
         let lock = LOCK
@@ -109,8 +122,8 @@ impl IntegrationTest {
             .await;
 
         Mock::given(method("POST"))
-            .respond_with(TracedResponder(ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}})
-            )))
+            .respond_with(TracedResponder(responder.unwrap_or_else(||
+                ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}})))))
             .mount(&subgraphs)
             .await;
 
@@ -119,17 +132,25 @@ impl IntegrationTest {
 
         fs::write(&test_config_location, config).expect("could not write config");
 
-        let router_location = PathBuf::from(env!("CARGO_BIN_EXE_router"));
         let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
+        let collect_stdio = collect_stdio.map(|sender| {
+            let version_line_re = regex::Regex::new("Apollo Router v[^ ]+ ").unwrap();
+            (sender, version_line_re)
+        });
         Self {
             router: None,
-            router_location,
+            router_location: Self::router_location(),
             test_config_location,
             _lock: lock,
             stdio_tx,
             stdio_rx,
+            collect_stdio,
             _subgraphs: subgraphs,
         }
+    }
+
+    pub fn router_location() -> PathBuf {
+        PathBuf::from(env!("CARGO_BIN_EXE_router"))
     }
 
     #[allow(dead_code)]
@@ -150,33 +171,117 @@ impl IntegrationTest {
             .expect("router should start");
         let reader = BufReader::new(router.stdout.take().expect("out"));
         let stdio_tx = self.stdio_tx.clone();
+        let collect_stdio = self.collect_stdio.take();
         // We need to read from stdout otherwise we will hang
         task::spawn(async move {
+            let mut collected = Vec::new();
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 println!("{line}");
+                if let Some((_sender, version_line_re)) = &collect_stdio {
+                    #[derive(serde::Deserialize)]
+                    struct Log {
+                        #[allow(unused)]
+                        timestamp: String,
+                        level: String,
+                        message: String,
+                    }
+                    let log = serde_json::from_str::<Log>(&line).unwrap();
+                    // Omit this message from snapshots since it depends on external environment
+                    if !log.message.starts_with("RUST_BACKTRACE=full detected") {
+                        collected.push(format!(
+                            "{}: {}",
+                            log.level,
+                            // Redacted so we don't need to update snapshots every release
+                            version_line_re
+                                .replace(&log.message, "Apollo Router [version number] ")
+                        ))
+                    }
+                }
                 let _ = stdio_tx.send(line).await;
+            }
+            if let Some((sender, _version_line_re)) = collect_stdio {
+                let _ = sender.send(collected.join("\n"));
             }
         });
 
         self.router = Some(router);
     }
 
-    fn init_telemetry<P: TextMapPropagator + Send + Sync + 'static>(
-        tracer: opentelemetry::sdk::trace::Tracer,
-        propagator: P,
-    ) {
-        let telemetry = tracing_opentelemetry::layer()
-            .with_tracer(tracer)
-            .with_filter(LevelFilter::INFO);
-        let subscriber = Registry::default().with(telemetry).with(
-            tracing_subscriber::fmt::Layer::default()
-                .compact()
-                .with_filter(EnvFilter::from_default_env()),
-        );
+    fn init_telemetry(telemetry: Option<Telemetry>) {
+        match telemetry {
+            Some(Telemetry::Jaeger) => {
+                let tracer = opentelemetry_jaeger::new_agent_pipeline()
+                    .with_service_name("my_app")
+                    .install_simple()
+                    .expect("jaeger pipeline failed");
+                let telemetry = tracing_opentelemetry::layer()
+                    .with_tracer(tracer)
+                    .with_filter(LevelFilter::INFO);
+                let subscriber = Registry::default().with(telemetry).with(
+                    tracing_subscriber::fmt::Layer::default()
+                        .compact()
+                        .with_filter(EnvFilter::from_default_env()),
+                );
 
-        let _ = tracing::subscriber::set_global_default(subscriber);
-        global::set_text_map_propagator(propagator);
+                let _ = tracing::subscriber::set_global_default(subscriber);
+                global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
+            }
+            Some(Telemetry::Datadog) => {
+                let tracer = opentelemetry_datadog::new_pipeline()
+                    .with_service_name("my_app")
+                    .install_simple()
+                    .expect("datadog pipeline failed");
+                let telemetry = tracing_opentelemetry::layer()
+                    .with_tracer(tracer)
+                    .with_filter(LevelFilter::INFO);
+                let subscriber = Registry::default().with(telemetry).with(
+                    tracing_subscriber::fmt::Layer::default()
+                        .compact()
+                        .with_filter(EnvFilter::from_default_env()),
+                );
+
+                let _ = tracing::subscriber::set_global_default(subscriber);
+                global::set_text_map_propagator(opentelemetry_datadog::DatadogPropagator::new());
+            }
+            Some(Telemetry::Otlp) => {
+                let tracer = opentelemetry_otlp::new_pipeline()
+                    .tracing()
+                    .install_simple()
+                    .expect("otlp pipeline failed");
+                let telemetry = tracing_opentelemetry::layer()
+                    .with_tracer(tracer)
+                    .with_filter(LevelFilter::INFO);
+                let subscriber = Registry::default().with(telemetry).with(
+                    tracing_subscriber::fmt::Layer::default()
+                        .compact()
+                        .with_filter(EnvFilter::from_default_env()),
+                );
+
+                let _ = tracing::subscriber::set_global_default(subscriber);
+                global::set_text_map_propagator(
+                    opentelemetry::sdk::propagation::TraceContextPropagator::new(),
+                );
+            }
+            Some(Telemetry::Zipkin) => {
+                let tracer = opentelemetry_zipkin::new_pipeline()
+                    .with_service_name("my_app")
+                    .install_simple()
+                    .expect("zipkin pipeline failed");
+                let telemetry = tracing_opentelemetry::layer()
+                    .with_tracer(tracer)
+                    .with_filter(LevelFilter::INFO);
+                let subscriber = Registry::default().with(telemetry).with(
+                    tracing_subscriber::fmt::Layer::default()
+                        .compact()
+                        .with_filter(EnvFilter::from_default_env()),
+                );
+
+                let _ = tracing::subscriber::set_global_default(subscriber);
+                global::set_text_map_propagator(opentelemetry_zipkin::Propagator::new());
+            }
+            _ => {}
+        }
     }
 
     #[allow(dead_code)]
@@ -208,42 +313,44 @@ impl IntegrationTest {
             .expect("must be able to write config");
     }
 
-    pub async fn run_query(&self) -> (String, reqwest::Response) {
+    pub fn run_query(&self) -> impl std::future::Future<Output = (String, reqwest::Response)> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
-        let client = reqwest::Client::new();
-        let id = Uuid::new_v4().to_string();
-        let span = info_span!("client_request", unit_test = id.as_str());
-        let _span_guard = span.enter();
+        async {
+            let client = reqwest::Client::new();
+            let id = Uuid::new_v4().to_string();
+            let span = info_span!("client_request", unit_test = id.as_str());
+            let _span_guard = span.enter();
 
-        let mut request = client
-            .post("http://localhost:4000")
-            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-            .header("apollographql-client-name", "custom_name")
-            .header("apollographql-client-version", "1.0")
-            .json(&json!({"query":"{topProducts{name}}","variables":{}}))
-            .build()
-            .unwrap();
+            let mut request = client
+                .post("http://localhost:4000")
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .header("apollographql-client-name", "custom_name")
+                .header("apollographql-client-version", "1.0")
+                .json(&json!({"query":"{topProducts{name}}","variables":{}}))
+                .build()
+                .unwrap();
 
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(
-                &span.context(),
-                &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-            );
-        });
-        request.headers_mut().remove(ACCEPT);
-        match client.execute(request).await {
-            Ok(response) => (id, response),
-            Err(err) => {
-                panic!("unable to send successful request to router, {err}")
+            global::get_text_map_propagator(|propagator| {
+                propagator.inject_context(
+                    &span.context(),
+                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                );
+            });
+            request.headers_mut().remove(ACCEPT);
+            match client.execute(request).await {
+                Ok(response) => (id, response),
+                Err(err) => {
+                    panic!("unable to send successful request to router, {err}")
+                }
             }
         }
     }
 
     #[allow(dead_code)]
-    pub async fn get_metrics(&self) -> reqwest::Result<String> {
+    pub async fn get_metrics_response(&self) -> reqwest::Result<reqwest::Response> {
         let client = reqwest::Client::new();
 
         let request = client
@@ -253,9 +360,7 @@ impl IntegrationTest {
             .build()
             .unwrap();
 
-        let res = client.execute(request).await?;
-
-        res.text().await
+        client.execute(request).await
     }
 
     #[allow(dead_code)]
@@ -270,7 +375,12 @@ impl IntegrationTest {
 
     #[cfg(target_os = "windows")]
     pub async fn graceful_shutdown(&mut self) {
-        // On windows we have to do complicated things to gracefully shutdown. One day we may get around to this, but it's not a priority.
+        // We don’t have SIGTERM on Windows, so do a non-graceful kill instead
+        self.kill().await
+    }
+
+    #[allow(dead_code)]
+    pub async fn kill(&mut self) {
         let _ = self
             .router
             .as_mut()
@@ -281,7 +391,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    fn pid(&mut self) -> i32 {
+    pub(crate) fn pid(&mut self) -> i32 {
         self.router
             .as_ref()
             .expect("router must have been started")
@@ -301,7 +411,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    async fn assert_log_contains(&mut self, msg: &str) {
+    pub async fn assert_log_contains(&mut self, msg: &str) {
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(5) {
             if let Ok(line) = self.stdio_rx.try_recv() {
@@ -316,8 +426,30 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub async fn assert_metrics_contains(&self, text: &str, duration: Option<Duration>) {
+        let now = Instant::now();
+        let mut last_metrics = String::new();
+        while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
+            if let Ok(metrics) = self
+                .get_metrics_response()
+                .await
+                .expect("failed to fetch metrics")
+                .text()
+                .await
+            {
+                if metrics.contains(text) {
+                    return;
+                }
+                last_metrics = metrics;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("'{text}' not detected in metrics\n{last_metrics}");
+    }
+
+    #[allow(dead_code)]
     pub async fn assert_shutdown(&mut self) {
-        let mut router = self.router.take().expect("router must have been started");
+        let router = self.router.as_mut().expect("router must have been started");
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(3) {
             match router.try_wait() {
@@ -332,6 +464,14 @@ impl IntegrationTest {
 
         self.dump_stack_traces();
         panic!("unable to shutdown router, this probably means a hang and should be investigated");
+    }
+
+    #[allow(dead_code)]
+    #[cfg(target_family = "unix")]
+    pub async fn send_sighup(&mut self) {
+        unsafe {
+            libc::kill(self.pid(), libc::SIGHUP);
+        }
     }
 
     #[cfg(target_os = "linux")]

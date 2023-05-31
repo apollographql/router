@@ -1,20 +1,20 @@
 use anyhow::Result;
-use structopt::StructOpt;
+use clap::Parser;
 
 use super::Compliance;
 use super::Licenses;
 use super::Lint;
 use super::Test;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 pub struct All {
-    #[structopt(flatten)]
+    #[command(flatten)]
     compliance: Compliance,
-    #[structopt(flatten)]
+    #[command(flatten)]
     licenses: Licenses,
-    #[structopt(flatten)]
+    #[command(flatten)]
     lint: Lint,
-    #[structopt(flatten)]
+    #[command(flatten)]
     test: Test,
 }
 

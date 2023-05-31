@@ -1,0 +1,14 @@
+---
+source: apollo-router/src/plugins/authorization/mod.rs
+expression: response
+---
+{
+  "errors": [
+    {
+      "message": "unauthenticated",
+      "extensions": {
+        "code": "AUTH_ERROR"
+      }
+    }
+  ]
+}

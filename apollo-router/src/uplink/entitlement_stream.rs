@@ -12,21 +12,18 @@ use std::task::Poll;
 use std::time::Instant;
 use std::time::SystemTime;
 
-use displaydoc::Display;
 use futures::stream::Fuse;
 use futures::Stream;
 use futures::StreamExt;
 use graphql_client::GraphQLQuery;
 use pin_project_lite::pin_project;
-use thiserror::Error;
 use tokio_util::time::DelayQueue;
 
 use crate::router::Event;
 use crate::uplink::entitlement::Entitlement;
-use crate::uplink::entitlement::EntitlementReport;
 use crate::uplink::entitlement::EntitlementState;
-use crate::uplink::entitlement_stream::entitlement_request::EntitlementRequestRouterEntitlements;
-use crate::uplink::entitlement_stream::entitlement_request::FetchErrorCode;
+use crate::uplink::entitlement_stream::entitlement_query::EntitlementQueryRouterEntitlements;
+use crate::uplink::entitlement_stream::entitlement_query::FetchErrorCode;
 use crate::uplink::UplinkRequest;
 use crate::uplink::UplinkResponse;
 
@@ -38,26 +35,26 @@ use crate::uplink::UplinkResponse;
     response_derives = "PartialEq, Debug, Deserialize",
     deprecated = "warn"
 )]
-pub(crate) struct EntitlementRequest {}
+pub(crate) struct EntitlementQuery {}
 
-impl From<UplinkRequest> for entitlement_request::Variables {
+impl From<UplinkRequest> for entitlement_query::Variables {
     fn from(req: UplinkRequest) -> Self {
-        entitlement_request::Variables {
+        entitlement_query::Variables {
             api_key: req.api_key,
             graph_ref: req.graph_ref,
-            unless_id: req.id,
+            if_after_id: req.id,
         }
     }
 }
 
-impl From<entitlement_request::ResponseData> for UplinkResponse<Entitlement> {
-    fn from(response: entitlement_request::ResponseData) -> Self {
+impl From<entitlement_query::ResponseData> for UplinkResponse<Entitlement> {
+    fn from(response: entitlement_query::ResponseData) -> Self {
         match response.router_entitlements {
-            EntitlementRequestRouterEntitlements::RouterEntitlementsResult(result) => {
+            EntitlementQueryRouterEntitlements::RouterEntitlementsResult(result) => {
                 if let Some(entitlement) = result.entitlement {
                     match Entitlement::from_str(&entitlement.jwt) {
-                        Ok(entitlement) => UplinkResponse::Result {
-                            response: entitlement,
+                        Ok(jwt) => UplinkResponse::New {
+                            response: jwt,
                             id: result.id,
                             // this will truncate the number of seconds to under u64::MAX, which should be
                             // a large enough delay anyway
@@ -70,7 +67,7 @@ impl From<entitlement_request::ResponseData> for UplinkResponse<Entitlement> {
                         },
                     }
                 } else {
-                    UplinkResponse::Result {
+                    UplinkResponse::New {
                         response: Entitlement::default(),
                         id: result.id,
                         // this will truncate the number of seconds to under u64::MAX, which should be
@@ -79,34 +76,26 @@ impl From<entitlement_request::ResponseData> for UplinkResponse<Entitlement> {
                     }
                 }
             }
-            EntitlementRequestRouterEntitlements::Unchanged(response) => {
-                UplinkResponse::Unchanged {
-                    id: Some(response.id),
-                    delay: Some(response.min_delay_seconds as u64),
-                }
-            }
-            EntitlementRequestRouterEntitlements::FetchError(error) => UplinkResponse::Error {
+            EntitlementQueryRouterEntitlements::Unchanged(response) => UplinkResponse::Unchanged {
+                id: Some(response.id),
+                delay: Some(response.min_delay_seconds as u64),
+            },
+            EntitlementQueryRouterEntitlements::FetchError(error) => UplinkResponse::Error {
                 retry_later: error.code == FetchErrorCode::RETRY_LATER,
                 code: match error.code {
                     FetchErrorCode::AUTHENTICATION_FAILED => "AUTHENTICATION_FAILED".to_string(),
                     FetchErrorCode::ACCESS_DENIED => "ACCESS_DENIED".to_string(),
                     FetchErrorCode::UNKNOWN_REF => "UNKNOWN_REF".to_string(),
                     FetchErrorCode::RETRY_LATER => "RETRY_LATER".to_string(),
+                    FetchErrorCode::NOT_IMPLEMENTED_ON_THIS_INSTANCE => {
+                        "NOT_IMPLEMENTED_ON_THIS_INSTANCE".to_string()
+                    }
                     FetchErrorCode::Other(other) => other,
                 },
                 message: error.message,
             },
         }
     }
-}
-
-#[derive(Error, Display, Debug)]
-pub(crate) enum Error {
-    /// invalid entitlement: {0}
-    InvalidEntitlement(jsonwebtoken::errors::Error),
-
-    /// entitlement violations: {0}
-    EntitlementViolations(EntitlementReport),
 }
 
 pin_project! {
@@ -151,10 +140,9 @@ where
                 // If we got a new entitlement then we need to reset the stream of events and return the new entitlement event.
                 reset_checks_for_entitlement(&mut this.checks, entitlement)
             }
-            // Upstream has a new entitlement with no claim
+            // Upstream has a new entitlement with no claim.
             (_, Some(Poll::Ready(Some(_)))) => {
-                // As we have no claim clear the checks
-                this.checks.clear();
+                // We don't clear the checks if there is an entitlement with no claim.
                 Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Unentitled)))
             }
             // If either checks or upstream returned pending then we need to return pending.
@@ -258,7 +246,7 @@ mod test {
     use crate::uplink::entitlement::EntitlementState;
     use crate::uplink::entitlement::OneOrMany;
     use crate::uplink::entitlement_stream::to_positive_instant;
-    use crate::uplink::entitlement_stream::EntitlementRequest;
+    use crate::uplink::entitlement_stream::EntitlementQuery;
     use crate::uplink::entitlement_stream::EntitlementStreamExt;
     use crate::uplink::stream_from_uplink;
 
@@ -268,7 +256,7 @@ mod test {
             std::env::var("TEST_APOLLO_KEY"),
             std::env::var("TEST_APOLLO_GRAPH_REF"),
         ) {
-            let results = stream_from_uplink::<EntitlementRequest, Entitlement>(
+            let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
                 apollo_key,
                 apollo_graph_ref,
                 None,
@@ -360,6 +348,7 @@ mod test {
 
     #[tokio::test]
     async fn entitlement_expander_claim_no_claim() {
+        // Entitlements with no claim do not clear checks as they are ignored if we move from entitled to unentitled, this is handled at the state machine level.
         let events_stream = futures::stream::iter(vec![
             entitlement_with_claim(10, 10),
             entitlement_with_no_claim(),
@@ -373,7 +362,9 @@ mod test {
             events,
             &[
                 SimpleEvent::UpdateEntitlement,
-                SimpleEvent::UpdateEntitlement
+                SimpleEvent::UpdateEntitlement,
+                SimpleEvent::WarnEntitlement,
+                SimpleEvent::HaltEntitlement
             ]
         );
     }
@@ -451,6 +442,7 @@ mod test {
         HaltEntitlement,
         WarnEntitlement,
         NoMoreEntitlement,
+        ForcedHotReload,
         Shutdown,
     }
 
@@ -469,6 +461,7 @@ mod test {
                 }
                 Event::UpdateEntitlement(_) => SimpleEvent::UpdateEntitlement,
                 Event::NoMoreEntitlement => SimpleEvent::NoMoreEntitlement,
+                Event::Reload => SimpleEvent::ForcedHotReload,
                 Event::Shutdown => SimpleEvent::Shutdown,
             }
         }
