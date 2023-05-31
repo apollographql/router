@@ -265,6 +265,7 @@ impl Query {
 
     // Behaves like parse, except the errors are stored in the `Query` structure.
     // This allows you to run parsing without needing to early return.
+    #[allow(dead_code)]
     pub(crate) fn parse_unchecked(
         query: impl Into<String>,
         schema: &Schema,
@@ -368,6 +369,7 @@ impl Query {
             fragments,
             operations,
             subselections: HashMap::new(),
+            errors: Default::default(),
         })
     }
 

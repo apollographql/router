@@ -221,6 +221,7 @@ where
                     let request = SupergraphRequest {
                         supergraph_request: http::Request::from_parts(parts, graphql_request),
                         context,
+                        query: None,
                     };
 
                     let request_res = apq.supergraph_request(request).await;
