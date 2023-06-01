@@ -1,7 +1,5 @@
 #! /bin/sh
 
-cd "$(dirname "$0")"
-
 ###
 # Build docker images from git commit hash or tag or from released version.
 #
@@ -133,6 +131,9 @@ if ! BUILD_DIR=$(mktemp -d -t "router-build.XXXXXXXXXX"); then
 fi
 
 echo "Building in: ${BUILD_DIR}"
+
+# Move to this script's directory so we can find the files that are next to it.
+cd "$(dirname "${0}")" || terminate "Couldn't cd to source location";
 
 # Copy in our dockerfiles, we'll need them later
 mkdir "${BUILD_DIR}/dockerfiles"
