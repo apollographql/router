@@ -456,19 +456,37 @@ fn authenticate(
             StatusCode::BAD_REQUEST,
         );
     }
+    let jwt: &str;
 
-    // Split our string in (at most 2) sections.
-    let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
-    if jwt_parts.len() != 2 {
-        return failure_message(
-            request.context,
-            AuthenticationError::MissingJWT(jwt_value),
-            StatusCode::BAD_REQUEST,
-        );
+    // If there's a header prefix, we need to split the header
+    if config.header_value_prefix.len() > 0 {
+        // Split our string in (at most 2) sections.
+        let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
+        if jwt_parts.len() != 2 {
+            return failure_message(
+                request.context,
+                AuthenticationError::MissingJWT(jwt_value),
+                StatusCode::BAD_REQUEST,
+            );
+        }
+
+        // We have our jwt
+        jwt = jwt_parts[1];
+    } else {
+        // check for whitespace- we've already trimmed, so this means the request has a prefix that shouldn't exist
+        if jwt_value.contains(" ") {
+            return failure_message(
+                request.context,
+                AuthenticationError::InvalidPrefix(
+                    jwt_value_untrimmed,
+                    &config.header_value_prefix,
+                ),
+                StatusCode::BAD_REQUEST,
+            );
+        }
+        // otherwise, we can simply assign the jwt to the jwt_value; we'll validate down below
+        jwt = jwt_value
     }
-
-    // We have our jwt
-    let jwt = jwt_parts[1];
 
     // Try to create a valid header to work with
     let jwt_header = match decode_header(jwt) {
