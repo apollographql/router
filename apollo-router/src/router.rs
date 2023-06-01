@@ -1320,7 +1320,7 @@ mod tests {
         let response = router_handle.request(request).await.unwrap();
 
         assert_eq!(
-            "cannot query field 'name' on type 'User'",
+            r#"Cannot query field "name" on type "User"."#,
             response.errors[0].message
         );
         assert_eq!(
