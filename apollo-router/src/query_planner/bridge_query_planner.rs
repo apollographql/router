@@ -163,16 +163,29 @@ impl BridgeQueryPlanner {
     async fn plan(
         &self,
         query: String,
+        filtered_query: String,
         operation: Option<String>,
         mut selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let planner_result = self
             .planner
-            .plan(query, operation)
+            .plan(filtered_query.clone(), operation.clone())
             .await
             .map_err(QueryPlannerError::RouterBridgeError)?
             .into_result()
             .map_err(QueryPlannerError::from)?;
+
+        // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
+        let operation_signature = if query != filtered_query {
+            Some(
+                self.planner
+                    .operation_signature(query, operation)
+                    .await
+                    .map_err(QueryPlannerError::RouterBridgeError)?,
+            )
+        } else {
+            None
+        };
 
         match planner_result {
             PlanSuccess {
@@ -181,10 +194,15 @@ impl BridgeQueryPlanner {
                         query_plan: QueryPlan { node: Some(node) },
                         formatted_query_plan,
                     },
-                usage_reporting,
+                mut usage_reporting,
             } => {
                 let subselections = node.parse_subselections(&self.schema)?;
                 selections.subselections = subselections;
+
+                if let Some(sig) = operation_signature {
+                    usage_reporting.stats_report_key = sig;
+                }
+
                 Ok(QueryPlannerContent::Plan {
                     plan: Arc::new(super::QueryPlan {
                         usage_reporting,
@@ -201,9 +219,13 @@ impl BridgeQueryPlanner {
                         query_plan: QueryPlan { node: None },
                         ..
                     },
-                usage_reporting,
+                mut usage_reporting,
             } => {
                 failfast_debug!("empty query plan");
+                if let Some(sig) = operation_signature {
+                    usage_reporting.stats_report_key = sig;
+                }
+
                 Err(QueryPlannerError::EmptyPlan(usage_reporting))
             }
         }
@@ -315,7 +337,8 @@ impl BridgeQueryPlanner {
             ));
         }
 
-        self.plan(filtered_query, operation_name, selections).await
+        self.plan(query, filtered_query, operation_name, selections)
+            .await
     }
 }
 
@@ -412,6 +435,7 @@ mod tests {
             // that the query planner would return an empty plan error if it received an
             // introspection query
             .plan(
+                include_str!("testdata/unknown_introspection_query.graphql").into(),
                 include_str!("testdata/unknown_introspection_query.graphql").into(),
                 None,
                 Query::default(),
