@@ -263,12 +263,12 @@ impl Query {
         vec![]
     }
 
-    pub(crate) fn parse(
-        query: impl Into<String>,
+    fn parse_inner(
+        query: String,
         schema: &Schema,
         configuration: &Configuration,
+        validate: bool,
     ) -> Result<Self, SpecError> {
-        let query = query.into();
         let mut compiler = ApolloCompiler::new()
             .recursion_limit(configuration.preview_operation_limits.parser_max_recursion)
             .token_limit(configuration.preview_operation_limits.parser_max_tokens);
@@ -280,35 +280,37 @@ impl Query {
         let recursion_limit = ast.recursion_limit();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let diagnostics = compiler.db.validate_executable(id);
-        let errors = diagnostics
-            .into_iter()
-            .filter(|err| err.data.is_error())
-            .collect::<Vec<_>>();
-
-        let parse_errors = errors
-            .iter()
-            .filter(|err| matches!(&*err.data, &DiagnosticData::SyntaxError { .. }))
-            .collect::<Vec<_>>();
-
-        if !parse_errors.is_empty() {
+        let mut parse_errors = ast.errors().peekable();
+        if parse_errors.peek().is_some() {
             let text = parse_errors
-                .into_iter()
-                .map(|err| err.data.to_string())
+                .map(|err| err.to_string())
                 .collect::<Vec<_>>()
                 .join("\n");
             failfast_debug!("parsing error(s): {}", text);
             return Err(SpecError::ParsingError(text));
         }
 
-        if !errors.is_empty() {
-            let errors = errors
+        // Bail out on validation errors, only if the input is expected to be valid
+        if validate {
+            let diagnostics = compiler.db.validate_executable(id);
+            let errors = diagnostics
                 .into_iter()
-                .map(|err| err.data.to_string())
-                .collect::<Vec<_>>()
-                .join("\n");
-            failfast_debug!("validation error(s): {}", errors);
-            return Err(SpecError::ValidationError(errors));
+                .filter(|err| err.data.is_error())
+                .collect::<Vec<_>>();
+
+            for d in &errors {
+                eprintln!("{d}")
+            }
+
+            if !errors.is_empty() {
+                let errors = errors
+                    .into_iter()
+                    .map(|err| err.data.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                failfast_debug!("validation error(s): {}", errors);
+                return Err(SpecError::ValidationError(errors));
+            }
         }
 
         let fragments = Fragments::from_hir(&compiler, schema)?;
@@ -327,6 +329,22 @@ impl Query {
             operations,
             subselections: HashMap::new(),
         })
+    }
+
+    pub(crate) fn parse(
+        query: impl Into<String>,
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> Result<Self, SpecError> {
+        Self::parse_inner(query.into(), schema, configuration, false)
+    }
+
+    pub(crate) fn parse_with_validation(
+        query: impl Into<String>,
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> Result<Self, SpecError> {
+        Self::parse_inner(query.into(), schema, configuration, true)
     }
 
     pub(crate) async fn compiler(&self, schema: Option<&Schema>) -> MutexGuard<'_, ApolloCompiler> {
