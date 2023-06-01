@@ -19,6 +19,6 @@
     "opentracing": "^0.14.7"
   },
   "devDependencies": {
-    "typescript": "4.9.5"
+    "typescript": "5.0.4"
   }
 }

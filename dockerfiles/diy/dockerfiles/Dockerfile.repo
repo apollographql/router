@@ -36,11 +36,11 @@ ARG DEBUG_IMAGE=false
 
 WORKDIR /dist
 
-# Install curl
+# Update apt and install ca-certificates
 RUN \
   apt-get update -y \
   && apt-get install -y \
-    curl
+    ca-certificates
 
 # Copy in the required files from our build image
 COPY --from=build --chown=root:root /dist /dist
