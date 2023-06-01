@@ -1,5 +1,7 @@
 #! /bin/sh
 
+cd "$(dirname "$0")"
+
 ###
 # Build docker images from git commit hash or tag or from released version.
 #
@@ -143,7 +145,7 @@ cd "${BUILD_DIR}" || terminate "Couldn't cd to ${BUILD_DIR}";
 
 # If we are building, clone our repo
 if [ "${BUILD_IMAGE}" = true ]; then
-    git clone "${GIT_REPO}" > /dev/null 2>&1 || terminate "Couldn't clone repository"
+    git clone "${GIT_REPO}" router > /dev/null 2>&1 || terminate "Couldn't clone repository"
     cd router || terminate "Couldn't cd to router"
     # Either unset or blank (equivalent for our purposes)
     if [ -z "${ROUTER_VERSION}" ]; then
