@@ -480,7 +480,7 @@ mod test {
     use crate::plugin::DynPlugin;
     use crate::query_planner::BridgeQueryPlanner;
     use crate::router_factory::create_plugins;
-    use crate::services::layers::query_parsing::QueryParsingLayer;
+    use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::services::router;
     use crate::services::router_service::RouterCreator;
     use crate::services::HasSchema;
@@ -599,7 +599,7 @@ mod test {
         let supergraph_creator = builder.build().await.expect("should build");
 
         RouterCreator::new(
-            QueryParsingLayer::new(supergraph_creator.schema(), Default::default()),
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()),
             Arc::new(supergraph_creator),
             Default::default(),
         )

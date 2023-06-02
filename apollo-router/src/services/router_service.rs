@@ -34,7 +34,7 @@ use tracing::Instrument;
 
 use super::layers::apq::APQLayer;
 use super::layers::content_negociation;
-use super::layers::query_parsing::QueryParsingLayer;
+use super::layers::query_analysis::QueryAnalysisLayer;
 use super::layers::static_page::StaticPageLayer;
 use super::new_service::ServiceFactory;
 use super::router;
@@ -68,7 +68,7 @@ where
 {
     supergraph_creator: Arc<SF>,
     apq_layer: APQLayer,
-    query_parsing_layer: QueryParsingLayer,
+    query_analysis_layer: QueryAnalysisLayer,
 }
 
 impl<SF> RouterService<SF>
@@ -78,12 +78,12 @@ where
     pub(crate) fn new(
         supergraph_creator: Arc<SF>,
         apq_layer: APQLayer,
-        query_parsing_layer: QueryParsingLayer,
+        query_analysis_layer: QueryAnalysisLayer,
     ) -> Self {
         RouterService {
             supergraph_creator,
             apq_layer,
-            query_parsing_layer,
+            query_analysis_layer,
         }
     }
 }
@@ -112,7 +112,7 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     });
 
     RouterCreator::new(
-        QueryParsingLayer::new(supergraph_service.schema(), Arc::clone(&configuration)),
+        QueryAnalysisLayer::new(supergraph_service.schema(), Arc::clone(&configuration)),
         Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
         configuration,
     )
@@ -153,7 +153,7 @@ pub(crate) async fn empty() -> impl Service<
         .returning(MockSupergraphService::new);
 
     RouterCreator::new(
-        QueryParsingLayer::new(supergraph_service.schema(), Default::default()),
+        QueryAnalysisLayer::new(supergraph_service.schema(), Default::default()),
         Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
         Default::default(),
     )
@@ -187,7 +187,7 @@ where
 
         let supergraph_creator = self.supergraph_creator.clone();
         let apq = self.apq_layer.clone();
-        let query_parsing = self.query_parsing_layer.clone();
+        let query_analysis = self.query_analysis_layer.clone();
 
         let fut = async move {
             let graphql_request: Result<graphql::Request, (&str, String)> = if parts.method
@@ -238,7 +238,7 @@ where
                     let request_res = apq.supergraph_request(request).await;
 
                     let SupergraphResponse { response, context } = match request_res
-                        .and_then(|request| query_parsing.supergraph_request(request))
+                        .and_then(|request| query_analysis.supergraph_request(request))
                     {
                         Err(response) => response,
                         Ok(request) => supergraph_creator.create().oneshot(request).await?,
@@ -412,7 +412,7 @@ where
     supergraph_creator: Arc<SF>,
     static_page: StaticPageLayer,
     apq_layer: APQLayer,
-    query_parsing_layer: QueryParsingLayer,
+    query_parsing_layer: QueryAnalysisLayer,
 }
 
 impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
@@ -480,7 +480,7 @@ where
         Send,
 {
     pub(crate) async fn new(
-        query_parsing_layer: QueryParsingLayer,
+        query_parsing_layer: QueryAnalysisLayer,
         supergraph_creator: Arc<SF>,
         configuration: Arc<Configuration>,
     ) -> Self {

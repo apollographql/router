@@ -20,7 +20,7 @@ use tower_service::Service;
 use tracing_futures::Instrument;
 
 use super::layers::content_negociation;
-use super::layers::query_parsing::QueryParsingLayer;
+use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
 use super::router::ClientRequestAccepts;
 use super::subgraph_service::MakeSubgraphService;
@@ -266,7 +266,7 @@ async fn plan_query(
     if query.is_none() {
         query = Some(
             // TODO[igni]: no
-            QueryParsingLayer::new(schema, Default::default())
+            QueryAnalysisLayer::new(schema, Default::default())
                 .parse((query_str, operation_name.clone())),
         );
     }
@@ -482,7 +482,7 @@ impl SupergraphCreator {
 
     pub(crate) async fn warm_up_query_planner(
         &mut self,
-        query_parser: &QueryParsingLayer,
+        query_parser: &QueryAnalysisLayer,
         cache_keys: Vec<(String, Option<String>)>,
     ) {
         self.query_planner_service

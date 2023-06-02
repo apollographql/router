@@ -17,7 +17,7 @@ use crate::plugin::PluginInit;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::execution;
-use crate::services::layers::query_parsing::QueryParsingLayer;
+use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::router;
 use crate::services::router_service::RouterCreator;
 use crate::services::subgraph;
@@ -258,7 +258,7 @@ impl<'a> TestHarness<'a> {
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
         let (config, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
-            QueryParsingLayer::new(supergraph_creator.schema(), Arc::clone(&config)),
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)),
             Arc::new(supergraph_creator),
             config,
         )
@@ -281,7 +281,7 @@ impl<'a> TestHarness<'a> {
 
         let (config, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
-            QueryParsingLayer::new(supergraph_creator.schema(), Arc::clone(&config)),
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)),
             Arc::new(supergraph_creator),
             Arc::clone(&config),
         )

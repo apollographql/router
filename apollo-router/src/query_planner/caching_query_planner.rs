@@ -18,7 +18,7 @@ use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
-use crate::services::layers::query_parsing::QueryParsingLayer;
+use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -71,7 +71,7 @@ where
 
     pub(crate) async fn warm_up(
         &mut self,
-        query_parser: &QueryParsingLayer,
+        query_parser: &QueryAnalysisLayer,
         cache_keys: Vec<(String, Option<String>)>,
     ) {
         let schema_id = self.schema_id.clone();
@@ -431,7 +431,7 @@ mod tests {
         let configuration: Arc<Configuration> = Default::default();
         let api_schema = None;
 
-        let parser = QueryParsingLayer::new(
+        let parser = QueryAnalysisLayer::new(
             Arc::new(
                 Schema::parse(
                     include_str!("testdata/schema.graphql"),

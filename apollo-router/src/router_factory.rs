@@ -25,7 +25,7 @@ use crate::plugin::PluginFactory;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
-use crate::services::layers::query_parsing::QueryParsingLayer;
+use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router_service::RouterCreator;
@@ -213,7 +213,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
         // Instantiate the parser here so we can use it to warm up the planner below
         let query_parsing_layer =
-            QueryParsingLayer::new(supergraph_creator.schema(), Arc::clone(&configuration));
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration));
 
         if let Some(router) = previous_router {
             if configuration.supergraph.query_planning.warmed_up_queries > 0 {

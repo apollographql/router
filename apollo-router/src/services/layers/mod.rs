@@ -2,5 +2,5 @@
 pub(crate) mod allow_only_http_post_mutations;
 pub(crate) mod apq;
 pub(crate) mod content_negociation;
-pub(crate) mod query_parsing;
+pub(crate) mod query_analysis;
 pub(crate) mod static_page;

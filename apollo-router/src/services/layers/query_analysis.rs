@@ -11,13 +11,13 @@ use crate::Configuration;
 
 /// [`Layer`] for QueryParsing implementation.
 #[derive(Clone)]
-pub(crate) struct QueryParsingLayer {
+pub(crate) struct QueryAnalysisLayer {
     /// set to None if QueryParsing is disabled
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
 }
 
-impl QueryParsingLayer {
+impl QueryAnalysisLayer {
     pub(crate) fn new(schema: Arc<Schema>, configuration: Arc<Configuration>) -> Self {
         Self {
             schema,

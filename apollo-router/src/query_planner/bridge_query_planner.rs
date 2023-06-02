@@ -303,7 +303,7 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use crate::services::layers::query_parsing::QueryParsingLayer;
+    use crate::services::layers::query_analysis::QueryAnalysisLayer;
 
     const EXAMPLE_SCHEMA: &str = include_str!("testdata/schema.graphql");
 
@@ -356,7 +356,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
-        let parser = QueryParsingLayer::new(
+        let parser = QueryAnalysisLayer::new(
             Arc::new(Schema::parse(EXAMPLE_SCHEMA, &Default::default(), None).unwrap()),
             Arc::clone(&Default::default()),
         );
@@ -437,7 +437,7 @@ mod tests {
         configuration.supergraph.introspection = true;
         let configuration = Arc::new(configuration);
         let api_schema = None;
-        let parser = QueryParsingLayer::new(
+        let parser = QueryAnalysisLayer::new(
             Arc::new(Schema::parse(schema, &configuration, api_schema).unwrap()),
             Arc::clone(&configuration),
         );
