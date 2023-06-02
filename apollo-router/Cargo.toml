@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.67.0"
+rust-version = "1.70.0"
 edition = "2021"
 build = "build/main.rs"
 
@@ -106,7 +106,7 @@ jsonschema = { version = "0.16.1", default-features = false }
 jsonwebtoken = "8.3.0"
 lazy_static = "1.4.0"
 libc = "0.2.144"
-linkme = "0.3.9"
+linkme = "0.3.10"
 lru = "0.8.1"
 mediatype = "0.19.13"
 mockall = "0.11.4"
@@ -236,7 +236,7 @@ ecdsa = { version = "0.15.1", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "6.3.0", features = ["enable-rustls", "no-client-setname"] }
 futures-test = "0.3.28"
 insta = { version = "1.29.0", features = ["json", "redactions", "yaml"] }
-introspector-gadget = "0.2.1"
+introspector-gadget = "0.2.2"
 maplit = "1.0.2"
 memchr = { version = "2.5.0", default-features = false }
 mockall = "0.11.4"
