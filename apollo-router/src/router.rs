@@ -74,7 +74,7 @@ use crate::uplink::Endpoints;
 // Later we might add a public API for this (probably a builder similar to `test_harness.rs`),
 // see https://github.com/apollographql/router/issues/1496.
 // In the meantime keeping this function helps make sure it still compiles.
-async fn make_router_service<RF>(
+async fn make_router_service(
     schema: &str,
     configuration: Arc<Configuration>,
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
