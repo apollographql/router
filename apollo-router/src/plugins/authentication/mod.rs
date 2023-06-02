@@ -456,10 +456,9 @@ fn authenticate(
             StatusCode::BAD_REQUEST,
         );
     }
-    let jwt: &str;
 
     // If there's a header prefix, we need to split the header
-    if config.header_value_prefix.len() > 0 {
+    let jwt = if !config.header_value_prefix.is_empty() {
         // Split our string in (at most 2) sections.
         let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
         if jwt_parts.len() != 2 {
@@ -471,7 +470,7 @@ fn authenticate(
         }
 
         // We have our jwt
-        jwt = jwt_parts[1];
+        jwt_parts[1]
     } else {
         // check for whitespace- we've already trimmed, so this means the request has a prefix that shouldn't exist
         if jwt_value.contains(" ") {
@@ -485,8 +484,8 @@ fn authenticate(
             );
         }
         // otherwise, we can simply assign the jwt to the jwt_value; we'll validate down below
-        jwt = jwt_value
-    }
+        jwt_value
+    };
 
     // Try to create a valid header to work with
     let jwt_header = match decode_header(jwt) {
