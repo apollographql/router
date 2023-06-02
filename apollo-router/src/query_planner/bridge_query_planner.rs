@@ -1,5 +1,6 @@
 //! Calls out to nodejs query planner
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
@@ -9,6 +10,7 @@ use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
+use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -217,11 +219,20 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     .context(req.context)
                     .build()),
                 Err(e) => {
-                    if let QueryPlannerError::PlanningErrors(pe) = &e {
-                        req.context
-                            .private_entries
-                            .lock()
-                            .insert(pe.usage_reporting.clone());
+                    match &e {
+                        QueryPlannerError::PlanningErrors(pe) => {
+                            req.context
+                                .private_entries
+                                .lock()
+                                .insert(pe.usage_reporting.clone());
+                        }
+                        QueryPlannerError::SpecError(e) => {
+                            req.context.private_entries.lock().insert(UsageReporting {
+                                stats_report_key: e.get_error_key().to_string(),
+                                referenced_fields_by_type: HashMap::new(),
+                            });
+                        }
+                        _ => (),
                     }
                     Err(e)
                 }

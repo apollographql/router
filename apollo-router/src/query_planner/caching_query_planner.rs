@@ -1,11 +1,13 @@
 // This entire file is license key functionality
 
+use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
 
 use futures::future::BoxFuture;
 use router_bridge::planner::Planner;
+use router_bridge::planner::UsageReporting;
 use sha2::Digest;
 use sha2::Sha256;
 use tower::ServiceExt;
@@ -220,12 +222,25 @@ where
                             .build())
                     }
                     Err(error) => {
-                        if let QueryPlannerError::PlanningErrors(pe) = error.deref() {
-                            request
-                                .context
-                                .private_entries
-                                .lock()
-                                .insert(pe.usage_reporting.clone());
+                        match error.deref() {
+                            QueryPlannerError::PlanningErrors(pe) => {
+                                request
+                                    .context
+                                    .private_entries
+                                    .lock()
+                                    .insert(pe.usage_reporting.clone());
+                            }
+                            QueryPlannerError::SpecError(e) => {
+                                request
+                                    .context
+                                    .private_entries
+                                    .lock()
+                                    .insert(UsageReporting {
+                                        stats_report_key: e.get_error_key().to_string(),
+                                        referenced_fields_by_type: HashMap::new(),
+                                    });
+                            }
+                            _ => {}
                         }
 
                         Err(CacheResolverError::RetrievalError(error))
