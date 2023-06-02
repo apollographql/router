@@ -20,6 +20,7 @@ use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::plugins::telemetry::AttributeValue;
 
 lazy_static! {
     static ref SPAN_RESOURCE_NAME_ATTRIBUTE_MAPPING: HashMap<&'static str, &'static str> = {
@@ -59,6 +60,14 @@ impl TracingConfigurator for Config {
         };
         let enable_span_mapping = self.enable_span_mapping.then_some(true);
 
+        // Try to help out datadog with service_namespace and service_version
+
+        let mut enhanced_trace_config = trace_config.clone();
+        enhanced_trace_config.attributes.insert(
+            "service_namespace".to_string(),
+            AttributeValue::String(trace_config.service_namespace.clone()),
+        );
+
         let exporter = opentelemetry_datadog::new_pipeline()
             .with(&url, |builder, e| {
                 builder.with_agent_endpoint(e.to_string().trim_end_matches('/'))
@@ -77,8 +86,17 @@ impl TracingConfigurator for Config {
                             .unwrap_or(span.name.as_ref())
                     })
             })
-            .with_service_name(trace_config.service_name.clone())
-            .with_trace_config(trace_config.into())
+            .with_service_name(enhanced_trace_config.service_name.clone())
+            .with_version(
+                opentelemetry::sdk::trace::Config::from(&enhanced_trace_config)
+                    .resource
+                    .get(Key::from(
+                        opentelemetry_semantic_conventions::resource::SERVICE_VERSION,
+                    ))
+                    .expect("cargo version is set as default;qed")
+                    .to_string(),
+            )
+            .with_trace_config((&enhanced_trace_config).into())
             .build_exporter()?;
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
