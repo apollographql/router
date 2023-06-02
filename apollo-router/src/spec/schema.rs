@@ -9,7 +9,6 @@ use apollo_compiler::diagnostics::DiagnosticData;
 use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
-use apollo_compiler::FileId;
 use apollo_compiler::HirDatabase;
 use apollo_compiler::InputDatabase;
 use http::Uri;
