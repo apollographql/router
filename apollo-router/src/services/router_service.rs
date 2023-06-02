@@ -237,37 +237,12 @@ where
 
                     let request_res = apq.supergraph_request(request).await;
 
-                    let SupergraphResponse { response, context } =
-                        match request_res.and_then(|request| {
-                            let request = query_parsing.supergraph_request(request);
-
-                            let query = request.supergraph_request.body().query.as_ref();
-
-                            if query.is_none() || query.unwrap().trim().is_empty() {
-                                let errors = vec![crate::error::Error::builder()
-                                    .message("Must provide query string.".to_string())
-                                    .extension_code("MISSING_QUERY_STRING")
-                                    .build()];
-                                tracing::error!(
-                                    monotonic_counter.apollo_router_http_requests_total = 1u64,
-                                    status = %StatusCode::BAD_REQUEST.as_u16(),
-                                    error = "Must provide query string",
-                                    "Must provide query string"
-                                );
-
-                                Err(SupergraphResponse::builder()
-                                    .errors(errors)
-                                    .status_code(StatusCode::BAD_REQUEST)
-                                    .context(request.context)
-                                    .build()
-                                    .expect("response is valid"))
-                            } else {
-                                Ok(request)
-                            }
-                        }) {
-                            Err(response) => response,
-                            Ok(request) => supergraph_creator.create().oneshot(request).await?,
-                        };
+                    let SupergraphResponse { response, context } = match request_res
+                        .and_then(|request| query_parsing.supergraph_request(request))
+                    {
+                        Err(response) => response,
+                        Ok(request) => supergraph_creator.create().oneshot(request).await?,
+                    };
 
                     let ClientRequestAccepts {
                         wildcard: accepts_wildcard,
