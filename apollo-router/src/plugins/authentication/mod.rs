@@ -473,7 +473,7 @@ fn authenticate(
         jwt_parts[1]
     } else {
         // check for whitespace- we've already trimmed, so this means the request has a prefix that shouldn't exist
-        if jwt_value.contains(" ") {
+        if jwt_value.contains(' ') {
             return failure_message(
                 request.context,
                 AuthenticationError::InvalidPrefix(
