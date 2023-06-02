@@ -20,7 +20,6 @@ use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
-use crate::plugins::telemetry::AttributeValue;
 
 lazy_static! {
     static ref SPAN_RESOURCE_NAME_ATTRIBUTE_MAPPING: HashMap<&'static str, &'static str> = {
@@ -30,6 +29,7 @@ lazy_static! {
         map.insert("query_planning", "graphql.operation.name");
         map.insert("subgraph", "apollo.subgraph.name");
         map.insert("subgraph_request", "graphql.operation.name");
+        map.insert("service.namespace", "service_namespace");
         map
     };
 }
@@ -60,23 +60,6 @@ impl TracingConfigurator for Config {
         };
         let enable_span_mapping = self.enable_span_mapping.then_some(true);
 
-        // Try to help out datadog with service_namespace
-        let mut enhanced_trace_config = trace_config.clone();
-        tracing::info!(?enhanced_trace_config, "before enhancing");
-        enhanced_trace_config.attributes.insert(
-            "service_namespace".to_string(),
-            AttributeValue::String(trace_config.service_namespace.clone()),
-        );
-        enhanced_trace_config.attributes.insert(
-            "namespace".to_string(),
-            AttributeValue::String(trace_config.service_namespace.clone()),
-        );
-        enhanced_trace_config.attributes.insert(
-            "something".to_string(),
-            AttributeValue::String(trace_config.service_namespace.clone()),
-        );
-
-        tracing::info!(?enhanced_trace_config, "after enhancing");
         let exporter = opentelemetry_datadog::new_pipeline()
             .with(&url, |builder, e| {
                 builder.with_agent_endpoint(e.to_string().trim_end_matches('/'))
@@ -95,21 +78,15 @@ impl TracingConfigurator for Config {
                             .unwrap_or(span.name.as_ref())
                     })
             })
-            .with_service_name(enhanced_trace_config.service_name.clone())
+            .with_service_name(trace_config.service_name.clone())
             .with_version(
-                opentelemetry::sdk::trace::Config::from(&enhanced_trace_config)
+                opentelemetry::sdk::trace::Config::from(trace_config)
                     .resource
-                    .get(Key::from(
-                        opentelemetry_semantic_conventions::resource::SERVICE_VERSION,
-                    ))
+                    .get(opentelemetry_semantic_conventions::resource::SERVICE_VERSION)
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
-            .with_resource_mapping(|span, model_config| {
-                tracing::info!(?span, ?model_config, "resource mapping");
-                "whatever"
-            })
-            .with_trace_config((&enhanced_trace_config).into())
+            .with_trace_config(trace_config.into())
             .build_exporter()?;
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
