@@ -60,11 +60,18 @@ impl TracingConfigurator for Config {
         };
         let enable_span_mapping = self.enable_span_mapping.then_some(true);
 
-        // Try to help out datadog with service_namespace and service_version
-
+        // Try to help out datadog with service_namespace
         let mut enhanced_trace_config = trace_config.clone();
         enhanced_trace_config.attributes.insert(
             "service_namespace".to_string(),
+            AttributeValue::String(trace_config.service_namespace.clone()),
+        );
+        enhanced_trace_config.attributes.insert(
+            "gary.namespace".to_string(),
+            AttributeValue::String(trace_config.service_namespace.clone()),
+        );
+        enhanced_trace_config.attributes.insert(
+            "namespace".to_string(),
             AttributeValue::String(trace_config.service_namespace.clone()),
         );
 
