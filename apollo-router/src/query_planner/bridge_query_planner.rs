@@ -239,6 +239,10 @@ impl BridgeQueryPlanner {
         query: Query,
         operation_name: Option<String>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
+        if let Some(e) = query.errors.first() {
+            return Err(QueryPlannerError::SpecError(e.clone()));
+        }
+
         if query.contains_introspection() {
             // If we have only one operation containing only the root field `__typename`
             // (possibly aliased or repeated). (This does mean we fail to properly support
