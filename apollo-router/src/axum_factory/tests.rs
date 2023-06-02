@@ -2317,7 +2317,7 @@ async fn test_supergraph_timeout() {
     let supergraph_creator = builder.build().await.unwrap();
 
     let service = RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&conf)),
+        QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&conf)).await,
         Arc::new(supergraph_creator),
         Arc::clone(&conf),
     )

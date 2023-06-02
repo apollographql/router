@@ -257,7 +257,7 @@ where
 
 async fn plan_query(
     mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    mut query: Option<Query>,
+    mut query: Option<Arc<Query>>,
     operation_name: Option<String>,
     context: Context,
     schema: Arc<Schema>,
@@ -266,8 +266,11 @@ async fn plan_query(
     if query.is_none() {
         query = Some(
             // TODO[igni]: no
-            QueryAnalysisLayer::new(schema, Default::default())
-                .parse((query_str, operation_name.clone())),
+            Arc::new(
+                QueryAnalysisLayer::new(schema, Default::default())
+                    .await
+                    .parse((query_str, operation_name.clone())),
+            ),
         );
     }
     planning

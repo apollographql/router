@@ -15,8 +15,10 @@ use serde::Deserialize;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tower::Service;
+use tracing::Instrument;
 
 use super::PlanNode;
+use super::QueryKey;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -124,6 +126,23 @@ impl BridgeQueryPlanner {
         self.schema.clone()
     }
 
+    async fn parse_selections(&self, key: QueryKey) -> Result<Query, QueryPlannerError> {
+        let (query, operation_name) = key;
+        let schema = self.schema.clone();
+        let configuration = self.configuration.clone();
+        let task_result = tokio::task::spawn_blocking(move || {
+            let mut query = Query::parse(query, &schema, &configuration)?;
+            crate::spec::operation_limits::check(&configuration, &mut query, operation_name)?;
+            Ok::<_, QueryPlannerError>(query)
+        })
+        .instrument(tracing::info_span!("parse_query", "otel.kind" = "INTERNAL"))
+        .await;
+        if let Err(err) = &task_result {
+            failfast_debug!("parsing query task failed: {}", err);
+        }
+        task_result?
+    }
+
     async fn introspection(&self, query: String) -> Result<QueryPlannerContent, QueryPlannerError> {
         match self.introspection.as_ref() {
             Some(introspection) => {
@@ -142,14 +161,12 @@ impl BridgeQueryPlanner {
 
     async fn plan(
         &self,
-        mut query: Query,
+        mut selections: Query,
         operation: Option<String>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        crate::spec::operation_limits::check(&self.configuration, &mut query, operation.clone())?;
-
         let planner_result = self
             .planner
-            .plan(query.string.clone(), operation)
+            .plan(selections.string.clone(), operation)
             .await
             .map_err(QueryPlannerError::RouterBridgeError)?
             .into_result()
@@ -165,13 +182,13 @@ impl BridgeQueryPlanner {
                 usage_reporting,
             } => {
                 let subselections = node.parse_subselections(&self.schema)?;
-                query.subselections = subselections;
+                selections.subselections = subselections;
                 Ok(QueryPlannerContent::Plan {
                     plan: Arc::new(super::QueryPlan {
                         usage_reporting,
                         root: node,
                         formatted_query_plan,
-                        query: Arc::new(query),
+                        query: Arc::new(selections),
                     }),
                 })
             }
@@ -247,23 +264,23 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 impl BridgeQueryPlanner {
     async fn get(
         &self,
-        query: Query,
+        query: Arc<Query>,
         operation_name: Option<String>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        if let Some(e) = query.errors.first() {
-            return Err(QueryPlannerError::SpecError(e.clone()));
-        }
+        let selections = self
+            .parse_selections((query.string.clone(), operation_name.clone()))
+            .await?;
 
-        if query.contains_introspection() {
+        if selections.contains_introspection() {
             // If we have only one operation containing only the root field `__typename`
             // (possibly aliased or repeated). (This does mean we fail to properly support
             // {"query": "query A {__typename} query B{somethingElse}", "operationName":"A"}.)
-            if let Some(output_keys) = query
+            if let Some(output_keys) = selections
                 .operations
                 .get(0)
                 .and_then(|op| op.is_only_typenames_with_output_keys())
             {
-                let operation_name = query.operations[0].kind().to_string();
+                let operation_name = selections.operations[0].kind().to_string();
                 let data: Value = Value::Object(Map::from_iter(
                     output_keys
                         .into_iter()
@@ -277,7 +294,7 @@ impl BridgeQueryPlanner {
             }
         }
 
-        self.plan(query, operation_name).await
+        self.plan(selections, operation_name).await
     }
 }
 
@@ -359,7 +376,8 @@ mod tests {
         let parser = QueryAnalysisLayer::new(
             Arc::new(Schema::parse(EXAMPLE_SCHEMA, &Default::default(), None).unwrap()),
             Arc::clone(&Default::default()),
-        );
+        )
+        .await;
 
         let query = parser.parse((
             include_str!("testdata/unknown_introspection_query.graphql").into(),
@@ -440,14 +458,15 @@ mod tests {
         let parser = QueryAnalysisLayer::new(
             Arc::new(Schema::parse(schema, &configuration, api_schema).unwrap()),
             Arc::clone(&configuration),
-        );
+        )
+        .await;
         let planner = BridgeQueryPlanner::new(schema.to_string(), configuration)
             .await
             .unwrap();
 
         planner
             .get(
-                parser.parse((query.to_string(), operation_name.clone())),
+                Arc::new(parser.parse((query.to_string(), operation_name.clone()))),
                 operation_name,
             )
             .await

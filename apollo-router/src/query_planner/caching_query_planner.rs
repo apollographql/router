@@ -78,7 +78,7 @@ where
 
         let mut count = 0usize;
         for (query_string, operation) in cache_keys {
-            let query = query_parser.parse((query_string.clone(), operation.clone()));
+            let query = Arc::new(query_parser.parse((query_string.clone(), operation.clone())));
 
             let caching_key = CachingQueryKey {
                 schema_id: schema_id.clone(),
@@ -354,7 +354,7 @@ mod tests {
         for _ in 0..5 {
             assert!(planner
                 .call(QueryPlannerRequest::new(
-                    parse_query("query Me { me { username } }".to_string(), None),
+                    parse_query("query Me { me { username } }".to_string(), None).await,
                     Some("".into()),
                     Context::new()
                 ))
@@ -363,7 +363,7 @@ mod tests {
         }
         assert!(planner
             .call(QueryPlannerRequest::new(
-                parse_query("query Me { me { name { first } } }".to_string(), None),
+                parse_query("query Me { me { name { first } } }".to_string(), None).await,
                 Some("".into()),
                 Context::new()
             ))
@@ -414,7 +414,7 @@ mod tests {
         for _ in 0..5 {
             assert!(planner
                 .call(QueryPlannerRequest::new(
-                    parse_query("query Me { me { username } }".to_string(), None),
+                    parse_query("query Me { me { username } }".to_string(), None).await,
                     Some("".into()),
                     Context::new()
                 ))
@@ -427,7 +427,7 @@ mod tests {
         }
     }
 
-    fn parse_query(query: String, operation_name: Option<String>) -> Query {
+    async fn parse_query(query: String, operation_name: Option<String>) -> Arc<Query> {
         let configuration: Arc<Configuration> = Default::default();
         let api_schema = None;
 
@@ -441,8 +441,9 @@ mod tests {
                 .unwrap(),
             ),
             Arc::clone(&configuration),
-        );
+        )
+        .await;
 
-        parser.parse((query, operation_name))
+        Arc::new(parser.parse((query, operation_name)))
     }
 }

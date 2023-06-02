@@ -213,7 +213,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
         // Instantiate the parser here so we can use it to warm up the planner below
         let query_parsing_layer =
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration));
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
 
         if let Some(router) = previous_router {
             if configuration.supergraph.query_planning.warmed_up_queries > 0 {

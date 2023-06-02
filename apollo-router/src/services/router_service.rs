@@ -111,7 +111,7 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     });
 
     RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_service.schema(), Arc::clone(&configuration)),
+        QueryAnalysisLayer::new(supergraph_service.schema(), Arc::clone(&configuration)).await,
         Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
         configuration,
     )
@@ -152,7 +152,7 @@ pub(crate) async fn empty() -> impl Service<
         .returning(MockSupergraphService::new);
 
     RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_service.schema(), Default::default()),
+        QueryAnalysisLayer::new(supergraph_service.schema(), Default::default()).await,
         Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
         Default::default(),
     )
@@ -235,12 +235,12 @@ where
                     };
 
                     let request_res = apq.supergraph_request(request).await;
-
-                    let SupergraphResponse { response, context } = match request_res
-                        .and_then(|request| query_analysis.supergraph_request(request))
-                    {
+                    let SupergraphResponse { response, context } = match request_res {
                         Err(response) => response,
-                        Ok(request) => supergraph_creator.create().oneshot(request).await?,
+                        Ok(request) => match query_analysis.supergraph_request(request).await {
+                            Err(response) => response,
+                            Ok(request) => supergraph_creator.create().oneshot(request).await?,
+                        },
                     };
 
                     let ClientRequestAccepts {

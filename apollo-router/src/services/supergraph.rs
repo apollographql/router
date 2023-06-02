@@ -2,6 +2,8 @@
 
 #![allow(missing_docs)] // FIXME
 
+use std::sync::Arc;
+
 use futures::future::ready;
 use futures::stream::once;
 use futures::stream::StreamExt;
@@ -44,7 +46,7 @@ pub struct Request {
     pub context: Context,
 
     #[allow(dead_code)]
-    pub(crate) query: Option<Query>,
+    pub(crate) query: Option<Arc<Query>>,
 }
 
 impl From<http::Request<graphql::Request>> for Request {
