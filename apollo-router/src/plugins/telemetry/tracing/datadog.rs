@@ -74,6 +74,10 @@ impl TracingConfigurator for Config {
             "namespace".to_string(),
             AttributeValue::String(trace_config.service_namespace.clone()),
         );
+        enhanced_trace_config.attributes.insert(
+            "something".to_string(),
+            AttributeValue::String(trace_config.service_namespace.clone()),
+        );
 
         let exporter = opentelemetry_datadog::new_pipeline()
             .with(&url, |builder, e| {
@@ -100,7 +104,7 @@ impl TracingConfigurator for Config {
                     .get(Key::from(
                         opentelemetry_semantic_conventions::resource::SERVICE_VERSION,
                     ))
-                    .expect("cargo version is set as default;qed")
+                    .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
             .with_trace_config((&enhanced_trace_config).into())
