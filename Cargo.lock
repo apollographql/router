@@ -250,6 +250,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "apollo-encoder"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a67cf5282faa8a66c848e1f4aef139c3cfe307025029983d05b80f8360f41e8"
+dependencies = [
+ "apollo-parser 0.5.3",
+ "thiserror",
+]
+
+[[package]]
 name = "apollo-parser"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -303,7 +313,7 @@ dependencies = [
  "fred",
  "futures",
  "futures-test",
- "graphql_client",
+ "graphql_client 0.11.0",
  "heck 0.4.1",
  "hex",
  "http",
@@ -443,7 +453,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b4ab369b6c748e8e1ea87733a7f98d8e8671bf848cd8a8290308d5b0f90299b"
 dependencies = [
- "apollo-encoder",
+ "apollo-encoder 0.4.0",
  "apollo-parser 0.4.1",
  "arbitrary",
  "once_cell",
@@ -2480,7 +2490,18 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fc16d75d169fddb720d8f1c7aed6413e329e1584079b9734ff07266a193f5bc"
 dependencies = [
- "graphql_query_derive",
+ "graphql_query_derive 0.11.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "graphql_client"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09cdf7b487d864c2939b23902291a5041bc4a84418268f25fda1c8d4e15ad8fa"
+dependencies = [
+ "graphql_query_derive 0.13.0",
  "serde",
  "serde_json",
 ]
@@ -2503,12 +2524,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "graphql_client_codegen"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a40f793251171991c4eb75bd84bc640afa8b68ff6907bc89d3b712a22f700506"
+dependencies = [
+ "graphql-introspection-query",
+ "graphql-parser",
+ "heck 0.4.1",
+ "lazy_static",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "graphql_query_derive"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a755cc59cda2641ea3037b4f9f7ef40471c329f55c1fa2db6fa0bb7ae6c1f7ce"
 dependencies = [
- "graphql_client_codegen",
+ "graphql_client_codegen 0.11.0",
+ "proc-macro2",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "graphql_query_derive"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00bda454f3d313f909298f626115092d348bc231025699f557b27e248475f48c"
+dependencies = [
+ "graphql_client_codegen 0.13.0",
  "proc-macro2",
  "syn 1.0.109",
 ]
@@ -2962,13 +3011,13 @@ checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
 
 [[package]]
 name = "introspector-gadget"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d8b71efbbc9b5600183f9a46ca29062e56db6424e4b185cac3a042e9bfa87e8"
+checksum = "f07e629cb6382fac6e1fb1560123f81438556e6fe4219fec939ad5ff4345d9fa"
 dependencies = [
- "apollo-encoder",
+ "apollo-encoder 0.5.1",
  "backoff",
- "graphql_client",
+ "graphql_client 0.13.0",
  "hyper",
  "reqwest",
  "serde",
@@ -3270,18 +3319,18 @@ dependencies = [
 
 [[package]]
 name = "linkme"
-version = "0.3.9"
+version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af8a3edd8a2d2a8432c78a3c791c93503ec2c5f0aedab26937cafd2f4ca9f013"
+checksum = "97f3302efc6ebb7b5f0810a1096dbbb44a536711a4576bc89264a8f9a1d634d8"
 dependencies = [
  "linkme-impl",
 ]
 
 [[package]]
 name = "linkme-impl"
-version = "0.3.9"
+version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c880e0101fc5844ae1c2f3b5b50aba1fb1939e308149dc2dde33b80a0816df18"
+checksum = "279a77bf40c85a08513aca203635b96610ebf0e37a92cb0cee76e04da100a426"
 dependencies = [
  "proc-macro2",
  "quote",
