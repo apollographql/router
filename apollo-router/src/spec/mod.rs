@@ -40,8 +40,6 @@ pub(crate) enum SpecError {
 }
 
 impl SpecError {
-    // TODO[igni]: put it back in the planner
-    #[allow(dead_code)]
     pub(crate) const fn get_error_key(&self) -> &'static str {
         match self {
             SpecError::ParsingError(_) => "## GraphQLParseFailure\n",

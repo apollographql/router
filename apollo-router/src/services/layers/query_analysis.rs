@@ -81,7 +81,6 @@ impl QueryAnalysisLayer {
         let query = key.0;
         let schema = self.schema.clone();
         let configuration: Arc<Configuration> = self.configuration.clone();
-        // TODO[igni]: profile and benchmark with and without the blocking task spawn
         tracing::info_span!("parse_query", "otel.kind" = "INTERNAL")
             .in_scope(|| Query::parse_unchecked(query, &schema, &configuration))
     }
