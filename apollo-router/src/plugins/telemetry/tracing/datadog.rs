@@ -105,6 +105,10 @@ impl TracingConfigurator for Config {
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
+            .with_resource_mapping(|span, model_config| {
+                tracing::info!(?span, ?model_config, "resource mapping");
+                "whatever"
+            })
             .with_trace_config((&enhanced_trace_config).into())
             .build_exporter()?;
         Ok(builder.with_span_processor(
