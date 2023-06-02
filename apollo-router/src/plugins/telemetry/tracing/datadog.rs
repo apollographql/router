@@ -62,6 +62,7 @@ impl TracingConfigurator for Config {
 
         // Try to help out datadog with service_namespace
         let mut enhanced_trace_config = trace_config.clone();
+        tracing::info!(?enhanced_trace_config, "before enhancing");
         enhanced_trace_config.attributes.insert(
             "service_namespace".to_string(),
             AttributeValue::String(trace_config.service_namespace.clone()),
@@ -79,6 +80,7 @@ impl TracingConfigurator for Config {
             AttributeValue::String(trace_config.service_namespace.clone()),
         );
 
+        tracing::info!(?enhanced_trace_config, "after enhancing");
         let exporter = opentelemetry_datadog::new_pipeline()
             .with(&url, |builder, e| {
                 builder.with_agent_endpoint(e.to_string().trim_end_matches('/'))
