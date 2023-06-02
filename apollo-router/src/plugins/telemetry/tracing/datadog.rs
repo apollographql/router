@@ -68,10 +68,6 @@ impl TracingConfigurator for Config {
             AttributeValue::String(trace_config.service_namespace.clone()),
         );
         enhanced_trace_config.attributes.insert(
-            "gary.namespace".to_string(),
-            AttributeValue::String(trace_config.service_namespace.clone()),
-        );
-        enhanced_trace_config.attributes.insert(
             "namespace".to_string(),
             AttributeValue::String(trace_config.service_namespace.clone()),
         );
