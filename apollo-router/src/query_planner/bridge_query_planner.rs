@@ -78,7 +78,7 @@ impl BridgeQueryPlanner {
         let planner = Arc::new(planner);
 
         let api_schema = planner.api_schema().await?;
-        let api_schema = Schema::parse(&api_schema.schema, &configuration)?;
+        let api_schema = Schema::parse_api_schema(&api_schema.schema, &configuration)?;
         let schema = Arc::new(schema.with_api_schema(api_schema));
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await))
@@ -112,7 +112,7 @@ impl BridgeQueryPlanner {
         );
 
         let api_schema = planner.api_schema().await?;
-        let api_schema = Schema::parse(&api_schema.schema, &configuration)?;
+        let api_schema = Schema::parse_api_schema(&api_schema.schema, &configuration)?;
         let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
         let introspection = if configuration.supergraph.introspection {
@@ -142,7 +142,7 @@ impl BridgeQueryPlanner {
         let schema = self.schema.clone();
         let configuration = self.configuration.clone();
         let task_result = tokio::task::spawn_blocking(move || {
-            let mut query = Query::parse(query, &schema, &configuration)?;
+            let mut query = Query::parse_with_validation(query, &schema, &configuration)?;
             crate::spec::operation_limits::check(&configuration, &mut query, operation_name)?;
             Ok::<_, QueryPlannerError>(query)
         })

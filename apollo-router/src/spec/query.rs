@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use apollo_compiler::diagnostics::DiagnosticData;
 use apollo_compiler::hir;
 use apollo_compiler::validation::ValidationDatabase;
 use apollo_compiler::ApolloCompiler;

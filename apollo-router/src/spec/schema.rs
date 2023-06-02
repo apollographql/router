@@ -9,7 +9,9 @@ use apollo_compiler::diagnostics::DiagnosticData;
 use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
+use apollo_compiler::FileId;
 use apollo_compiler::HirDatabase;
+use apollo_compiler::InputDatabase;
 use http::Uri;
 use sha2::Digest;
 use sha2::Sha256;
@@ -44,23 +46,33 @@ fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
 impl Schema {
     #[cfg(test)]
     pub(crate) fn parse_test(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        let api_schema = Self::parse(&make_api_schema(s)?, configuration)?;
+        let api_schema = Self::parse_api_schema(&make_api_schema(s)?, configuration)?;
         let schema = Self::parse(s, configuration)?.with_api_schema(api_schema);
         Ok(schema)
     }
 
-    pub(crate) fn parse(
-        schema: &str,
+    pub(crate) fn parse_api_schema(
+        sdl: &str,
         _configuration: &Configuration,
-    ) -> Result<Schema, SchemaError> {
+    ) -> Result<Self, SchemaError> {
         let mut compiler = ApolloCompiler::new();
-        let _supergraph = compiler.add_type_system(r#"
+        let _router_directives = compiler.add_type_system(r#"
             directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
             directive @stream(label: String, initialCount: Int = 0, if: Boolean! = true) on FIELD
-
         "#, "supergraph_spec.graphql");
-        let id = compiler.add_type_system(schema, "schema.graphql");
+        let id = compiler.add_type_system(sdl, "api_schema.graphql");
 
+        Self::from_compiler(compiler, id)
+    }
+
+    pub(crate) fn parse(sdl: &str, _configuration: &Configuration) -> Result<Self, SchemaError> {
+        let mut compiler = ApolloCompiler::new();
+        let id = compiler.add_type_system(sdl, "schema.graphql");
+
+        Self::from_compiler(compiler, id)
+    }
+
+    fn from_compiler(compiler: ApolloCompiler, id: FileId) -> Result<Schema, SchemaError> {
         let ast = compiler.db.ast(id);
 
         // Trace log recursion limit data
@@ -84,6 +96,13 @@ impl Schema {
             };
             errors.print();
             return Err(SchemaError::Parse(errors));
+        }
+
+        if !diagnostics.is_empty() {
+            ValidationErrors {
+                errors: diagnostics.clone(),
+            }
+            .print();
         }
 
         fn as_string(value: &hir::Value) -> Option<&String> {
@@ -119,12 +138,13 @@ impl Schema {
             }
         }
 
+        let sdl = compiler.db.source_code(id);
         let mut hasher = Sha256::new();
-        hasher.update(schema.as_bytes());
+        hasher.update(sdl.as_bytes());
         let schema_id = Some(format!("{:x}", hasher.finalize()));
 
         Ok(Schema {
-            raw_sdl: Arc::new(schema.into()),
+            raw_sdl: Arc::new(sdl.to_string()),
             type_system: compiler.db.type_system(),
             diagnostics,
             subgraphs,

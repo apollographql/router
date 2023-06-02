@@ -497,7 +497,7 @@ impl ValidationErrors {
         if LevelFilter::current() == LevelFilter::OFF && cfg!(not(debug_assertions)) {
             return;
         } else if atty::is(atty::Stream::Stdout) {
-            // Fancy Miette reports for TTYs
+            // Fancy reports for TTYs
             self.errors.iter().for_each(|err| {
                 // `format!` works around https://github.com/rust-lang/rust/issues/107118
                 // to test the panic from https://github.com/apollographql/router/issues/2269
