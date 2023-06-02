@@ -7,7 +7,6 @@ use std::task::Poll;
 
 use axum::body::StreamBody;
 use axum::response::*;
-use bytes::Buf;
 use bytes::Bytes;
 use futures::future::ready;
 use futures::future::BoxFuture;
@@ -207,7 +206,7 @@ where
                         )
                     })
                     .and_then(|bytes| {
-                        serde_json::from_reader(bytes.reader()).map_err(|err| {
+                        graphql::Request::deserialize_from_bytes(&bytes).map_err(|err| {
                             (
                                 "failed to deserialize the request body into JSON",
                                 format!("failed to deserialize the request body into JSON: {err}"),

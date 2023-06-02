@@ -132,6 +132,9 @@ fi
 
 echo "Building in: ${BUILD_DIR}"
 
+# Move to this script's directory so we can find the files that are next to it.
+cd "$(dirname "${0}")" || terminate "Couldn't cd to source location";
+
 # Copy in our dockerfiles, we'll need them later
 mkdir "${BUILD_DIR}/dockerfiles"
 cp dockerfiles/Dockerfile.repo "${BUILD_DIR}" || terminate "Couldn't copy dockerfiles to ${BUILD_DIR}"
@@ -143,7 +146,7 @@ cd "${BUILD_DIR}" || terminate "Couldn't cd to ${BUILD_DIR}";
 
 # If we are building, clone our repo
 if [ "${BUILD_IMAGE}" = true ]; then
-    git clone "${GIT_REPO}" > /dev/null 2>&1 || terminate "Couldn't clone repository"
+    git clone "${GIT_REPO}" router > /dev/null 2>&1 || terminate "Couldn't clone repository"
     cd router || terminate "Couldn't cd to router"
     # Either unset or blank (equivalent for our purposes)
     if [ -z "${ROUTER_VERSION}" ]; then

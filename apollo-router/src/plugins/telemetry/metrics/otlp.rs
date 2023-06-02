@@ -42,9 +42,7 @@ impl MetricsConfigurator for super::super::otlp::Config {
             Some(exporter) => {
                 let exporter = opentelemetry_otlp::new_pipeline()
                     .metrics(
-                        selectors::simple::histogram([
-                            0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
-                        ]),
+                        selectors::simple::histogram(metrics_config.buckets.clone()),
                         aggregation::stateless_temporality_selector(),
                         opentelemetry::runtime::Tokio,
                     )
