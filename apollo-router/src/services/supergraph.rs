@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use apollo_compiler::ApolloCompiler;
-use apollo_compiler::FileId;
 use futures::future::ready;
 use futures::stream::once;
 use futures::stream::StreamExt;
@@ -29,7 +28,6 @@ use crate::http_ext::header_map;
 use crate::http_ext::TryIntoHeaderName;
 use crate::http_ext::TryIntoHeaderValue;
 use crate::json_ext::Path;
-use crate::spec::Query;
 use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;

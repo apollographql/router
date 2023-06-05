@@ -264,11 +264,11 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 impl BridgeQueryPlanner {
     async fn get(
         &self,
-        query: Arc<Query>,
+        query: String,
         operation_name: Option<String>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let selections = self
-            .parse_selections((query.string.clone(), operation_name.clone()))
+            .parse_selections((query.clone(), operation_name.clone()))
             .await?;
 
         if selections.contains_introspection() {
@@ -290,7 +290,7 @@ impl BridgeQueryPlanner {
                     response: Box::new(graphql::Response::builder().data(data).build()),
                 });
             } else {
-                return self.introspection(query.string.clone()).await;
+                return self.introspection(query.clone()).await;
             }
         }
 
@@ -454,21 +454,11 @@ mod tests {
         let mut configuration: Configuration = Default::default();
         configuration.supergraph.introspection = true;
         let configuration = Arc::new(configuration);
-        let api_schema = None;
-        let parser = QueryAnalysisLayer::new(
-            Arc::new(Schema::parse(schema, &configuration, api_schema).unwrap()),
-            Arc::clone(&configuration),
-        )
-        .await;
+
         let planner = BridgeQueryPlanner::new(schema.to_string(), configuration)
             .await
             .unwrap();
 
-        planner
-            .get(
-                Arc::new(parser.parse((query.to_string(), operation_name.clone()))),
-                operation_name,
-            )
-            .await
+        planner.get(query.to_string(), operation_name).await
     }
 }

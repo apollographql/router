@@ -24,7 +24,6 @@ use hyper::Body;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use router_bridge::planner::Planner;
-use tokio::sync::Mutex;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;

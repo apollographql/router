@@ -4,11 +4,9 @@ use apollo_compiler::ApolloCompiler;
 use apollo_compiler::FileId;
 use apollo_compiler::HirDatabase;
 use http::StatusCode;
-use serde::Deserialize;
-use serde::Serialize;
+use lru::LruCache;
 use tokio::sync::Mutex;
 
-use crate::cache::DeduplicatingCache;
 use crate::query_planner::QueryKey;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
@@ -23,24 +21,13 @@ pub(crate) struct QueryAnalysisLayer {
     /// set to None if QueryParsing is disabled
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
-    cache: Arc<DeduplicatingCache<QueryAnalysisKey, Arc<Query>>>,
+    cache: Arc<Mutex<LruCache<QueryAnalysisKey, Arc<Mutex<ApolloCompiler>>>>>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct QueryAnalysisKey {
     query: String,
     operation_name: Option<String>,
-}
-
-impl std::fmt::Display for QueryAnalysisKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}\0{}",
-            self.query,
-            self.operation_name.as_deref().unwrap_or("-")
-        )
-    }
 }
 
 impl QueryAnalysisLayer {
@@ -55,7 +42,7 @@ impl QueryAnalysisLayer {
         Self {
             schema,
             configuration,
-            cache: Arc::new(DeduplicatingCache::from_configuration(&cache, "query analysis").await),
+            cache: Arc::new(Mutex::new(LruCache::new(cache.in_memory.limit))),
         }
     }
 
@@ -109,33 +96,33 @@ impl QueryAnalysisLayer {
             .query
             .clone()
             .expect("query presence was already checked");
-        let mut entry = self
+        let entry = self
             .cache
+            .lock()
+            .await
             .get(&QueryAnalysisKey {
-                query,
+                query: query.clone(),
                 operation_name: op_name.clone(),
             })
-            .await;
+            .cloned();
 
-        let compiler = if entry.is_first() {
-            let (compiler, file_id) = self.make_compiler(
-                request
-                    .supergraph_request
-                    .body()
-                    .query
-                    .as_deref()
-                    .expect("query presence was already checked"),
-            );
+        let compiler = match entry {
+            None => {
+                let (compiler, file_id) = self.make_compiler(&query);
 
-            let (compiler, id) = (Arc::new(Mutex::new(compiler)), file_id);
-            let wrapper = CompilerWrapper {
-                compiler: compiler.clone(),
-            };
-            entry.insert(wrapper).await;
-            compiler
-        } else {
-            let CompilerWrapper { compiler } = entry.get().await.unwrap();
-            compiler
+                let compiler = Arc::new(Mutex::new(compiler));
+
+                (*self.cache.lock().await).put(
+                    QueryAnalysisKey {
+                        query,
+                        operation_name: op_name.clone(),
+                    },
+                    compiler.clone(),
+                );
+
+                compiler
+            }
+            Some(c) => c,
         };
 
         let op = match op_name {

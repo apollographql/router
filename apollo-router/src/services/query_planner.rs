@@ -10,7 +10,6 @@ use static_assertions::assert_impl_all;
 
 use crate::graphql;
 use crate::query_planner::QueryPlan;
-use crate::spec::Query;
 use crate::Context;
 
 assert_impl_all!(Request: Send);

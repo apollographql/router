@@ -48,7 +48,6 @@ use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
@@ -259,14 +258,14 @@ where
 
 async fn plan_query(
     mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    mut compiler: Option<Arc<Mutex<ApolloCompiler>>>,
+    mut _compiler: Option<Arc<Mutex<ApolloCompiler>>>,
     operation_name: Option<String>,
     context: Context,
     schema: Arc<Schema>,
     query_str: String,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
-    if compiler.is_none() {
-        compiler = Some(
+    if _compiler.is_none() {
+        _compiler = Some(
             // TODO[igni]: no
             Arc::new(Mutex::new(
                 QueryAnalysisLayer::new(schema, Default::default())
