@@ -5,6 +5,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
 
+use apollo_compiler::ApolloCompiler;
+use apollo_compiler::InputDatabase;
 use futures::future::BoxFuture;
 use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanSuccess;
@@ -14,8 +16,8 @@ use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
+use tokio::sync::Mutex;
 use tower::Service;
-use tracing::Instrument;
 
 use super::PlanNode;
 use super::QueryKey;
@@ -28,6 +30,7 @@ use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::spec::Query;
 use crate::spec::Schema;
+use crate::spec::SpecError;
 use crate::Configuration;
 
 #[derive(Clone)]
@@ -126,21 +129,23 @@ impl BridgeQueryPlanner {
         self.schema.clone()
     }
 
-    async fn parse_selections(&self, key: QueryKey) -> Result<Query, QueryPlannerError> {
+    async fn parse_selections(
+        &self,
+        key: QueryKey,
+        compiler: Arc<Mutex<ApolloCompiler>>,
+    ) -> Result<Query, QueryPlannerError> {
         let (query, operation_name) = key;
         let schema = self.schema.clone();
         let configuration = self.configuration.clone();
-        let task_result = tokio::task::spawn_blocking(move || {
-            let mut query = Query::parse(query, &schema, &configuration)?;
-            crate::spec::operation_limits::check(&configuration, &mut query, operation_name)?;
-            Ok::<_, QueryPlannerError>(query)
-        })
-        .instrument(tracing::info_span!("parse_query", "otel.kind" = "INTERNAL"))
-        .await;
-        if let Err(err) = &task_result {
-            failfast_debug!("parsing query task failed: {}", err);
-        }
-        task_result?
+
+        let file_id = compiler.lock().await.db.source_file("query".into()).ok_or(
+            QueryPlannerError::SpecError(SpecError::ParsingError(
+                "missing input file for query".to_string(),
+            )),
+        )?;
+        let mut query = Query::parse_with_compiler(query, compiler, file_id, &schema).await?;
+        crate::spec::operation_limits::check(&configuration, &mut query, operation_name).await?;
+        Ok(query)
     }
 
     async fn introspection(&self, query: String) -> Result<QueryPlannerContent, QueryPlannerError> {
@@ -226,7 +231,9 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         let this = self.clone();
         let fut = async move {
             let start = Instant::now();
-            let res = this.get(req.query, req.operation_name.to_owned()).await;
+            let res = this
+                .get(req.query, req.operation_name.to_owned(), req.compiler)
+                .await;
             let duration = start.elapsed().as_secs_f64();
             tracing::info!(histogram.apollo_router_query_planning_time = duration,);
 
@@ -266,9 +273,10 @@ impl BridgeQueryPlanner {
         &self,
         query: String,
         operation_name: Option<String>,
+        compiler: Arc<Mutex<ApolloCompiler>>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let selections = self
-            .parse_selections((query.clone(), operation_name.clone()))
+            .parse_selections((query.clone(), operation_name.clone()), compiler)
             .await?;
 
         if selections.contains_introspection() {
@@ -455,10 +463,18 @@ mod tests {
         configuration.supergraph.introspection = true;
         let configuration = Arc::new(configuration);
 
-        let planner = BridgeQueryPlanner::new(schema.to_string(), configuration)
+        let planner = BridgeQueryPlanner::new(schema.to_string(), configuration.clone())
             .await
             .unwrap();
 
-        planner.get(query.to_string(), operation_name).await
+        let (compiler, _) = Query::make_compiler(query, &planner.schema(), &configuration);
+
+        planner
+            .get(
+                query.to_string(),
+                operation_name,
+                Arc::new(Mutex::new(compiler)),
+            )
+            .await
     }
 }

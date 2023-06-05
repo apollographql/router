@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
@@ -18,7 +19,6 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use tokio::sync::Mutex;
 use tokio::sync::MutexGuard;
-use tokio::sync::OnceCell;
 use tracing::level_filters::LevelFilter;
 
 use crate::error::FetchError;
@@ -47,7 +47,7 @@ pub(crate) struct Query {
     pub(crate) string: String,
     #[derivative(PartialEq = "ignore", Hash = "ignore", Debug = "ignore")]
     #[serde(skip)]
-    pub(crate) compiler: OnceCell<Mutex<ApolloCompiler>>,
+    pub(crate) compiler: Arc<Mutex<ApolloCompiler>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
@@ -279,7 +279,6 @@ impl Query {
 
     // Behaves like parse, except the errors are stored in the `Query` structure.
     // This allows you to run parsing without needing to early return.
-    #[allow(dead_code)]
     pub(crate) fn parse_unchecked(
         query: impl Into<String>,
         schema: &Schema,
@@ -333,7 +332,7 @@ impl Query {
 
         Query {
             string: query,
-            compiler: OnceCell::from(Mutex::new(compiler)),
+            compiler: Arc::new(Mutex::new(compiler)),
             fragments,
             operations,
             subselections: HashMap::new(),
@@ -341,16 +340,15 @@ impl Query {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn parse(
         query: impl Into<String>,
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
         let query = query.into();
-        let mut compiler = ApolloCompiler::new()
-            .recursion_limit(configuration.preview_operation_limits.parser_max_recursion)
-            .token_limit(configuration.preview_operation_limits.parser_max_tokens);
-        let id = compiler.add_executable(&query, "query");
+
+        let (compiler, id) = Self::make_compiler(&query, schema, configuration);
         let ast = compiler.db.ast(id);
 
         // Trace log recursion limit data
@@ -379,7 +377,52 @@ impl Query {
 
         Ok(Query {
             string: query,
-            compiler: OnceCell::from(Mutex::new(compiler)),
+            compiler: Arc::new(Mutex::new(compiler)),
+            fragments,
+            operations,
+            subselections: HashMap::new(),
+            errors: Default::default(),
+        })
+    }
+
+    pub(crate) async fn parse_with_compiler(
+        query: String,
+        compiler: Arc<Mutex<ApolloCompiler>>,
+        id: FileId,
+        schema: &Schema,
+    ) -> Result<Self, SpecError> {
+        let compiler_guard = compiler.lock().await;
+        let ast = compiler_guard.db.ast(id);
+
+        // Trace log recursion limit data
+        let recursion_limit = ast.recursion_limit();
+        tracing::trace!(?recursion_limit, "recursion limit data");
+
+        let errors = ast
+            .errors()
+            .map(|err| format!("{err:?}"))
+            .collect::<Vec<_>>();
+
+        if !errors.is_empty() {
+            let errors = errors.join(", ");
+            failfast_debug!("parsing error(s): {}", errors);
+            return Err(SpecError::ParsingError(errors));
+        }
+
+        let fragments = Fragments::from_hir(&compiler_guard, schema)?;
+
+        let operations = compiler_guard
+            .db
+            .all_operations()
+            .iter()
+            .map(|operation| Operation::from_hir(operation, schema))
+            .collect::<Result<Vec<_>, SpecError>>()?;
+
+        drop(compiler_guard);
+
+        Ok(Query {
+            string: query,
+            compiler,
             fragments,
             operations,
             subselections: HashMap::new(),
@@ -388,11 +431,7 @@ impl Query {
     }
 
     pub(crate) async fn compiler(&self, schema: Option<&Schema>) -> MutexGuard<'_, ApolloCompiler> {
-        self.compiler
-            .get_or_init(|| async { Mutex::new(self.uncached_compiler(schema)) })
-            .await
-            .lock()
-            .await
+        self.compiler.lock().await
     }
 
     /// Create a new compiler for this query, without caching it

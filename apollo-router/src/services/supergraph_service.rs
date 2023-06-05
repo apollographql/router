@@ -258,28 +258,32 @@ where
 
 async fn plan_query(
     mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    mut _compiler: Option<Arc<Mutex<ApolloCompiler>>>,
+    compiler: Option<Arc<Mutex<ApolloCompiler>>>,
     operation_name: Option<String>,
     context: Context,
     schema: Arc<Schema>,
     query_str: String,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
-    if _compiler.is_none() {
-        _compiler = Some(
-            // TODO[igni]: no
+    let compiler = match compiler {
+        None =>
+        // TODO[igni]: no
+        {
             Arc::new(Mutex::new(
                 QueryAnalysisLayer::new(schema, Default::default())
                     .await
                     .make_compiler(&query_str)
                     .0,
-            )),
-        );
-    }
+            ))
+        }
+        Some(c) => c,
+    };
+
     planning
         .call(
             QueryPlannerRequest::builder()
                 .query(query_str)
                 .and_operation_name(operation_name)
+                .compiler(compiler)
                 .context(context)
                 .build(),
         )

@@ -10,6 +10,7 @@ use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use sha2::Digest;
 use sha2::Sha256;
+use tokio::sync::Mutex;
 use tower::ServiceExt;
 use tracing::Instrument;
 
@@ -71,7 +72,7 @@ where
 
     pub(crate) async fn warm_up(
         &mut self,
-        query_parser: &QueryAnalysisLayer,
+        query_analysis: &QueryAnalysisLayer,
         cache_keys: Vec<(String, Option<String>)>,
     ) {
         let schema_id = self.schema_id.clone();
@@ -87,9 +88,11 @@ where
 
             let entry = self.cache.get(&caching_key).await;
             if entry.is_first() {
+                let (compiler, _) = query_analysis.make_compiler(&query);
                 let request = QueryPlannerRequest {
                     query,
                     operation_name: operation,
+                    compiler: Arc::new(Mutex::new(compiler)),
                     context: context.clone(),
                 };
 
@@ -349,20 +352,44 @@ mod tests {
         )
         .await;
 
+        let configuration = Configuration::default();
+
+        let schema = Schema::parse(
+            include_str!("testdata/schema.graphql"),
+            &configuration,
+            None,
+        )
+        .unwrap();
+
+        let compiler1 = Arc::new(Mutex::new(
+            Query::make_compiler("query Me { me { username } }", &schema, &configuration).0,
+        ));
+
         for _ in 0..5 {
             assert!(planner
                 .call(QueryPlannerRequest::new(
                     "query Me { me { username } }".to_string(),
                     Some("".into()),
+                    compiler1.clone(),
                     Context::new()
                 ))
                 .await
                 .is_err());
         }
+        let compiler2 = Arc::new(Mutex::new(
+            Query::make_compiler(
+                "query Me { me { name { first } } }",
+                &schema,
+                &configuration,
+            )
+            .0,
+        ));
+
         assert!(planner
             .call(QueryPlannerRequest::new(
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
+                compiler2,
                 Context::new()
             ))
             .await
@@ -402,6 +429,19 @@ mod tests {
             planner
         });
 
+        let configuration = Configuration::default();
+
+        let schema = Schema::parse(
+            include_str!("testdata/schema.graphql"),
+            &configuration,
+            None,
+        )
+        .unwrap();
+
+        let compiler = Arc::new(Mutex::new(
+            Query::make_compiler("query Me { me { username } }", &schema, &configuration).0,
+        ));
+
         let mut planner = CachingQueryPlanner::new(
             delegate,
             None,
@@ -414,6 +454,7 @@ mod tests {
                 .call(QueryPlannerRequest::new(
                     "query Me { me { username } }".to_string(),
                     Some("".into()),
+                    compiler.clone(),
                     Context::new()
                 ))
                 .await
