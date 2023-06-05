@@ -348,7 +348,7 @@ impl Query {
         Ok((fragments, operations))
     }
 
-    pub(crate) async fn compiler(&self, schema: Option<&Schema>) -> MutexGuard<'_, ApolloCompiler> {
+    pub(crate) async fn compiler(&self) -> MutexGuard<'_, ApolloCompiler> {
         self.compiler.lock().await
     }
 

@@ -63,10 +63,10 @@ impl Request {
     async fn internal_new<'a>(
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
-        schema: &'a Schema,
+        _schema: &'a Schema,
         context: Context,
     ) -> Request {
-        let compiler = query_plan.query.compiler(Some(schema)).await.snapshot();
+        let compiler = query_plan.query.compiler().await.snapshot();
         Self {
             supergraph_request,
             query_plan,
