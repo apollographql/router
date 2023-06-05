@@ -56,6 +56,7 @@
       "GraphOS reporting": "/configuration/apollo-telemetry",
       "OpenTelemetry tracing": "/configuration/tracing",
       "Configuring metrics collectors": "/configuration/metrics",
+      "Client awareness": "/managed-federation/client-awareness",
       "Health check": "/configuration/health-checks"
     },
     "Containerization": {
@@ -69,10 +70,9 @@
       "Request format": "/executing-operations/requests"
     },
     "Managed Federation": {
-      "Overview": "/managed-federation/overview",
-      "Setup": "/managed-federation/setup",
-      "Client awareness": "/managed-federation/client-awareness",
-      "Studio features": "https://www.apollographql.com/docs/studio/federated-graphs/"
+      "Overview": "https://www.apollographql.com/docs/federation/managed-federation/overview",
+      "Setup": "https://www.apollographql.com/docs/federation/managed-federation/setup",
+      "GraphOS Studio features": "https://www.apollographql.com/docs/graphos/graphs/federated-graphs"
     },
     "Customizations": {
       "Overview": "/customizations/overview",

@@ -4,6 +4,89 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.20.0] - 2023-05-31
+
+## 🚀 Features
+
+### Configurable histogram buckets for metrics ([Issue #2333](https://github.com/apollographql/router/issues/2333))
+
+It is now possible to change the default bucketing for histograms generated for metrics:
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    common:
+      buckets:
+        - 0.05
+        - 0.10
+        - 0.25
+        - 0.50
+        - 1.00
+        - 2.50
+        - 5.00
+        - 10.00
+        - 20.00
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3098
+
+## 🐛 Fixes
+
+### Federation v2.4.7 ([Issue #3170](https://github.com/apollographql/router/issues/3170), [Issue #3133](https://github.com/apollographql/router/issues/3133))
+
+This release bumps the Router's Federation support from v2.4.7 to v2.4.7, which brings in notable query planner fixes from [v2.4.7](https://github.com/apollographql/federation/releases/tag/%40apollo%2Fquery-planner%402.4.7).  Of note from those releases, this brings query planner fixes that (per that dependency's changelog):
+
+- Re-work the code use to try to reuse query named fragments to improve performance (thus sometimes improving query ([#2604](https://github.com/apollographql/federation/pull/2604)) planning performance)
+- Fix a raised assertion error (again, with a message of form like `Cannot add selection of field X to selection set of parent type Y`).
+- Fix a rare issue where an `interface` or `union` field was not being queried for all the types it should be.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3185
+
+### Set the global allocator in the library crate, not just the executable ([Issue #3126](https://github.com/apollographql/router/issues/3126))
+
+In 1.19, Apollo Router [switched to use `jemalloc` as the global Rust allocator on Linux](https://github.com/apollographql/router/blob/dev/CHANGELOG.md#improve-memory-fragmentation-and-resource-consumption-by-switching-to-jemalloc-as-the-memory-allocator-on-linux-pr-2882) to reduce memory fragmentation. However, prior to this change this was only occurring in the executable binary provided by the `apollo-router` crate and [custom binaries](https://www.apollographql.com/docs/router/customizations/custom-binary) using the crate _as a library_ were not getting this benefit.
+
+The `apollo-router` library crate now sets the global allocator so that custom binaries also take advantage of this by default. If some other choice is desired, the `global-allocator` Cargo [feature flag](https://doc.rust-lang.org/cargo/reference/features.html) can be disabled in `Cargo.toml` with:
+
+```toml
+[dependencies]
+apollo-router = {version = "[…]", default-features = false}
+```
+
+Library crates that depend on `apollo-router` (if any) should also do this in order to leave the choice to the eventual executable. (Cargo default features are only disabled if *all* dependents specify `default-features = false`.)
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/3157
+
+### Add `ca-certificates` to our Docker image ([Issue #3173](https://github.com/apollographql/router/issues/3173))
+
+We removed `curl` from our Docker images to improve security, which meant that our implicit install of `ca-certificates` (as a dependency of `curl`) was no longer performed.
+
+This fix reinstates the `ca-certificates` package explicitly, which is required for the router to be able to process TLS requests.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3174
+
+### Helm: Running of `helm test` no longer fails
+
+Running `helm test` was generating an error since `wget` was sending a request without a proper body and expecting an HTTP status response of 2xx.   Without the proper body, it expectedly resulted in an HTTP status of 400.  By switching to using `netcat` (or `nc`) we will now check that the port is up and use that to determine that the router is functional.
+
+By [@bbardawilwiser](https://github.com/bbardawilwiser) in https://github.com/apollographql/router/pull/3096
+
+### Move `curl` dependency to separate layer in Docker image ([Issue #3144](https://github.com/apollographql/router/issues/3144))
+
+We've moved `curl` out of the Docker image we publish.  The `curl` command is only used in the image we produce today for the sake of downloading dependencies.  It is never used after that, but we can move it to a separate layer to further remove it from the image.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/3146
+
+## 🛠 Maintenance
+
+### Improve `cargo-about` license checking ([Issue #3176](https://github.com/apollographql/router/issues/3176))
+
+From the description of this [cargo about PR](https://github.com/EmbarkStudios/cargo-about/pull/216), it is possible for `NOASSERTION` identifiers to be added when gathering license information, causing license checks to fail. This change uses the new `cargo-about` configuration `filter-noassertion` to eliminate the problem.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3178
+
+
+
 # [1.19.1] - 2023-05-26
 
 ## 🐛 Fixes
