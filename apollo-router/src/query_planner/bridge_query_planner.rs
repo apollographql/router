@@ -328,7 +328,6 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use crate::services::layers::query_analysis::QueryAnalysisLayer;
 
     const EXAMPLE_SCHEMA: &str = include_str!("testdata/schema.graphql");
 
@@ -381,16 +380,12 @@ mod tests {
 
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
-        let parser = QueryAnalysisLayer::new(
-            Arc::new(Schema::parse(EXAMPLE_SCHEMA, &Default::default(), None).unwrap()),
-            Arc::clone(&Default::default()),
+        let query = Query::parse(
+            include_str!("testdata/unknown_introspection_query.graphql"),
+            &Schema::parse(EXAMPLE_SCHEMA, &Default::default(), None).unwrap(),
+            &Configuration::default(),
         )
-        .await;
-
-        let query = parser.parse((
-            include_str!("testdata/unknown_introspection_query.graphql").into(),
-            None,
-        ));
+        .unwrap();
         let err = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
             .await
             .unwrap()

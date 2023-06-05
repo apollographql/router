@@ -7,7 +7,6 @@ use http::StatusCode;
 use lru::LruCache;
 use tokio::sync::Mutex;
 
-use crate::query_planner::QueryKey;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::query::Operation;
@@ -47,20 +46,7 @@ impl QueryAnalysisLayer {
     }
 
     pub(crate) fn make_compiler(&self, query: &str) -> (ApolloCompiler, FileId) {
-        let mut compiler = ApolloCompiler::new()
-            .recursion_limit(
-                self.configuration
-                    .preview_operation_limits
-                    .parser_max_recursion,
-            )
-            .token_limit(
-                self.configuration
-                    .preview_operation_limits
-                    .parser_max_tokens,
-            );
-        compiler.set_type_system_hir(self.schema.type_system.clone());
-        let id = compiler.add_executable(query, "query");
-        (compiler, id)
+        Query::make_compiler(query, &self.schema, &self.configuration)
     }
 
     pub(crate) async fn supergraph_request(
@@ -108,7 +94,7 @@ impl QueryAnalysisLayer {
 
         let compiler = match entry {
             None => {
-                let (compiler, file_id) = self.make_compiler(&query);
+                let (compiler, _) = self.make_compiler(&query);
 
                 let compiler = Arc::new(Mutex::new(compiler));
 
@@ -160,13 +146,5 @@ impl QueryAnalysisLayer {
             context: request.context,
             compiler: Some(compiler),
         })
-    }
-
-    pub(crate) fn parse(&self, key: QueryKey) -> Query {
-        let query = key.0;
-        let schema = self.schema.clone();
-        let configuration: Arc<Configuration> = self.configuration.clone();
-        tracing::info_span!("parse_query", "otel.kind" = "INTERNAL")
-            .in_scope(|| Query::parse_unchecked(query, &schema, &configuration))
     }
 }

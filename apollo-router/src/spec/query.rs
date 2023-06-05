@@ -54,8 +54,6 @@ pub(crate) struct Query {
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<SubSelection, Query>,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) errors: Vec<SpecError>,
 }
 
 #[derive(Debug, Derivative, Default)]
@@ -277,70 +275,6 @@ impl Query {
         (compiler, id)
     }
 
-    // Behaves like parse, except the errors are stored in the `Query` structure.
-    // This allows you to run parsing without needing to early return.
-    pub(crate) fn parse_unchecked(
-        query: impl Into<String>,
-        schema: &Schema,
-        configuration: &Configuration,
-    ) -> Self {
-        let query = query.into();
-        let mut compiler = ApolloCompiler::new()
-            .recursion_limit(configuration.preview_operation_limits.parser_max_recursion)
-            .token_limit(configuration.preview_operation_limits.parser_max_tokens);
-        let id = compiler.add_executable(&query, "query");
-        let ast = compiler.db.ast(id);
-
-        // Trace log recursion limit data
-        let recursion_limit = ast.recursion_limit();
-        tracing::trace!(?recursion_limit, "recursion limit data");
-
-        let mut parse_errors = Vec::new();
-        let errors = ast
-            .errors()
-            .map(|err| format!("{err:?}"))
-            .collect::<Vec<_>>();
-
-        if !errors.is_empty() {
-            let errors = errors.join(", ");
-            parse_errors.push(SpecError::ParsingError(errors));
-        }
-
-        let fragments = match Fragments::from_hir(&compiler, schema) {
-            Ok(fragments) => fragments,
-            Err(error) => {
-                parse_errors.push(error);
-                Default::default()
-            }
-        };
-
-        let operations = match compiler
-            .db
-            .all_operations()
-            .iter()
-            .map(|operation| Operation::from_hir(operation, schema))
-            .collect::<Result<Vec<_>, SpecError>>()
-        {
-            Ok(operations) => operations,
-            // TODO: maybe we want to collect all of them
-            // for display purposes?
-            Err(error) => {
-                parse_errors.push(error);
-                Default::default()
-            }
-        };
-
-        Query {
-            string: query,
-            compiler: Arc::new(Mutex::new(compiler)),
-            fragments,
-            operations,
-            subselections: HashMap::new(),
-            errors: parse_errors,
-        }
-    }
-
-    #[cfg(test)]
     pub(crate) fn parse(
         query: impl Into<String>,
         schema: &Schema,
@@ -349,6 +283,42 @@ impl Query {
         let query = query.into();
 
         let (compiler, id) = Self::make_compiler(&query, schema, configuration);
+        let (fragments, operations) = Self::extract_query_information(&compiler, id, schema)?;
+
+        Ok(Query {
+            string: query,
+            compiler: Arc::new(Mutex::new(compiler)),
+            fragments,
+            operations,
+            subselections: HashMap::new(),
+        })
+    }
+
+    pub(crate) async fn parse_with_compiler(
+        query: String,
+        compiler: Arc<Mutex<ApolloCompiler>>,
+        id: FileId,
+        schema: &Schema,
+    ) -> Result<Self, SpecError> {
+        let compiler_guard = compiler.lock().await;
+        let (fragments, operations) =
+            Self::extract_query_information(&*compiler_guard, id, schema)?;
+        drop(compiler_guard);
+
+        Ok(Query {
+            string: query,
+            compiler,
+            fragments,
+            operations,
+            subselections: HashMap::new(),
+        })
+    }
+
+    fn extract_query_information(
+        compiler: &ApolloCompiler,
+        id: FileId,
+        schema: &Schema,
+    ) -> Result<(Fragments, Vec<Operation>), SpecError> {
         let ast = compiler.db.ast(id);
 
         // Trace log recursion limit data
@@ -375,59 +345,7 @@ impl Query {
             .map(|operation| Operation::from_hir(operation, schema))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
-        Ok(Query {
-            string: query,
-            compiler: Arc::new(Mutex::new(compiler)),
-            fragments,
-            operations,
-            subselections: HashMap::new(),
-            errors: Default::default(),
-        })
-    }
-
-    pub(crate) async fn parse_with_compiler(
-        query: String,
-        compiler: Arc<Mutex<ApolloCompiler>>,
-        id: FileId,
-        schema: &Schema,
-    ) -> Result<Self, SpecError> {
-        let compiler_guard = compiler.lock().await;
-        let ast = compiler_guard.db.ast(id);
-
-        // Trace log recursion limit data
-        let recursion_limit = ast.recursion_limit();
-        tracing::trace!(?recursion_limit, "recursion limit data");
-
-        let errors = ast
-            .errors()
-            .map(|err| format!("{err:?}"))
-            .collect::<Vec<_>>();
-
-        if !errors.is_empty() {
-            let errors = errors.join(", ");
-            failfast_debug!("parsing error(s): {}", errors);
-            return Err(SpecError::ParsingError(errors));
-        }
-
-        let fragments = Fragments::from_hir(&compiler_guard, schema)?;
-
-        let operations = compiler_guard
-            .db
-            .all_operations()
-            .iter()
-            .map(|operation| Operation::from_hir(operation, schema))
-            .collect::<Result<Vec<_>, SpecError>>()?;
-
-        drop(compiler_guard);
-
-        Ok(Query {
-            string: query,
-            compiler,
-            fragments,
-            operations,
-            subselections: HashMap::new(),
-            errors: Default::default(),
-        })
+        Ok((fragments, operations))
     }
 
     pub(crate) async fn compiler(&self, schema: Option<&Schema>) -> MutexGuard<'_, ApolloCompiler> {

@@ -465,24 +465,4 @@ mod tests {
                 .contains_key::<UsageReporting>());
         }
     }
-
-    async fn parse_query(query: String, operation_name: Option<String>) -> Arc<Query> {
-        let configuration: Arc<Configuration> = Default::default();
-        let api_schema = None;
-
-        let parser = QueryAnalysisLayer::new(
-            Arc::new(
-                Schema::parse(
-                    include_str!("testdata/schema.graphql"),
-                    &configuration,
-                    api_schema,
-                )
-                .unwrap(),
-            ),
-            Arc::clone(&configuration),
-        )
-        .await;
-
-        Arc::new(parser.parse((query, operation_name)))
-    }
 }
