@@ -9,7 +9,7 @@ expression: get_spans()
     "metadata": {
       "name": "root",
       "target": "tracing_tests",
-      "level": "INFO",
+      "level": "ERROR",
       "module_path": "tracing_tests",
       "fields": {
         "names": []
@@ -230,31 +230,7 @@ expression: get_spans()
                       }
                     }
                   },
-                  "children": {
-                    "apollo_router::query_planner::bridge_query_planner::parse_query": {
-                      "name": "apollo_router::query_planner::bridge_query_planner::parse_query",
-                      "record": {
-                        "entries": [
-                          [
-                            "otel.kind",
-                            "INTERNAL"
-                          ]
-                        ],
-                        "metadata": {
-                          "name": "parse_query",
-                          "target": "apollo_router::query_planner::bridge_query_planner",
-                          "level": "INFO",
-                          "module_path": "apollo_router::query_planner::bridge_query_planner",
-                          "fields": {
-                            "names": [
-                              "otel.kind"
-                            ]
-                          }
-                        }
-                      },
-                      "children": {}
-                    }
-                  }
+                  "children": {}
                 }
               }
             }
