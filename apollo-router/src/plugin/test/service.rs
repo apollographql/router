@@ -84,8 +84,7 @@ macro_rules! mock_async_service {
                     std::task::Poll::Ready(Ok(()))
                 }
                 fn call(&mut self, req: $request_type<$req_generic>) -> Self::Future {
-                    let r  = self.call(req);
-                    Box::pin(async move { r.await })
+                    Box::pin(self.call(req))
                 }
             }
         }
