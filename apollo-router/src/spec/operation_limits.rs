@@ -96,7 +96,7 @@ pub(crate) async fn check(
 
     let mut fragment_cache = HashMap::new();
     let measured = count(
-        &*compiler,
+        &compiler,
         query_id,
         &mut fragment_cache,
         operation.selection_set(),

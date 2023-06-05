@@ -301,8 +301,7 @@ impl Query {
         schema: &Schema,
     ) -> Result<Self, SpecError> {
         let compiler_guard = compiler.lock().await;
-        let (fragments, operations) =
-            Self::extract_query_information(&*compiler_guard, id, schema)?;
+        let (fragments, operations) = Self::extract_query_information(&compiler_guard, id, schema)?;
         drop(compiler_guard);
 
         Ok(Query {
@@ -336,7 +335,7 @@ impl Query {
             return Err(SpecError::ParsingError(errors));
         }
 
-        let fragments = Fragments::from_hir(&compiler, schema)?;
+        let fragments = Fragments::from_hir(compiler, schema)?;
 
         let operations = compiler
             .db

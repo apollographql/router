@@ -129,7 +129,7 @@ impl QueryAnalysisLayer {
                 .filter_map(|operation| Operation::from_hir(operation, &self.schema).ok())
                 .find(|op| {
                     if let Some(op_name) = op.name.as_deref() {
-                        op_name == &name
+                        op_name == name
                     } else {
                         false
                     }
