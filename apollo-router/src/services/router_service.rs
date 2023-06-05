@@ -411,7 +411,7 @@ where
     supergraph_creator: Arc<SF>,
     static_page: StaticPageLayer,
     apq_layer: APQLayer,
-    query_parsing_layer: QueryAnalysisLayer,
+    query_analysis_layer: QueryAnalysisLayer,
 }
 
 impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
@@ -497,7 +497,7 @@ where
             supergraph_creator,
             static_page,
             apq_layer,
-            query_parsing_layer,
+            query_analysis_layer: query_parsing_layer,
         }
     }
 
@@ -512,7 +512,7 @@ where
         let router_service = content_negociation::RouterLayer::default().layer(RouterService::new(
             self.supergraph_creator.clone(),
             self.apq_layer.clone(),
-            self.query_parsing_layer.clone(),
+            self.query_analysis_layer.clone(),
         ));
 
         ServiceBuilder::new()

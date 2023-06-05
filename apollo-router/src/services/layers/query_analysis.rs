@@ -14,10 +14,9 @@ use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
 
-/// [`Layer`] for QueryParsing implementation.
+/// [`Layer`] for QueryAnalysis implementation.
 #[derive(Clone)]
 pub(crate) struct QueryAnalysisLayer {
-    /// set to None if QueryParsing is disabled
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
     cache: Arc<Mutex<LruCache<QueryAnalysisKey, Arc<Mutex<ApolloCompiler>>>>>,
