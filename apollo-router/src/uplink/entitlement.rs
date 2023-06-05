@@ -195,18 +195,13 @@ pub struct Entitlement {
 }
 
 /// Entitlements are converted into a stream of entitlement states by the expander
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub(crate) enum EntitlementState {
     Entitled,
     EntitledWarn,
     EntitledHalt,
+    #[default]
     Unentitled,
-}
-
-impl Default for EntitlementState {
-    fn default() -> Self {
-        EntitlementState::Unentitled
-    }
 }
 
 impl Display for Entitlement {

@@ -4,6 +4,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -1075,9 +1076,11 @@ impl ValueExt for Value {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn all_stock_router_example_yamls_are_valid() {
-    let example_dir = "../examples";
+    let example_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../examples");
     let example_directory_entries: Vec<DirEntry> = WalkDir::new(example_dir)
         .into_iter()
+        // Filter out `../examples/custom-global-allocator/target/` with its separate workspace
+        .filter_entry(|entry| entry.path().file_name() != Some(OsStr::new("target")))
         .map(|entry| {
             entry.unwrap_or_else(|e| panic!("invalid directory entry in {example_dir}: {e}"))
         })
