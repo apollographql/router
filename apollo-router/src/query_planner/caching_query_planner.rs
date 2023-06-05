@@ -77,12 +77,10 @@ where
         let schema_id = self.schema_id.clone();
 
         let mut count = 0usize;
-        for (query_string, operation) in cache_keys {
-            let query = Arc::new(query_parser.parse((query_string.clone(), operation.clone())));
-
+        for (query, operation) in cache_keys {
             let caching_key = CachingQueryKey {
                 schema_id: schema_id.clone(),
-                query: query_string,
+                query: query.clone(),
                 operation: operation.clone(),
             };
             let context = Context::new();
@@ -149,7 +147,7 @@ where
         Box::pin(async move {
             let caching_key = CachingQueryKey {
                 schema_id,
-                query: request.query.string.clone(),
+                query: request.query.clone(),
                 operation: request.operation_name.to_owned(),
             };
 
@@ -354,7 +352,7 @@ mod tests {
         for _ in 0..5 {
             assert!(planner
                 .call(QueryPlannerRequest::new(
-                    parse_query("query Me { me { username } }".to_string(), None).await,
+                    "query Me { me { username } }".to_string(),
                     Some("".into()),
                     Context::new()
                 ))
@@ -363,7 +361,7 @@ mod tests {
         }
         assert!(planner
             .call(QueryPlannerRequest::new(
-                parse_query("query Me { me { name { first } } }".to_string(), None).await,
+                "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
                 Context::new()
             ))
@@ -414,7 +412,7 @@ mod tests {
         for _ in 0..5 {
             assert!(planner
                 .call(QueryPlannerRequest::new(
-                    parse_query("query Me { me { username } }".to_string(), None).await,
+                    "query Me { me { username } }".to_string(),
                     Some("".into()),
                     Context::new()
                 ))

@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
+use apollo_compiler::FileId;
 use apollo_compiler::HirDatabase;
 use derivative::Derivative;
 use serde::de::Visitor;
@@ -261,6 +262,19 @@ impl Query {
         response.data = Some(Value::default());
 
         vec![]
+    }
+
+    pub(crate) fn make_compiler(
+        query: &str,
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> (ApolloCompiler, FileId) {
+        let mut compiler = ApolloCompiler::new()
+            .recursion_limit(configuration.preview_operation_limits.parser_max_recursion)
+            .token_limit(configuration.preview_operation_limits.parser_max_tokens);
+        compiler.set_type_system_hir(schema.type_system.clone());
+        let id = compiler.add_executable(query, "query");
+        (compiler, id)
     }
 
     // Behaves like parse, except the errors are stored in the `Query` structure.
@@ -1092,7 +1106,7 @@ struct FormatParameters<'a> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Operation {
-    name: Option<String>,
+    pub(crate) name: Option<String>,
     kind: OperationKind,
     selection_set: Vec<Selection>,
     variables: HashMap<ByteString, Variable>,
@@ -1105,7 +1119,10 @@ pub(crate) struct Variable {
 }
 
 impl Operation {
-    fn from_hir(operation: &hir::OperationDefinition, schema: &Schema) -> Result<Self, SpecError> {
+    pub(crate) fn from_hir(
+        operation: &hir::OperationDefinition,
+        schema: &Schema,
+    ) -> Result<Self, SpecError> {
         let name = operation.name().map(|s| s.to_owned());
         let kind = operation.operation_ty().into();
         if kind == OperationKind::Subscription {

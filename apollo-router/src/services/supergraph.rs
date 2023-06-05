@@ -4,6 +4,8 @@
 
 use std::sync::Arc;
 
+use apollo_compiler::ApolloCompiler;
+use apollo_compiler::FileId;
 use futures::future::ready;
 use futures::stream::once;
 use futures::stream::StreamExt;
@@ -18,6 +20,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
+use tokio::sync::Mutex;
 use tower::BoxError;
 
 use crate::error::Error;
@@ -46,7 +49,7 @@ pub struct Request {
     pub context: Context,
 
     #[allow(dead_code)]
-    pub(crate) query: Option<Arc<Query>>,
+    pub(crate) compiler: Option<Arc<Mutex<ApolloCompiler>>>,
 }
 
 impl From<http::Request<graphql::Request>> for Request {
@@ -54,7 +57,7 @@ impl From<http::Request<graphql::Request>> for Request {
         Self {
             supergraph_request,
             context: Context::new(),
-            query: None,
+            compiler: None,
         }
     }
 }
@@ -100,7 +103,7 @@ impl Request {
         Ok(Self {
             supergraph_request,
             context,
-            query: None,
+            compiler: None,
         })
     }
 

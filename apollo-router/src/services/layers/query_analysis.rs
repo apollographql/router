@@ -1,11 +1,18 @@
 use std::sync::Arc;
 
+use apollo_compiler::ApolloCompiler;
+use apollo_compiler::FileId;
+use apollo_compiler::HirDatabase;
 use http::StatusCode;
+use serde::Deserialize;
+use serde::Serialize;
+use tokio::sync::Mutex;
 
 use crate::cache::DeduplicatingCache;
 use crate::query_planner::QueryKey;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::spec::query::Operation;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
@@ -52,6 +59,23 @@ impl QueryAnalysisLayer {
         }
     }
 
+    pub(crate) fn make_compiler(&self, query: &str) -> (ApolloCompiler, FileId) {
+        let mut compiler = ApolloCompiler::new()
+            .recursion_limit(
+                self.configuration
+                    .preview_operation_limits
+                    .parser_max_recursion,
+            )
+            .token_limit(
+                self.configuration
+                    .preview_operation_limits
+                    .parser_max_tokens,
+            );
+        compiler.set_type_system_hir(self.schema.type_system.clone());
+        let id = compiler.add_executable(query, "query");
+        (compiler, id)
+    }
+
     pub(crate) async fn supergraph_request(
         &self,
         request: SupergraphRequest,
@@ -93,36 +117,61 @@ impl QueryAnalysisLayer {
             })
             .await;
 
-        let query = if entry.is_first() {
-            let query = Arc::new(
-                self.parse((
-                    request
-                        .supergraph_request
-                        .body()
-                        .query
-                        .clone()
-                        .expect("query presence was already checked"),
-                    op_name.clone(),
-                )),
+        let compiler = if entry.is_first() {
+            let (compiler, file_id) = self.make_compiler(
+                request
+                    .supergraph_request
+                    .body()
+                    .query
+                    .as_deref()
+                    .expect("query presence was already checked"),
             );
-            entry.insert(query.clone()).await;
-            query
+
+            let (compiler, id) = (Arc::new(Mutex::new(compiler)), file_id);
+            let wrapper = CompilerWrapper {
+                compiler: compiler.clone(),
+            };
+            entry.insert(wrapper).await;
+            compiler
         } else {
-            entry.get().await.unwrap()
+            let CompilerWrapper { compiler } = entry.get().await.unwrap();
+            compiler
+        };
+
+        let op = match op_name {
+            None => compiler
+                .lock()
+                .await
+                .db
+                .all_operations()
+                .iter()
+                .filter_map(|operation| Operation::from_hir(operation, &self.schema).ok())
+                .next(),
+            Some(name) => compiler
+                .lock()
+                .await
+                .db
+                .all_operations()
+                .iter()
+                .filter_map(|operation| Operation::from_hir(operation, &self.schema).ok())
+                .find(|op| {
+                    if let Some(op_name) = op.name.as_deref() {
+                        op_name == &name
+                    } else {
+                        false
+                    }
+                }),
         };
 
         request
             .context
-            .insert(
-                "operation_name",
-                query.operation(op_name).and_then(|op| op.name()),
-            )
+            .insert("operation_name", op.and_then(|op| op.name()))
             .unwrap();
 
         Ok(SupergraphRequest {
             supergraph_request: request.supergraph_request,
             context: request.context,
-            query: Some(query),
+            compiler: Some(compiler),
         })
     }
 

@@ -24,6 +24,7 @@ use hyper::Body;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use router_bridge::planner::Planner;
+use tokio::sync::Mutex;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -231,7 +232,7 @@ where
                     let request = SupergraphRequest {
                         supergraph_request: http::Request::from_parts(parts, graphql_request),
                         context,
-                        query: None,
+                        compiler: None,
                     };
 
                     let request_res = apq.supergraph_request(request).await;

@@ -17,7 +17,7 @@ assert_impl_all!(Request: Send);
 /// [`Context`] for the request.
 #[derive(Debug)]
 pub(crate) struct Request {
-    pub(crate) query: Arc<Query>,
+    pub(crate) query: String,
     pub(crate) operation_name: Option<String>,
     pub(crate) context: Context,
 }
@@ -28,11 +28,7 @@ impl Request {
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
     #[builder]
-    pub(crate) fn new(
-        query: Arc<Query>,
-        operation_name: Option<String>,
-        context: Context,
-    ) -> Request {
+    pub(crate) fn new(query: String, operation_name: Option<String>, context: Context) -> Request {
         Self {
             query,
             operation_name,

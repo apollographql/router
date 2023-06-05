@@ -5,6 +5,7 @@
 use std::sync::Arc;
 use std::task::Poll;
 
+use apollo_compiler::ApolloCompiler;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
@@ -12,6 +13,7 @@ use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
 use router_bridge::planner::Planner;
+use tokio::sync::Mutex;
 use tower::util::Either;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -147,7 +149,7 @@ where
         errors,
     } = match plan_query(
         planning,
-        req.query,
+        req.compiler,
         body.operation_name.clone(),
         context.clone(),
         schema.clone(),
@@ -257,26 +259,27 @@ where
 
 async fn plan_query(
     mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    mut query: Option<Arc<Query>>,
+    mut compiler: Option<Arc<Mutex<ApolloCompiler>>>,
     operation_name: Option<String>,
     context: Context,
     schema: Arc<Schema>,
     query_str: String,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
-    if query.is_none() {
-        query = Some(
+    if compiler.is_none() {
+        compiler = Some(
             // TODO[igni]: no
-            Arc::new(
+            Arc::new(Mutex::new(
                 QueryAnalysisLayer::new(schema, Default::default())
                     .await
-                    .parse((query_str, operation_name.clone())),
-            ),
+                    .make_compiler(&query_str)
+                    .0,
+            )),
         );
     }
     planning
         .call(
             QueryPlannerRequest::builder()
-                .query(query.expect("query presence was already checked by a plugin"))
+                .query(query_str)
                 .and_operation_name(operation_name)
                 .context(context)
                 .build(),
