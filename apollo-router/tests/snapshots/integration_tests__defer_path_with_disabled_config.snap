@@ -5,9 +5,9 @@ expression: stream.next().await.unwrap().unwrap()
 {
   "errors": [
     {
-      "message": "Unknown directive \"@defer\".",
+      "message": "validation error: cannot find type `defer` in this document",
       "extensions": {
-        "code": "GRAPHQL_VALIDATION_FAILED"
+        "code": "VALIDATION_ERROR"
       }
     }
   ]

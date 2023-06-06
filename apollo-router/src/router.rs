@@ -1320,11 +1320,11 @@ mod tests {
         let response = router_handle.request(request).await.unwrap();
 
         assert_eq!(
-            "cannot query field 'name' on type 'User'",
+            "validation error: cannot query field `name` on type `User`",
             response.errors[0].message
         );
         assert_eq!(
-            "INVALID_FIELD",
+            "VALIDATION_ERROR",
             response.errors[0].extensions.get("code").unwrap()
         );
 
@@ -1382,11 +1382,11 @@ mod tests {
         let response = router_handle.request(request).await.unwrap();
 
         assert_eq!(
-            "cannot query field 'name' on type 'User'",
+            "validation error: cannot query field `name` on type `User`",
             response.errors[0].message
         );
         assert_eq!(
-            "INVALID_FIELD",
+            "VALIDATION_ERROR",
             response.errors[0].extensions.get("code").unwrap()
         );
         router_handle.shutdown().await.unwrap();
