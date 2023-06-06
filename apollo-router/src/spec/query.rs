@@ -21,6 +21,7 @@ use tokio::sync::MutexGuard;
 use tokio::sync::OnceCell;
 use tracing::level_filters::LevelFilter;
 
+use crate::configuration::GraphQLValidation;
 use crate::error::FetchError;
 use crate::graphql::Error;
 use crate::graphql::Request;
@@ -290,7 +291,7 @@ impl Query {
         }
 
         // Bail out on validation errors, only if the input is expected to be valid
-        if validate {
+        if validate && configuration.experimental_graphql_validation != GraphQLValidation::Legacy {
             let diagnostics = compiler.db.validate_executable(id);
             let errors = diagnostics
                 .into_iter()

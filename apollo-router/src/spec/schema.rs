@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use apollo_compiler::diagnostics::ApolloDiagnostic;
 use apollo_compiler::diagnostics::DiagnosticData;
-use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
@@ -15,6 +14,7 @@ use http::Uri;
 use sha2::Digest;
 use sha2::Sha256;
 
+use crate::configuration::GraphQLValidation;
 use crate::error::SchemaError;
 use crate::error::ValidationErrors;
 use crate::query_planner::OperationKind;
@@ -50,7 +50,7 @@ impl Schema {
         Ok(schema)
     }
 
-    pub(crate) fn parse(sdl: &str, _configuration: &Configuration) -> Result<Self, SchemaError> {
+    pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
         let mut compiler = ApolloCompiler::new();
         let id = compiler.add_type_system(sdl, "schema.graphql");
 
@@ -60,11 +60,16 @@ impl Schema {
         let recursion_limit = ast.recursion_limit();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let diagnostics = compiler
-            .validate()
-            .into_iter()
-            .filter(|err| err.data.is_error())
-            .collect::<Vec<_>>();
+        let diagnostics =
+            if configuration.experimental_graphql_validation == GraphQLValidation::Legacy {
+                vec![]
+            } else {
+                compiler
+                    .validate()
+                    .into_iter()
+                    .filter(|err| err.data.is_error())
+                    .collect::<Vec<_>>()
+            };
 
         // Only bail out on parser errors for now: validation errors will be checked with the query
         // planner result
@@ -80,17 +85,13 @@ impl Schema {
         }
 
         if !diagnostics.is_empty() {
-            ValidationErrors {
+            let errors = ValidationErrors {
                 errors: diagnostics.clone(),
-            }
-            .print();
-        }
+            };
+            errors.print();
 
-        fn as_string(value: &hir::Value) -> Option<&String> {
-            if let hir::Value::String { value, .. } = value {
-                Some(value)
-            } else {
-                None
+            if configuration.experimental_graphql_validation == GraphQLValidation::New {
+                return Err(SchemaError::Parse(errors));
             }
         }
 
@@ -102,16 +103,16 @@ impl Schema {
                     .directives()
                     .iter()
                     .find(|directive| directive.name() == "join__graph")?;
-                let name = as_string(join_directive.argument_by_name("name")?)?;
-                let url = as_string(join_directive.argument_by_name("url")?)?;
+                let name = join_directive.argument_by_name("name")?.as_str()?;
+                let url = join_directive.argument_by_name("url")?.as_str()?;
                 Some((name, url))
             }) {
                 if url.is_empty() {
-                    return Err(SchemaError::MissingSubgraphUrl(name.clone()));
+                    return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
                 }
-                let url =
-                    Uri::from_str(url).map_err(|err| SchemaError::UrlParse(name.clone(), err))?;
-                if subgraphs.insert(name.clone(), url).is_some() {
+                let url = Uri::from_str(url)
+                    .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?;
+                if subgraphs.insert(name.to_string(), url).is_some() {
                     return Err(SchemaError::Api(format!(
                         "must not have several subgraphs with same name '{name}'"
                     )));

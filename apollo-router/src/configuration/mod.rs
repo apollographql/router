@@ -143,6 +143,10 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_chaos: Chaos,
 
+    /// Enable the new GraphQL validation.
+    #[serde(default)]
+    pub(crate) experimental_graphql_validation: GraphQLValidation,
+
     /// Plugin configuration
     #[serde(default)]
     plugins: UserPlugins,
@@ -151,6 +155,21 @@ pub struct Configuration {
     #[serde(default)]
     #[serde(flatten)]
     pub(crate) apollo_plugins: ApolloPlugins,
+}
+
+#[derive(Clone, PartialEq, Eq, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derivative(Debug)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum GraphQLValidation {
+    New,
+    Legacy,
+    Both,
+}
+
+impl Default for GraphQLValidation {
+    fn default() -> Self {
+        GraphQLValidation::Legacy
+    }
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
@@ -175,6 +194,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apq: Apq,
             preview_operation_limits: OperationLimits,
             experimental_chaos: Chaos,
+            experimental_graphql_validation: GraphQLValidation,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -190,6 +210,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .apq(ad_hoc.apq)
             .operation_limits(ad_hoc.preview_operation_limits)
             .chaos(ad_hoc.experimental_chaos)
+            .graphql_validation(ad_hoc.experimental_graphql_validation)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -222,6 +243,7 @@ impl Configuration {
         apq: Option<Apq>,
         operation_limits: Option<OperationLimits>,
         chaos: Option<Chaos>,
+        graphql_validation: Option<GraphQLValidation>,
     ) -> Result<Self, ConfigurationError> {
         let conf = Self {
             validated_yaml: Default::default(),
@@ -233,6 +255,7 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             preview_operation_limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
+            experimental_graphql_validation: graphql_validation.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -292,6 +315,7 @@ impl Configuration {
         apq: Option<Apq>,
         operation_limits: Option<OperationLimits>,
         chaos: Option<Chaos>,
+        graphql_validation: Option<GraphQLValidation>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -302,6 +326,7 @@ impl Configuration {
             cors: cors.unwrap_or_default(),
             preview_operation_limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
+            experimental_graphql_validation: graphql_validation.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
