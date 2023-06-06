@@ -16,6 +16,7 @@ use crate::Context;
 
 /// [`Layer`] for QueryAnalysis implementation.
 #[derive(Clone)]
+#[allow(clippy::type_complexity)]
 pub(crate) struct QueryAnalysisLayer {
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
