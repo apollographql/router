@@ -1113,10 +1113,6 @@ impl Operation {
         })
     }
 
-    pub(crate) fn name(&self) -> Option<String> {
-        self.name.clone()
-    }
-
     /// Checks to see if this is a query or mutation containing only
     /// `__typename` at the root level (possibly more than one time, possibly
     /// with aliases). If so, returns Some with a Vec of the output keys
