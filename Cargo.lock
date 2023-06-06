@@ -215,9 +215,9 @@ checksum = "9c7d0618f0e0b7e8ff11427422b64564d5fb0be1940354bfe2e0529b18a9d9b8"
 
 [[package]]
 name = "apollo-compiler"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b9ac0bd7e7539c36c395b046cce5d6cf18f76734e3bdb695de8671c623baa70"
+checksum = "59d0b721a6cf88b7dc0374b5593672b21f1b45dc4b0216c16aabf9b1c703a8f6"
 dependencies = [
  "apollo-parser 0.5.3",
  "ariadne",
