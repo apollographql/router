@@ -3,13 +3,13 @@ use std::sync::Arc;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::FileId;
 use apollo_compiler::HirDatabase;
+use apollo_compiler::InputDatabase;
 use http::StatusCode;
 use lru::LruCache;
 use tokio::sync::Mutex;
 
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::spec::query::Operation;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
@@ -30,17 +30,17 @@ struct QueryAnalysisKey {
 
 impl QueryAnalysisLayer {
     pub(crate) async fn new(schema: Arc<Schema>, configuration: Arc<Configuration>) -> Self {
-        let mut cache = configuration
-            .supergraph
-            .query_planning
-            .experimental_cache
-            .clone();
-        cache.redis = None;
-
         Self {
             schema,
+            cache: Arc::new(Mutex::new(LruCache::new(
+                configuration
+                    .supergraph
+                    .query_planning
+                    .experimental_cache
+                    .in_memory
+                    .limit,
+            ))),
             configuration,
-            cache: Arc::new(Mutex::new(LruCache::new(cache.in_memory.limit))),
         }
     }
 
@@ -110,34 +110,24 @@ impl QueryAnalysisLayer {
             Some(c) => c,
         };
 
-        let op = match op_name {
-            None => compiler
-                .lock()
-                .await
-                .db
-                .all_operations()
-                .iter()
-                .filter_map(|operation| Operation::from_hir(operation, &self.schema).ok())
-                .next(),
-            Some(name) => compiler
-                .lock()
-                .await
-                .db
-                .all_operations()
-                .iter()
-                .filter_map(|operation| Operation::from_hir(operation, &self.schema).ok())
-                .find(|op| {
-                    if let Some(op_name) = op.name.as_deref() {
-                        op_name == name
-                    } else {
-                        false
-                    }
-                }),
-        };
+        let file_id = compiler.lock().await.db.source_file("query".into()).ok_or(
+            SupergraphResponse::builder()
+                .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                .context(request.context.clone())
+                .build()
+                .expect("missing input file for query"),
+        )?;
+
+        let operation_name = compiler
+            .lock()
+            .await
+            .db
+            .find_operation(file_id, op_name)
+            .and_then(|operation| operation.name().map(|s| s.to_owned()));
 
         request
             .context
-            .insert("operation_name", op.and_then(|op| op.name()))
+            .insert("operation_name", operation_name)
             .unwrap();
 
         Ok(SupergraphRequest {

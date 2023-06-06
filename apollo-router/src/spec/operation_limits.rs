@@ -78,7 +78,6 @@ pub(crate) async fn check(
 
     // We only need `&ApolloCompiler` but
     // `get_mut` allows accessing a Tokio `Mutex` without awaiting.
-    #[allow(clippy::expect_used)] // can’t really avoid this one
     let compiler = query.compiler.lock().await;
 
     let ids = compiler.db.executable_definition_files();
