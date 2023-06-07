@@ -42,6 +42,7 @@ use tower::ServiceExt;
 use self::engine::RhaiService;
 use self::engine::SharedMut;
 use crate::error::Error;
+use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -624,9 +625,8 @@ macro_rules! gen_map_router_deferred_response {
                     let mapped_stream = rest
                         .map_err(BoxError::from)
                         .and_then(move |deferred_response| {
-                    // let mapped_stream = rest.filter_map(move |deferred_response| {
                         let rhai_service = $rhai_service.clone();
-                        let context = context.clone();
+                        let context = ctx.clone();
                         let callback = $callback.clone();
                         async move {
                             let response = $rhai_deferred_response {
@@ -640,51 +640,40 @@ macro_rules! gen_map_router_deferred_response {
                                 &callback,
                                 (shared_response.clone(),),
                             );
-                            /* XXX FIGURE OUT LATER
+
                             if let Err(error) = result {
                                 tracing::error!("map_response callback failed: {error}");
                                 let error_details = process_error(error);
-                                let response_opt = shared_response.lock().unwrap().take();
-                                let $rhai_deferred_response { mut response, .. } = response_opt.unwrap();
                                 let error = Error {
                                     message: error_details.message.unwrap_or_default(),
                                     ..Default::default()
                                 };
-                                response.errors = vec![error];
-                                return Some(response);
+                                // We don't have a structured response to work with here. Let's
+                                // throw away our response and custom build an error response
+                                let error_response = graphql::Response::builder()
+                                    .errors(vec![error]).build();
+                                let error_body = hyper::Body::from(serde_json::to_vec(&error_response)?);
+                                return hyper::body::to_bytes(error_body).await.map_err(BoxError::from);
                             }
-                            */
 
                             let response_opt = shared_response.lock().unwrap().take();
                             let $rhai_deferred_response { response, .. } =
                                 response_opt.unwrap();
-                            Ok(response)
+                            hyper::body::to_bytes(response).await.map_err(BoxError::from)
                         }
                     });
 
-                        todo!();
-                    /*
                     // Create our response stream which consists of the bytes from our first body chained with the
                     // rest of the responses in our mapped stream.
-                    // let bytes = hyper::body::to_bytes(body).await.map_err(BoxError::from);
-                    // let ready_bytes = ready(bytes);
-                    let final_stream = once(ready(Ok(body))).chain(mapped_stream).boxed();
+                    let bytes = hyper::body::to_bytes(body).await.map_err(BoxError::from);
+                    let final_stream = once(ready(bytes)).chain(mapped_stream).boxed();
 
                     // Finally, return a response which has a Body that wraps our stream of response chunks.
                     Ok($response {
-                        context: ctx,
-                        response: http::Response::from_parts(parts, final_stream),
+                        context,
+                        response: http::Response::from_parts(parts, hyper::Body::wrap_stream(final_stream)),
                     })
-                    let response = http::Response::from_parts(
-                        parts,
-                        hyper::Body::wrap_stream(once(ready(body)).chain(mapped_stream).boxed()),
-                    );
-                    // .into();
-                    Ok($response {
-                        context: ctx,
-                        response,
-                    })
-                    */
+
                 },
             ))
         })

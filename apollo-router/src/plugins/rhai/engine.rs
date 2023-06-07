@@ -14,6 +14,7 @@ use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
 use rhai::serde::from_dynamic;
 use rhai::serde::to_dynamic;
+use bytes::Bytes;
 use rhai::Array;
 use rhai::Dynamic;
 use rhai::Engine;
@@ -250,6 +251,16 @@ mod router_json {
     pub(crate) fn value_to_string(x: &mut Value) -> String {
         format!("{x:?}")
     }
+
+    #[rhai_fn(pure, return_raw)]
+    pub(crate) fn parse_json(input: &mut Dynamic) -> Result<String, Box<EvalAltResult>> {
+        serde_json::to_string(input).map_err(|e| e.to_string().into())
+    }
+
+    #[rhai_fn(pure, return_raw)]
+    pub(crate) fn encode_json(input: &mut ImmutableString) -> Result<Dynamic, Box<EvalAltResult>> {
+        serde_json::from_str(input).map_err(|e| e.to_string().into())
+    }
 }
 
 #[export_module]
@@ -308,6 +319,21 @@ mod router_context {
     }
 
     // Add context getter/setters for deferred responses
+    #[rhai_fn(get = "context", pure, return_raw)]
+    pub(crate) fn router_deferred_response_context_get(
+        obj: &mut SharedMut<router::DeferredResponse>,
+    ) -> Result<Context, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.context.clone()))
+    }
+    #[rhai_fn(set = "context", return_raw)]
+    pub(crate) fn router_deferred_response_context_set(
+        obj: &mut SharedMut<router::DeferredResponse>,
+        context: Context,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| response.context = context);
+        Ok(())
+    }
+
     #[rhai_fn(get = "context", pure, return_raw)]
     pub(crate) fn supergraph_deferred_response_context_get(
         obj: &mut SharedMut<supergraph::DeferredResponse>,
@@ -426,6 +452,34 @@ mod router_plugin {
     // End of SubgraphRequest specific section
 
     #[rhai_fn(get = "headers", pure, return_raw)]
+    pub(crate) fn get_originating_headers_router_response(
+        obj: &mut SharedMut<router::Response>,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.response.headers().clone()))
+    }
+
+    #[rhai_fn(name = "is_primary", pure)]
+    pub(crate) fn router_response_is_primary(
+        _obj: &mut SharedMut<router::Response>,
+    ) -> bool {
+        true
+    }
+
+    #[rhai_fn(get = "headers", pure, return_raw)]
+    pub(crate) fn get_originating_headers_router_deferred_response(
+        _obj: &mut SharedMut<router::DeferredResponse>,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+    }
+
+    #[rhai_fn(name = "is_primary", pure)]
+    pub(crate) fn router_deferred_response_is_primary(
+        _obj: &mut SharedMut<router::DeferredResponse>,
+    ) -> bool {
+        false
+    }
+
+    #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_supergraph_response(
         obj: &mut SharedMut<supergraph::Response>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
@@ -487,6 +541,23 @@ mod router_plugin {
     }
 
     #[rhai_fn(get = "body", pure, return_raw)]
+    pub(crate) fn get_originating_body_router_response(
+        obj: &mut SharedMut<router::Response>,
+    ) -> Result<String, Box<EvalAltResult>> {
+        // Get the body
+        let bytes = obj.with_mut(|response| {
+            let http_response = std::mem::take(&mut response.response);
+            let (parts, body) = http_response.into_parts();
+            let bytes = http_body_as_bytes(body)?;
+            // Copy back the response so it can continue to be used
+            response.response = http::Response::from_parts(parts, bytes.clone().into());
+            Ok::<Bytes, Box<EvalAltResult>>(bytes)
+        })?;
+
+        String::from_utf8(bytes.to_vec()).map_err(|err| err.to_string().into())
+    }
+
+    #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_supergraph_response(
         obj: &mut SharedMut<supergraph::Response>,
     ) -> Result<Response, Box<EvalAltResult>> {
@@ -509,6 +580,22 @@ mod router_plugin {
 
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_router_deferred_response(
+        obj: &mut SharedMut<router::DeferredResponse>,
+    ) -> Result<String, Box<EvalAltResult>> {
+        // Get the body
+        let bytes = obj.with_mut(|response| {
+            let body = std::mem::take(&mut response.response);
+            let bytes = http_body_as_bytes(body)?;
+            // Copy back the response so it can continue to be used
+            response.response = bytes.clone().into();
+            Ok::<Bytes, Box<EvalAltResult>>(bytes)
+        })?;
+
+        String::from_utf8(bytes.to_vec()).map_err(|err| err.to_string().into())
+    }
+
+    #[rhai_fn(get = "body", pure, return_raw)]
+    pub(crate) fn get_originating_body_supergraph_deferred_response(
         obj: &mut SharedMut<supergraph::DeferredResponse>,
     ) -> Result<Response, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.clone()))
@@ -519,6 +606,23 @@ mod router_plugin {
         obj: &mut SharedMut<execution::DeferredResponse>,
     ) -> Result<Response, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.clone()))
+    }
+
+    #[rhai_fn(set = "headers", return_raw)]
+    pub(crate) fn set_originating_headers_router_response(
+        obj: &mut SharedMut<router::Response>,
+        headers: HeaderMap,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| *response.response.headers_mut() = headers);
+        Ok(())
+    }
+
+    #[rhai_fn(set = "headers", return_raw)]
+    pub(crate) fn set_originating_headers_router_deferred_response(
+        _obj: &mut SharedMut<router::DeferredResponse>,
+        _headers: HeaderMap,
+    ) -> Result<(), Box<EvalAltResult>> {
+        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
     }
 
     #[rhai_fn(set = "headers", return_raw)]
@@ -565,6 +669,16 @@ mod router_plugin {
     }
 
     #[rhai_fn(set = "body", return_raw)]
+    pub(crate) fn set_originating_body_router_response(
+        obj: &mut SharedMut<router::Response>,
+        body: String,
+    ) -> Result<(), Box<EvalAltResult>> {
+        let bytes = Bytes::from(body);
+        obj.with_mut(|response| *response.response.body_mut() = bytes.into());
+        Ok(())
+    }
+
+    #[rhai_fn(set = "body", return_raw)]
     pub(crate) fn set_originating_body_supergraph_response(
         obj: &mut SharedMut<supergraph::Response>,
         body: Response,
@@ -593,6 +707,16 @@ mod router_plugin {
 
     #[rhai_fn(set = "body", return_raw)]
     pub(crate) fn set_originating_body_router_deferred_response(
+        obj: &mut SharedMut<router::DeferredResponse>,
+        body: String
+    ) -> Result<(), Box<EvalAltResult>> {
+        let bytes = Bytes::from(body);
+        obj.with_mut(|response| response.response = bytes.into());
+        Ok(())
+    }
+
+    #[rhai_fn(set = "body", return_raw)]
+    pub(crate) fn set_originating_body_supergraph_deferred_response(
         obj: &mut SharedMut<supergraph::DeferredResponse>,
         body: Response,
     ) -> Result<(), Box<EvalAltResult>> {
@@ -632,6 +756,18 @@ mod router_plugin {
         Ok(urlencoding::decode(x)
             .map_err(|e| e.to_string())?
             .into_owned())
+    }
+
+    #[rhai_fn(name = "headers_are_available", pure)]
+    pub(crate) fn router_response(_: &mut SharedMut<router::Response>) -> bool {
+        true
+    }
+
+    #[rhai_fn(name = "headers_are_available", pure)]
+    pub(crate) fn router_deferred_response(
+        _: &mut SharedMut<router::DeferredResponse>,
+    ) -> bool {
+        false
     }
 
     #[rhai_fn(name = "headers_are_available", pure)]
@@ -935,6 +1071,19 @@ macro_rules! if_subgraph {
     };
 }
 
+fn http_body_as_bytes(body: Body) -> Result<Bytes, Box<EvalAltResult>> {
+    futures::executor::block_on(async move {
+        let hdl = tokio::runtime::Handle::current();
+        std::thread::spawn(move || {
+            let _guard = hdl.enter();
+            hdl.spawn(async move {
+                hyper::body::to_bytes(body).await.expect("it should work")
+            })
+        }).join().unwrap().await
+        .map_err(|e| e.to_string().into())
+    })
+}
+
 macro_rules! register_rhai_router_interface {
     ($engine: ident, $($base: ident), *) => {
         $(
@@ -995,20 +1144,13 @@ macro_rules! register_rhai_router_interface {
                 |obj: &mut SharedMut<$base::Request>| -> Result<String, Box<EvalAltResult>> {
                     // Get the body
                     let bytes = obj.with_mut(|request| {
-                        let input_request = std::mem::take(&mut request.router_request);
-                        // We need to invoke async code here...
-                        let bytes = futures::executor::block_on(async move {
-                            let hdl = tokio::runtime::Handle::current();
-                            std::thread::spawn(move || {
-                                let _guard = hdl.enter();
-                                hdl.spawn(async move {
-                                    hyper::body::to_bytes(input_request.into_body()).await.expect("it should work")
-                                })
-                            }).join().unwrap().await.unwrap()
-                        });
-                        let _ = std::mem::replace(&mut request.router_request, hyper::Request::new(bytes.clone().into()));
-                        bytes
-                    });
+                        let http_request = std::mem::take(&mut request.router_request);
+                        let (parts, body) = http_request.into_parts();
+                        let bytes = http_body_as_bytes(body)?;
+                        // Copy back the request so it can continue to be used
+                        request.router_request = http::Request::from_parts(parts, bytes.clone().into());
+                        Ok::<Bytes, Box<EvalAltResult>>(bytes)
+                    })?;
 
                     String::from_utf8(bytes.to_vec()).map_err(|err| err.to_string().into())
                 }
@@ -1022,7 +1164,7 @@ macro_rules! register_rhai_router_interface {
                             let _unused = (obj, body);
                             Err("cannot mutate originating request on a subgraph".into())
                         } else {
-                            let bytes = bytes::Bytes::from(body);
+                            let bytes = Bytes::from(body);
                             obj.with_mut(|request| *request.router_request.body_mut() = bytes.into());
                             Ok(())
                         }
