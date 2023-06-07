@@ -4,17 +4,18 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
+use bytes::Bytes;
 use http::header::InvalidHeaderName;
 use http::uri::Authority;
 use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::Uri;
+use hyper::Body;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
 use rhai::serde::from_dynamic;
 use rhai::serde::to_dynamic;
-use bytes::Bytes;
 use rhai::Array;
 use rhai::Dynamic;
 use rhai::Engine;
@@ -26,12 +27,11 @@ use rhai::Scope;
 use rhai::AST;
 use tower::BoxError;
 use uuid::Uuid;
-use hyper::Body;
 
-use super::router;
-use super::supergraph;
 use super::execution;
+use super::router;
 use super::subgraph;
+use super::supergraph;
 use super::Rhai;
 use super::ServiceStep;
 use crate::graphql::Request;
@@ -459,9 +459,7 @@ mod router_plugin {
     }
 
     #[rhai_fn(name = "is_primary", pure)]
-    pub(crate) fn router_response_is_primary(
-        _obj: &mut SharedMut<router::Response>,
-    ) -> bool {
+    pub(crate) fn router_response_is_primary(_obj: &mut SharedMut<router::Response>) -> bool {
         true
     }
 
@@ -708,7 +706,7 @@ mod router_plugin {
     #[rhai_fn(set = "body", return_raw)]
     pub(crate) fn set_originating_body_router_deferred_response(
         obj: &mut SharedMut<router::DeferredResponse>,
-        body: String
+        body: String,
     ) -> Result<(), Box<EvalAltResult>> {
         let bytes = Bytes::from(body);
         obj.with_mut(|response| response.response = bytes.into());
@@ -764,9 +762,7 @@ mod router_plugin {
     }
 
     #[rhai_fn(name = "headers_are_available", pure)]
-    pub(crate) fn router_deferred_response(
-        _: &mut SharedMut<router::DeferredResponse>,
-    ) -> bool {
+    pub(crate) fn router_deferred_response(_: &mut SharedMut<router::DeferredResponse>) -> bool {
         false
     }
 
@@ -1076,10 +1072,11 @@ fn http_body_as_bytes(body: Body) -> Result<Bytes, Box<EvalAltResult>> {
         let hdl = tokio::runtime::Handle::current();
         std::thread::spawn(move || {
             let _guard = hdl.enter();
-            hdl.spawn(async move {
-                hyper::body::to_bytes(body).await.expect("it should work")
-            })
-        }).join().unwrap().await
+            hdl.spawn(async move { hyper::body::to_bytes(body).await.expect("it should work") })
+        })
+        .join()
+        .unwrap()
+        .await
         .map_err(|e| e.to_string().into())
     })
 }

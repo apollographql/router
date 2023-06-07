@@ -47,29 +47,29 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::rhai::engine::OptionDance;
+use crate::plugins::rhai::engine::RhaiExecutionDeferredResponse;
+use crate::plugins::rhai::engine::RhaiExecutionResponse;
 use crate::plugins::rhai::engine::RhaiRouterDeferredResponse;
 use crate::plugins::rhai::engine::RhaiRouterResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphDeferredResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphResponse;
-use crate::plugins::rhai::engine::RhaiExecutionDeferredResponse;
-use crate::plugins::rhai::engine::RhaiExecutionResponse;
 use crate::register_plugin;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::services::ExecutionRequest;
-use crate::services::ExecutionResponse;
 use crate::Context;
 
 mod engine;
 
 pub(crate) const RHAI_SPAN_NAME: &str = "rhai_plugin";
 
-mod router;
-mod supergraph;
 mod execution;
+mod router;
 mod subgraph;
+mod supergraph;
 
 struct EngineBlock {
     ast: AST,
