@@ -138,6 +138,29 @@ expression: get_spans()
               },
               "children": {}
             },
+            "apollo_router::services::layers::query_analysis::parse_query": {
+              "name": "apollo_router::services::layers::query_analysis::parse_query",
+              "record": {
+                "entries": [
+                  [
+                    "otel.kind",
+                    "INTERNAL"
+                  ]
+                ],
+                "metadata": {
+                  "name": "parse_query",
+                  "target": "apollo_router::services::layers::query_analysis",
+                  "level": "INFO",
+                  "module_path": "apollo_router::services::layers::query_analysis",
+                  "fields": {
+                    "names": [
+                      "otel.kind"
+                    ]
+                  }
+                }
+              },
+              "children": {}
+            },
             "apollo_router::plugins::telemetry::supergraph": {
               "name": "apollo_router::plugins::telemetry::supergraph",
               "record": {

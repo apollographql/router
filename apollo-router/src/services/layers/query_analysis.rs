@@ -94,7 +94,8 @@ impl QueryAnalysisLayer {
 
         let (context, compiler) = match entry {
             None => {
-                let (compiler, file_id) = self.make_compiler(&query);
+                let span = tracing::info_span!("parse_query", "otel.kind" = "INTERNAL");
+                let (compiler, file_id) = span.in_scope(|| self.make_compiler(&query));
 
                 let compiler = Arc::new(Mutex::new(compiler));
                 let context = Context::new();
