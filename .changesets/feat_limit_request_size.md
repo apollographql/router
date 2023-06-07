@@ -18,4 +18,4 @@ Before increasing this limit significantly consider testing performance
 in an environment similar to your production, especially if some clients are untrusted.
 Many concurrent large requests could cause the Router to run out of memory.
 
-By [@SimonSapin](https://github.com/SimonSapin in https://github.com/apollographql/router/pull/3130
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/3130
