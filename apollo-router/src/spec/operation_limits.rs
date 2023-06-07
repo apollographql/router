@@ -76,8 +76,6 @@ pub(crate) async fn check(
         return Ok(());
     }
 
-    // We only need `&ApolloCompiler` but
-    // `get_mut` allows accessing a Tokio `Mutex` without awaiting.
     let compiler = query.compiler.lock().await;
 
     let ids = compiler.db.executable_definition_files();
