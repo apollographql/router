@@ -12,6 +12,7 @@ use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use sha2::Digest;
 use sha2::Sha256;
+use tokio::sync::Mutex;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -22,11 +23,11 @@ use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::query_planner;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
-use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
@@ -88,7 +89,11 @@ where
             .collect()
     }
 
-    pub(crate) async fn warm_up(&mut self, cache_keys: Vec<(String, Option<String>)>) {
+    pub(crate) async fn warm_up(
+        &mut self,
+        query_analysis: &QueryAnalysisLayer,
+        cache_keys: Vec<(String, Option<String>)>,
+    ) {
         let schema_id = self.schema.schema_id.clone();
 
         let mut service = ServiceBuilder::new().service(
@@ -105,21 +110,18 @@ where
             let caching_key = CachingQueryKey {
                 schema_id: schema_id.clone(),
                 query: query.clone(),
-                operation: operation.to_owned(),
+                operation: operation.clone(),
             };
             let context = Context::new();
 
             let entry = self.cache.get(&caching_key).await;
             if entry.is_first() {
-                let (compiler, file_id) =
-                    Query::make_compiler(&query, &self.schema, &self.configuration);
-
+                let (compiler, _) = query_analysis.make_compiler(&query);
                 let request = QueryPlannerRequest {
                     query,
                     operation_name: operation,
+                    compiler: Arc::new(Mutex::new(compiler)),
                     context: context.clone(),
-                    compiler,
-                    file_id,
                 };
 
                 let res = match service.ready().await {
@@ -174,8 +176,6 @@ where
     fn call(&mut self, request: query_planner::CachingRequest) -> Self::Future {
         let mut qp = self.clone();
         let schema_id = self.schema.schema_id.clone();
-        let schema = self.schema.clone();
-        let configuration = self.configuration.clone();
         Box::pin(async move {
             let caching_key = CachingQueryKey {
                 schema_id,
@@ -190,16 +190,14 @@ where
                     query,
                     operation_name,
                     context,
+                    compiler,
                 } = request;
-
-                let (compiler, file_id) = Query::make_compiler(&query, &schema, &configuration);
 
                 let request = QueryPlannerRequest::builder()
                     .query(query)
                     .and_operation_name(operation_name)
                     .context(context)
                     .compiler(compiler)
-                    .file_id(file_id)
                     .build();
 
                 // some clients might timeout and cancel the request before query planning is finished,
@@ -336,6 +334,8 @@ mod tests {
     use crate::error::PlanErrors;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
+    use crate::spec::Schema;
+    use crate::Configuration;
 
     mock! {
         #[derive(Debug)]
@@ -401,21 +401,44 @@ mod tests {
         let mut planner =
             CachingQueryPlanner::new(delegate, schema, configuration, IndexMap::new()).await;
 
+        let configuration = Configuration::default();
+
+        let schema = Schema::parse(
+            include_str!("testdata/schema.graphql"),
+            &configuration,
+            None,
+        )
+        .unwrap();
+
+        let compiler1 = Arc::new(Mutex::new(
+            Query::make_compiler("query Me { me { username } }", &schema, &configuration).0,
+        ));
+
         for _ in 0..5 {
             assert!(planner
                 .call(query_planner::CachingRequest::new(
-                    "{ me { id } }".into(),
+                    "query Me { me { username } }".to_string(),
                     Some("".into()),
+                    compiler1.clone(),
                     Context::new()
                 ))
                 .await
                 .is_err());
         }
+        let compiler2 = Arc::new(Mutex::new(
+            Query::make_compiler(
+                "query Me { me { name { first } } }",
+                &schema,
+                &configuration,
+            )
+            .0,
+        ));
 
         assert!(planner
             .call(query_planner::CachingRequest::new(
-                "{ me { id name } }".into(),
+                "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
+                compiler2,
                 Context::new()
             ))
             .await
@@ -455,23 +478,33 @@ mod tests {
             planner
         });
 
-        let configuration = Arc::new(crate::Configuration::default());
-        let schema = Arc::new(
-            Schema::parse(
-                include_str!("testdata/schema.graphql"),
-                &configuration,
-                None,
-            )
-            .unwrap(),
-        );
-        let mut planner =
-            CachingQueryPlanner::new(delegate, schema, configuration, IndexMap::new()).await;
+        let configuration = Configuration::default();
+
+        let schema = Schema::parse(
+            include_str!("testdata/schema.graphql"),
+            &configuration,
+            None,
+        )
+        .unwrap();
+
+        let compiler = Arc::new(Mutex::new(
+            Query::make_compiler("query Me { me { username } }", &schema, &configuration).0,
+        ));
+
+        let mut planner = CachingQueryPlanner::new(
+            delegate,
+            Arc::new(schema),
+            Arc::new(configuration),
+            IndexMap::new(),
+        )
+        .await;
 
         for _ in 0..5 {
             assert!(planner
                 .call(query_planner::CachingRequest::new(
-                    "{ me { id } }".into(),
+                    "query Me { me { username } }".to_string(),
                     Some("".into()),
+                    compiler.clone(),
                     Context::new()
                 ))
                 .await

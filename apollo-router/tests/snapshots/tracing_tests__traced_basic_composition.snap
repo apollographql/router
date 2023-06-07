@@ -138,6 +138,29 @@ expression: get_spans()
               },
               "children": {}
             },
+            "apollo_router::services::layers::query_analysis::parse_query": {
+              "name": "apollo_router::services::layers::query_analysis::parse_query",
+              "record": {
+                "entries": [
+                  [
+                    "otel.kind",
+                    "INTERNAL"
+                  ]
+                ],
+                "metadata": {
+                  "name": "parse_query",
+                  "target": "apollo_router::services::layers::query_analysis",
+                  "level": "INFO",
+                  "module_path": "apollo_router::services::layers::query_analysis",
+                  "fields": {
+                    "names": [
+                      "otel.kind"
+                    ]
+                  }
+                }
+              },
+              "children": {}
+            },
             "apollo_router::plugins::telemetry::supergraph": {
               "name": "apollo_router::plugins::telemetry::supergraph",
               "record": {
@@ -246,31 +269,7 @@ expression: get_spans()
                       }
                     }
                   },
-                  "children": {
-                    "apollo_router::query_planner::bridge_query_planner::parse_query": {
-                      "name": "apollo_router::query_planner::bridge_query_planner::parse_query",
-                      "record": {
-                        "entries": [
-                          [
-                            "otel.kind",
-                            "INTERNAL"
-                          ]
-                        ],
-                        "metadata": {
-                          "name": "parse_query",
-                          "target": "apollo_router::query_planner::bridge_query_planner",
-                          "level": "INFO",
-                          "module_path": "apollo_router::query_planner::bridge_query_planner",
-                          "fields": {
-                            "names": [
-                              "otel.kind"
-                            ]
-                          }
-                        }
-                      },
-                      "children": {}
-                    }
-                  }
+                  "children": {}
                 },
                 "apollo_router::plugins::telemetry::execution": {
                   "name": "apollo_router::plugins::telemetry::execution",
