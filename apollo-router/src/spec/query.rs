@@ -39,6 +39,7 @@ use crate::spec::SpecError;
 use crate::Configuration;
 
 pub(crate) const TYPENAME: &str = "__typename";
+pub(crate) const QUERY_EXECUTABLE: &str = "query";
 
 /// A GraphQL query.
 #[derive(Derivative, Default, Serialize, Deserialize)]
@@ -271,7 +272,7 @@ impl Query {
             .recursion_limit(configuration.preview_operation_limits.parser_max_recursion)
             .token_limit(configuration.preview_operation_limits.parser_max_tokens);
         compiler.set_type_system_hir(schema.type_system.clone());
-        let id = compiler.add_executable(query, "query");
+        let id = compiler.add_executable(query, QUERY_EXECUTABLE);
         (compiler, id)
     }
 
@@ -360,7 +361,7 @@ impl Query {
         // As long as this is the only executable document in this compiler
         // we can use compiler’s `all_operations` and `all_fragments`.
         // If that changes, we’ll need to carry around this ID somehow.
-        let _id = compiler.add_executable(&self.string, "query");
+        let _id = compiler.add_executable(&self.string, QUERY_EXECUTABLE);
         compiler
     }
 

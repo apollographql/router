@@ -28,6 +28,7 @@ use crate::introspection::Introspection;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
+use crate::spec::query::QUERY_EXECUTABLE;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
@@ -138,11 +139,14 @@ impl BridgeQueryPlanner {
         let schema = self.schema.clone();
         let configuration = self.configuration.clone();
 
-        let file_id = compiler.lock().await.db.source_file("query".into()).ok_or(
-            QueryPlannerError::SpecError(SpecError::ParsingError(
+        let file_id = compiler
+            .lock()
+            .await
+            .db
+            .source_file(QUERY_EXECUTABLE.into())
+            .ok_or(QueryPlannerError::SpecError(SpecError::ParsingError(
                 "missing input file for query".to_string(),
-            )),
-        )?;
+            )))?;
         let mut query = Query::parse_with_compiler(query, compiler, file_id, &schema).await?;
         crate::spec::operation_limits::check(&configuration, &mut query, operation_name).await?;
         Ok(query)
