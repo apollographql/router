@@ -253,12 +253,12 @@ mod router_json {
     }
 
     #[rhai_fn(pure, return_raw)]
-    pub(crate) fn parse_json(input: &mut Dynamic) -> Result<String, Box<EvalAltResult>> {
+    pub(crate) fn json_encode(input: &mut Dynamic) -> Result<String, Box<EvalAltResult>> {
         serde_json::to_string(input).map_err(|e| e.to_string().into())
     }
 
     #[rhai_fn(pure, return_raw)]
-    pub(crate) fn encode_json(input: &mut ImmutableString) -> Result<Dynamic, Box<EvalAltResult>> {
+    pub(crate) fn json_decode(input: &mut ImmutableString) -> Result<Dynamic, Box<EvalAltResult>> {
         serde_json::from_str(input).map_err(|e| e.to_string().into())
     }
 }
