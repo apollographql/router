@@ -75,6 +75,7 @@ impl TryFrom<supergraph::Request> for Request {
         let supergraph::Request {
             context,
             supergraph_request,
+            ..
         } = request;
 
         let (mut parts, request) = supergraph_request.into_parts();

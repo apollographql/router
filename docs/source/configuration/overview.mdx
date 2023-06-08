@@ -513,8 +513,9 @@ tls:
 >
 > To set request limits, you must run v1.17 or later of the Apollo Router. [Download the latest version.](../quickstart#download-options)
 
-The Apollo Router supports enforcing two types of request limits for enhanced security:
+The Apollo Router supports enforcing three types of request limits for enhanced security:
 
+- Network-based limits
 - Lexical, parser-based limits
 - Semantic, operation-based limits (this is an [Enterprise feature](../enterprise-features/))
 
@@ -522,6 +523,9 @@ The router rejects any request that violates at least one of these limits.
 
 ```yaml title="router.yaml"
 preview_operation_limits:
+  # Network-based limits
+  experimental_http_max_request_bytes: 2000000 # Default value: 2 MB
+
   # Parser-based limits
   parser_max_tokens: 15000 # Default value
   parser_max_recursion: 4096 # Default value
@@ -536,6 +540,23 @@ preview_operation_limits:
 #### Operation-based limits (Enterprise only)
 
 See [this article](./operation-limits/).
+
+#### Network-based limits
+
+##### `http_max_request_bytes`
+
+> **This configuration is currently [experimental](/resources/product-launch-stages#experimental-features).**
+
+Limits the amount of data read from the network for the body of HTTP requests,
+to protect against unbounded memory consumption.
+This limit is checked before JSON parsing.
+Both the GraphQL document and associated variables count toward it.
+
+The default value is `2000000` bytes, 2 MB.
+
+Before increasing this limit significantly consider testing performance
+in an environment similar to your production, especially if some clients are untrusted.
+Many concurrent large requests could cause the Router to run out of memory.
 
 #### Parser-based limits
 

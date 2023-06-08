@@ -59,7 +59,7 @@ impl OperationLimits<bool> {
 }
 
 /// Returns which limits are exceeded by the given query, if any
-pub(crate) fn check(
+pub(crate) async fn check(
     configuration: &Configuration,
     query: &mut Query,
     operation_name: Option<String>,
@@ -76,14 +76,7 @@ pub(crate) fn check(
         return Ok(());
     }
 
-    // We only need `&ApolloCompiler` but
-    // `get_mut` allows accessing a Tokio `Mutex` without awaiting.
-    #[allow(clippy::expect_used)] // can’t really avoid this one
-    let compiler = query
-        .compiler
-        .get_mut()
-        .expect("compiler must be already initialized")
-        .get_mut();
+    let compiler = query.compiler.lock().await;
 
     let ids = compiler.db.executable_definition_files();
     // We create a new compiler for each query
@@ -100,7 +93,7 @@ pub(crate) fn check(
 
     let mut fragment_cache = HashMap::new();
     let measured = count(
-        compiler,
+        &compiler,
         query_id,
         &mut fragment_cache,
         operation.selection_set(),
