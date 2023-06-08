@@ -2,7 +2,7 @@
 
 //! Logic for loading configuration in to an object model
 pub(crate) mod cors;
-mod expansion;
+pub(crate) mod expansion;
 mod experimental;
 mod schema;
 pub(crate) mod subgraph;

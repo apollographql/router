@@ -13,14 +13,14 @@ use serde_json::Value;
 use super::ConfigurationError;
 use crate::executable::APOLLO_ROUTER_DEV_ENV;
 
-#[derive(buildstructor::Builder)]
+#[derive(buildstructor::Builder, Clone)]
 pub(crate) struct Expansion {
     prefix: Option<String>,
     supported_modes: Vec<String>,
     defaults: Vec<ConfigDefault>,
 }
 
-#[derive(buildstructor::Builder)]
+#[derive(buildstructor::Builder, Clone)]
 pub(crate) struct ConfigDefault {
     config_path: String,
     env_name: Option<String>,
@@ -70,6 +70,17 @@ impl Expansion {
             .defaults(dev_mode_defaults)
             .build())
     }
+
+    pub(crate) fn default_rhai() -> Result<Self, ConfigurationError> {
+        // APOLLO_ROUTER_CONFIG_ENV_PREFIX and APOLLO_ROUTER_CONFIG_SUPPORTED_MODES are unsupported and may change in future.
+        // If you need this functionality then raise an issue and we can look to promoting this to official support.
+        let prefix = match env::var("APOLLO_ROUTER_CONFIG_ENV_PREFIX") {
+            Ok(v) => Some(v),
+            Err(VarError::NotPresent) => None,
+            Err(VarError::NotUnicode(_)) => Err(ConfigurationError::InvalidExpansionModeConfig)?,
+        };
+        Ok(Expansion::builder().and_prefix(prefix).build())
+    }
 }
 
 fn dev_mode_defaults() -> Vec<ConfigDefault> {
@@ -116,15 +127,7 @@ impl Expansion {
             }
 
             if let Some(key) = key.strip_prefix("env.") {
-                return match self.prefix.as_ref() {
-                    None => env::var(key),
-                    Some(prefix) => env::var(format!("{prefix}_{key}")),
-                }
-                .map(Some)
-                .map_err(|cause| ConfigurationError::CannotExpandVariable {
-                    key: key.to_string(),
-                    cause: format!("{cause}"),
-                });
+                return self.expand_env(key);
             }
             if let Some(key) = key.strip_prefix("file.") {
                 if !std::path::Path::new(key).exists() {
@@ -140,6 +143,18 @@ impl Expansion {
             }
             Err(ConfigurationError::InvalidExpansionModeConfig)
         }
+    }
+
+    pub(crate) fn expand_env(&self, key: &str) -> Result<Option<String>, ConfigurationError> {
+        match self.prefix.as_ref() {
+            None => env::var(key),
+            Some(prefix) => env::var(format!("{prefix}_{key}")),
+        }
+        .map(Some)
+        .map_err(|cause| ConfigurationError::CannotExpandVariable {
+            key: key.to_string(),
+            cause: format!("{cause}"),
+        })
     }
 
     pub(crate) fn expand(
