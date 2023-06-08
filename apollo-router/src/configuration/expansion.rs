@@ -31,7 +31,6 @@ pub(crate) struct ConfigDefault {
 
 impl Expansion {
     pub(crate) fn default() -> Result<Self, ConfigurationError> {
-
         let prefix = Expansion::prefix()?;
 
         let supported_expansion_modes = match env::var("APOLLO_ROUTER_CONFIG_SUPPORTED_MODES") {
@@ -68,7 +67,9 @@ impl Expansion {
     }
 
     pub(crate) fn default_rhai() -> Result<Self, ConfigurationError> {
-        Ok(Expansion::builder().and_prefix(Expansion::prefix()?).build())
+        Ok(Expansion::builder()
+            .and_prefix(Expansion::prefix()?)
+            .build())
     }
 
     fn prefix() -> Result<Option<String>, ConfigurationError> {
