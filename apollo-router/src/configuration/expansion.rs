@@ -31,13 +31,9 @@ pub(crate) struct ConfigDefault {
 
 impl Expansion {
     pub(crate) fn default() -> Result<Self, ConfigurationError> {
-        // APOLLO_ROUTER_CONFIG_ENV_PREFIX and APOLLO_ROUTER_CONFIG_SUPPORTED_MODES are unsupported and may change in future.
-        // If you need this functionality then raise an issue and we can look to promoting this to official support.
-        let prefix = match env::var("APOLLO_ROUTER_CONFIG_ENV_PREFIX") {
-            Ok(v) => Some(v),
-            Err(VarError::NotPresent) => None,
-            Err(VarError::NotUnicode(_)) => Err(ConfigurationError::InvalidExpansionModeConfig)?,
-        };
+
+        let prefix = Expansion::prefix()?;
+
         let supported_expansion_modes = match env::var("APOLLO_ROUTER_CONFIG_SUPPORTED_MODES") {
             Ok(v) => v,
             Err(VarError::NotPresent) => "env,file".to_string(),
@@ -72,14 +68,17 @@ impl Expansion {
     }
 
     pub(crate) fn default_rhai() -> Result<Self, ConfigurationError> {
+        Ok(Expansion::builder().and_prefix(Expansion::prefix()?).build())
+    }
+
+    fn prefix() -> Result<Option<String>, ConfigurationError> {
         // APOLLO_ROUTER_CONFIG_ENV_PREFIX and APOLLO_ROUTER_CONFIG_SUPPORTED_MODES are unsupported and may change in future.
         // If you need this functionality then raise an issue and we can look to promoting this to official support.
-        let prefix = match env::var("APOLLO_ROUTER_CONFIG_ENV_PREFIX") {
-            Ok(v) => Some(v),
-            Err(VarError::NotPresent) => None,
-            Err(VarError::NotUnicode(_)) => Err(ConfigurationError::InvalidExpansionModeConfig)?,
-        };
-        Ok(Expansion::builder().and_prefix(prefix).build())
+        match env::var("APOLLO_ROUTER_CONFIG_ENV_PREFIX") {
+            Ok(v) => Ok(Some(v)),
+            Err(VarError::NotPresent) => Ok(None),
+            Err(VarError::NotUnicode(_)) => Err(ConfigurationError::InvalidExpansionModeConfig),
+        }
     }
 }
 
