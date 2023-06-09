@@ -46,7 +46,6 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     delegate: T,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
-    configuration: Arc<Configuration>,
 }
 
 impl<T: Clone + 'static> CachingQueryPlanner<T>
@@ -62,7 +61,7 @@ where
     pub(crate) async fn new(
         delegate: T,
         schema: Arc<Schema>,
-        configuration: Arc<Configuration>,
+        configuration: &Configuration,
         plugins: Plugins,
     ) -> CachingQueryPlanner<T> {
         let cache = Arc::new(
@@ -76,7 +75,6 @@ where
             cache,
             delegate,
             schema,
-            configuration,
             plugins: Arc::new(plugins),
         }
     }
@@ -399,7 +397,7 @@ mod tests {
         );
 
         let mut planner =
-            CachingQueryPlanner::new(delegate, schema, configuration, IndexMap::new()).await;
+            CachingQueryPlanner::new(delegate, schema, &configuration, IndexMap::new()).await;
 
         let configuration = Configuration::default();
 
@@ -491,13 +489,9 @@ mod tests {
             Query::make_compiler("query Me { me { username } }", &schema, &configuration).0,
         ));
 
-        let mut planner = CachingQueryPlanner::new(
-            delegate,
-            Arc::new(schema),
-            Arc::new(configuration),
-            IndexMap::new(),
-        )
-        .await;
+        let mut planner =
+            CachingQueryPlanner::new(delegate, Arc::new(schema), &configuration, IndexMap::new())
+                .await;
 
         for _ in 0..5 {
             assert!(planner

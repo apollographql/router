@@ -352,7 +352,7 @@ impl PluggableSupergraphServiceBuilder {
         let query_planner_service = CachingQueryPlanner::new(
             self.planner,
             schema.clone(),
-            configuration.clone(),
+            &configuration,
             IndexMap::new(),
         )
         .await;

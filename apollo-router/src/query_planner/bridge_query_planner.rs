@@ -396,7 +396,7 @@ mod tests {
         let result = plan(
             EXAMPLE_SCHEMA,
             include_str!("testdata/query.graphql"),
-            include_str!("testdata/query.graphql").into(),
+            include_str!("testdata/query.graphql"),
             None,
         )
         .await
@@ -462,8 +462,8 @@ mod tests {
             .plan(
                 include_str!("testdata/unknown_introspection_query.graphql").to_string(),
                 include_str!("testdata/unknown_introspection_query.graphql").to_string(),
-                query,
                 None,
+                query,
             )
             .await
             .unwrap_err();
