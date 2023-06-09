@@ -20,6 +20,7 @@ macro_rules! assert_eq_and_ordered {
 #[derive(Default)]
 struct FormatTest {
     schema: Option<&'static str>,
+    query_type_name: Option<&'static str>,
     query: Option<&'static str>,
     operation: Option<&'static str>,
     variables: Option<serde_json_bytes::Value>,
@@ -50,6 +51,11 @@ impl FormatTest {
 
     fn query(mut self, query: &'static str) -> Self {
         self.query = Some(query);
+        self
+    }
+
+    fn query_type_name(mut self, name: &'static str) -> Self {
+        self.query_type_name = Some(name);
         self
     }
 
@@ -94,10 +100,11 @@ impl FormatTest {
         let schema = self.schema.expect("missing schema");
         let query = self.query.expect("missing query");
         let response = self.response.expect("missing response");
+        let query_type_name = self.query_type_name.unwrap_or("Query");
 
         let schema = match self.federation_version {
-            FederationVersion::Fed1 => with_supergraph_boilerplate(schema),
-            FederationVersion::Fed2 => with_supergraph_boilerplate_fed2(schema),
+            FederationVersion::Fed1 => with_supergraph_boilerplate(schema, query_type_name),
+            FederationVersion::Fed2 => with_supergraph_boilerplate_fed2(schema, query_type_name),
         };
 
         let schema =
@@ -135,40 +142,38 @@ impl FormatTest {
     }
 }
 
-fn with_supergraph_boilerplate(content: &str) -> String {
+fn with_supergraph_boilerplate(content: &str, query_type_name: &str) -> String {
     format!(
-        "{}\n{}",
         r#"
     schema
         @core(feature: "https://specs.apollo.dev/core/v0.1")
         @core(feature: "https://specs.apollo.dev/join/v0.1")
         @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
-         {
-        query: Query
-    }
+         {{
+        query: {query_type_name}
+    }}
     directive @core(feature: String!) repeatable on SCHEMA
     directive @join__graph(name: String!, url: String!) on ENUM_VALUE
     directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
-    enum join__Graph {
+    enum join__Graph {{
         TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
-    }
+    }}
 
-    "#,
-        content
+    {content}
+    "#
     )
 }
 
-fn with_supergraph_boilerplate_fed2(content: &str) -> String {
+fn with_supergraph_boilerplate_fed2(content: &str, query_type_name: &str) -> String {
     format!(
-        "{}\n{}",
         r#"
         schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
         @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
         @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
-        {
-            query: Query
-        }
+        {{
+            query: {query_type_name}
+        }}
 
         directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
@@ -179,7 +184,7 @@ fn with_supergraph_boilerplate_fed2(content: &str) -> String {
 
         scalar join__FieldSet
         scalar link__Import
-        enum link__Purpose {
+        enum link__Purpose {{
         """
         `SECURITY` features provide metadata necessary to securely resolve fields.
         """
@@ -189,14 +194,32 @@ fn with_supergraph_boilerplate_fed2(content: &str) -> String {
         `EXECUTION` features provide metadata necessary for operation execution.
         """
         EXECUTION
-        }
+        }}
 
-        enum join__Graph {
+        enum join__Graph {{
             TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
-        }
+        }}
+
+        {content}
     "#,
-        content
     )
+}
+
+#[test]
+fn reformat_typename_of_query_not_named_query() {
+    FormatTest::builder()
+        .schema(
+            "type MyRootQuery {
+                foo: String
+            }",
+        )
+        .query_type_name("MyRootQuery")
+        .query("{ __typename }")
+        .response(json! {{}})
+        .expected(json! {{
+            "__typename": "MyRootQuery",
+        }})
+        .test();
 }
 
 #[test]
@@ -1188,14 +1211,22 @@ macro_rules! run_validation {
 
 macro_rules! assert_validation {
     ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
-        let res = run_validation!(with_supergraph_boilerplate($schema), $query, $variables);
+        let res = run_validation!(
+            with_supergraph_boilerplate($schema, "Query"),
+            $query,
+            $variables
+        );
         assert!(res.is_ok(), "validation should have succeeded: {:?}", res);
     }};
 }
 
 macro_rules! assert_validation_error {
     ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
-        let res = run_validation!(with_supergraph_boilerplate($schema), $query, $variables);
+        let res = run_validation!(
+            with_supergraph_boilerplate($schema, "Query"),
+            $query,
+            $variables
+        );
         assert!(res.is_err(), "validation should have failed");
     }};
 }
@@ -3059,6 +3090,7 @@ fn it_parses_default_floats() {
             a_float_that_doesnt_fit_an_int: Float = 9876543210
         }
         "#,
+        "Query",
     );
 
     let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
@@ -3089,6 +3121,7 @@ fn it_statically_includes() {
         id: String!
         body: String
     }",
+        "Query",
     );
     let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
 
@@ -3225,6 +3258,7 @@ fn it_statically_skips() {
         id: String!
         body: String
     }",
+        "Query",
     );
     let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
 
@@ -3353,6 +3387,7 @@ fn it_should_fail_with_empty_selection_set() {
         id: String!
         name: String
     }",
+        "Query",
     );
     let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
 
@@ -4968,7 +5003,7 @@ fn parse_introspection_query() {
         baz: String
     }";
 
-    let schema = with_supergraph_boilerplate(schema);
+    let schema = with_supergraph_boilerplate(schema, "Query");
     let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
     let api_schema = schema.api_schema();
 

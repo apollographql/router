@@ -768,6 +768,8 @@ impl Query {
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
+        let operation_type_name = parameters.schema.root_operation_name(operation.kind);
+
         for selection in &operation.selection_set {
             match selection {
                 Selection::Field {
@@ -813,14 +815,14 @@ impl Query {
                         if !output.contains_key(field_name_str) {
                             output.insert(
                                 field_name.clone(),
-                                Value::String(operation.kind.to_string().into()),
+                                Value::String(operation_type_name.into()),
                             );
                         }
                     } else if field_type.is_non_null() {
                         parameters.errors.push(Error {
                             message: format!(
                                 "Cannot return null for non-nullable field {}.{field_name_str}",
-                                operation.kind
+                                operation_type_name
                             ),
                             path: Some(Path::from_response_slice(path)),
                             ..Error::default()
@@ -837,9 +839,7 @@ impl Query {
                     ..
                 } => {
                     // top level objects will not provide a __typename field
-                    if type_condition.as_str()
-                        != parameters.schema.root_operation_name(operation.kind)
-                    {
+                    if type_condition.as_str() != operation_type_name {
                         return Err(InvalidValue);
                     }
 
@@ -870,8 +870,6 @@ impl Query {
                             continue;
                         }
 
-                        let operation_type_name =
-                            parameters.schema.root_operation_name(operation.kind);
                         let is_apply = {
                             // check if the fragment matches the input type directly, and if not, check if the
                             // input type is a subtype of the fragment's type condition (interface, union)
