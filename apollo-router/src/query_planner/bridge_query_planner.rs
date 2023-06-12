@@ -328,15 +328,25 @@ mod tests {
     use serde_json::json;
     use test_log::test;
 
+    use crate::configuration::GraphQLValidation;
+
     use super::*;
 
     const EXAMPLE_SCHEMA: &str = include_str!("testdata/schema.graphql");
 
+    fn test_configuration() -> Configuration {
+        Configuration::builder()
+            .graphql_validation(GraphQLValidation::Both)
+            .build()
+            .unwrap()
+    }
+
     #[test(tokio::test)]
     async fn test_plan() {
-        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
-            .await
-            .unwrap();
+        let planner =
+            BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), test_configuration().into())
+                .await
+                .unwrap();
         let result = planner
             .get((include_str!("testdata/query.graphql").into(), None))
             .await
@@ -353,9 +363,10 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_plan_invalid_query() {
-        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
-            .await
-            .unwrap();
+        let planner =
+            BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), test_configuration().into())
+                .await
+                .unwrap();
         let err = planner
             .get((
                 "fragment UnusedTestFragment on User { id } query { me { id } }".to_string(),
@@ -394,7 +405,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
-        let err = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
+        let err = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), test_configuration().into())
             .await
             .unwrap()
             // test the planning part separately because it is a valid introspection query
@@ -423,9 +434,10 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_plan_error() {
-        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
-            .await
-            .unwrap();
+        let planner =
+            BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), test_configuration().into())
+                .await
+                .unwrap();
         let result = planner.get(("".into(), None)).await;
 
         assert_eq!(
@@ -436,9 +448,10 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_single_aliased_root_typename() {
-        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
-            .await
-            .unwrap();
+        let planner =
+            BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), test_configuration().into())
+                .await
+                .unwrap();
         let result = planner
             .get(("{ x: __typename }".into(), None))
             .await
@@ -455,9 +468,10 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_two_root_typenames() {
-        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
-            .await
-            .unwrap();
+        let planner =
+            BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), test_configuration().into())
+                .await
+                .unwrap();
         let result = planner
             .get(("{ x: __typename __typename }".into(), None))
             .await
