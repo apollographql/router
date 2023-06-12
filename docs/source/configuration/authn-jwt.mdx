@@ -156,17 +156,14 @@ Below are 2 example [Rhai script](../customizations/rhai/) customizations that d
 
 ### Example: Forwarding claims to subgraphs
 
-Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details.
+Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
-> This script hooks into the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+> This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
 
 <ExpansionPanel title="Click to expand">
 
 ```rhai title="claims_forwarding.rhai"
-fn subgraph_service(service, subgraph) {
-  let f = |request| {
-    // Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope
-    // constant with value `apollo_authentication::JWT::claims`
+fn process_request(request) {
     let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
     if claims ==() {
       throw #{
@@ -177,9 +174,6 @@ fn subgraph_service(service, subgraph) {
     for key in claims.keys() {
       request.subgraph.headers[key] = claims[key].to_string();
     }
-  };
-
-  service.map_request(f);
 }
 ```
 
@@ -187,60 +181,53 @@ fn subgraph_service(service, subgraph) {
 
 ### Example: Throwing errors for invalid claims
 
-Below is an example [Rhai script](../customizations/rhai/) that throws distinct errors for different invalid JWT claim details.
+Below is an example [Rhai script](../customizations/rhai/) that throws distinct errors for different invalid JWT claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
-> This script hooks into the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+> This script should be run in the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
 
 <ExpansionPanel title="Click to expand">
 
 ```rhai title="claims_validation.rhai"
+fn process_request(request) {
+    // Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope
+    // constant with value `apollo_authentication::JWT::claims`
+    let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
+    if claims == () || !claims.contains("iss") || claims["iss"] != "https://idp.local" {
+        throw #{
+            status: 401,
+            message: "Unauthorized"
+        };
+    }
+    // Happy path: We have valid claims from the correct idP.
+}
+```
+
+</ExpansionPanel>
+
+### Example `main.rhai`
+
+In order to use the above Rhai examples, you must import them into your [`main.rhai`](../customizations/rhai#the-main-file) like this:
+
+<ExpansionPanel title="Click to expand">
+
+```rhai title="main.rhai"
+import "claims_validation" as claims_validation;
+import "claims_forwarding" as claims_forwarding;
+
 fn supergraph_service(service) {
-    // Rhai mechanism for creating a function pointer
-    const request_callback = Fn("process_request");
-    service.map_request(request_callback); // Register the callback
+    let request_callback = |request| {
+        claims_validation::process_request(request);
+    };
+
+    service.map_request(request_callback);
 }
 
-fn process_request(request) {
-    try {
-        // Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope
-        // constant with value `apollo_authentication::JWT::claims`
-        let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
-        if claims == () {
-            throw #{
-                status: 401,
-                body: #{
-                    errors: [#{
-                        message: "No claims presented in this request"
-                    }]
-                }
-            };
-        }
-        if !claims.contains("iss") {
-            throw #{
-                status: 401,
-                message: "No issuer presented in this request"
-            };
-        }
-        if claims["iss"] != "https://idp.local" {
-            throw #{
-                status: 401,
-                body: #{
-                    errors: [#{
-                        message: `Issuer ${claims.iss} is not accepted here`
-                    }]
-                }
-            };
-        }
-        // Happy path: We have valid claims from the correct idP.
-        // Proceed accordingly (in this case, we just log the claims).
-        print(`claims: ${claims}`);
-    }
-    catch(err)
-    {
-        // log any errors
-        log_error(`Error during claims processing: ${err}`);
-        throw err;
-    }
+fn subgraph_service(service, subgraph) {
+    let request_callback = |request| {
+        claims_forwarding::process_request(request);
+    };
+
+    service.map_request(request_callback);
 }
 ```
 

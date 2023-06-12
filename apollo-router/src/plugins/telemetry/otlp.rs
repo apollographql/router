@@ -195,17 +195,12 @@ impl GrpcExporter {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Protocol {
+    #[default]
     Grpc,
     Http,
-}
-
-impl Default for Protocol {
-    fn default() -> Self {
-        Protocol::Grpc
-    }
 }
 
 mod metadata_map_serde {
