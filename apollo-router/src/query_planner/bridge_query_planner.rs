@@ -19,6 +19,7 @@ use tracing::Instrument;
 
 use super::PlanNode;
 use super::QueryKey;
+use crate::configuration::GraphQLValidation;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -61,19 +62,26 @@ impl BridgeQueryPlanner {
         let planner = match planner {
             Ok(planner) => planner,
             Err(err) => {
-                assert!(
-                    schema.has_errors(),
-                    "query planner reported a validation error, but apollo-rs did not"
-                );
+                if configuration.experimental_graphql_validation == GraphQLValidation::Both {
+                    let has_validation_errors =
+                        err.iter().any(|err| !err.is_supergraph_validation_error());
+
+                    assert!(
+                        has_validation_errors == schema.has_errors(),
+                        "query planner reported a validation error, but apollo-rs did not"
+                    );
+                }
 
                 return Err(err.into());
             }
         };
 
-        assert!(
-            !schema.has_errors(),
-            "query planner did not report validation error, but apollo-rs did"
-        );
+        if configuration.experimental_graphql_validation == GraphQLValidation::Both {
+            assert!(
+                !schema.has_errors(),
+                "query planner did not report validation error, but apollo-rs did"
+            );
+        }
 
         let planner = Arc::new(planner);
 
@@ -327,8 +335,6 @@ struct QueryPlan {
 mod tests {
     use serde_json::json;
     use test_log::test;
-
-    use crate::configuration::GraphQLValidation;
 
     use super::*;
 
