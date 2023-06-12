@@ -55,6 +55,10 @@ impl BridgeQueryPlanner {
                 incremental_delivery: Some(IncrementalDeliverySupport {
                     enable_defer: Some(configuration.supergraph.defer_support),
                 }),
+                graphql_validation: matches!(
+                    configuration.experimental_graphql_validation,
+                    GraphQLValidation::Legacy | GraphQLValidation::Both
+                ),
             },
         )
         .await;
@@ -114,6 +118,10 @@ impl BridgeQueryPlanner {
                         incremental_delivery: Some(IncrementalDeliverySupport {
                             enable_defer: Some(configuration.supergraph.defer_support),
                         }),
+                        graphql_validation: matches!(
+                            configuration.experimental_graphql_validation,
+                            GraphQLValidation::Legacy | GraphQLValidation::Both
+                        ),
                     },
                 )
                 .await?,
