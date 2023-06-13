@@ -550,10 +550,7 @@ jobs:
                 condition:
                   equal: [ true, << parameters.nightly >> ]
                 steps:
-                  - run:
-                      command: >
-                        cargo xtask release prepare nightly
-                      no_output_timeout: 30m
+                  - run: cargo xtask release prepare nightly
             - run:
                 command: >
                   cargo xtask dist
