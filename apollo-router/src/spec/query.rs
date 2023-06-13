@@ -38,6 +38,9 @@ use crate::spec::Selection;
 use crate::spec::SpecError;
 use crate::Configuration;
 
+pub(crate) mod transform;
+pub(crate) mod traverse;
+
 pub(crate) const TYPENAME: &str = "__typename";
 pub(crate) const QUERY_EXECUTABLE: &str = "query";
 
