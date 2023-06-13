@@ -1,6 +1,6 @@
 ### Query planner plugins ([Issue #3150](https://github.com/apollographql/router/issues/3150))
 
-We may need to observe and edit the query between the query plan caching and the query planner, so this brings back the query planner plugins we had initially, with a different architecture.
+We may need to observe and edit the query between query plan caching and the query planner, so this brings back the query planner plugins we had initially, with a different architecture.
 The plugins need an ApolloCompiler instance to perform useful work on the query, so the caching layer, in case of cache miss, will generate a compiler instance and transmit it as part of the request going through query planner plugins. At the end of the chain, the query planner extracts the modified query from the compiler, uses it to generate a query plan, and generates the selections of both the original and filtered query for response formatting. This is done to ensure that the response does not leak data removed in the filtered query, but still keeps a shape expected by the original query, using the null propagation.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3177

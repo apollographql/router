@@ -267,15 +267,15 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         let fut = async move {
             let start = Instant::now();
 
+            let compiler = compiler.lock().await;
             let file_id = compiler
-                .lock()
-                .await
                 .db
                 .source_file(QUERY_EXECUTABLE.into())
                 .ok_or(QueryPlannerError::SpecError(SpecError::ParsingError(
                     "missing input file for query".to_string(),
                 )))?;
-            let filtered_query = compiler.lock().await.db.source_code(file_id);
+            let filtered_query = compiler.db.source_code(file_id);
+            drop(compiler)
 
             let res = this
                 .get(
