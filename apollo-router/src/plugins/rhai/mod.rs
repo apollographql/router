@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::future::ready;
 use futures::stream::once;
@@ -81,7 +82,9 @@ impl EngineBlock {
             sdl.to_string(),
             main.clone(),
         ));
-        let ast = engine.compile_file(main)?;
+        let ast = engine
+            .compile_file(main.clone())
+            .map_err(|err| anyhow!("in Rhai script {}: {}", main.display(), err))?;
         let mut scope = Scope::new();
         // Keep these two lower cases ones as mistakes until 2.0
         // At 2.0 (or maybe before), replace with upper case
