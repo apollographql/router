@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::Duration;
@@ -132,27 +130,23 @@ impl SchemaSource {
                 urls,
                 poll_interval,
                 timeout,
-            } => {
-                // With regards to ELv2 licensing, the code inside this block
-                // is license key functionality
-                stream_from_uplink::<SupergraphSdlQuery, String>(
-                    apollo_key,
-                    apollo_graph_ref,
-                    urls.map(Endpoints::fallback),
-                    poll_interval,
-                    timeout,
-                )
-                .filter_map(|res| {
-                    future::ready(match res {
-                        Ok(schema) => Some(UpdateSchema(schema)),
-                        Err(e) => {
-                            tracing::error!("{}", e);
-                            None
-                        }
-                    })
+            } => stream_from_uplink::<SupergraphSdlQuery, String>(
+                apollo_key,
+                apollo_graph_ref,
+                urls.map(Endpoints::fallback),
+                poll_interval,
+                timeout,
+            )
+            .filter_map(|res| {
+                future::ready(match res {
+                    Ok(schema) => Some(UpdateSchema(schema)),
+                    Err(e) => {
+                        tracing::error!("{}", e);
+                        None
+                    }
                 })
-                .boxed()
-            }
+            })
+            .boxed(),
         }
         .chain(stream::iter(vec![NoMoreSchema]))
     }

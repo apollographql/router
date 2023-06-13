@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 //! Logic for loading configuration in to an object model
 pub(crate) mod cors;
 mod expansion;
@@ -133,7 +131,7 @@ pub struct Configuration {
     pub(crate) apq: Apq,
 
     // NOTE: when renaming this to move out of preview, also update paths
-    // in `configuration/expansion.rs` and `uplink/entitlement.rs`.
+    // in `configuration/expansion.rs` and `uplink/license.rs`.
     /// Operation limits
     #[serde(default)]
     pub(crate) preview_operation_limits: OperationLimits,
