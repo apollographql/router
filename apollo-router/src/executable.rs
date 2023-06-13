@@ -207,7 +207,7 @@ pub struct Opt {
 
     /// Your Apollo Router license.
     /// EXPERIMENTAL and not subject to semver.
-    #[clap(skip = std::env::var("APOLLO_ROUTER_LICENSE").or_else(|| std::env::var("APOLLO_ROUTER_ENTITLEMENT")))]
+    #[clap(skip = std::env::var("APOLLO_ROUTER_LICENSE").ok())]
     apollo_router_license: Option<String>,
 
     /// License location relative to the current directory.
