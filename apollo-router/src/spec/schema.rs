@@ -33,19 +33,27 @@ pub(crate) struct Schema {
 }
 
 #[cfg(test)]
-fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
+fn make_api_schema(schema: &str, configuration: &Configuration) -> Result<String, SchemaError> {
     use itertools::Itertools;
-    use router_bridge::api_schema;
-    let s = api_schema::api_schema(schema)
-        .map_err(|e| SchemaError::Api(e.to_string()))?
-        .map_err(|e| SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", ")))?;
+    use router_bridge::api_schema::{api_schema, ApiSchemaOptions};
+    let s = api_schema(
+        schema,
+        ApiSchemaOptions {
+            graphql_validation: matches!(
+                configuration.experimental_graphql_validation,
+                GraphQLValidation::Legacy | GraphQLValidation::Both
+            ),
+        },
+    )
+    .map_err(|e| SchemaError::Api(e.to_string()))?
+    .map_err(|e| SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", ")))?;
     Ok(format!("{s}\n"))
 }
 
 impl Schema {
     #[cfg(test)]
     pub(crate) fn parse_test(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        let api_schema = Self::parse(&make_api_schema(s)?, configuration)?;
+        let api_schema = Self::parse(&make_api_schema(s, configuration)?, configuration)?;
         let schema = Self::parse(s, configuration)?.with_api_schema(api_schema);
         Ok(schema)
     }
