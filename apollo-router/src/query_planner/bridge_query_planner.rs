@@ -170,7 +170,7 @@ impl BridgeQueryPlanner {
 
     async fn plan(
         &self,
-        query: String,
+        original_query: String,
         filtered_query: String,
         operation: Option<String>,
 
@@ -185,10 +185,10 @@ impl BridgeQueryPlanner {
             .map_err(QueryPlannerError::from)?;
 
         // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
-        let operation_signature = if query != filtered_query {
+        let operation_signature = if original_query != filtered_query {
             Some(
                 self.planner
-                    .operation_signature(query, operation)
+                    .operation_signature(original_query, operation)
                     .await
                     .map_err(QueryPlannerError::RouterBridgeError)?,
             )
@@ -257,7 +257,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
         let QueryPlannerRequest {
-            query,
+            query: original_query,
             operation_name,
             context,
             compiler,
@@ -279,7 +279,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 
             let res = this
                 .get(
-                    query,
+                    original_query,
                     filtered_query.to_string(),
                     operation_name.to_owned(),
                     compiler,
@@ -322,13 +322,16 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 impl BridgeQueryPlanner {
     async fn get(
         &self,
-        query: String,
+        original_query: String,
         filtered_query: String,
         operation_name: Option<String>,
         compiler: Arc<Mutex<ApolloCompiler>>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let mut selections = self
-            .parse_selections((query.clone(), operation_name.clone()), compiler.clone())
+            .parse_selections(
+                (original_query.clone(), operation_name.clone()),
+                compiler.clone(),
+            )
             .await?;
 
         if selections.contains_introspection() {
@@ -350,18 +353,18 @@ impl BridgeQueryPlanner {
                     response: Box::new(graphql::Response::builder().data(data).build()),
                 });
             } else {
-                return self.introspection(query).await;
+                return self.introspection(original_query).await;
             }
         }
 
-        if filtered_query != query {
+        if filtered_query != original_query {
             selections.filtered_query = Some(Arc::new(
                 self.parse_selections((filtered_query.clone(), operation_name.clone()), compiler)
                     .await?,
             ));
         }
 
-        self.plan(query, filtered_query, operation_name, selections)
+        self.plan(original_query, filtered_query, operation_name, selections)
             .await
     }
 }
@@ -532,7 +535,7 @@ mod tests {
 
     async fn plan(
         schema: &str,
-        query: &str,
+        original_query: &str,
         filtered_query: &str,
         operation_name: Option<String>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
@@ -544,11 +547,11 @@ mod tests {
             .await
             .unwrap();
 
-        let (compiler, _) = Query::make_compiler(query, &planner.schema(), &configuration);
+        let (compiler, _) = Query::make_compiler(original_query, &planner.schema(), &configuration);
 
         planner
             .get(
-                query.to_string(),
+                original_query.to_string(),
                 filtered_query.to_string(),
                 operation_name,
                 Arc::new(Mutex::new(compiler)),
