@@ -1,5 +1,3 @@
-// This entire file is license key functionality
-
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;

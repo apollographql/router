@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 use std::fmt::Debug;
 use std::time::Duration;
 use std::time::Instant;
@@ -12,8 +10,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::instrument::WithSubscriber;
 use url::Url;
 
-pub(crate) mod entitlement;
-pub(crate) mod entitlement_stream;
+pub(crate) mod license_enforcement;
+pub(crate) mod license_stream;
 pub(crate) mod schema_stream;
 
 const GCP_URL: &str = "https://uplink.api.apollographql.com";
@@ -684,7 +682,7 @@ mod test {
         MockResponses::builder()
             .mock_server(&mock_server)
             .endpoint(&url1)
-            .response(response_invalid_entitlement())
+            .response(response_invalid_license())
             .build()
             .await;
         let results = stream_from_uplink::<TestQuery, QueryResult>(
@@ -821,7 +819,7 @@ mod test {
         }))
     }
 
-    fn response_invalid_entitlement() -> ResponseTemplate {
+    fn response_invalid_license() -> ResponseTemplate {
         ResponseTemplate::new(StatusCode::OK).set_body_json(json!(
         {
             "data":{
