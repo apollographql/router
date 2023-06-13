@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::task::Poll;
