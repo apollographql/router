@@ -111,9 +111,16 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
         supergraph_service
     });
 
+    let (_, supergraph_creator) = crate::TestHarness::builder()
+        .configuration(configuration.clone())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed())
+        .build_common()
+        .await
+        .unwrap();
+
     RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_service.schema(), Arc::clone(&configuration)).await,
-        Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
+        QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
+        Arc::new(supergraph_creator),
         configuration,
     )
     .await
@@ -152,9 +159,16 @@ pub(crate) async fn empty() -> impl Service<
         .expect_clone()
         .returning(MockSupergraphService::new);
 
+    let (_, supergraph_creator) = crate::TestHarness::builder()
+        .configuration(Default::default())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed())
+        .build_common()
+        .await
+        .unwrap();
+
     RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_service.schema(), Default::default()).await,
-        Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
+        QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
+        Arc::new(supergraph_creator),
         Default::default(),
     )
     .await
