@@ -101,7 +101,9 @@ mod router_expansion {
         Expansion::default_rhai().map_err(|e| e.to_string().into())
     }
 
-    #[rhai_fn(name = "env", pure, return_raw)]
+    // Note: This must be marked global so that Expansion objects may be interacted with in global
+    // scope using method notation. i.e.: obj.env("whatever")
+    #[rhai_fn(name = "env", pure, global, return_raw)]
     pub(crate) fn expansion_env(
         expander: &mut Expansion,
         key: &str,

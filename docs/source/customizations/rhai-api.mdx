@@ -241,6 +241,25 @@ fn supergraph_service(service) {
 }
 ```
 
+## Environment expansion (Environment Variables)
+
+Your Rhai customization can access environment variables using the `expansion` module. First use the `create()` method to create a new `expansion` instance, this can then be used to access environment variables using the `env()` method.
+
+```rhai
+fn router_service(service) {
+    try {
+        let expander = expansion::create();
+        print(`HOME: ${expander.env("HOME")}`);
+        print(`LANG: ${expander.env("LANG")}`);
+    } catch(err) {
+        print(`exception: ${err}`);
+    }
+}
+```
+
+Note: You don't need to import the "expansion" module. It is imported in the router.
+Note: create() and env() may fail, so it's best to handle exceptions when using them.
+
 ## `Request` interface
 
 All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, any of which a callback can modify in-place (read-write):

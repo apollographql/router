@@ -719,3 +719,34 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
         panic!("error processed incorrectly");
     }
 }
+
+#[test]
+#[should_panic(expected = "can use expansion: ErrorRuntime(\"could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found\", 3:19)")]
+fn it_cannot_expand_missing_environment_variable() {
+    assert!(std::env::var("THIS_SHOULD_NOT_EXIST").is_err());
+    let engine = new_rhai_test_engine();
+    let _: String = engine.eval(r#"
+        let expansion = expansion::create();
+        expansion.env("THIS_SHOULD_NOT_EXIST")"#).expect("can use expansion");
+}
+
+// POSIX specifies HOME is always set
+#[test]
+fn it_can_expand_environment_variable() {
+    let home = std::env::var("HOME").expect("can always read HOME");
+    let engine = new_rhai_test_engine();
+    let env_variable: String = engine.eval(r#"
+        let expansion = expansion::create();
+        expansion.env("HOME")"#).expect("can use expansion");
+    assert_eq!(home, env_variable);
+}
+
+#[test]
+#[should_panic(expected = "can use expansion: ErrorFunctionNotFound(\"env (&str | ImmutableString | String, &str | ImmutableString | String)\", 3:19)")]
+fn it_can_only_access_env_method_from_expansion_instances() {
+    let engine = new_rhai_test_engine();
+    let _: String = engine.eval(r#"
+        let expansion = "5";
+        expansion.env("HOME")"#).expect("can use expansion");
+}
+
