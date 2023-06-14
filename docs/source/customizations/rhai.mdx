@@ -263,8 +263,9 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
     ```mermaid
     graph LR;
       client(Client);
-      client --> supergraph(supergraph_service);
+      client --> router(router_service);
       subgraph Apollo Router
+      router --> supergraph(supergraph_service);
       supergraph --> execution(execution_service);
       execution --> subs_a(subgraph_service);
       execution --> subs_b(subgraph_service);
@@ -286,8 +287,9 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
     graph RL;
       client(Client);
       subgraph Apollo Router
-      supergraph(supergraph_service);
       execution(execution_service);
+      supergraph(supergraph_service);
+      router(router_service);
       subs_a(subgraph_service);
       subs_b(subgraph_service);
       end;
@@ -298,13 +300,14 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
       subs_a --> execution;
       subs_b --> execution;
       execution --> supergraph;
-      supergraph --> client;
+      supergraph --> router;;
+      router --> client;
       class client,sub_a,sub_b secondary;
     ```
     
     First, callbacks for `subgraph_service` are each passed the `response` from the corresponding subgraph.
     
-    Afterward, callbacks for `execution_service` and then `supergraph_service` are passed the combined `response` for the client that's assembled from all subgraph `response`s.
+    Afterward, callbacks for `execution_service`, `supergraph_service` and then `router_service` are passed the combined `response` for the client that's assembled from all subgraph `response`s.
     
 
 

@@ -536,6 +536,11 @@ macro_rules! gen_map_response {
     };
 }
 
+// Even though this macro is only ever used to generate router service handling, I'm leaving it as
+// a macro so that the code shape is "similar" to the way in which other services are processed.
+//
+// I can't easily unify the macros because the router response processing is quite different to
+// other service in terms of payload.
 macro_rules! gen_map_router_deferred_response {
     ($response: ident, $rhai_response: ident, $rhai_deferred_response: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
         $borrow.replace(|service| {
@@ -579,24 +584,43 @@ macro_rules! gen_map_router_deferred_response {
                     let (parts, stream) = response.into_parts();
                     let (first, rest) = stream.into_future().await;
 
-                    if first.is_none() {
-                        let error_details = ErrorDetails {
-                            status: StatusCode::INTERNAL_SERVER_ERROR,
-                            message: Some("rhai execution error: empty response".to_string()),
-                            position: None,
-                            body: None
-                        };
-                        return Ok(failure_message(
-                            context,
-                            error_details
-                        ));
-                    }
+                    let body = match first {
+                        Some(body_result) => {
+                            match body_result {
+                                Ok(body) => body,
+                                Err(e) => {
+                                    let error_details = ErrorDetails {
+                                        status: StatusCode::INTERNAL_SERVER_ERROR,
+                                        message: Some(format!("rhai execution error: {e}")),
+                                        position: None,
+                                        body: None
+                                    };
+                                    return Ok(failure_message(
+                                        context,
+                                        error_details
+                                    ));
+                                }
+                            }
+                        },
+                        None => {
+                            let error_details = ErrorDetails {
+                                status: StatusCode::INTERNAL_SERVER_ERROR,
+                                message: Some("rhai execution error: empty response".to_string()),
+                                position: None,
+                                body: None
+                            };
+                            return Ok(failure_message(
+                                context,
+                                error_details
+                            ));
+                        }
+                    };
 
                     let response = $rhai_response {
                         context,
                         response: http::Response::from_parts(
                             parts,
-                            first.expect("already checked").expect("check again").into(),
+                            body.into(),
                         )
                         .into(),
                     };
