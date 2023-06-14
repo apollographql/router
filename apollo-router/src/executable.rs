@@ -31,7 +31,7 @@ use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
-use crate::EntitlementSource;
+use crate::LicenseSource;
 
 #[cfg(all(
     feature = "global-allocator",
@@ -205,18 +205,14 @@ pub struct Opt {
     #[clap(skip = std::env::var("APOLLO_GRAPH_REF").ok())]
     apollo_graph_ref: Option<String>,
 
-    /// Your Apollo Router entitlement.
+    /// Your Apollo Router license.
     /// EXPERIMENTAL and not subject to semver.
-    #[clap(skip = std::env::var("APOLLO_ROUTER_ENTITLEMENT").ok())]
-    apollo_router_entitlement: Option<String>,
+    #[clap(skip = std::env::var("APOLLO_ROUTER_LICENSE").ok())]
+    apollo_router_license: Option<String>,
 
-    /// Entitlement location relative to the current directory.
-    #[clap(
-        long = "entitlement",
-        env = "APOLLO_ROUTER_ENTITLEMENT_PATH",
-        hide(true)
-    )]
-    apollo_router_entitlement_path: Option<PathBuf>,
+    /// License location relative to the current directory.
+    #[clap(long = "license", env = "APOLLO_ROUTER_LICENSE_PATH", hide(true))]
+    apollo_router_license_path: Option<PathBuf>,
 
     /// The endpoints (comma separated) polled to fetch the latest supergraph schema.
     #[clap(long, env, action = ArgAction::Append)]
@@ -353,7 +349,7 @@ impl Executable {
     async fn start(
         shutdown: Option<ShutdownSource>,
         schema: Option<SchemaSource>,
-        entitlement: Option<EntitlementSource>,
+        license: Option<LicenseSource>,
         config: Option<ConfigurationSource>,
         cli_args: Option<Opt>,
     ) -> Result<()> {
@@ -403,7 +399,7 @@ impl Executable {
                 Discussed::new().print_preview();
                 Ok(())
             }
-            None => Self::inner_start(shutdown, schema, config, entitlement, opt).await,
+            None => Self::inner_start(shutdown, schema, config, license, opt).await,
         };
 
         //We should be good to shutdown the tracer provider now as the router should have finished everything.
@@ -415,7 +411,7 @@ impl Executable {
         shutdown: Option<ShutdownSource>,
         schema: Option<SchemaSource>,
         config: Option<ConfigurationSource>,
-        entitlement: Option<EntitlementSource>,
+        license: Option<LicenseSource>,
         mut opt: Opt,
     ) -> Result<()> {
         let uplink_endpoints: Option<Vec<Url>> = opt
@@ -542,28 +538,28 @@ impl Executable {
 
         // Order of precedence:
         // 1. explicit path from cli
-        // 2. env APOLLO_ROUTER_ENTITLEMENT
+        // 2. env APOLLO_ROUTER_LICENSE
         // 3. uplink
-        let entitlement = entitlement.unwrap_or_else(|| {
+        let license = license.unwrap_or_else(|| {
             match (
-                &opt.apollo_router_entitlement,
-                &opt.apollo_router_entitlement_path,
+                &opt.apollo_router_license,
+                &opt.apollo_router_license_path,
                 &opt.apollo_key,
                 &opt.apollo_graph_ref,
             ) {
-                (_, Some(entitlement_path), _, _) => {
-                    let entitlement_path = if entitlement_path.is_relative() {
-                        current_directory.join(entitlement_path)
+                (_, Some(license_path), _, _) => {
+                    let license_path = if license_path.is_relative() {
+                        current_directory.join(license_path)
                     } else {
-                        entitlement_path.clone()
+                        license_path.clone()
                     };
-                    EntitlementSource::File {
-                        path: entitlement_path,
+                    LicenseSource::File {
+                        path: license_path,
                         watch: opt.hot_reload,
                     }
                 }
-                (Some(_entitlement), _, _, _) => EntitlementSource::Env,
-                (_, _, Some(apollo_key), Some(apollo_graph_ref)) => EntitlementSource::Registry {
+                (Some(_license), _, _, _) => LicenseSource::Env,
+                (_, _, Some(apollo_key), Some(apollo_graph_ref)) => LicenseSource::Registry {
                     apollo_key: apollo_key.to_string(),
                     apollo_graph_ref: apollo_graph_ref.to_string(),
                     urls: uplink_endpoints.clone(),
@@ -571,14 +567,14 @@ impl Executable {
                     timeout: opt.apollo_uplink_timeout,
                 },
 
-                _ => EntitlementSource::default(),
+                _ => LicenseSource::default(),
             }
         });
 
         let router = RouterHttpServer::builder()
             .configuration(configuration)
             .schema(schema)
-            .entitlement(entitlement)
+            .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
             .start();
         if let Err(err) = router.await {

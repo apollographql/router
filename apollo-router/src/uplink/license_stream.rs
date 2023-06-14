@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 // tonic does not derive `Eq` for the gRPC message types, which causes a warning from Clippy. The
 // current suggestion is to explicitly allow the lint in the module that imports the protos.
 // Read more: https://github.com/hyperium/tonic/issues/1056
@@ -20,26 +18,26 @@ use pin_project_lite::pin_project;
 use tokio_util::time::DelayQueue;
 
 use crate::router::Event;
-use crate::uplink::entitlement::Entitlement;
-use crate::uplink::entitlement::EntitlementState;
-use crate::uplink::entitlement_stream::entitlement_query::EntitlementQueryRouterEntitlements;
-use crate::uplink::entitlement_stream::entitlement_query::FetchErrorCode;
+use crate::uplink::license_enforcement::License;
+use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::license_stream::license_query::FetchErrorCode;
+use crate::uplink::license_stream::license_query::LicenseQueryRouterEntitlements;
 use crate::uplink::UplinkRequest;
 use crate::uplink::UplinkResponse;
 
 #[derive(GraphQLQuery)]
 #[graphql(
-    query_path = "src/uplink/entitlement_query.graphql",
+    query_path = "src/uplink/license_query.graphql",
     schema_path = "src/uplink/uplink.graphql",
     request_derives = "Debug",
     response_derives = "PartialEq, Debug, Deserialize",
     deprecated = "warn"
 )]
-pub(crate) struct EntitlementQuery {}
+pub(crate) struct LicenseQuery {}
 
-impl From<UplinkRequest> for entitlement_query::Variables {
+impl From<UplinkRequest> for license_query::Variables {
     fn from(req: UplinkRequest) -> Self {
-        entitlement_query::Variables {
+        license_query::Variables {
             api_key: req.api_key,
             graph_ref: req.graph_ref,
             if_after_id: req.id,
@@ -47,12 +45,12 @@ impl From<UplinkRequest> for entitlement_query::Variables {
     }
 }
 
-impl From<entitlement_query::ResponseData> for UplinkResponse<Entitlement> {
-    fn from(response: entitlement_query::ResponseData) -> Self {
+impl From<license_query::ResponseData> for UplinkResponse<License> {
+    fn from(response: license_query::ResponseData) -> Self {
         match response.router_entitlements {
-            EntitlementQueryRouterEntitlements::RouterEntitlementsResult(result) => {
-                if let Some(entitlement) = result.entitlement {
-                    match Entitlement::from_str(&entitlement.jwt) {
+            LicenseQueryRouterEntitlements::RouterEntitlementsResult(result) => {
+                if let Some(license) = result.entitlement {
+                    match License::from_str(&license.jwt) {
                         Ok(jwt) => UplinkResponse::New {
                             response: jwt,
                             id: result.id,
@@ -62,13 +60,13 @@ impl From<entitlement_query::ResponseData> for UplinkResponse<Entitlement> {
                         },
                         Err(error) => UplinkResponse::Error {
                             retry_later: true,
-                            code: "INVALID_ENTITLEMENT".to_string(),
+                            code: "INVALID_LICENSE".to_string(),
                             message: error.to_string(),
                         },
                     }
                 } else {
                     UplinkResponse::New {
-                        response: Entitlement::default(),
+                        response: License::default(),
                         id: result.id,
                         // this will truncate the number of seconds to under u64::MAX, which should be
                         // a large enough delay anyway
@@ -76,11 +74,11 @@ impl From<entitlement_query::ResponseData> for UplinkResponse<Entitlement> {
                     }
                 }
             }
-            EntitlementQueryRouterEntitlements::Unchanged(response) => UplinkResponse::Unchanged {
+            LicenseQueryRouterEntitlements::Unchanged(response) => UplinkResponse::Unchanged {
                 id: Some(response.id),
                 delay: Some(response.min_delay_seconds as u64),
             },
-            EntitlementQueryRouterEntitlements::FetchError(error) => UplinkResponse::Error {
+            LicenseQueryRouterEntitlements::FetchError(error) => UplinkResponse::Error {
                 retry_later: error.code == FetchErrorCode::RETRY_LATER,
                 code: match error.code {
                     FetchErrorCode::AUTHENTICATION_FAILED => "AUTHENTICATION_FAILED".to_string(),
@@ -99,13 +97,13 @@ impl From<entitlement_query::ResponseData> for UplinkResponse<Entitlement> {
 }
 
 pin_project! {
-    /// This stream wrapper will cause check the current entitlement at the point of warn_at or halt_at.
-    /// This means that the state machine can be kept clean, and not have to deal with setting it's own timers and also avoids lots of racy scenarios as entitlement checks are guaranteed to happen after an entitlement update even if they were in the past.
+    /// This stream wrapper will cause check the current license at the point of warn_at or halt_at.
+    /// This means that the state machine can be kept clean, and not have to deal with setting it's own timers and also avoids lots of racy scenarios as license checks are guaranteed to happen after a license update even if they were in the past.
     #[must_use = "streams do nothing unless polled"]
-    #[project = EntitlementExpanderProj]
-    pub(crate) struct EntitlementExpander<Upstream>
+    #[project = LicenseExpanderProj]
+    pub(crate) struct LicenseExpander<Upstream>
     where
-        Upstream: Stream<Item = Entitlement>,
+        Upstream: Stream<Item = License>,
     {
         #[pin]
         checks: DelayQueue<Event>,
@@ -114,9 +112,9 @@ pin_project! {
     }
 }
 
-impl<Upstream> Stream for EntitlementExpander<Upstream>
+impl<Upstream> Stream for LicenseExpander<Upstream>
 where
-    Upstream: Stream<Item = Entitlement>,
+    Upstream: Stream<Item = License>,
 {
     type Item = Event;
 
@@ -135,15 +133,15 @@ where
             // Checks has an expired claim that needs checking.
             // This is the ONLY arm where upstream.poll_next has not been called, and this is OK because we are not returning pending.
             (Poll::Ready(Some(item)), _) => Poll::Ready(Some(item.into_inner())),
-            // Upstream has a new entitlement with a claim
-            (_, Some(Poll::Ready(Some(entitlement)))) if entitlement.claims.is_some() => {
-                // If we got a new entitlement then we need to reset the stream of events and return the new entitlement event.
-                reset_checks_for_entitlement(&mut this.checks, entitlement)
+            // Upstream has a new license with a claim
+            (_, Some(Poll::Ready(Some(license)))) if license.claims.is_some() => {
+                // If we got a new license then we need to reset the stream of events and return the new license event.
+                reset_checks_for_licenses(&mut this.checks, license)
             }
-            // Upstream has a new entitlement with no claim.
+            // Upstream has a new license with no claim.
             (_, Some(Poll::Ready(Some(_)))) => {
-                // We don't clear the checks if there is an entitlement with no claim.
-                Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Unentitled)))
+                // We don't clear the checks if there is a license with no claim.
+                Poll::Ready(Some(Event::UpdateLicense(LicenseState::Unlicensed)))
             }
             // If either checks or upstream returned pending then we need to return pending.
             // It is the responsibility of upstream and checks to schedule wakeup.
@@ -158,15 +156,15 @@ where
     }
 }
 
-/// This function takes an entitlement and returns the appropriate event for that entitlement.
+/// This function takes a license and returns the appropriate event for that license.
 /// If warn at or halt at are in the future it will register appropriate checks to trigger at such times.
-fn reset_checks_for_entitlement(
+fn reset_checks_for_licenses(
     checks: &mut DelayQueue<Event>,
-    entitlement: Entitlement,
+    license: License,
 ) -> Poll<Option<Event>> {
     // We got a new claim, so clear the previous checks.
     checks.clear();
-    let claims = entitlement.claims.as_ref().expect("claims is gated, qed");
+    let claims = license.claims.as_ref().expect("claims is gated, qed");
     let halt_at = to_positive_instant(claims.halt_at);
     let warn_at = to_positive_instant(claims.warn_at);
     let now = Instant::now();
@@ -174,28 +172,24 @@ fn reset_checks_for_entitlement(
     if halt_at > now {
         // Only add halt if it isn't immediately going to be triggered.
         checks.insert_at(
-            Event::UpdateEntitlement(EntitlementState::EntitledHalt),
+            Event::UpdateLicense(LicenseState::LicensedHalt),
             (halt_at).into(),
         );
     } else {
-        return Poll::Ready(Some(Event::UpdateEntitlement(
-            EntitlementState::EntitledHalt,
-        )));
+        return Poll::Ready(Some(Event::UpdateLicense(LicenseState::LicensedHalt)));
     }
     if warn_at > now {
         // Only add warn if it isn't immediately going to be triggered and halt is not already set.
         // Something that is halted is by definition also warn.
         checks.insert_at(
-            Event::UpdateEntitlement(EntitlementState::EntitledWarn),
+            Event::UpdateLicense(LicenseState::LicensedWarn),
             (warn_at).into(),
         );
     } else {
-        return Poll::Ready(Some(Event::UpdateEntitlement(
-            EntitlementState::EntitledWarn,
-        )));
+        return Poll::Ready(Some(Event::UpdateLicense(LicenseState::LicensedWarn)));
     }
 
-    Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Entitled)))
+    Poll::Ready(Some(Event::UpdateLicense(LicenseState::Licensed)))
 }
 
 /// This function exists to generate an approximate Instant from a `SystemTime`. We have externally generated unix timestamps that need to be scheduled, but anything time related to scheduling must be an `Instant`.
@@ -215,19 +209,19 @@ fn to_positive_instant(system_time: SystemTime) -> Instant {
     }
 }
 
-pub(crate) trait EntitlementStreamExt: Stream<Item = Entitlement> {
-    fn expand_entitlements(self) -> EntitlementExpander<Self>
+pub(crate) trait LicenseStreamExt: Stream<Item = License> {
+    fn expand_licenses(self) -> LicenseExpander<Self>
     where
         Self: Sized,
     {
-        EntitlementExpander {
+        LicenseExpander {
             checks: Default::default(),
             upstream: self.fuse(),
         }
     }
 }
 
-impl<T: Stream<Item = Entitlement>> EntitlementStreamExt for T {}
+impl<T: Stream<Item = License>> LicenseStreamExt for T {}
 
 #[cfg(test)]
 mod test {
@@ -240,14 +234,14 @@ mod test {
     use futures_test::stream::StreamTestExt;
 
     use crate::router::Event;
-    use crate::uplink::entitlement::Audience;
-    use crate::uplink::entitlement::Claims;
-    use crate::uplink::entitlement::Entitlement;
-    use crate::uplink::entitlement::EntitlementState;
-    use crate::uplink::entitlement::OneOrMany;
-    use crate::uplink::entitlement_stream::to_positive_instant;
-    use crate::uplink::entitlement_stream::EntitlementQuery;
-    use crate::uplink::entitlement_stream::EntitlementStreamExt;
+    use crate::uplink::license_enforcement::Audience;
+    use crate::uplink::license_enforcement::Claims;
+    use crate::uplink::license_enforcement::License;
+    use crate::uplink::license_enforcement::LicenseState;
+    use crate::uplink::license_enforcement::OneOrMany;
+    use crate::uplink::license_stream::to_positive_instant;
+    use crate::uplink::license_stream::LicenseQuery;
+    use crate::uplink::license_stream::LicenseStreamExt;
     use crate::uplink::stream_from_uplink;
 
     #[tokio::test]
@@ -256,7 +250,7 @@ mod test {
             std::env::var("TEST_APOLLO_KEY"),
             std::env::var("TEST_APOLLO_GRAPH_REF"),
         ) {
-            let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
+            let results = stream_from_uplink::<LicenseQuery, License>(
                 apollo_key,
                 apollo_graph_ref,
                 None,
@@ -271,7 +265,7 @@ mod test {
                 .get(0)
                 .expect("expected one result")
                 .as_ref()
-                .expect("entitlement should be OK")
+                .expect("license should be OK")
                 .claims
                 .is_some())
         }
@@ -294,130 +288,126 @@ mod test {
     }
 
     #[tokio::test]
-    async fn entitlement_expander() {
-        let events_stream = futures::stream::iter(vec![entitlement_with_claim(15, 30)])
-            .expand_entitlements()
+    async fn license_expander() {
+        let events_stream = futures::stream::iter(vec![license_with_claim(15, 30)])
+            .expand_licenses()
             .map(SimpleEvent::from);
 
         let events = events_stream.collect::<Vec<_>>().await;
         assert_eq!(
             events,
             &[
-                SimpleEvent::UpdateEntitlement,
-                SimpleEvent::WarnEntitlement,
-                SimpleEvent::HaltEntitlement
+                SimpleEvent::UpdateLicense,
+                SimpleEvent::WarnLicense,
+                SimpleEvent::HaltLicense
             ]
         );
     }
 
     #[tokio::test]
-    async fn entitlement_expander_warn_now() {
-        let events_stream = futures::stream::iter(vec![entitlement_with_claim(0, 15)])
+    async fn license_expander_warn_now() {
+        let events_stream = futures::stream::iter(vec![license_with_claim(0, 15)])
             .interleave_pending()
-            .expand_entitlements()
+            .expand_licenses()
             .map(SimpleEvent::from);
 
         let events = events_stream.collect::<Vec<_>>().await;
         assert_eq!(
             events,
-            &[SimpleEvent::WarnEntitlement, SimpleEvent::HaltEntitlement]
+            &[SimpleEvent::WarnLicense, SimpleEvent::HaltLicense]
         );
     }
 
     #[tokio::test]
-    async fn entitlement_expander_halt_now() {
-        let events_stream = futures::stream::iter(vec![entitlement_with_claim(0, 0)])
+    async fn license_expander_halt_now() {
+        let events_stream = futures::stream::iter(vec![license_with_claim(0, 0)])
             .interleave_pending()
-            .expand_entitlements()
+            .expand_licenses()
             .map(SimpleEvent::from);
 
         let events = events_stream.collect::<Vec<_>>().await;
-        assert_eq!(events, &[SimpleEvent::HaltEntitlement]);
+        assert_eq!(events, &[SimpleEvent::HaltLicense]);
     }
 
     #[tokio::test]
-    async fn entitlement_expander_no_claim() {
-        let events_stream = futures::stream::iter(vec![entitlement_with_no_claim()])
+    async fn license_expander_no_claim() {
+        let events_stream = futures::stream::iter(vec![license_with_no_claim()])
             .interleave_pending()
-            .expand_entitlements()
+            .expand_licenses()
             .map(SimpleEvent::from);
 
         let events = events_stream.collect::<Vec<_>>().await;
-        assert_eq!(events, &[SimpleEvent::UpdateEntitlement]);
+        assert_eq!(events, &[SimpleEvent::UpdateLicense]);
     }
 
     #[tokio::test]
-    async fn entitlement_expander_claim_no_claim() {
-        // Entitlements with no claim do not clear checks as they are ignored if we move from entitled to unentitled, this is handled at the state machine level.
-        let events_stream = futures::stream::iter(vec![
-            entitlement_with_claim(10, 10),
-            entitlement_with_no_claim(),
-        ])
-        .interleave_pending()
-        .expand_entitlements()
-        .map(SimpleEvent::from);
+    async fn license_expander_claim_no_claim() {
+        // Licenses with no claim do not clear checks as they are ignored if we move from entitled to unentitled, this is handled at the state machine level.
+        let events_stream =
+            futures::stream::iter(vec![license_with_claim(10, 10), license_with_no_claim()])
+                .interleave_pending()
+                .expand_licenses()
+                .map(SimpleEvent::from);
 
         let events = events_stream.collect::<Vec<_>>().await;
         assert_eq!(
             events,
             &[
-                SimpleEvent::UpdateEntitlement,
-                SimpleEvent::UpdateEntitlement,
-                SimpleEvent::WarnEntitlement,
-                SimpleEvent::HaltEntitlement
+                SimpleEvent::UpdateLicense,
+                SimpleEvent::UpdateLicense,
+                SimpleEvent::WarnLicense,
+                SimpleEvent::HaltLicense
             ]
         );
     }
 
     #[tokio::test]
-    async fn entitlement_expander_no_claim_claim() {
-        let events_stream = futures::stream::iter(vec![
-            entitlement_with_no_claim(),
-            entitlement_with_claim(15, 30),
-        ])
-        .interleave_pending()
-        .expand_entitlements()
-        .map(SimpleEvent::from);
+    async fn license_expander_no_claim_claim() {
+        let events_stream =
+            futures::stream::iter(vec![license_with_no_claim(), license_with_claim(15, 30)])
+                .interleave_pending()
+                .expand_licenses()
+                .map(SimpleEvent::from);
 
         let events = events_stream.collect::<Vec<_>>().await;
         assert_eq!(
             events,
             &[
-                SimpleEvent::UpdateEntitlement,
-                SimpleEvent::UpdateEntitlement,
-                SimpleEvent::WarnEntitlement,
-                SimpleEvent::HaltEntitlement
+                SimpleEvent::UpdateLicense,
+                SimpleEvent::UpdateLicense,
+                SimpleEvent::WarnLicense,
+                SimpleEvent::HaltLicense
             ]
         );
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn entitlement_expander_claim_pause_claim() {
+    async fn license_expander_claim_pause_claim() {
         let (mut tx, rx) = futures::channel::mpsc::channel(10);
-        let events_stream = rx.expand_entitlements().map(SimpleEvent::from);
+        let events_stream = rx.expand_licenses().map(SimpleEvent::from);
 
         tokio::task::spawn(async move {
             // This simulates a new claim coming in before in between the warning and halt
-            let _ = tx.send(entitlement_with_claim(15, 45)).await;
+            let _ = tx.send(license_with_claim(15, 45)).await;
             tokio::time::sleep(Duration::from_millis(20)).await;
-            let _ = tx.send(entitlement_with_claim(15, 30)).await;
+            let _ = tx.send(license_with_claim(15, 30)).await;
         });
         let events = events_stream.collect::<Vec<_>>().await;
         assert_eq!(
             events,
             &[
-                SimpleEvent::UpdateEntitlement,
-                SimpleEvent::WarnEntitlement,
-                SimpleEvent::UpdateEntitlement,
-                SimpleEvent::WarnEntitlement,
-                SimpleEvent::HaltEntitlement
+                SimpleEvent::UpdateLicense,
+                SimpleEvent::WarnLicense,
+                SimpleEvent::UpdateLicense,
+                SimpleEvent::WarnLicense,
+                SimpleEvent::HaltLicense
             ]
         );
     }
 
-    fn entitlement_with_claim(warn_delta: u64, halt_delta: u64) -> Entitlement {
+    fn license_with_claim(warn_delta: u64, halt_delta: u64) -> License {
         let now = SystemTime::now();
-        Entitlement {
+        License {
             claims: Some(Claims {
                 iss: "".to_string(),
                 sub: "".to_string(),
@@ -428,8 +418,8 @@ mod test {
         }
     }
 
-    fn entitlement_with_no_claim() -> Entitlement {
-        Entitlement { claims: None }
+    fn license_with_no_claim() -> License {
+        License { claims: None }
     }
 
     #[derive(Eq, PartialEq, Debug)]
@@ -438,10 +428,10 @@ mod test {
         NoMoreConfiguration,
         UpdateSchema,
         NoMoreSchema,
-        UpdateEntitlement,
-        HaltEntitlement,
-        WarnEntitlement,
-        NoMoreEntitlement,
+        UpdateLicense,
+        HaltLicense,
+        WarnLicense,
+        NoMoreLicense,
         ForcedHotReload,
         Shutdown,
     }
@@ -453,14 +443,10 @@ mod test {
                 Event::NoMoreConfiguration => SimpleEvent::NoMoreConfiguration,
                 Event::UpdateSchema(_) => SimpleEvent::UpdateSchema,
                 Event::NoMoreSchema => SimpleEvent::NoMoreSchema,
-                Event::UpdateEntitlement(EntitlementState::EntitledHalt) => {
-                    SimpleEvent::HaltEntitlement
-                }
-                Event::UpdateEntitlement(EntitlementState::EntitledWarn) => {
-                    SimpleEvent::WarnEntitlement
-                }
-                Event::UpdateEntitlement(_) => SimpleEvent::UpdateEntitlement,
-                Event::NoMoreEntitlement => SimpleEvent::NoMoreEntitlement,
+                Event::UpdateLicense(LicenseState::LicensedHalt) => SimpleEvent::HaltLicense,
+                Event::UpdateLicense(LicenseState::LicensedWarn) => SimpleEvent::WarnLicense,
+                Event::UpdateLicense(_) => SimpleEvent::UpdateLicense,
+                Event::NoMoreLicense => SimpleEvent::NoMoreLicense,
                 Event::Reload => SimpleEvent::ForcedHotReload,
                 Event::Shutdown => SimpleEvent::Shutdown,
             }
