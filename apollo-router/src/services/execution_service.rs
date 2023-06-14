@@ -109,14 +109,24 @@ impl Service<ExecutionRequest> for ExecutionService {
 
                     let has_next = response.has_next.unwrap_or(true);
                     tracing::debug_span!("format_response").in_scope(|| {
-                        let paths = query.format_response(
+                        let mut paths = Vec::new();
+                        if let Some(filtered_query) = query.filtered_query.as_ref() {
+                            paths = filtered_query.format_response(
+                                &mut response,
+                                operation_name.as_deref(),
+                                is_deferred,
+                                variables.clone(),
+                                schema.api_schema(),
+                            );
+                        }
+
+                        paths.extend(query.format_response(
                             &mut response,
                             operation_name.as_deref(),
                             is_deferred,
                             variables.clone(),
                             schema.api_schema(),
-                        );
-
+                        ).into_iter());
                         nullified_paths.extend(paths.into_iter());
                     });
 
