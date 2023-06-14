@@ -1,16 +1,16 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 #![allow(missing_docs)] // FIXME
 
 use std::sync::Arc;
 
 use apollo_compiler::ApolloCompiler;
+use async_trait::async_trait;
 use derivative::Derivative;
 use serde::Deserialize;
 use serde::Serialize;
 use static_assertions::assert_impl_all;
 use tokio::sync::Mutex;
 
+use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::query_planner::QueryPlan;
 use crate::Context;
@@ -36,9 +36,41 @@ impl Request {
     pub(crate) fn new(
         query: String,
         operation_name: Option<String>,
+        context: Context,
+        compiler: Arc<Mutex<ApolloCompiler>>,
+    ) -> Request {
+        Self {
+            query,
+            operation_name,
+            context,
+            compiler,
+        }
+    }
+}
+
+/// [`Context`] for the request.
+#[derive(Clone, Derivative)]
+#[derivative(Debug)]
+pub(crate) struct CachingRequest {
+    pub(crate) query: String,
+    pub(crate) operation_name: Option<String>,
+    pub(crate) context: Context,
+    #[derivative(Debug = "ignore")]
+    pub(crate) compiler: Arc<Mutex<ApolloCompiler>>,
+}
+
+#[buildstructor::buildstructor]
+impl CachingRequest {
+    /// This is the constructor (or builder) to use when constructing a real QueryPlannerRequest.
+    ///
+    /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
+    #[builder]
+    pub(crate) fn new(
+        query: String,
+        operation_name: Option<String>,
         compiler: Arc<Mutex<ApolloCompiler>>,
         context: Context,
-    ) -> Request {
+    ) -> CachingRequest {
         Self {
             query,
             operation_name,
@@ -82,4 +114,22 @@ impl Response {
             errors,
         }
     }
+}
+
+pub(crate) type BoxService = tower::util::BoxService<Request, Response, QueryPlannerError>;
+#[allow(dead_code)]
+pub(crate) type BoxCloneService =
+    tower::util::BoxCloneService<Request, Response, QueryPlannerError>;
+#[allow(dead_code)]
+pub(crate) type ServiceResult = Result<Response, QueryPlannerError>;
+#[allow(dead_code)]
+pub(crate) type Body = hyper::Body;
+#[allow(dead_code)]
+pub(crate) type Error = hyper::Error;
+
+#[async_trait]
+pub(crate) trait QueryPlannerPlugin: Send + Sync + 'static {
+    /// This service runs right after the query planner cache, which means that it will be called once per unique
+    /// query, unless the cache entry was evicted
+    fn query_planner_service(&self, service: BoxService) -> BoxService;
 }

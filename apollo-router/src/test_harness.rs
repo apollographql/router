@@ -281,7 +281,7 @@ impl<'a> TestHarness<'a> {
         use crate::axum_factory::tests::make_axum_router;
         use crate::axum_factory::ListenAddrAndRouter;
         use crate::router_factory::RouterFactory;
-        use crate::uplink::entitlement::EntitlementState;
+        use crate::uplink::license_enforcement::LicenseState;
 
         let (config, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
@@ -296,7 +296,7 @@ impl<'a> TestHarness<'a> {
             router_creator,
             &config,
             web_endpoints,
-            EntitlementState::Unentitled,
+            LicenseState::Unlicensed,
         )?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
         Ok(router.boxed())
