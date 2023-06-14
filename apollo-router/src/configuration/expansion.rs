@@ -31,7 +31,7 @@ pub(crate) struct ConfigDefault {
 
 impl Expansion {
     pub(crate) fn default() -> Result<Self, ConfigurationError> {
-        let prefix = Expansion::prefix()?;
+        let prefix = Expansion::prefix_from_env()?;
 
         let supported_expansion_modes = match env::var("APOLLO_ROUTER_CONFIG_SUPPORTED_MODES") {
             Ok(v) => v,
@@ -68,11 +68,11 @@ impl Expansion {
 
     pub(crate) fn default_rhai() -> Result<Self, ConfigurationError> {
         Ok(Expansion::builder()
-            .and_prefix(Expansion::prefix()?)
+            .and_prefix(Expansion::prefix_from_env()?)
             .build())
     }
 
-    fn prefix() -> Result<Option<String>, ConfigurationError> {
+    fn prefix_from_env() -> Result<Option<String>, ConfigurationError> {
         // APOLLO_ROUTER_CONFIG_ENV_PREFIX and APOLLO_ROUTER_CONFIG_SUPPORTED_MODES are unsupported and may change in future.
         // If you need this functionality then raise an issue and we can look to promoting this to official support.
         match env::var("APOLLO_ROUTER_CONFIG_ENV_PREFIX") {
