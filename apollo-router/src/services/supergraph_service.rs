@@ -30,8 +30,6 @@ use super::QueryPlannerContent;
 use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
-#[cfg(test)]
-use crate::plugin::test::MockSupergraphService;
 use crate::plugin::DynPlugin;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::traffic_shaping::TrafficShaping;
@@ -495,66 +493,6 @@ impl SupergraphCreator {
         self.query_planner_service
             .warm_up(query_parser, cache_keys)
             .await
-    }
-
-    /// Create a test service.
-    #[cfg(test)]
-    pub(crate) async fn for_tests(
-        supergraph_service: MockSupergraphService,
-    ) -> MockSupergraphCreator {
-        MockSupergraphCreator::new(supergraph_service).await
-    }
-}
-
-#[cfg(test)]
-#[derive(Clone)]
-pub(crate) struct MockSupergraphCreator {
-    supergraph_service: MockSupergraphService,
-    plugins: Arc<Plugins>,
-    schema: Arc<Schema>,
-}
-
-#[cfg(test)]
-impl MockSupergraphCreator {
-    pub(crate) async fn new(supergraph_service: MockSupergraphService) -> Self {
-        let configuration = Configuration::builder().build().unwrap();
-        let schema = supergraph_service.schema();
-        use crate::router_factory::create_plugins;
-        let plugins = Arc::new(
-            create_plugins(&configuration, &schema, None)
-                .await
-                .unwrap()
-                .into_iter()
-                .collect(),
-        );
-
-        Self {
-            supergraph_service,
-            plugins,
-            schema: Arc::clone(&schema),
-        }
-    }
-}
-
-#[cfg(test)]
-impl HasPlugins for MockSupergraphCreator {
-    fn plugins(&self) -> Arc<Plugins> {
-        self.plugins.clone()
-    }
-}
-
-#[cfg(test)]
-impl HasSchema for MockSupergraphCreator {
-    fn schema(&self) -> Arc<Schema> {
-        self.schema.clone()
-    }
-}
-
-#[cfg(test)]
-impl ServiceFactory<supergraph::Request> for MockSupergraphCreator {
-    type Service = supergraph::BoxService;
-    fn create(&self) -> Self::Service {
-        self.supergraph_service.clone().boxed()
     }
 }
 
