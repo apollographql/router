@@ -67,8 +67,7 @@ impl BridgeQueryPlanner {
             Ok(planner) => planner,
             Err(err) => {
                 if configuration.experimental_graphql_validation == GraphQLValidation::Both {
-                    let has_validation_errors =
-                        err.iter().any(|err| !err.is_supergraph_validation_error());
+                    let has_validation_errors = err.iter().any(|err| err.is_validation_error());
 
                     assert!(
                         has_validation_errors == schema.has_errors(),
