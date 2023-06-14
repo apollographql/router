@@ -1302,11 +1302,11 @@ expression: aggregated_metrics
       }
     }
   },
-  "operation_count_by_type": {
+  "licensed_operation_count_by_type": {
     "query": {
       "type": "query",
       "subtype": null,
-      "operation_count": 2
+      "licensed_operation_count": 2
     }
   }
 }

@@ -1,5 +1,4 @@
 //! Environment variable expansion in the configuration file
-// This entire file is license key functionality
 
 use std::env;
 use std::env::VarError;

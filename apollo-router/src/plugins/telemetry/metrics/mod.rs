@@ -559,7 +559,7 @@ impl BasicMetrics {
                 .init(),
             http_requests_duration: meter
                 .f64_histogram("apollo_router_http_request_duration_seconds")
-                .with_description("Total number of HTTP requests made.")
+                .with_description("Duration of HTTP requests.")
                 .init(),
         }
     }

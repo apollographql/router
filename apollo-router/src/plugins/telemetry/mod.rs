@@ -1,5 +1,4 @@
 //! Telemetry plugin.
-// With regards to ELv2 licensing, this entire file is license key functionality
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
@@ -53,7 +52,7 @@ use tracing_subscriber::fmt::format::JsonFields;
 use tracing_subscriber::Layer;
 
 use self::apollo::ForwardValues;
-use self::apollo::OperationCountByType;
+use self::apollo::LicensedOperationCountByType;
 use self::apollo::OperationSubType;
 use self::apollo::SingleReport;
 use self::apollo_exporter::proto;
@@ -1165,7 +1164,8 @@ impl Telemetry {
             .get::<UsageReporting>()
             .cloned()
         {
-            let operation_count = operation_count(&usage_reporting.stats_report_key);
+            let licensed_operation_count =
+                licensed_operation_count(&usage_reporting.stats_report_key);
             let persisted_query_hit = context
                 .get::<_, bool>("persisted_query_hit")
                 .unwrap_or_default();
@@ -1176,11 +1176,11 @@ impl Telemetry {
             {
                 // The request was excluded don't report the details, but do report the operation count
                 SingleStatsReport {
-                    operation_count_by_type: (operation_count > 0).then_some(
-                        OperationCountByType {
+                    licensed_operation_count_by_type: (licensed_operation_count > 0).then_some(
+                        LicensedOperationCountByType {
                             r#type: operation_kind,
                             subtype: operation_subtype,
-                            operation_count,
+                            licensed_operation_count,
                         },
                     ),
                     ..Default::default()
@@ -1198,11 +1198,11 @@ impl Telemetry {
                             .trace_id()
                             .to_bytes(),
                     ),
-                    operation_count_by_type: (operation_count > 0).then_some(
-                        OperationCountByType {
+                    licensed_operation_count_by_type: (licensed_operation_count > 0).then_some(
+                        LicensedOperationCountByType {
                             r#type: operation_kind,
                             subtype: operation_subtype,
-                            operation_count,
+                            licensed_operation_count,
                         },
                     ),
                     stats: HashMap::from([(
@@ -1246,10 +1246,10 @@ impl Telemetry {
         } else {
             // Usage reporting was missing, so it counts as one operation.
             SingleStatsReport {
-                operation_count_by_type: OperationCountByType {
+                licensed_operation_count_by_type: LicensedOperationCountByType {
                     r#type: operation_kind,
                     subtype: operation_subtype,
-                    operation_count: 1,
+                    licensed_operation_count: 1,
                 }
                 .into(),
                 ..Default::default()
@@ -1419,7 +1419,7 @@ fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String
 
 // Planner errors return stats report key that start with `## `
 // while successful planning stats report key start with `# `
-fn operation_count(stats_report_key: &str) -> u64 {
+fn licensed_operation_count(stats_report_key: &str) -> u64 {
     if stats_report_key.starts_with("## ") {
         0
     } else {
