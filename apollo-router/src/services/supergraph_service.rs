@@ -9,7 +9,6 @@ use futures::stream::StreamExt;
 use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
-use multimap::MultiMap;
 use router_bridge::planner::Planner;
 use tokio::sync::Mutex;
 use tower::util::Either;
@@ -19,6 +18,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
+use super::execution;
 use super::layers::content_negociation;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
@@ -47,8 +47,6 @@ use crate::services::SupergraphResponse;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
-use crate::Endpoint;
-use crate::ListenAddr;
 
 pub(crate) const QUERY_PLANNING_SPAN_NAME: &str = "query_planning";
 
@@ -125,16 +123,12 @@ impl Service<SupergraphRequest> for SupergraphService {
     }
 }
 
-async fn service_call<ExecutionService>(
+async fn service_call(
     planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    execution: ExecutionService,
+    execution: execution::BoxService,
     schema: Arc<Schema>,
     req: SupergraphRequest,
-) -> Result<SupergraphResponse, BoxError>
-where
-    ExecutionService:
-        Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError> + Send,
-{
+) -> Result<SupergraphResponse, BoxError> {
     let context = req.context;
     let body = req.supergraph_request.body();
     let variables = body.variables.clone();
@@ -376,28 +370,6 @@ impl PluggableSupergraphServiceBuilder {
             plugins,
         })
     }
-}
-
-/// Factory for creating a RouterService
-///
-/// Instances of this traits are used by the HTTP server to generate a new
-/// RouterService on each request
-pub(crate) trait SupergraphFactory:
-    ServiceFactory<supergraph::Request, Service = Self::SupergraphService>
-    + Clone
-    + Send
-    + Sync
-    + 'static
-{
-    type SupergraphService: Service<
-            supergraph::Request,
-            Response = supergraph::Response,
-            Error = BoxError,
-            Future = Self::Future,
-        > + Send;
-    type Future: Send;
-
-    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 }
 
 /// A collection of services and data which may be used to create a "router".
