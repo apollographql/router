@@ -1,4 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
 #![allow(missing_docs)] // FIXME
 #![allow(deprecated)] // Note: Required to prevents complaints on enum declaration
 
@@ -12,8 +11,8 @@ use std::task::Poll;
 
 pub use error::ApolloRouterError;
 pub use event::ConfigurationSource;
-pub use event::EntitlementSource;
 pub(crate) use event::Event;
+pub use event::LicenseSource;
 pub(crate) use event::ReloadSource;
 pub use event::SchemaSource;
 pub use event::ShutdownSource;
@@ -47,7 +46,7 @@ use crate::router_factory::YamlRouterFactory;
 use crate::services::router;
 use crate::state_machine::ListenAddresses;
 use crate::state_machine::StateMachine;
-use crate::uplink::entitlement::EntitlementState;
+use crate::uplink::license_enforcement::LicenseState;
 
 // For now this is unused:
 // TODO: Check with simon once the refactor is complete
@@ -59,7 +58,7 @@ async fn make_router_service(
     schema: &str,
     configuration: Arc<Configuration>,
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
-    entitlement: EntitlementState,
+    license: LicenseState,
 ) -> Result<router::BoxCloneService, BoxError> {
     let service_factory = YamlRouterFactory
         .create(
@@ -70,7 +69,7 @@ async fn make_router_service(
         )
         .await?;
     let web_endpoints = service_factory.web_endpoints();
-    let routers = make_axum_router(service_factory, &configuration, web_endpoints, entitlement)?;
+    let routers = make_axum_router(service_factory, &configuration, web_endpoints, license)?;
     let ListenAddrAndRouter(_listener, router) = routers.main;
 
     Ok(router
@@ -154,9 +153,9 @@ impl RouterHttpServer {
     ///   Specifies where to find the router configuration.
     ///   If not provided, the default configuration as with an empty YAML file.
     ///
-    /// * `.entitlement(impl Into<`[`EntitlementSource`]`>)`
+    /// * `.license(impl Into<`[`LicenseSource`]`>)`
     ///   Optional.
-    ///   Specifies where to find the router entitlement which controls if commercial features are enabled or not.
+    ///   Specifies where to find the router license which controls if commercial features are enabled or not.
     ///   If not provided then commercial features will not be enabled.
     ///
     /// * `.shutdown(impl Into<`[`ShutdownSource`]`>)`
@@ -182,7 +181,7 @@ impl RouterHttpServer {
     fn start(
         schema: SchemaSource,
         configuration: Option<ConfigurationSource>,
-        entitlement: Option<EntitlementSource>,
+        license: Option<LicenseSource>,
         shutdown: Option<ShutdownSource>,
     ) -> RouterHttpServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -190,7 +189,7 @@ impl RouterHttpServer {
             shutdown.unwrap_or(ShutdownSource::CtrlC),
             configuration.unwrap_or_default(),
             schema,
-            entitlement.unwrap_or_default(),
+            license.unwrap_or_default(),
             shutdown_receiver,
         );
         let server_factory = AxumHttpServerFactory::new();
@@ -278,7 +277,7 @@ fn generate_event_stream(
     shutdown: ShutdownSource,
     configuration: ConfigurationSource,
     schema: SchemaSource,
-    entitlement: EntitlementSource,
+    license: LicenseSource,
     shutdown_receiver: oneshot::Receiver<()>,
 ) -> impl Stream<Item = Event> {
     let reload_source = ReloadSource::default();
@@ -286,7 +285,7 @@ fn generate_event_stream(
     let stream = stream::select_all(vec![
         shutdown.into_stream().boxed(),
         schema.into_stream().boxed(),
-        entitlement.into_stream().boxed(),
+        license.into_stream().boxed(),
         reload_source.clone().into_stream().boxed(),
         configuration
             .into_stream()
@@ -399,7 +398,7 @@ mod tests {
     use crate::graphql;
     use crate::graphql::Request;
     use crate::router::Event::UpdateConfiguration;
-    use crate::router::Event::UpdateEntitlement;
+    use crate::router::Event::UpdateLicense;
     use crate::router::Event::UpdateSchema;
 
     fn init_with_server() -> RouterHttpServer {
@@ -467,7 +466,7 @@ mod tests {
             .await
             .unwrap();
         router_handle
-            .send_event(UpdateEntitlement(EntitlementState::Unentitled))
+            .send_event(UpdateLicense(LicenseState::Unlicensed))
             .await
             .unwrap();
 
@@ -512,7 +511,7 @@ mod tests {
             .await
             .unwrap();
         router_handle
-            .send_event(UpdateEntitlement(EntitlementState::Unentitled))
+            .send_event(UpdateLicense(LicenseState::Unlicensed))
             .await
             .unwrap();
 

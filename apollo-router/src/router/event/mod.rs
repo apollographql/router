@@ -1,7 +1,5 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 mod configuration;
-mod entitlement;
+mod license;
 mod reload;
 mod schema;
 mod shutdown;
@@ -10,20 +8,20 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 
 pub use configuration::ConfigurationSource;
-pub use entitlement::EntitlementSource;
+pub use license::LicenseSource;
 pub(crate) use reload::ReloadSource;
 pub use schema::SchemaSource;
 pub use shutdown::ShutdownSource;
 
 use self::Event::NoMoreConfiguration;
-use self::Event::NoMoreEntitlement;
+use self::Event::NoMoreLicense;
 use self::Event::NoMoreSchema;
 use self::Event::Reload;
 use self::Event::Shutdown;
 use self::Event::UpdateConfiguration;
-use self::Event::UpdateEntitlement;
+use self::Event::UpdateLicense;
 use self::Event::UpdateSchema;
-use crate::uplink::entitlement::EntitlementState;
+use crate::uplink::license_enforcement::LicenseState;
 use crate::Configuration;
 
 /// Messages that are broadcast across the app.
@@ -40,11 +38,11 @@ pub(crate) enum Event {
     /// There are no more updates to the schema
     NoMoreSchema,
 
-    /// Update entitlement {}
-    UpdateEntitlement(EntitlementState),
+    /// Update license {}
+    UpdateLicense(LicenseState),
 
-    /// There were no more updates to entitlement.
-    NoMoreEntitlement,
+    /// There were no more updates to license.
+    NoMoreLicense,
 
     /// Artificial hot reload for chaos testing
     Reload,
@@ -68,11 +66,11 @@ impl Debug for Event {
             NoMoreSchema => {
                 write!(f, "NoMoreSchema")
             }
-            UpdateEntitlement(e) => {
-                write!(f, "UpdateEntitlement({e:?})")
+            UpdateLicense(e) => {
+                write!(f, "UpdateLicense({e:?})")
             }
-            NoMoreEntitlement => {
-                write!(f, "NoMoreEntitlement")
+            NoMoreLicense => {
+                write!(f, "NoMoreLicense")
             }
             Reload => {
                 write!(f, "ForcedHotReload")

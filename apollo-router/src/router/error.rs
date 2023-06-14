@@ -20,11 +20,11 @@ pub enum ApolloRouterError {
     /// no valid schema was supplied
     NoSchema,
 
-    /// no valid entitlement was supplied
-    NoEntitlement,
+    /// no valid license was supplied
+    NoLicense,
 
-    /// entitlement violation
-    EntitlementViolation,
+    /// license violation
+    LicenseViolation,
 
     /// could not create router: {0}
     ServiceCreationError(BoxError),

@@ -1,5 +1,4 @@
 //! Configuration schema generation and validation
-// This entire file is license key functionality
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
