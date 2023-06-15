@@ -84,7 +84,7 @@ impl EngineBlock {
         ));
         let ast = engine
             .compile_file(main.clone())
-            .map_err(|err| anyhow!("in Rhai script {}: {}", main.display(), err))?;
+            .map_err(|err| format!("in Rhai script {}: {}", main.display(), err))?;
         let mut scope = Scope::new();
         // Keep these two lower cases ones as mistakes until 2.0
         // At 2.0 (or maybe before), replace with upper case
