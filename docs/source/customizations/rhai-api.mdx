@@ -269,15 +269,16 @@ fn supergraph_service(service) {
 
 ## `Request` interface
 
-All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, any of which a callback can modify in-place (read-write):
+All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. These objects provide the following fields, any of which a callback can modify in-place (read-write):
 
 ```
 request.context
 request.headers
-request.body.query
-request.body.operation_name
-request.body.variables
-request.body.extensions
+request.body (router_service only)
+request.body.query (not on router_service)
+request.body.operation_name (not on router_service)
+request.body.variables (not on router_service)
+request.body.extensions (not on router_service)
 request.uri.host
 request.uri.path
 ```
@@ -360,6 +361,10 @@ request.headers["set-cookie"] = [
 // Note: It's probably more useful to do this on response headers. Simply illustrating the syntax here.
 print(`${request.headers.values("set-cookie")}`);
 ```
+
+### `request.body`
+
+At the router_service, the `router_body` is simply a String and can be manipulated as such. This is not so convenient as working with GraphQL objects, such as are available at the `supergraph_service`.
 
 ### `request.body.query`
 
@@ -448,10 +453,11 @@ The `response` object includes the following fields:
 ```
 response.context
 response.headers
-response.body.label
-response.body.data
-response.body.errors
-response.body.extensions
+response.body (router_service only)
+response.body.label (not on router_service)
+response.body.data (not on router_service)
+response.body.errors (not on router_service)
+response.body.extensions (not on router_service)
 ```
 
 All of the above fields are read/write.
@@ -460,9 +466,10 @@ The following fields are identical in behavior to their `request` counterparts:
 
 * [`context`](#requestcontext)
 * [`headers`](#requestheaders)
+* [`body`](#requestbody)
 * [`body.extensions`](#requestbodyextensions)
 
-Note: Be particularly careful when interacting with headers in a response context. For supergraph_service() and execution_service(), response headers only exist for the first response in a deferred response stream. You can handle this by making use of the `is_primary()` function which will return true if a response is the first (or primary) response. If you do try to access the headers in a non-primary response, then you'll raise an exception which can be handled like any other rhai exception, but is not so convenient as using the `is_primary()` method.
+Note: Be particularly careful when interacting with headers in a response context. For router_service(), supergraph_service() and execution_service(), response headers only exist for the first response in a deferred response stream. You can handle this by making use of the `is_primary()` function which will return true if a response is the first (or primary) response. If you do try to access the headers in a non-primary response, then you'll raise an exception which can be handled like any other rhai exception, but is not so convenient as using the `is_primary()` method.
 
 ```rhai
     if response.is_primary() {
