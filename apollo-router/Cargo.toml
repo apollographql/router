@@ -250,7 +250,7 @@ reqwest = { version = "0.11.18", default-features = false, features = [
 ] }
 similar-asserts = "1.4.2"
 tempfile = "3.6.0"
-test-log = { version = "0.2.11", default-features = false, features = [
+test-log = { version = "0.2.12", default-features = false, features = [
     "trace",
 ] }
 test-span = "0.7"
