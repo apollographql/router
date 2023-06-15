@@ -1,0 +1,6 @@
+---
+source: apollo-router/src/query_planner/bridge_query_planner.rs
+expression: "subselections_keys(\"query Q { topProducts {\n            name\n            ... on Book {\n                isbn\n                ... @defer {\n                    similarBooks {\n                        isbn\n                    }\n                }\n            }\n        }}\").await"
+---
+ { topProducts { ... on Book { name isbn } ... on Furniture { name } } }
+/topProducts/... on Book { similarBooks { isbn } }

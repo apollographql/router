@@ -59,10 +59,12 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) subselections: HashMap<SubSelection, Query>,
+    pub(crate) subselections: SubSelections,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) filtered_query: Option<Arc<Query>>,
 }
+
+pub(crate) type SubSelections = HashMap<SubSelection, Query>;
 
 fn empty_compiler() -> Arc<Mutex<ApolloCompiler>> {
     Arc::new(Mutex::new(ApolloCompiler::new()))
