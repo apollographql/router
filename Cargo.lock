@@ -286,6 +286,7 @@ dependencies = [
  "access-json",
  "anyhow",
  "apollo-compiler",
+ "apollo-encoder 0.5.1",
  "apollo-parser 0.5.3",
  "arc-swap",
  "askama",
