@@ -1072,11 +1072,12 @@ fn http_body_as_bytes(body: Body) -> Result<Bytes, Box<EvalAltResult>> {
         let hdl = tokio::runtime::Handle::current();
         std::thread::spawn(move || {
             let _guard = hdl.enter();
-            hdl.spawn(async move { hyper::body::to_bytes(body).await.expect("it should work") })
+            hdl.spawn(async move { hyper::body::to_bytes(body).await })
         })
         .join()
-        .unwrap()
+        .map_err(|_e| "join failed".to_string())?
         .await
+        .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string().into())
     })
 }
