@@ -57,10 +57,12 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) subselections: HashMap<SubSelection, Query>,
+    pub(crate) subselections: SubSelections,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) filtered_query: Option<Arc<Query>>,
 }
+
+pub(crate) type SubSelections = HashMap<SubSelection, Query>;
 
 #[derive(Debug, Derivative, Default)]
 #[derivative(PartialEq, Hash, Eq)]
