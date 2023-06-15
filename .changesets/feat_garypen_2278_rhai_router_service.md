@@ -4,7 +4,7 @@ Adds `Rhai` support for the `router_service`.
 
 It is now possible to interact with requests and responses at the `router_service` level from `Rhai`. The functionality is very similar to that provided for interacting with existing services, for example `supergraph_service`. For instance, you may map requests and responses as follows:
 
-```
+```json
 fn router_service(service) {
     const request_callback = Fn("process_request");
     service.map_request(request_callback);
@@ -19,7 +19,7 @@ This makes it more complex to deal with Request and Response bodies with the tra
 
 This simple example, simply logs the bodies:
 
-```
+```json
 // Generate a log for each request at this stage
 fn process_request(request) {
     print(`body: ${request.body}`);
@@ -30,5 +30,14 @@ fn process_response(response) {
     print(`body: ${response.body}`);
 }
 ```
+
+This PR also introduces two new Rhai functions:
+
+```json
+json_encode(Object)
+json_decode(String) -> Object
+
+```
+Which will respectively encode a `Rhai` Object or decode a JSON string into a `Rhai` Object. These functions may be helpful when dealing with String bodies which represent encoded JSON objects.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3234
