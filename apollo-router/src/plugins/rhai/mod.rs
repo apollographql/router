@@ -9,7 +9,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::future::ready;
 use futures::stream::once;
