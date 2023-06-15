@@ -41,8 +41,8 @@ async fn test_metrics_reloading() -> Result<(), BoxError> {
         router.assert_reloaded().await;
     }
 
-    router.assert_metrics_contains(r#"apollo_router_cache_hit_count{kind="query planner",service_name="apollo-router",storage="memory"} 4"#, None).await;
-    router.assert_metrics_contains(r#"apollo_router_cache_miss_count{kind="query planner",service_name="apollo-router",storage="memory"} 2"#, None).await;
+    router.assert_metrics_contains(r#"apollo_router_cache_hit_count_total{kind="query planner",service_name="apollo-router",storage="memory",otel_scope_name="apollo/router",otel_scope_version=""} 4"#, None).await;
+    router.assert_metrics_contains(r#"apollo_router_cache_miss_count_total{kind="query planner",service_name="apollo-router",storage="memory",otel_scope_name="apollo/router",otel_scope_version=""} 2"#, None).await;
     router
         .assert_metrics_contains(r#"apollo_router_cache_hit_time"#, None)
         .await;
