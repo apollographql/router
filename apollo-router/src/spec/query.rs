@@ -69,6 +69,11 @@ pub(crate) struct Query {
     pub(crate) subselections: HashMap<SubSelection, Query>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) filtered_query: Option<Arc<Query>>,
+    /// Validation errors, used for comparison with the JS implementation.
+    ///
+    /// XXX(@goto-bus-stop): Remove when only Rust validation is used
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    validation_error: Option<SpecError>,
 }
 
 #[derive(Debug, Derivative, Default)]
@@ -307,6 +312,7 @@ impl Query {
             operations,
             subselections: HashMap::new(),
             filtered_query: None,
+            validation_error: None,
         })
     }
 
@@ -320,18 +326,14 @@ impl Query {
         let compiler_guard = compiler.lock().await;
         let (fragments, operations) = Self::extract_query_information(&compiler_guard, id, schema)?;
 
-        match configuration.experimental_graphql_validation {
-            GraphQLValidation::Legacy => {}
+        let validation_error = match configuration.experimental_graphql_validation {
+            GraphQLValidation::Legacy => None,
             GraphQLValidation::New => {
                 Self::validate_query(&compiler_guard, id)?;
+                None
             }
-            GraphQLValidation::Both => {
-                if let Err(err) = Self::validate_query(&compiler_guard, id) {
-                    // TODO(@goto-bus-stop) store a flag on `Query {}` so we can compare w/ query
-                    // planner errors
-                }
-            }
-        }
+            GraphQLValidation::Both => Self::validate_query(&compiler_guard, id).err(),
+        };
 
         drop(compiler_guard);
 
@@ -342,6 +344,7 @@ impl Query {
             operations,
             subselections: HashMap::new(),
             filtered_query: None,
+            validation_error,
         })
     }
 
@@ -1097,6 +1100,10 @@ impl Query {
             .selection_set
             .iter()
             .any(|selection| selection.contains_error_path(&path.0, &self.fragments))
+    }
+
+    pub(crate) fn has_errors(&self) -> bool {
+        self.validation_error.is_some()
     }
 }
 
