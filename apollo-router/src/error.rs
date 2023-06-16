@@ -499,6 +499,15 @@ pub(crate) struct ValidationErrors {
     pub(crate) errors: Vec<apollo_compiler::ApolloDiagnostic>,
 }
 
+impl std::fmt::Display for ValidationErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for error in &self.errors {
+            writeln!(f, "{}", error.data)?;
+        }
+        Ok(())
+    }
+}
+
 impl ValidationErrors {
     #[allow(clippy::needless_return)]
     pub(crate) fn print(&self) {
@@ -516,8 +525,8 @@ impl ValidationErrors {
             });
         } else {
             // Best effort to display errors
-            self.errors.iter().for_each(|r| {
-                println!("{r:#?}");
+            self.errors.iter().for_each(|diag| {
+                println!("{}", diag.data);
             });
         };
     }

@@ -24,6 +24,7 @@ use tracing::level_filters::LevelFilter;
 
 use crate::configuration::GraphQLValidation;
 use crate::error::FetchError;
+use crate::error::ValidationErrors;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -356,17 +357,10 @@ impl Query {
             return Ok(());
         }
 
-        for d in &errors {
-            eprintln!("{d}")
-        }
+        let errors = ValidationErrors { errors };
+        errors.print();
 
-        let errors = errors
-            .into_iter()
-            .map(|err| err.data.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-        failfast_debug!("validation error(s): {}", errors);
-        return Err(SpecError::ValidationError(errors));
+        return Err(SpecError::ValidationError(errors.to_string()));
     }
 
     fn extract_query_information(
