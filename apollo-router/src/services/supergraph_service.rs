@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 //! Implements the router phase of the request lifecycle.
 
 use std::sync::Arc;
@@ -41,10 +39,10 @@ use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::services::query_planner;
 use crate::services::supergraph;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
-use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
@@ -279,7 +277,7 @@ async fn plan_query(
 
     planning
         .call(
-            QueryPlannerRequest::builder()
+            query_planner::CachingRequest::builder()
                 .query(query_str)
                 .and_operation_name(operation_name)
                 .compiler(compiler)
@@ -351,8 +349,9 @@ impl PluggableSupergraphServiceBuilder {
         let schema = self.planner.schema();
         let query_planner_service = CachingQueryPlanner::new(
             self.planner,
-            schema.schema_id.clone(),
-            &configuration.supergraph.query_planning,
+            schema.clone(),
+            &configuration,
+            IndexMap::new(),
         )
         .await;
 

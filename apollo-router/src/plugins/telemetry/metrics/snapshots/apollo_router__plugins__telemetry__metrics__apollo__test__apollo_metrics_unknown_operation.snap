@@ -39,6 +39,6 @@ expression: results
         "referenced_fields_by_type": {}
       }
     },
-    "operation_count_by_type": null
+    "licensed_operation_count_by_type": null
   }
 ]

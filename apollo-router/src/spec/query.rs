@@ -38,6 +38,9 @@ use crate::spec::Selection;
 use crate::spec::SpecError;
 use crate::Configuration;
 
+pub(crate) mod transform;
+pub(crate) mod traverse;
+
 pub(crate) const TYPENAME: &str = "__typename";
 pub(crate) const QUERY_EXECUTABLE: &str = "query";
 
@@ -55,6 +58,8 @@ pub(crate) struct Query {
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<SubSelection, Query>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) filtered_query: Option<Arc<Query>>,
 }
 
 #[derive(Debug, Derivative, Default)]
@@ -292,6 +297,7 @@ impl Query {
             fragments,
             operations,
             subselections: HashMap::new(),
+            filtered_query: None,
         })
     }
 
@@ -311,6 +317,7 @@ impl Query {
             fragments,
             operations,
             subselections: HashMap::new(),
+            filtered_query: None,
         })
     }
 

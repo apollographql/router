@@ -1,5 +1,4 @@
 //! Tracing configuration for apollo telemetry.
-// With regards to ELv2 licensing, this entire file is license key functionality
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use serde::Serialize;
