@@ -313,6 +313,7 @@ impl IntegrationTest {
             .expect("must be able to write config");
     }
 
+    #[allow(dead_code)]
     pub fn run_query(&self) -> impl std::future::Future<Output = (String, reqwest::Response)> {
         assert!(
             self.router.is_some(),
