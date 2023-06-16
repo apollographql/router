@@ -501,8 +501,12 @@ pub(crate) struct ValidationErrors {
 
 impl std::fmt::Display for ValidationErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for error in &self.errors {
-            writeln!(f, "{}", error.data)?;
+        let mut errors = self.errors.iter();
+        if let Some(error) = errors.next() {
+            write!(f, "{}", error.data)?;
+        }
+        for error in errors {
+            write!(f, "\n{}", error.data)?;
         }
         Ok(())
     }
