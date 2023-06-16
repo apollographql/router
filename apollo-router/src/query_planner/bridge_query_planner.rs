@@ -456,16 +456,6 @@ mod tests {
 
         match err {
             QueryPlannerError::SpecError(spec_error) => {
-                // TODO(@goto-bus-stop): it's not useful to do this here right? should be part of
-                // SpecError maybe?
-                let usage_reporting = UsageReporting {
-                    stats_report_key: spec_error.get_error_key().to_string(),
-                    referenced_fields_by_type: HashMap::new(),
-                };
-
-                insta::with_settings!({sort_maps => true}, {
-                    insta::assert_json_snapshot!("plan_invalid_query_usage_reporting", usage_reporting);
-                });
                 insta::assert_debug_snapshot!("plan_invalid_query_errors", spec_error);
             }
             _ => {
