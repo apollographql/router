@@ -435,17 +435,3 @@ If your router customization needs to do any of these, you can instead use [exte
 The Apollo Router requires that its Rhai engine implements the [sync feature](https://rhai.rs/book/start/features.html) to guarantee data integrity within the router's multi-threading execution environment. This means that [shared values](https://rhai.rs/book/language/fn-closure.html?highlight=deadlock#data-races-in-sync-builds-can-become-deadlocks) within Rhai might cause a deadlock.
 
 This is particularly risky when using closures within callbacks while referencing external data. Take particular care to avoid this kind of situation by making copies of data when required. The [examples/surrogate-cache-key directory](https://github.com/apollographql/router/tree/main/examples/surrogate-cache-key) contains an example of this, where "closing over" `response.headers` would cause a deadlock. To avoid this, a local copy of the required data is obtained and used in the closure.
-
-## Debugging
-
-### Understanding errors
-
-If there is a syntax error in a Rhai script, the router will log an error message at startup mentioning the `apollo.rhai` plugin. The line number in the error message describes where the error was _detected_, not where the error is present. For example, if you're missing a semicolon at the end of line 10, the error will mention line 11 (once Rhai realizes the mistake).
-
-### Syntax highlighting
-
-Syntax highlighting can make it easier to spot errors in a script. We recommend using the online [Rhai playground](https://rhai.rs/playground/stable/) or using VS Code with the [Rhai extension](https://marketplace.visualstudio.com/items?itemName=rhaiscript.vscode-rhai).
-
-### Logging
-
-For tracking down runtime errors, insert [logging](/docs/router/customizations/rhai-api#logging) statements to narrow down the issue.
