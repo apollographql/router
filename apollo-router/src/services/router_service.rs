@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 //! Implements the router phase of the request lifecycle.
 
 use std::sync::Arc;
@@ -33,12 +31,14 @@ use tracing::Instrument;
 
 use super::layers::apq::APQLayer;
 use super::layers::content_negociation;
+use super::layers::query_analysis::QueryAnalysisLayer;
 use super::layers::static_page::StaticPageLayer;
 use super::new_service::ServiceFactory;
 use super::router;
 use super::router::ClientRequestAccepts;
 use super::supergraph;
 use super::HasPlugins;
+use super::HasSchema;
 #[cfg(test)]
 use super::SupergraphCreator;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
@@ -65,16 +65,25 @@ where
 {
     supergraph_creator: Arc<SF>,
     apq_layer: APQLayer,
+    query_analysis_layer: QueryAnalysisLayer,
+    experimental_http_max_request_bytes: usize,
 }
 
 impl<SF> RouterService<SF>
 where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
-    pub(crate) fn new(supergraph_creator: Arc<SF>, apq_layer: APQLayer) -> Self {
+    pub(crate) fn new(
+        supergraph_creator: Arc<SF>,
+        apq_layer: APQLayer,
+        query_analysis_layer: QueryAnalysisLayer,
+        experimental_http_max_request_bytes: usize,
+    ) -> Self {
         RouterService {
             supergraph_creator,
             apq_layer,
+            query_analysis_layer,
+            experimental_http_max_request_bytes,
         }
     }
 }
@@ -103,8 +112,9 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     });
 
     RouterCreator::new(
+        QueryAnalysisLayer::new(supergraph_service.schema(), Arc::clone(&configuration)).await,
         Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
-        &configuration,
+        configuration,
     )
     .await
     .make()
@@ -143,8 +153,9 @@ pub(crate) async fn empty() -> impl Service<
         .returning(MockSupergraphService::new);
 
     RouterCreator::new(
+        QueryAnalysisLayer::new(supergraph_service.schema(), Default::default()).await,
         Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
-        &Configuration::default(),
+        Default::default(),
     )
     .await
     .make()
@@ -176,9 +187,12 @@ where
 
         let supergraph_creator = self.supergraph_creator.clone();
         let apq = self.apq_layer.clone();
+        let query_analysis = self.query_analysis_layer.clone();
+        let experimental_http_max_request_bytes = self.experimental_http_max_request_bytes;
 
         let fut = async move {
-            let graphql_request: Result<graphql::Request, (&str, String)> = if parts.method
+            let graphql_request: Result<graphql::Request, (StatusCode, &str, String)> = if parts
+                .method
                 == Method::GET
             {
                 parts
@@ -187,32 +201,68 @@ where
                     .map(|q| {
                         graphql::Request::from_urlencoded_query(q.to_string()).map_err(|e| {
                             (
+                                StatusCode::BAD_REQUEST,
                                 "failed to decode a valid GraphQL request from path",
                                 format!("failed to decode a valid GraphQL request from path {e}"),
                             )
                         })
                     })
                     .unwrap_or_else(|| {
-                        Err(("There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.", "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.".to_string()))
+                        Err((
+                            StatusCode::BAD_REQUEST,
+                            "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.", 
+                            "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.".to_string()
+                        ))
                     })
             } else {
-                hyper::body::to_bytes(body)
-                    .instrument(tracing::debug_span!("receive_body"))
-                    .await
-                    .map_err(|e| {
-                        (
-                            "failed to get the request body",
-                            format!("failed to get the request body: {e}"),
-                        )
-                    })
-                    .and_then(|bytes| {
-                        graphql::Request::deserialize_from_bytes(&bytes).map_err(|err| {
-                            (
-                                "failed to deserialize the request body into JSON",
-                                format!("failed to deserialize the request body into JSON: {err}"),
-                            )
+                // FIXME: use a try block when available: https://github.com/rust-lang/rust/issues/31436
+                let content_length = (|| {
+                    parts
+                        .headers
+                        .get(http::header::CONTENT_LENGTH)?
+                        .to_str()
+                        .ok()?
+                        .parse()
+                        .ok()
+                })();
+                if content_length.unwrap_or(0) > experimental_http_max_request_bytes {
+                    Err((
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        "payload too large for the `experimental_http_max_request_bytes` configuration",
+                        "payload too large".to_string(),
+                    ))
+                } else {
+                    let body = http_body::Limited::new(body, experimental_http_max_request_bytes);
+                    hyper::body::to_bytes(body)
+                        .instrument(tracing::debug_span!("receive_body"))
+                        .await
+                        .map_err(|e| {
+                            if e.is::<http_body::LengthLimitError>() {
+                                (
+                                    StatusCode::PAYLOAD_TOO_LARGE,
+                                    "payload too large for the `experimental_http_max_request_bytes` configuration",
+                                    "payload too large".to_string(),
+                                )
+                            } else {
+                                (
+                                    StatusCode::BAD_REQUEST,
+                                    "failed to get the request body",
+                                    format!("failed to get the request body: {e}"),
+                                )
+                            }
                         })
-                    })
+                        .and_then(|bytes| {
+                            graphql::Request::deserialize_from_bytes(&bytes).map_err(|err| {
+                                (
+                                    StatusCode::BAD_REQUEST,
+                                    "failed to deserialize the request body into JSON",
+                                    format!(
+                                        "failed to deserialize the request body into JSON: {err}"
+                                    ),
+                                )
+                            })
+                        })
+                }
             };
 
             match graphql_request {
@@ -220,39 +270,17 @@ where
                     let request = SupergraphRequest {
                         supergraph_request: http::Request::from_parts(parts, graphql_request),
                         context,
+                        compiler: None,
                     };
 
                     let request_res = apq.supergraph_request(request).await;
-
-                    let SupergraphResponse { response, context } =
-                        match request_res.and_then(|request| {
-                            let query = request.supergraph_request.body().query.as_ref();
-
-                            if query.is_none() || query.unwrap().trim().is_empty() {
-                                let errors = vec![crate::error::Error::builder()
-                                    .message("Must provide query string.".to_string())
-                                    .extension_code("MISSING_QUERY_STRING")
-                                    .build()];
-                                tracing::error!(
-                                    monotonic_counter.apollo_router_http_requests_total = 1u64,
-                                    status = %StatusCode::BAD_REQUEST.as_u16(),
-                                    error = "Must provide query string",
-                                    "Must provide query string"
-                                );
-
-                                Err(SupergraphResponse::builder()
-                                    .errors(errors)
-                                    .status_code(StatusCode::BAD_REQUEST)
-                                    .context(request.context)
-                                    .build()
-                                    .expect("response is valid"))
-                            } else {
-                                Ok(request)
-                            }
-                        }) {
+                    let SupergraphResponse { response, context } = match request_res {
+                        Err(response) => response,
+                        Ok(request) => match query_analysis.supergraph_request(request).await {
                             Err(response) => response,
                             Ok(request) => supergraph_creator.create().oneshot(request).await?,
-                        };
+                        },
+                    };
 
                     let ClientRequestAccepts {
                         wildcard: accepts_wildcard,
@@ -377,11 +405,10 @@ where
                         }
                     }
                 }
-                Err((error, extension_details)) => {
-                    // BAD REQUEST
+                Err((status_code, error, extension_details)) => {
                     ::tracing::error!(
                         monotonic_counter.apollo_router_http_requests_total = 1u64,
-                        status = %400,
+                        status = %status_code.as_u16(),
                         error = %error,
                         %error
                     );
@@ -394,7 +421,7 @@ where
                                 .extension("details", extension_details)
                                 .build(),
                         )
-                        .status_code(StatusCode::BAD_REQUEST)
+                        .status_code(status_code)
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                         .context(context)
                         .build()
@@ -422,11 +449,19 @@ where
     supergraph_creator: Arc<SF>,
     static_page: StaticPageLayer,
     apq_layer: APQLayer,
+    query_analysis_layer: QueryAnalysisLayer,
+    experimental_http_max_request_bytes: usize,
 }
 
 impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
 where
-    SF: HasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
+    SF: HasSchema
+        + HasPlugins
+        + ServiceFactory<supergraph::Request>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     <SF as ServiceFactory<supergraph::Request>>::Service:
         Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
     <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
@@ -440,7 +475,13 @@ where
 
 impl<SF> RouterFactory for RouterCreator<SF>
 where
-    SF: HasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
+    SF: HasSchema
+        + HasPlugins
+        + ServiceFactory<supergraph::Request>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     <SF as ServiceFactory<supergraph::Request>>::Service:
         Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
     <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
@@ -464,14 +505,24 @@ where
 
 impl<SF> RouterCreator<SF>
 where
-    SF: HasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
+    SF: HasSchema
+        + HasPlugins
+        + ServiceFactory<supergraph::Request>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     <SF as ServiceFactory<supergraph::Request>>::Service:
         Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
     <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
         Send,
 {
-    pub(crate) async fn new(supergraph_creator: Arc<SF>, configuration: &Configuration) -> Self {
-        let static_page = StaticPageLayer::new(configuration);
+    pub(crate) async fn new(
+        query_analysis_layer: QueryAnalysisLayer,
+        supergraph_creator: Arc<SF>,
+        configuration: Arc<Configuration>,
+    ) -> Self {
+        let static_page = StaticPageLayer::new(&configuration);
         let apq_layer = if configuration.apq.enabled {
             APQLayer::with_cache(
                 DeduplicatingCache::from_configuration(&configuration.apq.router.cache, "APQ")
@@ -485,6 +536,10 @@ where
             supergraph_creator,
             static_page,
             apq_layer,
+            query_analysis_layer,
+            experimental_http_max_request_bytes: configuration
+                .preview_operation_limits
+                .experimental_http_max_request_bytes,
         }
     }
 
@@ -499,6 +554,8 @@ where
         let router_service = content_negociation::RouterLayer::default().layer(RouterService::new(
             self.supergraph_creator.clone(),
             self.apq_layer.clone(),
+            self.query_analysis_layer.clone(),
+            self.experimental_http_max_request_bytes,
         ));
 
         ServiceBuilder::new()
@@ -689,5 +746,51 @@ mod tests {
         let actual_error = response.errors[0].message.clone();
         assert_eq!(expected_error, actual_error);
         assert!(response.errors[0].extensions.contains_key("code"));
+    }
+
+    #[tokio::test]
+    async fn test_experimental_http_max_request_bytes() {
+        /// Size of the JSON serialization of the request created by `fn canned_new`
+        /// in `apollo-router/src/services/supergraph.rs`
+        const CANNED_REQUEST_LEN: usize = 391;
+
+        async fn with_config(experimental_http_max_request_bytes: usize) -> router::Response {
+            let http_request = supergraph::Request::canned_builder()
+                .build()
+                .unwrap()
+                .supergraph_request
+                .map(|body| {
+                    let json_bytes = serde_json::to_vec(&body).unwrap();
+                    assert_eq!(
+                        json_bytes.len(),
+                        CANNED_REQUEST_LEN,
+                        "The request generated by `fn canned_new` \
+                         in `apollo-router/src/services/supergraph.rs` has changed. \
+                         Please update `CANNED_REQUEST_LEN` accordingly."
+                    );
+                    hyper::Body::from(json_bytes)
+                });
+            let config = serde_json::json!({
+                "preview_operation_limits": {
+                    "experimental_http_max_request_bytes": experimental_http_max_request_bytes
+                }
+            });
+            crate::TestHarness::builder()
+                .configuration_json(config)
+                .unwrap()
+                .build_router()
+                .await
+                .unwrap()
+                .oneshot(router::Request::from(http_request))
+                .await
+                .unwrap()
+        }
+        // Send a request just at (under) the limit
+        let response = with_config(CANNED_REQUEST_LEN).await.response;
+        assert_eq!(response.status(), http::StatusCode::OK);
+
+        // Send a request just over the limit
+        let response = with_config(CANNED_REQUEST_LEN - 1).await.response;
+        assert_eq!(response.status(), http::StatusCode::PAYLOAD_TOO_LARGE);
     }
 }

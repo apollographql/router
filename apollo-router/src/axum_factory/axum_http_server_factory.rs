@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::pin::Pin;
 use std::sync::atomic::AtomicU64;
@@ -58,8 +56,8 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
-use crate::uplink::entitlement::EntitlementState;
-use crate::uplink::entitlement::ENTITLEMENT_EXPIRED_SHORT_MESSAGE;
+use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -89,7 +87,7 @@ pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
-    entitlement: EntitlementState,
+    license: LicenseState,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -132,7 +130,7 @@ where
         endpoints
             .remove(&configuration.supergraph.listen)
             .unwrap_or_default(),
-        entitlement,
+        license,
     )?;
     let mut extra_endpoints = extra_endpoints(endpoints);
 
@@ -159,19 +157,15 @@ impl HttpServerFactory for AxumHttpServerFactory {
         mut main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
-        entitlement: EntitlementState,
+        license: LicenseState,
         all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self::Future
     where
         RF: RouterFactory,
     {
         Box::pin(async move {
-            let all_routers = make_axum_router(
-                service_factory,
-                &configuration,
-                extra_endpoints,
-                entitlement,
-            )?;
+            let all_routers =
+                make_axum_router(service_factory, &configuration, extra_endpoints, license)?;
 
             // serve main router
 
@@ -312,7 +306,7 @@ fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
-    entitlement: EntitlementState,
+    license: LicenseState,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -324,10 +318,10 @@ where
     let main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
         .layer(middleware::from_fn_with_state(
-            (entitlement, Instant::now(), Arc::new(AtomicU64::new(0))),
-            entitlement_handler,
+            (license, Instant::now(), Arc::new(AtomicU64::new(0))),
+            license_handler,
         ))
-        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { entitlement }))
+        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license }))
         .layer(Extension(service_factory))
         .layer(cors);
 
@@ -339,22 +333,22 @@ where
     Ok(ListenAddrAndRouter(listener, route))
 }
 
-async fn entitlement_handler<B>(
-    State((entitlement, start, delta)): State<(EntitlementState, Instant, Arc<AtomicU64>)>,
+async fn license_handler<B>(
+    State((license, start, delta)): State<(LicenseState, Instant, Arc<AtomicU64>)>,
     request: Request<B>,
     next: Next<B>,
 ) -> Response {
     if matches!(
-        entitlement,
-        EntitlementState::EntitledHalt | EntitlementState::EntitledWarn
+        license,
+        LicenseState::LicensedHalt | LicenseState::LicensedWarn
     ) {
         ::tracing::error!(
            monotonic_counter.apollo_router_http_requests_total = 1u64,
            status = %500u16,
-           error = ENTITLEMENT_EXPIRED_SHORT_MESSAGE,
+           error = LICENSE_EXPIRED_SHORT_MESSAGE,
         );
 
-        // This will rate limit logs about entitlement to 1 a second.
+        // This will rate limit logs about license to 1 a second.
         // The way it works is storing the delta in seconds from a starting instant.
         // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successfull log.
         // If not successful some other thread will have logged.
@@ -370,11 +364,11 @@ async fn entitlement_handler<B>(
                 )
                 .is_ok()
         {
-            ::tracing::error!("{}", ENTITLEMENT_EXPIRED_SHORT_MESSAGE);
+            ::tracing::error!("{}", LICENSE_EXPIRED_SHORT_MESSAGE);
         }
     }
 
-    if matches!(entitlement, EntitlementState::EntitledHalt) {
+    if matches!(license, LicenseState::LicensedHalt) {
         http::Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .body(UnsyncBoxBody::default())

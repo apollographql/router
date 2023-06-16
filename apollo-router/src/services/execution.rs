@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 #![allow(missing_docs)] // FIXME
 
 use std::sync::Arc;
@@ -8,7 +6,6 @@ use static_assertions::assert_impl_all;
 use tower::BoxError;
 
 use crate::graphql;
-use crate::spec::Schema;
 use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
@@ -60,13 +57,12 @@ impl Request {
 
     #[builder(visibility = "pub(crate)")]
     #[allow(clippy::needless_lifetimes)] // needed by buildstructor-generated code
-    async fn internal_new<'a>(
+    async fn internal_new(
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
-        schema: &'a Schema,
         context: Context,
     ) -> Request {
-        let compiler = query_plan.query.compiler(Some(schema)).await.snapshot();
+        let compiler = query_plan.query.compiler().await.snapshot();
         Self {
             supergraph_request,
             query_plan,

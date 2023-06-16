@@ -68,6 +68,7 @@ use crate::query_planner::BridgeQueryPlanner;
 use crate::router_factory::create_plugins;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
@@ -75,6 +76,7 @@ use crate::services::router;
 use crate::services::router_service;
 use crate::services::router_service::RouterCreator;
 use crate::services::supergraph;
+use crate::services::HasSchema;
 use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
@@ -82,7 +84,7 @@ use crate::services::SupergraphResponse;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
-use crate::uplink::entitlement::EntitlementState;
+use crate::uplink::license_enforcement::LicenseState;
 use crate::ApolloRouterError;
 use crate::Configuration;
 use crate::Context;
@@ -214,7 +216,7 @@ async fn init(
             None,
             vec![],
             MultiMap::new(),
-            EntitlementState::Unentitled,
+            LicenseState::Unlicensed,
             all_connections_stopped_sender,
         )
         .await
@@ -271,7 +273,7 @@ pub(super) async fn init_with_config(
             None,
             vec![],
             web_endpoints,
-            EntitlementState::Unentitled,
+            LicenseState::Unlicensed,
             all_connections_stopped_sender,
         )
         .await?;
@@ -337,7 +339,7 @@ async fn init_unix(
             None,
             vec![],
             MultiMap::new(),
-            EntitlementState::Unentitled,
+            LicenseState::Unlicensed,
             all_connections_stopped_sender,
         )
         .await
@@ -1769,7 +1771,7 @@ async fn it_supports_server_restart() {
             None,
             vec![],
             MultiMap::new(),
-            EntitlementState::default(),
+            LicenseState::default(),
             all_connections_stopped_sender,
         )
         .await
@@ -1798,7 +1800,7 @@ async fn it_supports_server_restart() {
             supergraph_service_factory,
             new_configuration,
             MultiMap::new(),
-            EntitlementState::default(),
+            LicenseState::default(),
         )
         .await
         .unwrap();
@@ -2314,10 +2316,13 @@ async fn test_supergraph_timeout() {
     }
     let supergraph_creator = builder.build().await.unwrap();
 
-    let service = RouterCreator::new(Arc::new(supergraph_creator), &conf)
-        .await
-        .make();
-
+    let service = RouterCreator::new(
+        QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&conf)).await,
+        Arc::new(supergraph_creator),
+        Arc::clone(&conf),
+    )
+    .await
+    .make();
     // keep the server handle around otherwise it will immediately shutdown
     let (_server, client) = init_with_config(service, conf.clone(), MultiMap::new())
         .await

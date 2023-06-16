@@ -1,4 +1,4 @@
-query EntitlementQuery($apiKey: String!, $graph_ref: String!, $ifAfterId: ID) {
+query LicenseQuery($apiKey: String!, $graph_ref: String!, $ifAfterId: ID) {
 
     routerEntitlements(ifAfterId: $ifAfterId, apiKey: $apiKey, ref: $graph_ref) {
         __typename
