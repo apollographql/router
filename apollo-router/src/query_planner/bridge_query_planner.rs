@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ApolloCompiler;
+use apollo_compiler::HirDatabase;
 use apollo_compiler::InputDatabase;
 use futures::future::BoxFuture;
 use router_bridge::planner::IncrementalDeliverySupport;
@@ -136,19 +137,45 @@ impl BridgeQueryPlanner {
         compiler: Arc<Mutex<ApolloCompiler>>,
     ) -> Result<Query, QueryPlannerError> {
         let (query, operation_name) = key;
-        let schema = self.schema.clone();
-        let configuration = self.configuration.clone();
-
-        let file_id = compiler
-            .lock()
-            .await
+        let compiler_guard = compiler.lock().await;
+        let file_id = compiler_guard
             .db
             .source_file(QUERY_EXECUTABLE.into())
-            .ok_or(QueryPlannerError::SpecError(SpecError::ParsingError(
-                "missing input file for query".to_string(),
-            )))?;
-        let mut query = Query::parse_with_compiler(query, compiler, file_id, &schema).await?;
-        crate::spec::operation_limits::check(&configuration, &mut query, operation_name).await?;
+            .ok_or_else(|| {
+                QueryPlannerError::SpecError(SpecError::ParsingError(
+                    "missing input file for query".to_string(),
+                ))
+            })?;
+        let kind = compiler_guard
+            .db
+            .find_operation(file_id, operation_name.clone())
+            .ok_or_else(|| {
+                QueryPlannerError::SpecError(SpecError::ParsingError(
+                    "missing operation definition".to_string(),
+                ))
+            })?
+            .operation_ty()
+            .into();
+        let (fragments, operations) =
+            Query::extract_query_information(&compiler_guard, file_id, &self.schema)?;
+        let subselections = crate::spec::query::subselections::collect_subselections(
+            &self.configuration,
+            &self.schema,
+            &compiler_guard,
+            file_id,
+            kind,
+        )?;
+        drop(compiler_guard);
+        let mut query = Query {
+            string: query,
+            compiler,
+            fragments,
+            operations,
+            filtered_query: None,
+            subselections,
+        };
+        crate::spec::operation_limits::check(&self.configuration, &mut query, operation_name)
+            .await?;
         Ok(query)
     }
 
@@ -173,8 +200,7 @@ impl BridgeQueryPlanner {
         original_query: String,
         filtered_query: String,
         operation: Option<String>,
-
-        mut selections: Query,
+        selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let planner_result = self
             .planner
@@ -205,9 +231,6 @@ impl BridgeQueryPlanner {
                     },
                 mut usage_reporting,
             } => {
-                let subselections = node.parse_subselections(&self.schema)?;
-                selections.subselections = subselections;
-
                 if let Some(sig) = operation_signature {
                     usage_reporting.stats_report_key = sig;
                 }
@@ -696,7 +719,12 @@ mod tests {
                         if let Some(subselection) = deferred.subselection.clone() {
                             let path = deferred.query_path.clone();
                             let key = SubSelection { path, subselection };
-                            assert!(subselections.contains_key(&key));
+                            assert!(
+                                subselections.contains_key(&key),
+                                "Missing key: {} {}",
+                                key.path,
+                                key.subselection
+                            );
                         }
                         if let Some(node) = &deferred.node {
                             check_query_plan_coverage(node, &deferred.query_path, subselections)
@@ -727,6 +755,7 @@ mod tests {
             }
         }
 
+        dbg!(query);
         let result = plan(EXAMPLE_SCHEMA, query, query, None).await.unwrap();
         if let QueryPlannerContent::Plan { plan, .. } = result {
             check_query_plan_coverage(&plan.root, &Path::empty(), &plan.query.subselections);

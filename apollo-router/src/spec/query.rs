@@ -38,6 +38,7 @@ use crate::spec::Selection;
 use crate::spec::SpecError;
 use crate::Configuration;
 
+pub(crate) mod subselections;
 pub(crate) mod transform;
 pub(crate) mod traverse;
 
@@ -53,7 +54,7 @@ pub(crate) struct Query {
     #[serde(skip)]
     pub(crate) compiler: Arc<Mutex<ApolloCompiler>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    fragments: Fragments,
+    pub(crate) fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
@@ -303,27 +304,7 @@ impl Query {
         })
     }
 
-    pub(crate) async fn parse_with_compiler(
-        query: String,
-        compiler: Arc<Mutex<ApolloCompiler>>,
-        id: FileId,
-        schema: &Schema,
-    ) -> Result<Self, SpecError> {
-        let compiler_guard = compiler.lock().await;
-        let (fragments, operations) = Self::extract_query_information(&compiler_guard, id, schema)?;
-        drop(compiler_guard);
-
-        Ok(Query {
-            string: query,
-            compiler,
-            fragments,
-            operations,
-            subselections: HashMap::new(),
-            filtered_query: None,
-        })
-    }
-
-    fn extract_query_information(
+    pub(crate) fn extract_query_information(
         compiler: &ApolloCompiler,
         id: FileId,
         schema: &Schema,
