@@ -319,9 +319,17 @@ impl Query {
         let compiler_guard = compiler.lock().await;
         let (fragments, operations) = Self::extract_query_information(&compiler_guard, id, schema)?;
 
-        // Bail out on validation errors, only if the input is expected to be valid
-        if configuration.experimental_graphql_validation != GraphQLValidation::Legacy {
-            Self::validate_query(&compiler_guard, id)?;
+        match configuration.experimental_graphql_validation {
+            GraphQLValidation::Legacy => {}
+            GraphQLValidation::New => {
+                Self::validate_query(&compiler_guard, id)?;
+            }
+            GraphQLValidation::Both => {
+                if let Err(err) = Self::validate_query(&compiler_guard, id) {
+                    // TODO(@goto-bus-stop) store a flag on `Query {}` so we can compare w/ query
+                    // planner errors
+                }
+            }
         }
 
         drop(compiler_guard);
