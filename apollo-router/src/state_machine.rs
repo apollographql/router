@@ -508,11 +508,8 @@ mod tests {
     use std::pin::Pin;
     use std::str::FromStr;
     use std::sync::Mutex;
-    use std::task::Context;
-    use std::task::Poll;
 
     use futures::channel::oneshot;
-    use futures::future::BoxFuture;
     use mockall::mock;
     use mockall::Sequence;
     use multimap::MultiMap;
@@ -529,8 +526,8 @@ mod tests {
     use crate::router_factory::RouterFactory;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::services::new_service::ServiceFactory;
+    use crate::services::router;
     use crate::services::RouterRequest;
-    use crate::services::RouterResponse;
 
     fn example_schema() -> String {
         include_str!("testdata/supergraph.graphql").to_owned()
@@ -1020,43 +1017,17 @@ mod tests {
         MyRouterFactory {}
 
         impl RouterFactory for MyRouterFactory {
-            type RouterService = MockMyRouter;
+            type RouterService = router::BoxService;
             type Future = <Self::RouterService as Service<RouterRequest>>::Future;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
         }
         impl ServiceFactory<RouterRequest> for MyRouterFactory {
-            type Service = MockMyRouter;
-            fn create(&self) -> MockMyRouter;
+            type Service = router::BoxService;
+            fn create(&self) -> router::BoxService;
         }
 
         impl Clone for MyRouterFactory {
             fn clone(&self) -> MockMyRouterFactory;
-        }
-    }
-
-    mock! {
-        #[derive(Debug)]
-        MyRouter {
-            fn poll_ready(&mut self) -> Poll<Result<(), BoxError>>;
-            fn service_call(&mut self, req: RouterRequest) -> <MockMyRouter as Service<RouterRequest>>::Future;
-        }
-
-        impl Clone for MyRouter {
-            fn clone(&self) -> MockMyRouter;
-        }
-    }
-
-    //mockall does not handle well the lifetime on Context
-    impl Service<RouterRequest> for MockMyRouter {
-        type Response = RouterResponse;
-        type Error = BoxError;
-        type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
-            self.poll_ready()
-        }
-        fn call(&mut self, req: RouterRequest) -> Self::Future {
-            self.service_call(req)
         }
     }
 

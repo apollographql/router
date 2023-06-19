@@ -36,10 +36,11 @@ use super::layers::static_page::StaticPageLayer;
 use super::new_service::ServiceFactory;
 use super::router;
 use super::router::ClientRequestAccepts;
+#[cfg(test)]
 use super::supergraph;
 use super::HasPlugins;
-use super::HasSchema;
 #[cfg(test)]
+use super::HasSchema;
 use super::SupergraphCreator;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::cache::DeduplicatingCache;
@@ -59,22 +60,16 @@ use crate::ListenAddr;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
-pub(crate) struct RouterService<SF>
-where
-    SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
-{
-    supergraph_creator: Arc<SF>,
+pub(crate) struct RouterService {
+    supergraph_creator: Arc<SupergraphCreator>,
     apq_layer: APQLayer,
     query_analysis_layer: QueryAnalysisLayer,
     experimental_http_max_request_bytes: usize,
 }
 
-impl<SF> RouterService<SF>
-where
-    SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
-{
+impl RouterService {
     pub(crate) fn new(
-        supergraph_creator: Arc<SF>,
+        supergraph_creator: Arc<SupergraphCreator>,
         apq_layer: APQLayer,
         query_analysis_layer: QueryAnalysisLayer,
         experimental_http_max_request_bytes: usize,
@@ -111,9 +106,16 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
         supergraph_service
     });
 
+    let (_, supergraph_creator) = crate::TestHarness::builder()
+        .configuration(configuration.clone())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed())
+        .build_common()
+        .await
+        .unwrap();
+
     RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_service.schema(), Arc::clone(&configuration)).await,
-        Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
+        QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
+        Arc::new(supergraph_creator),
         configuration,
     )
     .await
@@ -152,23 +154,23 @@ pub(crate) async fn empty() -> impl Service<
         .expect_clone()
         .returning(MockSupergraphService::new);
 
+    let (_, supergraph_creator) = crate::TestHarness::builder()
+        .configuration(Default::default())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed())
+        .build_common()
+        .await
+        .unwrap();
+
     RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_service.schema(), Default::default()).await,
-        Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
+        QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
+        Arc::new(supergraph_creator),
         Default::default(),
     )
     .await
     .make()
 }
 
-impl<SF> Service<RouterRequest> for RouterService<SF>
-where
-    SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
-    <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
-    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
-        Send,
-{
+impl Service<RouterRequest> for RouterService {
     type Response = RouterResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -442,54 +444,25 @@ fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
-pub(crate) struct RouterCreator<SF>
-where
-    SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
-{
-    supergraph_creator: Arc<SF>,
+pub(crate) struct RouterCreator {
+    supergraph_creator: Arc<SupergraphCreator>,
     static_page: StaticPageLayer,
     apq_layer: APQLayer,
     query_analysis_layer: QueryAnalysisLayer,
     experimental_http_max_request_bytes: usize,
 }
 
-impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
-where
-    SF: HasSchema
-        + HasPlugins
-        + ServiceFactory<supergraph::Request>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
-    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
-        Send,
-{
+impl ServiceFactory<router::Request> for RouterCreator {
     type Service = router::BoxService;
     fn create(&self) -> Self::Service {
         self.make().boxed()
     }
 }
 
-impl<SF> RouterFactory for RouterCreator<SF>
-where
-    SF: HasSchema
-        + HasPlugins
-        + ServiceFactory<supergraph::Request>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
-    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
-        Send,
-{
+impl RouterFactory for RouterCreator {
     type RouterService = router::BoxService;
 
-    type Future = <<RouterCreator<SF> as ServiceFactory<router::Request>>::Service as Service<
+    type Future = <<RouterCreator as ServiceFactory<router::Request>>::Service as Service<
         router::Request,
     >>::Future;
 
@@ -503,23 +476,10 @@ where
     }
 }
 
-impl<SF> RouterCreator<SF>
-where
-    SF: HasSchema
-        + HasPlugins
-        + ServiceFactory<supergraph::Request>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
-    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
-        Send,
-{
+impl RouterCreator {
     pub(crate) async fn new(
         query_analysis_layer: QueryAnalysisLayer,
-        supergraph_creator: Arc<SF>,
+        supergraph_creator: Arc<SupergraphCreator>,
         configuration: Arc<Configuration>,
     ) -> Self {
         let static_page = StaticPageLayer::new(&configuration);
@@ -570,7 +530,7 @@ where
     }
 }
 
-impl RouterCreator<crate::services::supergraph_service::SupergraphCreator> {
+impl RouterCreator {
     pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
         self.supergraph_creator.cache_keys(count).await
     }
