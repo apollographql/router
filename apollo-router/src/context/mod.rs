@@ -218,6 +218,12 @@ impl Context {
     pub(crate) fn busy_time(&self) -> Duration {
         self.busy_timer.lock().current()
     }
+
+    pub(crate) fn extend(&self, other: &Context) {
+        for kv in other.entries.iter() {
+            self.entries.insert(kv.key().clone(), kv.value().clone());
+        }
+    }
 }
 
 impl Default for Context {

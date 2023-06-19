@@ -1,4 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
@@ -22,8 +21,9 @@ use uuid::Uuid;
 use crate::configuration::generate_config_schema;
 use crate::executable::Opt;
 use crate::plugin::DynPlugin;
-use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
+use crate::router_factory::YamlRouterFactory;
+use crate::services::router_service::RouterCreator;
 use crate::spec::Schema;
 use crate::Configuration;
 
@@ -53,8 +53,8 @@ struct UsageReport {
     usage: Map<String, Value>,
 }
 
-impl<T: RouterSuperServiceFactory> OrbiterRouterSuperServiceFactory<T> {
-    pub(crate) fn new(delegate: T) -> OrbiterRouterSuperServiceFactory<T> {
+impl OrbiterRouterSuperServiceFactory {
+    pub(crate) fn new(delegate: YamlRouterFactory) -> OrbiterRouterSuperServiceFactory {
         OrbiterRouterSuperServiceFactory { delegate }
     }
 }
@@ -85,16 +85,13 @@ impl<T: RouterSuperServiceFactory> OrbiterRouterSuperServiceFactory<T> {
 /// }
 /// ```
 #[derive(Default)]
-pub(crate) struct OrbiterRouterSuperServiceFactory<T: RouterSuperServiceFactory> {
-    delegate: T,
+pub(crate) struct OrbiterRouterSuperServiceFactory {
+    delegate: YamlRouterFactory,
 }
 
 #[async_trait]
-impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory<T>
-where
-    T::RouterFactory: RouterFactory,
-{
-    type RouterFactory = T::RouterFactory;
+impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
+    type RouterFactory = RouterCreator;
 
     async fn create<'a>(
         &'a mut self,

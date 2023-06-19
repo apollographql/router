@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 #![allow(missing_docs)] // FIXME
 
 use bytes::Bytes;
@@ -75,6 +73,7 @@ impl TryFrom<supergraph::Request> for Request {
         let supergraph::Request {
             context,
             supergraph_request,
+            ..
         } = request;
 
         let (mut parts, request) = supergraph_request.into_parts();

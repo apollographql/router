@@ -27,10 +27,11 @@ use crate::services::SubgraphRequest;
 use crate::spec::Schema;
 
 /// GraphQL operation type.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub enum OperationKind {
+    #[default]
     Query,
     Mutation,
     Subscription,
@@ -58,12 +59,6 @@ impl OperationKind {
             OperationKind::Mutation => "mutation",
             OperationKind::Subscription => "subscription",
         }
-    }
-}
-
-impl Default for OperationKind {
-    fn default() -> Self {
-        OperationKind::Query
     }
 }
 
