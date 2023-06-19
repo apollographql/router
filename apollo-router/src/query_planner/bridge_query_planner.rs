@@ -628,15 +628,13 @@ mod tests {
         }}");
         s!("query Q { me {
             id
-            # Triple-nesting is buggy, this is a placeholder for now.
-            # See next commit.
-            # ... @defer {
+            ... @defer {
                 username
                 ... @defer { name {
                     first
                     ... @defer { last }
                 }}
-            # }
+            }
         }}");
         // Conditional
         s!("query Q($d1:Boolean!) { me {
