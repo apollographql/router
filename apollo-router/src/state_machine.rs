@@ -16,6 +16,10 @@ use Event::NoMoreLicense;
 use Event::NoMoreSchema;
 use Event::Reload;
 use Event::Shutdown;
+use State::Errored;
+use State::Running;
+use State::Startup;
+use State::Stopped;
 
 use super::http_server_factory::HttpServerFactory;
 use super::http_server_factory::HttpServerHandle;
@@ -36,10 +40,6 @@ use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
 use crate::ApolloRouterError::NoLicense;
-use State::Errored;
-use State::Running;
-use State::Startup;
-use State::Stopped;
 
 #[derive(Default, Clone)]
 pub(crate) struct ListenAddresses {
@@ -69,12 +69,12 @@ enum State<FA: RouterSuperServiceFactory> {
 }
 
 #[derive(Default)]
-pub(crate) struct ListenerState {
+pub(crate) struct LiveReadyState {
     pub(crate) live: bool,
     pub(crate) ready: bool,
 }
 
-pub(crate) static HEALTH_CHECK_STATE: Lazy<PLRwLock<ListenerState>> =
+pub(crate) static HEALTH_CHECK_STATE: Lazy<PLRwLock<LiveReadyState>> =
     Lazy::new(|| PLRwLock::new(Default::default()));
 
 impl<FA: RouterSuperServiceFactory> Debug for State<FA> {
@@ -504,7 +504,6 @@ where
                 let mut write_guard = HEALTH_CHECK_STATE.write();
                 // We are ready if we are Running
                 if matches!(state, State::Running { .. }) {
-                    println!("SETTING READY TRUE AGAIN");
                     write_guard.ready = true;
                 } else {
                     write_guard.ready = false;
