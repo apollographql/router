@@ -253,7 +253,7 @@ impl PlanNode {
                     if let Some(current_node) = &current.node {
                         current_node.collect_subselections(
                             schema,
-                            &initial_path.join(&current.query_path),
+                            &current.query_path,
                             kind,
                             subs,
                         )?;
