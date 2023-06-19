@@ -501,20 +501,20 @@ where
             // Note: Our state may not have changed, but since we marked ourselves as not ready
             // above, we still need to check.
             {
-            let mut write_guard = HEALTH_CHECK_STATE.write();
-            // We are ready if we are Running
-            if matches!(state, State::Running { .. }) {
-                println!("SETTING READY TRUE AGAIN");
-                write_guard.ready = true;
-            } else {
-                write_guard.ready = false;
-            }
-            // We are live if we are not Errored
-            if matches!(state, State::Errored(_)) {
-                write_guard.live = false;
-            } else {
-                write_guard.live = true;
-            }
+                let mut write_guard = HEALTH_CHECK_STATE.write();
+                // We are ready if we are Running
+                if matches!(state, State::Running { .. }) {
+                    println!("SETTING READY TRUE AGAIN");
+                    write_guard.ready = true;
+                } else {
+                    write_guard.ready = false;
+                }
+                // We are live if we are not Errored
+                if matches!(state, State::Errored(_)) {
+                    write_guard.live = false;
+                } else {
+                    write_guard.live = true;
+                }
             }
 
             // Update the shared state

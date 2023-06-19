@@ -56,9 +56,9 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
+use crate::state_machine::HEALTH_CHECK_STATE;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
-use crate::state_machine::HEALTH_CHECK_STATE;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
