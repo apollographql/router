@@ -73,10 +73,12 @@ impl BridgeQueryPlanner {
                 if configuration.experimental_graphql_validation == GraphQLValidation::Both {
                     let has_validation_errors = err.iter().any(|err| err.is_validation_error());
 
-                    assert!(
-                        has_validation_errors == schema.has_errors(),
-                        "query planner reported a validation error, but apollo-rs did not"
-                    );
+                    if has_validation_errors != schema.has_errors() {
+                        tracing::warn!(
+                            monotonic_counter.apollo_router_validation_false_negative = 1,
+                            "query planner reported a validation error, but apollo-rs did not"
+                        );
+                    }
                 }
 
                 return Err(err.into());
@@ -84,8 +86,8 @@ impl BridgeQueryPlanner {
         };
 
         if configuration.experimental_graphql_validation == GraphQLValidation::Both {
-            assert!(
-                !schema.has_errors(),
+            tracing::warn!(
+                monotonic_counter.apollo_router_validation_false_positive = 1,
                 "query planner did not report validation error, but apollo-rs did"
             );
         }
