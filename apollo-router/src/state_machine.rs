@@ -3,6 +3,8 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 
 use futures::prelude::*;
+use once_cell::sync::Lazy;
+use parking_lot::RwLock as PLRwLock;
 use tokio::sync::mpsc;
 #[cfg(test)]
 use tokio::sync::Notify;
@@ -23,10 +25,6 @@ use super::router::ApolloRouterError::{self};
 use super::router::Event::UpdateConfiguration;
 use super::router::Event::UpdateSchema;
 use super::router::Event::{self};
-use super::state_machine::State::Errored;
-use super::state_machine::State::Running;
-use super::state_machine::State::Startup;
-use super::state_machine::State::Stopped;
 use crate::configuration::Configuration;
 use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
@@ -38,6 +36,10 @@ use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
 use crate::ApolloRouterError::NoLicense;
+use State::Errored;
+use State::Running;
+use State::Startup;
+use State::Stopped;
 
 #[derive(Default, Clone)]
 pub(crate) struct ListenAddresses {
@@ -65,6 +67,15 @@ enum State<FA: RouterSuperServiceFactory> {
     Stopped,
     Errored(ApolloRouterError),
 }
+
+#[derive(Default)]
+pub(crate) struct ListenerState {
+    pub(crate) live: bool,
+    pub(crate) ready: bool,
+}
+
+pub(crate) static HEALTH_CHECK_STATE: Lazy<PLRwLock<ListenerState>> =
+    Lazy::new(|| PLRwLock::new(Default::default()));
 
 impl<FA: RouterSuperServiceFactory> Debug for State<FA> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -451,10 +462,18 @@ where
                 .expect("must have listen address guard"),
         };
 
+        // Mark ourselves as live at this point
+        HEALTH_CHECK_STATE.write().live = true;
+
         // Process all the events in turn until we get to error state or we run out of events.
         while let Some(event) = messages.next().await {
             let event_name = format!("{event:?}");
             let last_state = format!("{state:?}");
+            // Before we start processing the event, mark ourselves not ready. This will prevent
+            // k8s from using us until such a time as we mark ourselves ready again. That's a
+            // desirable characterstic during event processing.
+            HEALTH_CHECK_STATE.write().ready = false;
+
             state = match event {
                 UpdateConfiguration(configuration) => {
                     state
@@ -478,6 +497,27 @@ where
                 Shutdown => state.shutdown().await,
             };
 
+            // Now that we've finished processing our inputs, decide if we are ready or live
+            // Note: Our state may not have changed, but since we marked ourselves as not ready
+            // above, we still need to check.
+            {
+            let mut write_guard = HEALTH_CHECK_STATE.write();
+            // We are ready if we are Running
+            if matches!(state, State::Running { .. }) {
+                println!("SETTING READY TRUE AGAIN");
+                write_guard.ready = true;
+            } else {
+                write_guard.ready = false;
+            }
+            // We are live if we are not Errored
+            if matches!(state, State::Errored(_)) {
+                write_guard.live = false;
+            } else {
+                write_guard.live = true;
+            }
+            }
+
+            // Update the shared state
             #[cfg(test)]
             self.notify_updated.notify_one();
 

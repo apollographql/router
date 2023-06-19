@@ -58,6 +58,7 @@ use crate::router_factory::RouterFactory;
 use crate::services::router;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
+use crate::state_machine::HEALTH_CHECK_STATE;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -104,8 +105,33 @@ where
             Endpoint::from_router_service(
                 "/health".to_string(),
                 service_fn(move |req: router::Request| {
-                    let health = Health {
-                        status: HealthStatus::Up,
+                    let health = if let Some(query) = req.router_request.uri().query() {
+                        tracing::info!("query: {query:?}");
+                        let query_upper = query.to_ascii_uppercase();
+                        // Could be more precise, but sloppy match is fine for this use case
+                        if query_upper.starts_with("READY") {
+                            let status = if HEALTH_CHECK_STATE.read().ready {
+                                HealthStatus::Up
+                            } else {
+                                HealthStatus::Down
+                            };
+                            Health { status }
+                        } else if query_upper.starts_with("LIVE") {
+                            let status = if HEALTH_CHECK_STATE.read().live {
+                                HealthStatus::Up
+                            } else {
+                                HealthStatus::Down
+                            };
+                            Health { status }
+                        } else {
+                            Health {
+                                status: HealthStatus::Up,
+                            }
+                        }
+                    } else {
+                        Health {
+                            status: HealthStatus::Up,
+                        }
                     };
                     tracing::trace!(?health, request = ?req.router_request, "health check");
                     async move {
