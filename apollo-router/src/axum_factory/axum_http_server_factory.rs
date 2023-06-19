@@ -56,7 +56,7 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
-use crate::state_machine::HEALTH_CHECK_STATE;
+use crate::state_machine::LIVE_READY_STATE;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
@@ -110,14 +110,14 @@ where
                         let query_upper = query.to_ascii_uppercase();
                         // Could be more precise, but sloppy match is fine for this use case
                         if query_upper.starts_with("READY") {
-                            let status = if HEALTH_CHECK_STATE.read().ready {
+                            let status = if LIVE_READY_STATE.read().ready {
                                 HealthStatus::Up
                             } else {
                                 HealthStatus::Down
                             };
                             Health { status }
                         } else if query_upper.starts_with("LIVE") {
-                            let status = if HEALTH_CHECK_STATE.read().live {
+                            let status = if LIVE_READY_STATE.read().live {
                                 HealthStatus::Up
                             } else {
                                 HealthStatus::Down

@@ -74,7 +74,7 @@ pub(crate) struct LiveReadyState {
     pub(crate) ready: bool,
 }
 
-pub(crate) static HEALTH_CHECK_STATE: Lazy<PLRwLock<LiveReadyState>> =
+pub(crate) static LIVE_READY_STATE: Lazy<PLRwLock<LiveReadyState>> =
     Lazy::new(|| PLRwLock::new(Default::default()));
 
 impl<FA: RouterSuperServiceFactory> Debug for State<FA> {
@@ -463,7 +463,7 @@ where
         };
 
         // Mark ourselves as live at this point
-        HEALTH_CHECK_STATE.write().live = true;
+        LIVE_READY_STATE.write().live = true;
 
         // Process all the events in turn until we get to error state or we run out of events.
         while let Some(event) = messages.next().await {
@@ -472,7 +472,7 @@ where
             // Before we start processing the event, mark ourselves not ready. This will prevent
             // k8s from using us until such a time as we mark ourselves ready again. That's a
             // desirable characterstic during event processing.
-            HEALTH_CHECK_STATE.write().ready = false;
+            LIVE_READY_STATE.write().ready = false;
 
             state = match event {
                 UpdateConfiguration(configuration) => {
@@ -501,7 +501,7 @@ where
             // Note: Our state may not have changed, but since we marked ourselves as not ready
             // above, we still need to check.
             {
-                let mut write_guard = HEALTH_CHECK_STATE.write();
+                let mut write_guard = LIVE_READY_STATE.write();
                 // We are ready if we are Running
                 if matches!(state, State::Running { .. }) {
                     write_guard.ready = true;
