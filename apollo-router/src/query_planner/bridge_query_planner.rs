@@ -210,7 +210,19 @@ impl BridgeQueryPlanner {
             .await
             .map_err(QueryPlannerError::RouterBridgeError)?
             .into_result()
-            .map_err(QueryPlannerError::from)?;
+            .map_err(|err| {
+                let is_validation_error = err.errors.iter().all(|err| err.validation_error);
+                match (is_validation_error, &selections.validation_error) {
+                    // if both JS and Rust returned an error, it worked as expected, so we can
+                    // return the Rust error
+                    (true, Some(prev_err)) => {
+                        return QueryPlannerError::from(prev_err.clone());
+                    }
+                    _ => (),
+                }
+
+                QueryPlannerError::from(dbg!(err))
+            })?;
 
         // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
         let operation_signature = if original_query != filtered_query {

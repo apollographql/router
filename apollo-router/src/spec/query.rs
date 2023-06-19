@@ -73,7 +73,7 @@ pub(crate) struct Query {
     ///
     /// XXX(@goto-bus-stop): Remove when only Rust validation is used
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    validation_error: Option<SpecError>,
+    pub(crate) validation_error: Option<SpecError>,
 }
 
 #[derive(Debug, Derivative, Default)]
@@ -1100,10 +1100,6 @@ impl Query {
             .selection_set
             .iter()
             .any(|selection| selection.contains_error_path(&path.0, &self.fragments))
-    }
-
-    pub(crate) fn has_errors(&self) -> bool {
-        self.validation_error.is_some()
     }
 }
 
