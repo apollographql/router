@@ -52,6 +52,17 @@
         "Privacy and data collection": "/privacy"
       }
     },
+    "Executing Operations": {
+      "Build and run queries": "/executing-operations/build-run-queries",
+      "GraphQL subscriptions": [
+        "/executing-operations/subscription-support",
+        [
+          "enterprise"
+        ]
+      ],
+      "@defer support": "/executing-operations/defer-support",
+      "Request format": "/executing-operations/requests"
+    },
     "Metrics & Monitoring": {
       "GraphOS reporting": "/configuration/apollo-telemetry",
       "OpenTelemetry tracing": "/configuration/tracing",
@@ -63,17 +74,6 @@
       "Overview": "/containerization/overview",
       "Docker": "/containerization/docker",
       "Kubernetes": "/containerization/kubernetes"
-    },
-    "Executing Operations": {
-      "Build and run queries": "/executing-operations/build-run-queries",
-      "Subscriptions": [
-        "/executing-operations/subscription-support",
-        [
-          "enterprise"
-        ]
-      ],
-      "@defer support": "/executing-operations/defer-support",
-      "Request format": "/executing-operations/requests"
     },
     "Managed Federation": {
       "Overview": "https://www.apollographql.com/docs/federation/managed-federation/overview",
