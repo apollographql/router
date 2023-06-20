@@ -66,6 +66,12 @@
     },
     "Executing Operations": {
       "Build and run queries": "/executing-operations/build-run-queries",
+      "Subscriptions": [
+        "/executing-operations/subscription-support",
+        [
+          "enterprise"
+        ]
+      ],
       "@defer support": "/executing-operations/defer-support",
       "Request format": "/executing-operations/requests"
     },

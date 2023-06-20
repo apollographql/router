@@ -350,6 +350,45 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub async fn run_subscription(&self, subscription: &str) -> (String, reqwest::Response) {
+        assert!(
+            self.router.is_some(),
+            "router was not started, call `router.start().await; router.assert_started().await`"
+        );
+        let client = reqwest::Client::new();
+        let id = Uuid::new_v4().to_string();
+        let span = info_span!("client_request", unit_test = id.as_str());
+        let _span_guard = span.enter();
+
+        let mut request = client
+            .post("http://localhost:4000")
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+            .header(
+                ACCEPT,
+                "multipart/mixed;boundary=\"graphql\";subscriptionSpec=1.0",
+            )
+            .header("apollographql-client-name", "custom_name")
+            .header("apollographql-client-version", "1.0")
+            .json(&json!({"query":subscription,"variables":{}}))
+            .build()
+            .unwrap();
+
+        global::get_text_map_propagator(|propagator| {
+            propagator.inject_context(
+                &span.context(),
+                &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+            );
+        });
+
+        match client.execute(request).await {
+            Ok(response) => (id, response),
+            Err(err) => {
+                panic!("unable to send successful request to router, {err}")
+            }
+        }
+    }
+
+    #[allow(dead_code)]
     pub async fn get_metrics_response(&self) -> reqwest::Result<reqwest::Response> {
         let client = reqwest::Client::new();
 
