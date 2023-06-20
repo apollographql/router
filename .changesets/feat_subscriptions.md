@@ -1,4 +1,4 @@
-### Federated Subscriptions ([PR #3284](https://github.com/apollographql/router/pull/3284))
+### Federated Subscriptions ([PR #3285](https://github.com/apollographql/router/pull/3285))
 
 > ⚠️ **This is an [Enterprise feature](https://www.apollographql.com/blog/platform/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
 >
@@ -148,4 +148,4 @@ This PR includes the following configurable performance optimizations.
 
 We will be publishing several new docs that explain federated subscriptions in more detail shortly.
 
-By [@bnjjj](https://github.com/bnjjj) and [@o0Ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/3284
+By [@bnjjj](https://github.com/bnjjj) and [@o0Ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/3285
