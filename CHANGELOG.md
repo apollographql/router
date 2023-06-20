@@ -12,7 +12,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 In some cases, we may need to modify a query between query plan caching and query planning. This requires a query planner plugin which is introduced in this commit. This capability is private to the router for now.
 
-The plugins need an ApolloCompiler instance to perform useful work on the query, so the caching layer, in case of cache miss, will generate a compiler instance and transmit it as part of the request going through query planner plugins. At the end of the chain, the query planner extracts the modified query from the compiler, uses it to generate a query plan, and generates the selections of both the original and filtered query for response formatting. This is done to ensure that the response does not leak data removed in the filtered query, but still keeps a shape expected by the original query, using the null propagation.
+The plugins need an ApolloCompiler instance to perform useful work on the query. In case of a cache miss, the caching layer will generate a compiler instance and transmit it as part of the request going through query planner plugins. At the end of the chain, the query planner extracts the modified query from the compiler, uses it to generate a query plan, and generates the selections of both the original and filtered query for response formatting. This is done to ensure that the response does not leak data removed in the filtered query, but still keeps a shape expected by the original query, using the null propagation.
 
 A new visitor trait helps modifying the query.
 
