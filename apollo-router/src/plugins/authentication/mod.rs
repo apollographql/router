@@ -1,5 +1,4 @@
 //! Authentication plugin
-// With regards to ELv2 licensing, this entire file is license key functionality
 
 use std::ops::ControlFlow;
 use std::str::FromStr;
@@ -457,18 +456,35 @@ fn authenticate(
         );
     }
 
-    // Split our string in (at most 2) sections.
-    let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
-    if jwt_parts.len() != 2 {
-        return failure_message(
-            request.context,
-            AuthenticationError::MissingJWT(jwt_value),
-            StatusCode::BAD_REQUEST,
-        );
-    }
+    // If there's no header prefix, we need to avoid splitting the header
+    let jwt = if config.header_value_prefix.is_empty() {
+        // check for whitespace- we've already trimmed, so this means the request has a prefix that shouldn't exist
+        if jwt_value.contains(' ') {
+            return failure_message(
+                request.context,
+                AuthenticationError::InvalidPrefix(
+                    jwt_value_untrimmed,
+                    &config.header_value_prefix,
+                ),
+                StatusCode::BAD_REQUEST,
+            );
+        }
+        // we can simply assign the jwt to the jwt_value; we'll validate down below
+        jwt_value
+    } else {
+        // Otherwise, we need to split our string in (at most 2) sections.
+        let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
+        if jwt_parts.len() != 2 {
+            return failure_message(
+                request.context,
+                AuthenticationError::MissingJWT(jwt_value),
+                StatusCode::BAD_REQUEST,
+            );
+        }
 
-    // We have our jwt
-    let jwt = jwt_parts[1];
+        // We have our jwt
+        jwt_parts[1]
+    };
 
     // Try to create a valid header to work with
     let jwt_header = match decode_header(jwt) {

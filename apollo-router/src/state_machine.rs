@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
@@ -12,7 +10,7 @@ use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
 use ApolloRouterError::ServiceCreationError;
 use Event::NoMoreConfiguration;
-use Event::NoMoreEntitlement;
+use Event::NoMoreLicense;
 use Event::NoMoreSchema;
 use Event::Reload;
 use Event::Shutdown;
@@ -32,14 +30,14 @@ use super::state_machine::State::Stopped;
 use crate::configuration::Configuration;
 use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
-use crate::router::Event::UpdateEntitlement;
+use crate::router::Event::UpdateLicense;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::spec::Schema;
-use crate::uplink::entitlement::EntitlementReport;
-use crate::uplink::entitlement::EntitlementState;
-use crate::uplink::entitlement::ENTITLEMENT_EXPIRED_URL;
-use crate::ApolloRouterError::NoEntitlement;
+use crate::uplink::license_enforcement::LicenseEnforcementReport;
+use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
+use crate::ApolloRouterError::NoLicense;
 
 #[derive(Default, Clone)]
 pub(crate) struct ListenAddresses {
@@ -53,13 +51,13 @@ enum State<FA: RouterSuperServiceFactory> {
     Startup {
         configuration: Option<Arc<Configuration>>,
         schema: Option<Arc<String>>,
-        entitlement: Option<EntitlementState>,
+        license: Option<LicenseState>,
         listen_addresses_guard: OwnedRwLockWriteGuard<ListenAddresses>,
     },
     Running {
         configuration: Arc<Configuration>,
         schema: Arc<String>,
-        entitlement: EntitlementState,
+        license: LicenseState,
         server_handle: Option<HttpServerHandle>,
         router_service_factory: FA::RouterFactory,
         all_connections_stopped_signal: mpsc::Receiver<()>,
@@ -105,11 +103,9 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         }
     }
 
-    async fn no_more_entitlement(self) -> Self {
+    async fn no_more_license(self) -> Self {
         match self {
-            Startup {
-                entitlement: None, ..
-            } => Errored(NoEntitlement),
+            Startup { license: None, .. } => Errored(NoLicense),
             _ => self,
         }
     }
@@ -119,7 +115,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         state_machine: &mut StateMachine<S, FA>,
         new_schema: Option<Arc<String>>,
         new_configuration: Option<Arc<Configuration>>,
-        new_entitlement: Option<EntitlementState>,
+        new_license: Option<LicenseState>,
     ) -> Self
     where
         S: HttpServerFactory,
@@ -129,15 +125,15 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             Startup {
                 schema,
                 configuration,
-                entitlement,
+                license,
                 listen_addresses_guard,
             } => {
                 *schema = new_schema.or_else(|| schema.take());
                 *configuration = new_configuration.or_else(|| configuration.take());
-                *entitlement = new_entitlement.or_else(|| entitlement.take());
+                *license = new_license.or_else(|| license.take());
 
-                if let (Some(schema), Some(configuration), Some(entitlement)) =
-                    (schema, configuration, entitlement)
+                if let (Some(schema), Some(configuration), Some(license)) =
+                    (schema, configuration, license)
                 {
                     new_state = Some(
                         Self::try_start(
@@ -146,7 +142,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                             None,
                             configuration.clone(),
                             schema.clone(),
-                            *entitlement,
+                            *license,
                             listen_addresses_guard,
                         )
                         .map_ok_or_else(Errored, |f| f)
@@ -157,37 +153,37 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             Running {
                 schema,
                 configuration,
-                entitlement,
+                license,
                 server_handle,
                 router_service_factory,
                 all_connections_stopped_signal: _,
             } => {
                 tracing::info!(
                     new_schema = new_schema.is_some(),
-                    new_entitlement = new_entitlement.is_some(),
+                    new_license = new_license.is_some(),
                     new_configuration = new_configuration.is_some(),
                     "reloading"
                 );
 
-                if new_entitlement == Some(EntitlementState::Unentitled)
-                    && *entitlement != EntitlementState::Unentitled
+                if new_license == Some(LicenseState::Unlicensed)
+                    && *license != LicenseState::Unlicensed
                 {
-                    // When we get an unentitled event, if we were entitled before then just carry on.
+                    // When we get an unlicensed event, if we were licensed before then just carry on.
                     // This means that users can delete and then undelete their graphs in studio while having their routers continue to run.
-                    tracing::info!("loss of entitlement detected, ignoring reload");
+                    tracing::info!("loss of license detected, ignoring reload");
                     return self;
                 }
 
                 // We update the running config. This is OK even in the case that the router could not reload as we always want to retain the latest information for when we try to reload next.
-                // In the case of a failed reload the server handle is retained, which has the old config/schema/entitlements in.
+                // In the case of a failed reload the server handle is retained, which has the old config/schema/license in.
                 if let Some(new_configuration) = new_configuration {
                     *configuration = new_configuration;
                 }
                 if let Some(new_schema) = new_schema {
                     *schema = new_schema;
                 }
-                if let Some(new_entitlement) = new_entitlement {
-                    *entitlement = new_entitlement;
+                if let Some(new_license) = new_license {
+                    *license = new_license;
                 }
 
                 let mut guard = state_machine.listen_addresses.clone().write_owned().await;
@@ -197,7 +193,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     Some(router_service_factory),
                     configuration.clone(),
                     schema.clone(),
-                    *entitlement,
+                    *license,
                     &mut guard,
                 )
                 .await
@@ -255,7 +251,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         previous_router_service_factory: Option<&FA::RouterFactory>,
         configuration: Arc<Configuration>,
         schema: Arc<String>,
-        entitlement: EntitlementState,
+        license: LicenseState,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
     ) -> Result<State<FA>, ApolloRouterError>
     where
@@ -267,40 +263,40 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?,
         );
 
-        // Check the entitlements
-        let report = EntitlementReport::build(&configuration, &parsed_schema);
+        // Check the license
+        let report = LicenseEnforcementReport::build(&configuration, &parsed_schema);
 
-        match entitlement {
-            EntitlementState::Entitled => {
-                tracing::debug!("A valid Apollo entitlement has been detected.");
+        match license {
+            LicenseState::Licensed => {
+                tracing::debug!("A valid Apollo license has been detected.");
             }
-            EntitlementState::EntitledWarn if report.uses_restricted_features() => {
-                tracing::error!("Entitlement has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active entitlement for the following features:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
+            LicenseState::LicensedWarn if report.uses_restricted_features() => {
+                tracing::error!("License has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
             }
-            EntitlementState::EntitledHalt if report.uses_restricted_features() => {
-                tracing::error!("Entitlement has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active entitlement for the following features:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
+            LicenseState::LicensedHalt if report.uses_restricted_features() => {
+                tracing::error!("License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
             }
-            EntitlementState::Unentitled if report.uses_restricted_features() => {
+            LicenseState::Unlicensed if report.uses_restricted_features() => {
                 // This is OSS, so fail to reload or start.
                 if std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok()
                 {
-                    tracing::error!("Entitlement not found. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an entitlement for the following features:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
+                    tracing::error!("License not found. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
                 } else {
-                    tracing::error!("Not connected to GraphOS. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS (using APOLLO_KEY and APOLLO_GRAPH_REF) that provides an entitlement for the following features:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
+                    tracing::error!("Not connected to GraphOS. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS (using APOLLO_KEY and APOLLO_GRAPH_REF) that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
                 }
 
-                return Err(ApolloRouterError::EntitlementViolation);
+                return Err(ApolloRouterError::LicenseViolation);
             }
             _ => {
-                tracing::debug!("A valid Apollo entitlement was not detected. However, no restricted features are in use.");
+                tracing::debug!("A valid Apollo license was not detected. However, no restricted features are in use.");
             }
         }
 
-        // If there are no restricted featured in use then the effective entitlement is Entitled as we don't need warn or halt behavior.
-        let effective_entitlement = if !report.uses_restricted_features() {
-            EntitlementState::Entitled
+        // If there are no restricted featured in use then the effective license is Licensed as we don't need warn or halt behavior.
+        let effective_license = if !report.uses_restricted_features() {
+            LicenseState::Licensed
         } else {
-            entitlement
+            license
         };
 
         let router_service_factory = state_machine
@@ -330,7 +326,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         Default::default(),
                         Default::default(),
                         web_endpoints,
-                        effective_entitlement,
+                        effective_license,
                         all_connections_stopped_sender,
                     )
                     .await?
@@ -342,7 +338,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         router_service_factory.clone(),
                         configuration.clone(),
                         web_endpoints,
-                        effective_entitlement,
+                        effective_license,
                     )
                     .await?
             }
@@ -364,7 +360,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         Ok(Running {
             configuration,
             schema,
-            entitlement,
+            license,
             server_handle: Some(server_handle),
             router_service_factory,
             all_connections_stopped_signal,
@@ -377,7 +373,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
 /// If config and schema are not supplied then the machine ends with an error.
 /// Once schema and config are obtained running state is entered.
 /// Config and schema updates will try to swap in the new values into the running state. In future we may trigger an http server restart if for instance socket address is encountered.
-/// At any point a shutdown event will cause the machine to try to get to stopped state.  
+/// At any point a shutdown event will cause the machine to try to get to stopped state.
 pub(crate) struct StateMachine<S, FA>
 where
     S: HttpServerFactory,
@@ -448,7 +444,7 @@ where
         let mut state: State<FA> = Startup {
             configuration: None,
             schema: None,
-            entitlement: None,
+            license: None,
             listen_addresses_guard: self
                 .listen_addresses_guard
                 .take()
@@ -472,13 +468,13 @@ where
                         .await
                 }
                 NoMoreSchema => state.no_more_schema().await,
-                UpdateEntitlement(entitlement) => {
+                UpdateLicense(license) => {
                     state
-                        .update_inputs(&mut self, None, None, Some(entitlement))
+                        .update_inputs(&mut self, None, None, Some(license))
                         .await
                 }
                 Reload => state.update_inputs(&mut self, None, None, None).await,
-                NoMoreEntitlement => state.no_more_entitlement().await,
+                NoMoreLicense => state.no_more_license().await,
                 Shutdown => state.shutdown().await,
             };
 
@@ -512,11 +508,8 @@ mod tests {
     use std::pin::Pin;
     use std::str::FromStr;
     use std::sync::Mutex;
-    use std::task::Context;
-    use std::task::Poll;
 
     use futures::channel::oneshot;
-    use futures::future::BoxFuture;
     use mockall::mock;
     use mockall::Sequence;
     use multimap::MultiMap;
@@ -533,8 +526,8 @@ mod tests {
     use crate::router_factory::RouterFactory;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::services::new_service::ServiceFactory;
+    use crate::services::router;
     use crate::services::RouterRequest;
-    use crate::services::RouterResponse;
 
     fn example_schema() -> String {
         include_str!("testdata/supergraph.graphql").to_owned()
@@ -581,17 +574,17 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn no_entitlement() {
+    async fn no_license() {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
             execute(
                 server_factory,
                 router_factory,
-                stream::iter(vec![NoMoreEntitlement])
+                stream::iter(vec![NoMoreLicense])
             )
             .await,
-            Err(NoEntitlement)
+            Err(NoLicense)
         );
     }
     fn test_config_restricted() -> Configuration {
@@ -602,7 +595,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn restricted_entitled() {
+    async fn restricted_licensed() {
         let router_factory = create_mock_router_configurator(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
@@ -613,7 +606,7 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(EntitlementState::Entitled),
+                    UpdateLicense(LicenseState::Licensed),
                     Shutdown
                 ])
             )
@@ -624,7 +617,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn restricted_entitled_halted() {
+    async fn restricted_licensed_halted() {
         let router_factory = create_mock_router_configurator(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
@@ -635,7 +628,7 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(EntitlementState::EntitledHalt),
+                    UpdateLicense(LicenseState::LicensedHalt),
                     Shutdown
                 ])
             )
@@ -646,7 +639,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn restricted_entitled_warn() {
+    async fn restricted_licensed_warn() {
         let router_factory = create_mock_router_configurator(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
@@ -657,7 +650,7 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(EntitlementState::EntitledWarn),
+                    UpdateLicense(LicenseState::LicensedWarn),
                     Shutdown
                 ])
             )
@@ -668,11 +661,11 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn restricted_entitled_unentitled() {
+    async fn restricted_licensed_unlicensed() {
         let router_factory = create_mock_router_configurator(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
-        // The unentitled event is dropped so we should get a reload
+        // The unlicensed event is dropped so we should get a reload
         assert_matches!(
             execute(
                 server_factory,
@@ -680,8 +673,8 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(EntitlementState::Entitled),
-                    UpdateEntitlement(EntitlementState::Unentitled),
+                    UpdateLicense(LicenseState::Licensed),
+                    UpdateLicense(LicenseState::Unlicensed),
                     UpdateConfiguration(test_config_restricted()),
                     Shutdown
                 ])
@@ -693,7 +686,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn restricted_unentitled() {
+    async fn restricted_unlicensed() {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
@@ -704,18 +697,18 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(EntitlementState::Unentitled),
+                    UpdateLicense(LicenseState::Unlicensed),
                     Shutdown
                 ])
             )
             .await,
-            Err(ApolloRouterError::EntitlementViolation)
+            Err(ApolloRouterError::LicenseViolation)
         );
         assert_eq!(shutdown_receivers.lock().unwrap().len(), 0);
     }
 
     #[test(tokio::test)]
-    async fn unrestricted_unentitled_restricted_entitled() {
+    async fn unrestricted_unlicensed_restricted_licensed() {
         let router_factory = create_mock_router_configurator(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
@@ -726,9 +719,9 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(EntitlementState::Unentitled),
+                    UpdateLicense(LicenseState::Unlicensed),
                     UpdateConfiguration(test_config_restricted()),
-                    UpdateEntitlement(EntitlementState::Entitled),
+                    UpdateLicense(LicenseState::Licensed),
                     Shutdown
                 ])
             )
@@ -768,7 +761,7 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(EntitlementState::default()),
+                    UpdateLicense(LicenseState::default()),
                     Shutdown
                 ])
             )
@@ -790,7 +783,7 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(minimal_schema.to_owned()),
-                    UpdateEntitlement(EntitlementState::default()),
+                    UpdateLicense(LicenseState::default()),
                     UpdateSchema(example_schema()),
                     Shutdown
                 ])
@@ -802,7 +795,7 @@ mod tests {
     }
 
     #[test(tokio::test)]
-    async fn startup_reload_entitlement() {
+    async fn startup_reload_license() {
         let router_factory = create_mock_router_configurator(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
@@ -813,8 +806,8 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(minimal_schema.to_owned()),
-                    UpdateEntitlement(EntitlementState::default()),
-                    UpdateEntitlement(EntitlementState::default()),
+                    UpdateLicense(LicenseState::default()),
+                    UpdateLicense(LicenseState::default()),
                     Shutdown
                 ])
             )
@@ -836,7 +829,7 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(EntitlementState::default()),
+                    UpdateLicense(LicenseState::default()),
                     UpdateConfiguration(
                         Configuration::builder()
                             .supergraph(
@@ -868,7 +861,7 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(EntitlementState::default()),
+                    UpdateLicense(LicenseState::default()),
                     Shutdown
                 ])
             )
@@ -895,7 +888,7 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(EntitlementState::default()),
+                    UpdateLicense(LicenseState::default()),
                 ])
             )
             .await,
@@ -933,7 +926,7 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(EntitlementState::default()),
+                    UpdateLicense(LicenseState::default()),
                     UpdateSchema(example_schema()),
                     Shutdown
                 ])
@@ -984,7 +977,7 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(EntitlementState::default()),
+                    UpdateLicense(LicenseState::default()),
                     UpdateConfiguration(
                         Configuration::builder()
                             .homepage(Homepage::builder().enabled(true).build())
@@ -1024,43 +1017,17 @@ mod tests {
         MyRouterFactory {}
 
         impl RouterFactory for MyRouterFactory {
-            type RouterService = MockMyRouter;
+            type RouterService = router::BoxService;
             type Future = <Self::RouterService as Service<RouterRequest>>::Future;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
         }
         impl ServiceFactory<RouterRequest> for MyRouterFactory {
-            type Service = MockMyRouter;
-            fn create(&self) -> MockMyRouter;
+            type Service = router::BoxService;
+            fn create(&self) -> router::BoxService;
         }
 
         impl Clone for MyRouterFactory {
             fn clone(&self) -> MockMyRouterFactory;
-        }
-    }
-
-    mock! {
-        #[derive(Debug)]
-        MyRouter {
-            fn poll_ready(&mut self) -> Poll<Result<(), BoxError>>;
-            fn service_call(&mut self, req: RouterRequest) -> <MockMyRouter as Service<RouterRequest>>::Future;
-        }
-
-        impl Clone for MyRouter {
-            fn clone(&self) -> MockMyRouter;
-        }
-    }
-
-    //mockall does not handle well the lifetime on Context
-    impl Service<RouterRequest> for MockMyRouter {
-        type Response = RouterResponse;
-        type Error = BoxError;
-        type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
-            self.poll_ready()
-        }
-        fn call(&mut self, req: RouterRequest) -> Self::Future {
-            self.service_call(req)
         }
     }
 
@@ -1085,7 +1052,7 @@ mod tests {
             _extra_listeners: Vec<(ListenAddr, Listener)>,
             _web_endpoints: MultiMap<ListenAddr, Endpoint>,
 
-            _entitlment: EntitlementState,
+            _license: LicenseState,
             _all_connections_stopped_sender: mpsc::Sender<()>,
         ) -> Self::Future
         where

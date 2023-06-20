@@ -4,6 +4,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -545,7 +546,17 @@ async fn query_just_at_recursion_limit() {
 
     let expected_service_hits = hashmap! {};
 
-    let (actual, registry) = query_rust_with_config(request, config).await;
+    let (mut http_response, registry) = http_query_rust_with_config(request, config).await;
+    let actual = serde_json::from_slice::<graphql::Response>(
+        http_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
 
     assert_eq!(1, actual.errors.len());
     assert!(actual.errors[0].message.contains("parser limit(5) reached"));
@@ -585,7 +596,17 @@ async fn query_just_at_token_limit() {
 
     let expected_service_hits = hashmap! {};
 
-    let (actual, registry) = query_rust_with_config(request, config).await;
+    let (mut http_response, registry) = http_query_rust_with_config(request, config).await;
+    let actual = serde_json::from_slice::<graphql::Response>(
+        http_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
 
     assert_eq!(1, actual.errors.len());
     assert!(actual.errors[0].message.contains("token limit reached"));
@@ -1069,9 +1090,11 @@ impl ValueExt for Value {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn all_stock_router_example_yamls_are_valid() {
-    let example_dir = "../examples";
+    let example_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../examples");
     let example_directory_entries: Vec<DirEntry> = WalkDir::new(example_dir)
         .into_iter()
+        // Filter out `../examples/custom-global-allocator/target/` with its separate workspace
+        .filter_entry(|entry| entry.path().file_name() != Some(OsStr::new("target")))
         .map(|entry| {
             entry.unwrap_or_else(|e| panic!("invalid directory entry in {example_dir}: {e}"))
         })

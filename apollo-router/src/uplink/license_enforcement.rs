@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 // tonic does not derive `Eq` for the gRPC message types, which causes a warning from Clippy. The
 // current suggestion is to explicitly allow the lint in the module that imports the protos.
 // Read more: https://github.com/hyperium/tonic/issues/1056
@@ -30,16 +28,16 @@ use thiserror::Error;
 use crate::spec::Schema;
 use crate::Configuration;
 
-pub(crate) const ENTITLEMENT_EXPIRED_URL: &str = "https://go.apollo.dev/o/elp";
-pub(crate) const ENTITLEMENT_EXPIRED_SHORT_MESSAGE: &str =
-    "Apollo entitlement expired https://go.apollo.dev/o/elp";
+pub(crate) const LICENSE_EXPIRED_URL: &str = "https://go.apollo.dev/o/elp";
+pub(crate) const LICENSE_EXPIRED_SHORT_MESSAGE: &str =
+    "Apollo license expired https://go.apollo.dev/o/elp";
 
 static JWKS: OnceCell<JwkSet> = OnceCell::new();
 
 #[derive(Error, Display, Debug)]
 pub enum Error {
-    /// invalid entitlement: {0}
-    InvalidEntitlement(jsonwebtoken::errors::Error),
+    /// invalid license: {0}
+    InvalidLicense(jsonwebtoken::errors::Error),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -76,17 +74,20 @@ where
 }
 
 #[derive(Debug)]
-pub(crate) struct EntitlementReport {
+pub(crate) struct LicenseEnforcementReport {
     restricted_config_in_use: Vec<ConfigurationRestriction>,
 }
 
-impl EntitlementReport {
+impl LicenseEnforcementReport {
     pub(crate) fn uses_restricted_features(&self) -> bool {
         !self.restricted_config_in_use.is_empty()
     }
 
-    pub(crate) fn build(configuration: &Configuration, _schema: &Schema) -> EntitlementReport {
-        EntitlementReport {
+    pub(crate) fn build(
+        configuration: &Configuration,
+        _schema: &Schema,
+    ) -> LicenseEnforcementReport {
+        LicenseEnforcementReport {
             restricted_config_in_use: Self::validate_configuration(
                 configuration,
                 &Self::configuration_restrictions(),
@@ -175,7 +176,7 @@ impl EntitlementReport {
     }
 }
 
-impl Display for EntitlementReport {
+impl Display for LicenseEnforcementReport {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let restricted_config = self
             .restricted_config_in_use
@@ -187,29 +188,24 @@ impl Display for EntitlementReport {
     }
 }
 
-/// Entitlement controls availability of certain features of the Router. It must be constructed from a base64 encoded JWT
+/// License controls availability of certain features of the Router. It must be constructed from a base64 encoded JWT
 /// This API experimental and is subject to change outside of semver.
 #[derive(Debug, Clone, Default)]
-pub struct Entitlement {
+pub struct License {
     pub(crate) claims: Option<Claims>,
 }
 
-/// Entitlements are converted into a stream of entitlement states by the expander
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub(crate) enum EntitlementState {
-    Entitled,
-    EntitledWarn,
-    EntitledHalt,
-    Unentitled,
+/// Licenses are converted into a stream of license states by the expander
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
+pub(crate) enum LicenseState {
+    Licensed,
+    LicensedWarn,
+    LicensedHalt,
+    #[default]
+    Unlicensed,
 }
 
-impl Default for EntitlementState {
-    fn default() -> Self {
-        EntitlementState::Unentitled
-    }
-}
-
-impl Display for Entitlement {
+impl Display for License {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(claims) = &self.claims {
             write!(
@@ -219,12 +215,12 @@ impl Display for Entitlement {
                     .unwrap_or_else(|_| "claim serialization error".to_string())
             )
         } else {
-            write!(f, "no entitlement")
+            write!(f, "no license")
         }
     }
 }
 
-impl FromStr for Entitlement {
+impl FromStr for License {
     type Err = Error;
 
     fn from_str(jwt: &str) -> Result<Self, Self::Err> {
@@ -249,8 +245,8 @@ impl FromStr for Entitlement {
                     &DecodingKey::from_jwk(jwk).expect("router.jwks.json must be valid"),
                     &validation,
                 )
-                .map_err(Error::InvalidEntitlement)
-                .map(|r| Entitlement {
+                .map_err(Error::InvalidLicense)
+                .map(|r| License {
                     claims: Some(r.claims),
                 })
             })
@@ -258,7 +254,7 @@ impl FromStr for Entitlement {
             .transpose()
             .map(|e| {
                 let e = e.unwrap_or_default();
-                tracing::debug!("decoded entitlement {jwt}->{e}");
+                tracing::debug!("decoded license {jwt}->{e}");
                 e
             })
     }
@@ -272,12 +268,12 @@ pub(crate) struct ConfigurationRestriction {
     value: Option<Value>,
 }
 
-impl Entitlement {
+impl License {
     pub(crate) fn jwks() -> &'static JwkSet {
         JWKS.get_or_init(|| {
             // Strip the comments from the top of the file.
             let re = Regex::new("(?m)^//.*$").expect("regex must be valid");
-            let jwks = re.replace(include_str!("router.jwks.json"), "");
+            let jwks = re.replace(include_str!("license.jwks.json"), "");
             serde_json::from_str::<JwkSet>(&jwks).expect("router jwks must be valid")
         })
     }
@@ -293,19 +289,19 @@ mod test {
     use serde_json::json;
 
     use crate::spec::Schema;
-    use crate::uplink::entitlement::Audience;
-    use crate::uplink::entitlement::Claims;
-    use crate::uplink::entitlement::Entitlement;
-    use crate::uplink::entitlement::EntitlementReport;
-    use crate::uplink::entitlement::OneOrMany;
+    use crate::uplink::license_enforcement::Audience;
+    use crate::uplink::license_enforcement::Claims;
+    use crate::uplink::license_enforcement::License;
+    use crate::uplink::license_enforcement::LicenseEnforcementReport;
+    use crate::uplink::license_enforcement::OneOrMany;
     use crate::Configuration;
 
-    fn check(router_yaml: &str, supergraph_schema: &str) -> EntitlementReport {
+    fn check(router_yaml: &str, supergraph_schema: &str) -> LicenseEnforcementReport {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
         let schema = Schema::parse(supergraph_schema, &config, None)
             .expect("supergraph schema must be valid");
 
-        EntitlementReport::build(&config, &schema)
+        LicenseEnforcementReport::build(&config, &schema)
     }
 
     #[test]
@@ -336,10 +332,10 @@ mod test {
     }
 
     #[test]
-    fn test_entitlement_parse() {
-        let entitlement = Entitlement::from_str("eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLCJzdWIiOiJhcG9sbG8iLCJhdWQiOiJTRUxGX0hPU1RFRCIsIndhcm5BdCI6MTY3NjgwODAwMCwiaGFsdEF0IjoxNjc4MDE3NjAwfQ.tXexfjZ2SQeqSwkWQ7zD4XBoxS_Hc5x7tSNJ3ln-BCL_GH7i3U9hsIgdRQTczCAjA_jjk34w39DeSV0nTc5WBw").expect("must be able to decode JWT");
+    fn test_license_parse() {
+        let license = License::from_str("eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLCJzdWIiOiJhcG9sbG8iLCJhdWQiOiJTRUxGX0hPU1RFRCIsIndhcm5BdCI6MTY3NjgwODAwMCwiaGFsdEF0IjoxNjc4MDE3NjAwfQ.tXexfjZ2SQeqSwkWQ7zD4XBoxS_Hc5x7tSNJ3ln-BCL_GH7i3U9hsIgdRQTczCAjA_jjk34w39DeSV0nTc5WBw").expect("must be able to decode JWT");
         assert_eq!(
-            entitlement.claims,
+            license.claims,
             Some(Claims {
                 iss: "https://www.apollographql.com/".to_string(),
                 sub: "apollo".to_string(),
@@ -351,10 +347,10 @@ mod test {
     }
 
     #[test]
-    fn test_entitlement_parse_with_whitespace() {
-        let entitlement = Entitlement::from_str("   eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLCJzdWIiOiJhcG9sbG8iLCJhdWQiOiJTRUxGX0hPU1RFRCIsIndhcm5BdCI6MTY3NjgwODAwMCwiaGFsdEF0IjoxNjc4MDE3NjAwfQ.tXexfjZ2SQeqSwkWQ7zD4XBoxS_Hc5x7tSNJ3ln-BCL_GH7i3U9hsIgdRQTczCAjA_jjk34w39DeSV0nTc5WBw\n ").expect("must be able to decode JWT");
+    fn test_license_parse_with_whitespace() {
+        let license = License::from_str("   eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLCJzdWIiOiJhcG9sbG8iLCJhdWQiOiJTRUxGX0hPU1RFRCIsIndhcm5BdCI6MTY3NjgwODAwMCwiaGFsdEF0IjoxNjc4MDE3NjAwfQ.tXexfjZ2SQeqSwkWQ7zD4XBoxS_Hc5x7tSNJ3ln-BCL_GH7i3U9hsIgdRQTczCAjA_jjk34w39DeSV0nTc5WBw\n ").expect("must be able to decode JWT");
         assert_eq!(
-            entitlement.claims,
+            license.claims,
             Some(Claims {
                 iss: "https://www.apollographql.com/".to_string(),
                 sub: "apollo".to_string(),
@@ -366,8 +362,8 @@ mod test {
     }
 
     #[test]
-    fn test_entitlement_parse_fail() {
-        Entitlement::from_str("invalid").expect_err("jwt must fail parse");
+    fn test_license_parse_fail() {
+        License::from_str("invalid").expect_err("jwt must fail parse");
     }
 
     #[test]

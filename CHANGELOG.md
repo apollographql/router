@@ -4,10 +4,299 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.21.0] - 2023-06-20
+
+## 🚀 Features
+
+### Restore HTTP payload size limit, make it configurable ([Issue #2000](https://github.com/apollographql/router/issues/2000))
+
+Early versions of Apollo Router used to rely on a part of the Axum web framework
+that imposed a 2 MB limit on the size of the HTTP request body.
+Version 1.7 changed to read the body directly, unintentionally removing this limit.
+
+The limit is now restored to help protect against unbounded memory usage, but is now configurable:
+
+```yaml
+preview_operation_limits:
+  experimental_http_max_request_bytes: 2000000 # Default value: 2 MB
+```
+
+This limit is checked while reading from the network, before JSON parsing.
+Both the GraphQL document and associated variables count toward it.
+
+Before increasing this limit significantly consider testing performance
+in an environment similar to your production, especially if some clients are untrusted.
+Many concurrent large requests could cause the Router to run out of memory.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/3130
+
+### Add support for empty auth prefixes ([Issue #2909](https://github.com/apollographql/router/issues/2909))
+
+The `authentication.jwt` plugin now supports empty prefixes for the JWT header. Some companies use prefix-less headers; previously, the authentication plugin rejected requests even with an empty header explicitly set, such as: 
+
+```yml 
+authentication:
+  jwt:
+    header_value_prefix: ""
+```
+
+By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/3206
+
+## 🐛 Fixes
+
+### GraphQL introspection errors are now 400 errors ([Issue #3090](https://github.com/apollographql/router/issues/3090))
+
+If we get an introspection error during SupergraphService::plan_query(), then it is reported to the client as an HTTP 500 error. The Router now generates a valid GraphQL error for introspection errors whilst also modifying the HTTP status to be 400.
+
+Before:
+
+StatusCode:500
+```json
+{"errors":[{"message":"value retrieval failed: introspection error: introspection error : Field \"__schema\" of type \"__Schema!\" must have a selection of subfields. Did you mean \"__schema { ... }\"?","extensions":{"code":"INTERNAL_SERVER_ERROR"}}]}
+```
+
+After:
+
+StatusCode:400
+```json
+{"errors":[{"message":"introspection error : Field \"__schema\" of type \"__Schema!\" must have a selection of subfields. Did you mean \"__schema { ... }\"?","extensions":{"code":"INTROSPECTION_ERROR"}}]}
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3122
+
+### Restore missing debug tools in "debug" Docker images ([Issue #3249](https://github.com/apollographql/router/issues/3249))
+
+Debug Docker images were designed to make use of `heaptrack` for debugging memory issues. However, this functionality was inadvertently removed when we changed to multi-architecture Docker image builds.
+
+`heaptrack` functionality is now restored to our debug docker images.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3250
+
+### Federation v2.4.8 ([Issue #3217](https://github.com/apollographql/router/issues/3217), [Issue #3227](https://github.com/apollographql/router/issues/3227))
+
+This release bumps the Router's Federation support from v2.4.7 to v2.4.8, which brings in notable query planner fixes from [v2.4.8](https://github.com/apollographql/federation/releases/tag/@apollo/query-planner@2.4.8).  Of note from those releases, this brings query planner fixes that (per that dependency's changelog):
+
+- Fix bug in the handling of dependencies of subgraph fetches. This bug was manifesting itself as an assertion error ([apollographql/federation#2622](https://github.com/apollographql/federation/pull/2622))
+thrown during query planning with a message of the form `Root groups X should have no remaining groups unhandled (...)`.
+
+- Fix issues in code to reuse named fragments. One of the fixed issue would manifest as an assertion error with a message ([apollographql/federation#2619](https://github.com/apollographql/federation/pull/2619))
+looking like `Cannot add fragment of condition X (...) to parent type Y (...)`. Another would manifest itself by
+generating an invalid subgraph fetch where a field conflicts with another version of that field that is in a reused
+named fragment.
+
+These manifested as Router issues https://github.com/apollographql/router/issues/3217 and https://github.com/apollographql/router/issues/3227.
+
+By [@renovate](https://github.com/renovate) and [o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/3202
+
+### update Rhai to 1.15.0 to fix issue with hanging example test ([Issue #3213](https://github.com/apollographql/router/issues/3213))
+
+One of our Rhai examples' tests have been regularly hanging in the CI builds. Investigation uncovered a race condition within Rhai itself. This update brings in the fixed version of Rhai and should eliminate the hanging problem and improve build stability.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3273
+
+## 🛠 Maintenance
+
+### chore: split out router events into its own module ([PR #3235](https://github.com/apollographql/router/pull/3235))
+
+Breaks down `./apollo-router/src/router.rs` into its own module `./apollo-router/src/router/mod.rs` with a sub-module `./apollo-router/src/router/event/mod.rs` that contains all the streams that we combine to start a router (entitlement, schema, reload, configuration, shutdown, more streams to be added).
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/3235
+
+### Simplify router service tests ([PR #3259](https://github.com/apollographql/router/pull/3259))
+
+Parts of the router service creation were generic, to allow mocking, but the `TestHarness` API allows us to reuse the same code in all cases. Generic types have been removed to simplify the API.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3259
+
+## 📚 Documentation
+
+### Improve example Rhai scripts for JWT Authentication ([PR #3184](https://github.com/apollographql/router/pull/3184))
+
+Simplify the example Rhai scripts in the [JWT Authentication](https://www.apollographql.com/docs/router/configuration/authn-jwt) docs and includes a sample `main.rhai` file to make it clear how to use all scripts together.
+
+By [@dbanty](https://github.com/dbanty) in https://github.com/apollographql/router/pull/3184
+
+## 🧪 Experimental
+
+### Expose the apollo compiler at the supergraph service level (internal) ([PR #3200](https://github.com/apollographql/router/pull/3200))
+
+Add a query analysis phase inside the router service, before sending the query through the supergraph plugins. It makes a compiler available to supergraph plugins, to perform deeper analysis of the query. That compiler is then used in the query planner to create the `Query` object containing selections for response formatting.
+
+This is for internal use only for now, and the APIs are not considered stable.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) and [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3200
+
+### Query planner plugins (internal) ([Issue #3150](https://github.com/apollographql/router/issues/3150))
+
+Future functionality may need to modify a query between query plan caching and the query planner. This leads to the requirement to provide a query planner plugin capability.
+
+Query planner plugin functionality exposes an ApolloCompiler instance to perform preprocessing of a query before sending it to the query planner.
+
+This is for internal use only for now, and the APIs are not considered stable.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3177 and https://github.com/apollographql/router/pull/3252
+
+
+# [1.20.0] - 2023-05-31
+
+## 🚀 Features
+
+### Configurable histogram buckets for metrics ([Issue #2333](https://github.com/apollographql/router/issues/2333))
+
+It is now possible to change the default bucketing for histograms generated for metrics:
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    common:
+      buckets:
+        - 0.05
+        - 0.10
+        - 0.25
+        - 0.50
+        - 1.00
+        - 2.50
+        - 5.00
+        - 10.00
+        - 20.00
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3098
+
+## 🐛 Fixes
+
+### Federation v2.4.7 ([Issue #3170](https://github.com/apollographql/router/issues/3170), [Issue #3133](https://github.com/apollographql/router/issues/3133))
+
+This release bumps the Router's Federation support from v2.4.6 to v2.4.7, which brings in notable query planner fixes from [v2.4.7](https://github.com/apollographql/federation/releases/tag/%40apollo%2Fquery-planner%402.4.7).  Of note from those releases, this brings query planner fixes that (per that dependency's changelog):
+
+- Re-work the code use to try to reuse query named fragments to improve performance (thus sometimes improving query ([#2604](https://github.com/apollographql/federation/pull/2604)) planning performance)
+- Fix a raised assertion error (again, with a message of form like `Cannot add selection of field X to selection set of parent type Y`).
+- Fix a rare issue where an `interface` or `union` field was not being queried for all the types it should be.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3185
+
+### Set the global allocator in the library crate, not just the executable ([Issue #3126](https://github.com/apollographql/router/issues/3126))
+
+In 1.19, Apollo Router [switched to use `jemalloc` as the global Rust allocator on Linux](https://github.com/apollographql/router/blob/dev/CHANGELOG.md#improve-memory-fragmentation-and-resource-consumption-by-switching-to-jemalloc-as-the-memory-allocator-on-linux-pr-2882) to reduce memory fragmentation. However, prior to this change this was only occurring in the executable binary provided by the `apollo-router` crate and [custom binaries](https://www.apollographql.com/docs/router/customizations/custom-binary) using the crate _as a library_ were not getting this benefit.
+
+The `apollo-router` library crate now sets the global allocator so that custom binaries also take advantage of this by default. If some other choice is desired, the `global-allocator` Cargo [feature flag](https://doc.rust-lang.org/cargo/reference/features.html) can be disabled in `Cargo.toml` with:
+
+```toml
+[dependencies]
+apollo-router = {version = "[…]", default-features = false}
+```
+
+Library crates that depend on `apollo-router` (if any) should also do this in order to leave the choice to the eventual executable. (Cargo default features are only disabled if *all* dependents specify `default-features = false`.)
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/3157
+
+### Add `ca-certificates` to our Docker image ([Issue #3173](https://github.com/apollographql/router/issues/3173))
+
+We removed `curl` from our Docker images to improve security, which meant that our implicit install of `ca-certificates` (as a dependency of `curl`) was no longer performed.
+
+This fix reinstates the `ca-certificates` package explicitly, which is required for the router to be able to process TLS requests.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3174
+
+### Helm: Running of `helm test` no longer fails
+
+Running `helm test` was generating an error since `wget` was sending a request without a proper body and expecting an HTTP status response of 2xx.   Without the proper body, it expectedly resulted in an HTTP status of 400.  By switching to using `netcat` (or `nc`) we will now check that the port is up and use that to determine that the router is functional.
+
+By [@bbardawilwiser](https://github.com/bbardawilwiser) in https://github.com/apollographql/router/pull/3096
+
+### Move `curl` dependency to separate layer in Docker image ([Issue #3144](https://github.com/apollographql/router/issues/3144))
+
+We've moved `curl` out of the Docker image we publish.  The `curl` command is only used in the image we produce today for the sake of downloading dependencies.  It is never used after that, but we can move it to a separate layer to further remove it from the image.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/3146
+
+## 🛠 Maintenance
+
+### Improve `cargo-about` license checking ([Issue #3176](https://github.com/apollographql/router/issues/3176))
+
+From the description of this [cargo about PR](https://github.com/EmbarkStudios/cargo-about/pull/216), it is possible for `NOASSERTION` identifiers to be added when gathering license information, causing license checks to fail. This change uses the new `cargo-about` configuration `filter-noassertion` to eliminate the problem.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3178
+
+
+
+# [1.19.1] - 2023-05-26
+
+## 🐛 Fixes
+
+### Fix router coprocessor deferred response buffering and change JSON body type from Object to String ([Issue #3015](https://github.com/apollographql/router/issues/3015))
+
+The current implementation of the `RouterResponse` processing for coprocessors forces buffering of response data before passing the data to a coprocessor. This is a bug, because deferred responses should be processed progressively with a stream of calls to the coprocessor as each chunk of data becomes available.
+
+Furthermore, the data type was assumed to be valid JSON for both `RouterRequest` and `RouterResponse` coprocessor processing. This is also a bug, because data at this stage of processing was never necessarily valid JSON. This is a particular issue when dealing with deferred (when using `@defer`) `RouterResponses`.
+
+This change fixes both of these bugs by modifying the router so that coprocessors are invoked with a `body` payload which is a JSON `String`, not a JSON `Object`. Furthermore, the router now processes each chunk of response data separately so that a coprocessor will receive multiple calls (once for each chunk) for a deferred response.
+
+For more details about how this works see the [coprocessor documentation](https://www.apollographql.com/docs/router/customizations/coprocessor/).
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3104
+
+### Experimental: Query plan cache keys now include a hash of the query and operation name ([Issue #2998](https://github.com/apollographql/router/issues/2998))
+
+> **Note**
+> This feature is still _experimental_ and not recommended under normal use nor is it validated that caching query plans in a distributed fashion will result in improved performance.
+
+The experimental feature for caching query plans in a distributed store (e.g., Redis) will now create a SHA-256 hash of the query and operation name and include that hash in the cache key, rather than using the operation document as it was previously.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3101
+
+### Federation v2.4.6 ([Issue #3133](https://github.com/apollographql/router/issues/3133))
+
+This release bumps the Router's Federation support from v2.4.5 to v2.4.6, which brings in notable query planner fixes from [v2.4.6](https://github.com/apollographql/federation/releases/tag/%40apollo%2Fquery-planner%402.4.6).  Of note from those releases, this brings query planner fixes that (per that dependency's changelog):
+
+- Fix assertion error in some overlapping fragment cases. In some cases, when fragments overlaps on some sub-selections ([apollographql/federation#2594](https://github.com/apollographql/federation/pull/2594)) and some interface field implementation relied on sub-typing, an assertion error could be raised with a message of the form `Cannot add selection of field X to selection set of parent type Y` and this fixes this problem.
+
+- Fix possible fragment-related assertion error during query planning. This prevents a rare case where an assertion with a ([apollographql/federation#2596](https://github.com/apollographql/federation/pull/2596)) message of the form `Cannot add fragment of condition X (runtimes: ...) to parent type Y (runtimes: ...)` could fail during query planning.
+
+In addition, the packaging includes dependency updates for `bytes`, `regex`, `once_cell`, `tokio`, and `uuid`.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3135
+
+### Error redaction for subgraphs now respects _disabling_ it
+
+This follows-up on the new ability to selectively disable Studio-bound error redaction which was released in https://github.com/apollographql/router/pull/3011 by fixing a bug which was preventing users from _disabling_ that behavior on subgraphs.  Redaction continues to be on by default and both the default behavior and the explicit `redact: true` option were behaving correctly.
+
+With this fix, the `tracing.apollo.errors.subgraph.all.redact` option set to `false` will now transmit the un-redacted error message to Studio.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3137
+
+### Evaluate multiple keys matching a JWT criteria ([Issue #3017](https://github.com/apollographql/router/issues/3017))
+
+In some cases, multiple keys could match what a JWT asks for (both the algorithm, `alg`, and optional key identifier, `kid`). Previously, we scored each possible match and only took the one with the highest score. But even then, we could have multiple keys with the same score (e.g., colliding `kid` between multiple JWKS in tests).
+
+The improved behavior will:
+
+- Return a list of those matching `key` instead of the one with the highest score.
+- Try them one by one until the JWT is validated, or return an error.
+- If some keys were found with the highest possible score (matching `alg`, with `kid` present and matching, too), then we only test those keys.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3031
+
+## 🛠 Maintenance
+
+### chore(deps): `xtask/` dependency updates ([PR #3149](https://github.com/apollographql/router/pull/3149))
+
+This is effectively running `cargo update` in the `xtask/` directory (our directory of tooling; not runtime components) to bring things more up to date.
+
+This changeset takes extra care to update `chrono`'s features to remove the `time` dependency which is impacted by [CVE-2020-26235](https://nvd.nist.gov/vuln/detail/CVE-2020-26235), resolving a moderate severity which was appearing in scans.  Again, this is not a runtime dependency and there was no actual/known impact to any users.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/3149
+
+### Improve testability of the `state_machine` in integration tests
+
+We have introduced a `TestRouterHttpServer` for writing more fine-grained integration tests in the Router core for the behaviors of the state machine.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3099
+
 # [1.19.0] - 2023-05-19
 
 > **Note**
-> This release focused a notable amount of effort on improving both CPU usage and memory utilization/fragmentization.  Our testing and pre-release feedback has been overwhelmingly positive.  🙌 
+> This release focused a notable amount of effort on improving both CPU usage and memory utilization/fragmentization.  Our testing and pre-release feedback has been overwhelmingly positive.  🙌
 
 ## 🚀 Features
 
@@ -29,9 +318,9 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
-### Prevent span attributes from being formatted to write logs 
+### Prevent span attributes from being formatted to write logs
 
-We do not show span attributes in our logs, but the log formatter still spends time formatting them to a string, even when there will be no logs written for the trace. This adds the `NullFieldFormatter` that entirely avoids formatting the attributes to improve performance. 
+We do not show span attributes in our logs, but the log formatter still spends time formatting them to a string, even when there will be no logs written for the trace. This adds the `NullFieldFormatter` that entirely avoids formatting the attributes to improve performance.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2890
 
@@ -41,7 +330,7 @@ This release bumps the Router's Federation support from v2.4.2 to v2.4.5, which 
 
 - Improves the heuristics used to try to reuse the query named fragments in subgraph fetches. Said fragment will be reused ([apollographql/federation#2541](https://github.com/apollographql/federation/pull/2541)) more often, which can lead to smaller subgraph queries (and hence overall faster processing).
 - Fix potential assertion error during query planning in some multi-field `@requires` case. This error could be triggered ([#2575](https://github.com/apollographql/federation/pull/2575)) when a field in a `@requires` depended on another field that was also part of that same requires (for instance, if a field has a `@requires(fields: "id otherField")` and that `id` is also a key necessary to reach the subgraph providing `otherField`).
-  
+
   The assertion error thrown in that case contained the message `Root groups (...) should have no remaining groups unhandled (...)`
 
 By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/3107
@@ -65,7 +354,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 If you were using local schema or config then previously the Router was performing blocking IO in an async thread. This could have caused stalls to serving requests.
 The Router now uses async IO for all config and schema reloads.
 
-Fixing the above surfaced an issue with the experimental `force_hot_reload` feature introduced for testing. This has also been fixed and renamed to `force_reload`. 
+Fixing the above surfaced an issue with the experimental `force_hot_reload` feature introduced for testing. This has also been fixed and renamed to `force_reload`.
 
 ```diff
 experimental_chaos:
@@ -99,7 +388,7 @@ Adds an integration test that iterates over `./examples` looking for `.yaml` fil
 
 By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/3097
 
-### Improve memory fragmentation and resource consumption by switching to `jemalloc` as the memory allocator on Linux ([PR #2882](https://github.com/apollographql/router/pull/2882)) 
+### Improve memory fragmentation and resource consumption by switching to `jemalloc` as the memory allocator on Linux ([PR #2882](https://github.com/apollographql/router/pull/2882))
 
 Detailed memory investigation revealed significant memory fragmentation when using the default allocator, `glibc`, on Linux. Performance testing and flame-graph analysis suggested that using `jemalloc` on Linux would yield notable performance improvements. In our tests, this figure shows performance to be about 35% faster than the default allocator, on account of spending less time managing memory fragmentation.
 
