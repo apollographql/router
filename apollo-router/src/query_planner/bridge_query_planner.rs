@@ -173,7 +173,6 @@ impl BridgeQueryPlanner {
         original_query: String,
         filtered_query: String,
         operation: Option<String>,
-
         mut selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let planner_result = self
@@ -188,7 +187,7 @@ impl BridgeQueryPlanner {
         let operation_signature = if original_query != filtered_query {
             Some(
                 self.planner
-                    .operation_signature(original_query, operation)
+                    .operation_signature(original_query, operation.clone())
                     .await
                     .map_err(QueryPlannerError::RouterBridgeError)?,
             )
@@ -205,9 +204,14 @@ impl BridgeQueryPlanner {
                     },
                 mut usage_reporting,
             } => {
-                let subselections = node.parse_subselections(&self.schema)?;
-                selections.subselections = subselections;
-
+                selections.subselections =
+                    crate::spec::query::subselections::collect_subselections(
+                        &self.configuration,
+                        &self.schema,
+                        &mut selections,
+                        operation,
+                    )
+                    .await?;
                 if let Some(sig) = operation_signature {
                     usage_reporting.stats_report_key = sig;
                 }
@@ -708,7 +712,12 @@ mod tests {
                         if let Some(subselection) = deferred.subselection.clone() {
                             let path = deferred.query_path.clone();
                             let key = SubSelection { path, subselection };
-                            assert!(subselections.contains_key(&key));
+                            assert!(
+                                subselections.contains_key(&key),
+                                "Missing key: {} {}",
+                                key.path,
+                                key.subselection
+                            );
                         }
                         if let Some(node) = &deferred.node {
                             check_query_plan_coverage(node, &deferred.query_path, subselections)
@@ -733,6 +742,11 @@ mod tests {
                         check_query_plan_coverage(node, path, subselections)
                     }
                     if let Some(node) = else_clause {
+                        check_query_plan_coverage(node, path, subselections)
+                    }
+                }
+                PlanNode::Subscription { rest, .. } => {
+                    if let Some(node) = rest {
                         check_query_plan_coverage(node, path, subselections)
                     }
                 }

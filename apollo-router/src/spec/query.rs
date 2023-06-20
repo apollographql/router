@@ -38,6 +38,7 @@ use crate::spec::Selection;
 use crate::spec::SpecError;
 use crate::Configuration;
 
+pub(crate) mod subselections;
 pub(crate) mod transform;
 pub(crate) mod traverse;
 
