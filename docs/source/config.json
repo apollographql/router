@@ -54,14 +54,22 @@
     },
     "Executing Operations": {
       "Build and run queries": "/executing-operations/build-run-queries",
-      "GraphQL subscriptions": [
-        "/executing-operations/subscription-support",
-        [
-          "enterprise"
-        ]
-      ],
       "@defer support": "/executing-operations/defer-support",
-      "Request format": "/executing-operations/requests"
+      "Request format": "/executing-operations/requests",
+      "GraphQL Subscriptions": {
+        "Overview": [
+          "/executing-operations/subscription-support",
+          [
+            "enterprise"
+          ]
+        ],
+        "HTTP callback protocol": [
+          "/executing-operations/subscription-callback-protocol",
+          [
+            "enterprise"
+          ]
+        ]
+      }
     },
     "Metrics & Monitoring": {
       "GraphOS reporting": "/configuration/apollo-telemetry",
