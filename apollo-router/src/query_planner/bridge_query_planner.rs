@@ -176,8 +176,14 @@ impl BridgeQueryPlanner {
                 "missing input file for query".to_string(),
             )))?;
 
-        let mut query =
-            Query::parse_with_compiler(query, compiler, file_id, &schema, &configuration).await?;
+        let mut query = Query::parse_with_compiler(
+            query,
+            compiler,
+            file_id,
+            schema.api_schema(),
+            &configuration,
+        )
+        .await?;
         crate::spec::operation_limits::check(&configuration, &mut query, operation_name).await?;
         Ok(query)
     }
@@ -223,7 +229,7 @@ impl BridgeQueryPlanner {
                     _ => (),
                 }
 
-                QueryPlannerError::from(dbg!(err))
+                QueryPlannerError::from(err)
             })?;
 
         // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
@@ -587,7 +593,11 @@ mod tests {
             .await
             .unwrap();
 
-        let (compiler, _) = Query::make_compiler(original_query, &planner.schema(), &configuration);
+        let (compiler, _) = Query::make_compiler(
+            original_query,
+            planner.schema().api_schema(),
+            &configuration,
+        );
 
         planner
             .get(

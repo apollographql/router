@@ -46,7 +46,7 @@ impl QueryAnalysisLayer {
     }
 
     pub(crate) fn make_compiler(&self, query: &str) -> (ApolloCompiler, FileId) {
-        Query::make_compiler(query, &self.schema, &self.configuration)
+        Query::make_compiler(query, self.schema.api_schema(), &self.configuration)
     }
 
     pub(crate) async fn supergraph_request(
