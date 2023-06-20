@@ -28,9 +28,11 @@ use crate::services::supergraph;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
 use crate::services::MULTIPART_DEFER_SPEC_VALUE;
+use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
+use crate::services::MULTIPART_SUBSCRIPTION_SPEC_PARAMETER;
+use crate::services::MULTIPART_SUBSCRIPTION_SPEC_VALUE;
 
 pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql-response+json";
-
 /// [`Layer`] for Content-Type checks implementation.
 #[derive(Clone, Default)]
 pub(crate) struct RouterLayer {}
@@ -70,28 +72,34 @@ where
 
                     return Ok(ControlFlow::Break(response.into()));
                 }
+
                 let accepts = parse_accept(req.router_request.headers());
 
-                if accepts.wildcard || accepts.multipart || accepts.json {
+                if accepts.wildcard
+                    || accepts.multipart_defer
+                    || accepts.multipart_subscription
+                    || accepts.json
+                {
                     req.context.private_entries.lock().insert(accepts);
 
                     Ok(ControlFlow::Continue(req))
                 } else {
                     let response: http::Response<hyper::Body> = http::Response::builder().status(StatusCode::NOT_ACCEPTABLE).header(CONTENT_TYPE, APPLICATION_JSON.essence_str()).body(
-                            hyper::Body::from(
-                                serde_json::json!({
-                                    "errors": [
-                                        graphql::Error::builder()
-                                            .message(format!(
-                                                r#"'accept' header must be one of: \"*/*\", {:?}, {:?} or {:?}"#,
-                                                APPLICATION_JSON.essence_str(),
-                                                GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                                MULTIPART_DEFER_CONTENT_TYPE
-                                            ))
-                                            .extension_code("INVALID_ACCEPT_HEADER")
-                                            .build()
-                                    ]
-                                }).to_string())).expect("cannot fail");
+                        hyper::Body::from(
+                            serde_json::json!({
+                                "errors": [
+                                    graphql::Error::builder()
+                                        .message(format!(
+                                            r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
+                                            APPLICATION_JSON.essence_str(),
+                                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                            MULTIPART_SUBSCRIPTION_CONTENT_TYPE,
+                                            MULTIPART_DEFER_CONTENT_TYPE
+                                        ))
+                                        .extension_code("INVALID_ACCEPT_HEADER")
+                                        .build()
+                                ]
+                            }).to_string())).expect("cannot fail");
 
                     Ok(ControlFlow::Break(response.into()))
                 }
@@ -120,7 +128,8 @@ where
                 let ClientRequestAccepts {
                     wildcard: accepts_wildcard,
                     json: accepts_json,
-                    multipart: accepts_multipart,
+                    multipart_defer: accepts_multipart_defer,
+                    multipart_subscription: accepts_multipart_subscription,
                 } = context
                     .private_entries
                     .lock()
@@ -133,10 +142,15 @@ where
                         CONTENT_TYPE,
                         HeaderValue::from_static(APPLICATION_JSON.essence_str()),
                     );
-                } else if accepts_multipart {
+                } else if accepts_multipart_defer {
                     parts.headers.insert(
                         CONTENT_TYPE,
                         HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
+                    );
+                } else if accepts_multipart_subscription {
+                    parts.headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE),
                     );
                 }
                 (parts, res)
@@ -167,7 +181,6 @@ fn content_type_is_json(headers: &HeaderMap) -> bool {
             .unwrap_or(false)
     })
 }
-
 // Clippy suggests `for mime in MediaTypeList::new(str).flatten()` but less indentation
 // does not seem worth making it invisible that Result is involved.
 #[allow(clippy::manual_flatten)]
@@ -191,13 +204,24 @@ fn parse_accept(headers: &HeaderMap) -> ClientRequestAccepts {
                     if !accepts.wildcard && (mime.ty == _STAR && mime.subty == _STAR) {
                         accepts.wildcard = true
                     }
-                    if !accepts.multipart && (mime.ty == MULTIPART && mime.subty == MIXED) {
+                    if !accepts.multipart_defer && (mime.ty == MULTIPART && mime.subty == MIXED) {
                         let parameter = mediatype::Name::new(MULTIPART_DEFER_SPEC_PARAMETER)
                             .expect("valid name");
                         let value =
                             mediatype::Value::new(MULTIPART_DEFER_SPEC_VALUE).expect("valid value");
                         if mime.get_param(parameter) == Some(value) {
-                            accepts.multipart = true
+                            accepts.multipart_defer = true
+                        }
+                    }
+                    if !accepts.multipart_subscription
+                        && (mime.ty == MULTIPART && mime.subty == MIXED)
+                    {
+                        let parameter = mediatype::Name::new(MULTIPART_SUBSCRIPTION_SPEC_PARAMETER)
+                            .expect("valid name");
+                        let value = mediatype::Value::new(MULTIPART_SUBSCRIPTION_SPEC_VALUE)
+                            .expect("valid value");
+                        if mime.get_param(parameter) == Some(value) {
+                            accepts.multipart_subscription = true
                         }
                     }
                 }
@@ -256,6 +280,6 @@ mod tests {
             HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
         );
         let accepts = parse_accept(&default_headers);
-        assert!(accepts.multipart);
+        assert!(accepts.multipart_defer);
     }
 }
