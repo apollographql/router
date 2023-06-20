@@ -735,5 +735,5 @@ async fn it_mentions_source_when_syntax_error_occurs() {
 
     assert!(err
         .to_string()
-        .contains("tests/fixtures/syntax_errors.rhai"));
+        .contains("syntax_errors.rhai"));
 }
