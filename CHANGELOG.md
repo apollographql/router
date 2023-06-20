@@ -8,16 +8,6 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Query planner plugins ([Issue #3150](https://github.com/apollographql/router/issues/3150))
-
-In some cases, we may need to modify a query between query plan caching and query planning. This requires a query planner plugin which is introduced in this commit. This capability is private to the router for now.
-
-The plugins need an ApolloCompiler instance to perform useful work on the query. In case of a cache miss, the caching layer will generate a compiler instance and transmit it as part of the request going through query planner plugins. At the end of the chain, the query planner extracts the modified query from the compiler, uses it to generate a query plan, and generates the selections of both the original and filtered query for response formatting. This is done to ensure that the response does not leak data removed in the filtered query, but still keeps a shape expected by the original query, using the null propagation.
-
-A new visitor trait helps modifying the query.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3177 and https://github.com/apollographql/router/pull/3252
-
 ### Restore HTTP payload size limit, make it configurable ([Issue #2000](https://github.com/apollographql/router/issues/2000))
 
 Early versions of Apollo Router used to rely on a part of the Axum web framework
@@ -42,7 +32,7 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 
 ### Add support for empty auth prefixes ([Issue #2909](https://github.com/apollographql/router/issues/2909))
 
-This updates the `authentication.jwt` plugin to support empty prefixes for the JWT header. Some companies use prefix-less headers; previously, the authentication plugin would reject requests even with an empty header explicitly set, such as: 
+The `authentication.jwt` plugin now supports empty prefixes for the JWT header. Some companies use prefix-less headers; previously, the authentication plugin rejected requests even with an empty header explicitly set, such as: 
 
 ```yml 
 authentication:
@@ -50,28 +40,26 @@ authentication:
     header_value_prefix: ""
 ```
 
-This change enables the plugin to support this.
-
 By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/3206
 
 ## 🐛 Fixes
 
 ### GraphQL introspection errors are now 400 errors ([Issue #3090](https://github.com/apollographql/router/issues/3090))
 
-If we get an Introspection error during SupergraphService::plan_query(), then it is reported to the client as an HTTP 500 error. This change modifies the handling of errors to generate a valid GraphQL error for Introspection errors whilst also modifying the HTTP status to be 400.
+If we get an introspection error during SupergraphService::plan_query(), then it is reported to the client as an HTTP 500 error. The Router now generates a valid GraphQL error for introspection errors whilst also modifying the HTTP status to be 400.
 
-The result of this change is that the client response
+Before:
 
 StatusCode:500
 ```json
-{"errors":[{"message":"value retrieval failed: introspection error: introspection error : Field "__schema" of type "__Schema!" must have a selection of subfields. Did you mean "__schema { ... }"?","extensions":{"code":"INTERNAL_SERVER_ERROR"}}]}
+{"errors":[{"message":"value retrieval failed: introspection error: introspection error : Field \"__schema\" of type \"__Schema!\" must have a selection of subfields. Did you mean \"__schema { ... }\"?","extensions":{"code":"INTERNAL_SERVER_ERROR"}}]}
 ```
 
-becomes:
+After:
 
 StatusCode:400
 ```json
-{"errors":[{"message":"introspection error : Field "__schema" of type "__Schema!" must have a selection of subfields. Did you mean "__schema { ... }"?","extensions":{"code":"INTROSPECTION_ERROR"}}]}
+{"errors":[{"message":"introspection error : Field \"__schema\" of type \"__Schema!\" must have a selection of subfields. Did you mean \"__schema { ... }\"?","extensions":{"code":"INTROSPECTION_ERROR"}}]}
 ```
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3122
@@ -80,7 +68,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 Debug Docker images were designed to make use of `heaptrack` for debugging memory issues. However, this functionality was inadvertently removed when we changed to multi-architecture Docker image builds.
 
-This restores the heaptrack functionality to our debug docker images.
+`heaptrack` functionality is now restored to our debug docker images.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3250
 
@@ -100,44 +88,53 @@ These manifested as Router issues https://github.com/apollographql/router/issues
 
 By [@renovate](https://github.com/renovate) and [o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/3202
 
+### update Rhai to 1.15.0 to fix issue with hanging example test ([Issue #3213](https://github.com/apollographql/router/issues/3213))
+
+One of our Rhai examples' tests have been regularly hanging in the CI builds. Investigation uncovered a race condition within Rhai itself. This update brings in the fixed version of Rhai and should eliminate the hanging problem and improve build stability.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3273
+
 ## 🛠 Maintenance
 
 ### chore: split out router events into its own module ([PR #3235](https://github.com/apollographql/router/pull/3235))
 
-Breaks down `./apollo-router/src/router.rs` into its own module `./apollo-router/src/router/mod.rs` with a sub-module `./apollo-router/src/router/event/mod.rs` that contains all of the streams that we combine to start a router (entitlement, schema, reload, configuration, shutdown, more streams to be added). This change makes adding new events/modifying existing events a bit easier since it's not in one huge giant file to rule them all.
+Breaks down `./apollo-router/src/router.rs` into its own module `./apollo-router/src/router/mod.rs` with a sub-module `./apollo-router/src/router/event/mod.rs` that contains all the streams that we combine to start a router (entitlement, schema, reload, configuration, shutdown, more streams to be added).
 
 By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/3235
 
 ### Simplify router service tests ([PR #3259](https://github.com/apollographql/router/pull/3259))
 
-Parts of the router service creation were generic, to allow mocking, but the `TestHarness` API allows us to reuse the same code in all cases. We can remove some generic types and simplify the API
+Parts of the router service creation were generic, to allow mocking, but the `TestHarness` API allows us to reuse the same code in all cases. Generic types have been removed to simplify the API.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3259
-
-### update Rhai to 1.15.0 to fix issue with hanging example test ([Issue #3213](https://github.com/apollographql/router/issues/3213))
-
-One of our Rhai examples' tests have been regularly hanging in the CI builds for the last couple of months. Investigation uncovered a race condition within Rhai itself. This update brings in the fixed version of Rhai and should eliminate the hanging problem and improve build stability.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3273
 
 ## 📚 Documentation
 
 ### Improve example Rhai scripts for JWT Authentication ([PR #3184](https://github.com/apollographql/router/pull/3184))
 
-Simplify the example Rhai scripts in the [JWT Authentication](https://www.apollographql.com/docs/router/configuration/authn-jwt) docs and includes a sample `main.rhai` file to make it more clear how to use all scripts together.
+Simplify the example Rhai scripts in the [JWT Authentication](https://www.apollographql.com/docs/router/configuration/authn-jwt) docs and includes a sample `main.rhai` file to make it clear how to use all scripts together.
 
 By [@dbanty](https://github.com/dbanty) in https://github.com/apollographql/router/pull/3184
 
 ## 🧪 Experimental
 
-### Expose the apollo compiler at the supergraph service level ([PR #3200](https://github.com/apollographql/router/pull/3200))
+### Expose the apollo compiler at the supergraph service level (internal) ([PR #3200](https://github.com/apollographql/router/pull/3200))
 
-This adds a query analysis phase inside the router service, before sending the query through the supergraph plugins. It makes a compiler available to supergraph plugins, to perform deeper analysis of the query. That compiler is then used in the query planner to create the `Query` object containing selections for response formatting.
+Add a query analysis phase inside the router service, before sending the query through the supergraph plugins. It makes a compiler available to supergraph plugins, to perform deeper analysis of the query. That compiler is then used in the query planner to create the `Query` object containing selections for response formatting.
 
-This is for internal use only for now, until we are sure we can expose the right public API.
+This is for internal use only for now, and the APIs are not considered stable.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) and [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3200
 
+### Query planner plugins (internal) ([Issue #3150](https://github.com/apollographql/router/issues/3150))
+
+Future functionality may need to modify a query between query plan caching and the query planner. This leads to the requirement to provide a query planner plugin capability.
+
+Query planner plugin functionality exposes an ApolloCompiler instance to perform preprocessing of a query before sending it to the query planner.
+
+This is for internal use only for now, and the APIs are not considered stable.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3177 and https://github.com/apollographql/router/pull/3252
 
 
 # [1.20.0] - 2023-05-31
