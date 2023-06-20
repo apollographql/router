@@ -733,7 +733,5 @@ async fn it_mentions_source_when_syntax_error_occurs() {
         .err()
         .unwrap();
 
-    assert!(err
-        .to_string()
-        .contains("syntax_errors.rhai"));
+    assert!(err.to_string().contains("syntax_errors.rhai"));
 }
