@@ -1,4 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
 //! Utilities used for [`super::AxumHttpServerFactory`]
 
 use async_compression::tokio::write::BrotliDecoder;
@@ -17,8 +16,8 @@ use tokio::io::AsyncWriteExt;
 use tower_http::trace::MakeSpan;
 use tracing::Span;
 
-use crate::uplink::entitlement::EntitlementState;
-use crate::uplink::entitlement::ENTITLEMENT_EXPIRED_SHORT_MESSAGE;
+use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
 pub(crate) const REQUEST_SPAN_NAME: &str = "request";
 
@@ -97,7 +96,7 @@ pub(super) async fn decompress_request_body(
 
 #[derive(Clone, Default)]
 pub(crate) struct PropagatingMakeSpan {
-    pub(crate) entitlement: EntitlementState,
+    pub(crate) license: LicenseState,
 }
 
 impl<B> MakeSpan<B> for PropagatingMakeSpan {
@@ -127,8 +126,8 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
 impl PropagatingMakeSpan {
     fn create_span<B>(&mut self, request: &Request<B>) -> Span {
         if matches!(
-            self.entitlement,
-            EntitlementState::EntitledWarn | EntitlementState::EntitledHalt
+            self.license,
+            LicenseState::LicensedWarn | LicenseState::LicensedHalt
         ) {
             tracing::error_span!(
                 REQUEST_SPAN_NAME,
@@ -137,7 +136,7 @@ impl PropagatingMakeSpan {
                 "http.flavor" = ?request.version(),
                 "http.status" = 500, // This prevents setting later
                 "otel.kind" = "SERVER",
-                "apollo_router.entitlement" = ENTITLEMENT_EXPIRED_SHORT_MESSAGE
+                "apollo_router.license" = LICENSE_EXPIRED_SHORT_MESSAGE
             )
         } else {
             tracing::info_span!(
