@@ -200,7 +200,9 @@ impl<'a> TestHarness<'a> {
         self
     }
 
-    async fn build_common(self) -> Result<(Arc<Configuration>, SupergraphCreator), BoxError> {
+    pub(crate) async fn build_common(
+        self,
+    ) -> Result<(Arc<Configuration>, SupergraphCreator), BoxError> {
         let builder = if self.schema.is_none() {
             self.subgraph_hook(|subgraph_name, default| match subgraph_name {
                 "products" => canned::products_subgraph().boxed(),
