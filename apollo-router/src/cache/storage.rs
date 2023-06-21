@@ -1,5 +1,3 @@
-// This entire file is license key functionality
-
 use std::fmt::Display;
 use std::fmt::{self};
 use std::hash::Hash;

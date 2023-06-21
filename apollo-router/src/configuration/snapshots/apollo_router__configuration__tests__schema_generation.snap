@@ -1129,10 +1129,18 @@ expression: "&schema"
         "max_aliases": null,
         "warn_only": false,
         "parser_max_recursion": 4096,
-        "parser_max_tokens": 15000
+        "parser_max_tokens": 15000,
+        "experimental_http_max_request_bytes": 2000000
       },
       "type": "object",
       "properties": {
+        "experimental_http_max_request_bytes": {
+          "description": "Limit the size of incoming HTTP requests read from the network, to protect against running out of memory. Default: 2000000 (2 MB)",
+          "default": 2000000,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
         "max_aliases": {
           "description": "If set, requests with operations with more aliases than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
           "default": null,
@@ -3711,6 +3719,28 @@ expression: "&schema"
                   "additionalProperties": false,
                   "nullable": true
                 },
+                "buckets": {
+                  "description": "Custom buckets for histograms",
+                  "default": [
+                    0.001,
+                    0.005,
+                    0.015,
+                    0.05,
+                    0.1,
+                    0.2,
+                    0.3,
+                    0.4,
+                    0.5,
+                    1.0,
+                    5.0,
+                    10.0
+                  ],
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "double"
+                  }
+                },
                 "resources": {
                   "description": "Resources",
                   "default": {},
@@ -3721,11 +3751,13 @@ expression: "&schema"
                 },
                 "service_name": {
                   "description": "Set a service.name resource in your metrics",
+                  "default": null,
                   "type": "string",
                   "nullable": true
                 },
                 "service_namespace": {
                   "description": "Set a service.namespace attribute in your metrics",
+                  "default": null,
                   "type": "string",
                   "nullable": true
                 }

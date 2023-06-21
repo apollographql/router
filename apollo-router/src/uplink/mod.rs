@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 use std::fmt::Debug;
 use std::time::Duration;
 use std::time::Instant;
@@ -12,8 +10,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::instrument::WithSubscriber;
 use url::Url;
 
-pub(crate) mod entitlement;
-pub(crate) mod entitlement_stream;
+pub(crate) mod license_enforcement;
+pub(crate) mod license_stream;
 pub(crate) mod schema_stream;
 
 const GCP_URL: &str = "https://uplink.api.apollographql.com";
@@ -419,40 +417,6 @@ mod test {
     }
 
     #[test]
-    #[cfg(not(windows))] // Don’t bother with line ending differences
-    fn test_uplink_schema_is_up_to_date() {
-        use std::path::PathBuf;
-
-        use introspector_gadget::blocking::GraphQLClient;
-        use introspector_gadget::introspect;
-        use introspector_gadget::introspect::GraphIntrospectInput;
-
-        let client = GraphQLClient::new(
-            "https://uplink.api.apollographql.com/",
-            reqwest::blocking::Client::new(),
-        );
-
-        let should_retry = true;
-        let introspection_response = introspect::run(
-            GraphIntrospectInput {
-                headers: Default::default(),
-            },
-            &client,
-            should_retry,
-        )
-        .unwrap();
-        if introspection_response.schema_sdl != include_str!("uplink.graphql") {
-            let path = PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("uplink.graphql");
-            std::fs::write(&path, introspection_response.schema_sdl).unwrap();
-            panic!(
-                "\n\nUplink schema is out of date. Run this command to update it:\n\n    \
-                mv {} apollo-router/src/uplink/uplink.graphql\n\n",
-                path.to_str().unwrap()
-            );
-        }
-    }
-
-    #[test]
     fn test_round_robin_endpoints() {
         let url1 = Url::parse("http://example1.com").expect("url must be valid");
         let url2 = Url::parse("http://example2.com").expect("url must be valid");
@@ -718,7 +682,7 @@ mod test {
         MockResponses::builder()
             .mock_server(&mock_server)
             .endpoint(&url1)
-            .response(response_invalid_entitlement())
+            .response(response_invalid_license())
             .build()
             .await;
         let results = stream_from_uplink::<TestQuery, QueryResult>(
@@ -855,7 +819,7 @@ mod test {
         }))
     }
 
-    fn response_invalid_entitlement() -> ResponseTemplate {
+    fn response_invalid_license() -> ResponseTemplate {
         ResponseTemplate::new(StatusCode::OK).set_body_json(json!(
         {
             "data":{

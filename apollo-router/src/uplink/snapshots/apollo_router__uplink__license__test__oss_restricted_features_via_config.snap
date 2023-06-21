@@ -1,5 +1,5 @@
 ---
-source: apollo-router/src/uplink/entitlement.rs
+source: apollo-router/src/uplink/license.rs
 expression: err.to_string()
 ---
 TODO PREAMBLE

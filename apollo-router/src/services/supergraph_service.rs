@@ -1,17 +1,16 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 //! Implements the router phase of the request lifecycle.
 
 use std::sync::Arc;
 use std::task::Poll;
 
+use apollo_compiler::ApolloCompiler;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
-use multimap::MultiMap;
 use router_bridge::planner::Planner;
+use tokio::sync::Mutex;
 use tower::util::Either;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -19,7 +18,9 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
+use super::execution;
 use super::layers::content_negociation;
+use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
 use super::router::ClientRequestAccepts;
 use super::subgraph_service::MakeSubgraphService;
@@ -29,8 +30,6 @@ use super::QueryPlannerContent;
 use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
-#[cfg(test)]
-use crate::plugin::test::MockSupergraphService;
 use crate::plugin::DynPlugin;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::traffic_shaping::TrafficShaping;
@@ -38,18 +37,16 @@ use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::services::query_planner;
 use crate::services::supergraph;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
-use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
-use crate::Endpoint;
-use crate::ListenAddr;
 
 pub(crate) const QUERY_PLANNING_SPAN_NAME: &str = "query_planning";
 
@@ -126,16 +123,12 @@ impl Service<SupergraphRequest> for SupergraphService {
     }
 }
 
-async fn service_call<ExecutionService>(
+async fn service_call(
     planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    execution: ExecutionService,
+    execution: execution::BoxService,
     schema: Arc<Schema>,
     req: SupergraphRequest,
-) -> Result<SupergraphResponse, BoxError>
-where
-    ExecutionService:
-        Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError> + Send,
-{
+) -> Result<SupergraphResponse, BoxError> {
     let context = req.context;
     let body = req.supergraph_request.body();
     let variables = body.variables.clone();
@@ -143,7 +136,20 @@ where
         content,
         context,
         errors,
-    } = match plan_query(planning, body, context.clone()).await {
+    } = match plan_query(
+        planning,
+        req.compiler,
+        body.operation_name.clone(),
+        context.clone(),
+        schema.clone(),
+        req.supergraph_request
+            .body()
+            .query
+            .clone()
+            .expect("query presence was checked before"),
+    )
+    .await
+    {
         Ok(resp) => resp,
         Err(err) => match err.into_graphql_errors() {
             Ok(gql_errors) => {
@@ -218,7 +224,6 @@ where
                         ExecutionRequest::internal_builder()
                             .supergraph_request(req.supergraph_request)
                             .query_plan(plan.clone())
-                            .schema(&schema)
                             .context(context)
                             .build()
                             .await,
@@ -242,18 +247,32 @@ where
 
 async fn plan_query(
     mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    body: &graphql::Request,
+    compiler: Option<Arc<Mutex<ApolloCompiler>>>,
+    operation_name: Option<String>,
     context: Context,
+    schema: Arc<Schema>,
+    query_str: String,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
+    let compiler = match compiler {
+        None =>
+        // TODO[igni]: no
+        {
+            Arc::new(Mutex::new(
+                QueryAnalysisLayer::new(schema, Default::default())
+                    .await
+                    .make_compiler(&query_str)
+                    .0,
+            ))
+        }
+        Some(c) => c,
+    };
+
     planning
         .call(
-            QueryPlannerRequest::builder()
-                .query(
-                    body.query
-                        .clone()
-                        .expect("the query presence was already checked by a plugin"),
-                )
-                .and_operation_name(body.operation_name.clone())
+            query_planner::CachingRequest::builder()
+                .query(query_str)
+                .and_operation_name(operation_name)
+                .compiler(compiler)
                 .context(context)
                 .build(),
         )
@@ -263,7 +282,6 @@ async fn plan_query(
         ))
         .await
 }
-
 /// Builder which generates a plugin pipeline.
 ///
 /// This is at the heart of the delegation of responsibility model for the router. A schema,
@@ -323,8 +341,9 @@ impl PluggableSupergraphServiceBuilder {
         let schema = self.planner.schema();
         let query_planner_service = CachingQueryPlanner::new(
             self.planner,
-            schema.schema_id.clone(),
-            &configuration.supergraph.query_planning,
+            schema.clone(),
+            &configuration,
+            IndexMap::new(),
         )
         .await;
 
@@ -353,28 +372,6 @@ impl PluggableSupergraphServiceBuilder {
     }
 }
 
-/// Factory for creating a RouterService
-///
-/// Instances of this traits are used by the HTTP server to generate a new
-/// RouterService on each request
-pub(crate) trait SupergraphFactory:
-    ServiceFactory<supergraph::Request, Service = Self::SupergraphService>
-    + Clone
-    + Send
-    + Sync
-    + 'static
-{
-    type SupergraphService: Service<
-            supergraph::Request,
-            Response = supergraph::Response,
-            Error = BoxError,
-            Future = Self::Future,
-        > + Send;
-    type Future: Send;
-
-    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
-}
-
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct SupergraphCreator {
@@ -391,6 +388,16 @@ pub(crate) trait HasPlugins {
 impl HasPlugins for SupergraphCreator {
     fn plugins(&self) -> Arc<Plugins> {
         self.plugins.clone()
+    }
+}
+
+pub(crate) trait HasSchema {
+    fn schema(&self) -> Arc<Schema>;
+}
+
+impl HasSchema for SupergraphCreator {
+    fn schema(&self) -> Arc<Schema> {
+        Arc::clone(&self.schema)
     }
 }
 
@@ -452,63 +459,12 @@ impl SupergraphCreator {
 
     pub(crate) async fn warm_up_query_planner(
         &mut self,
+        query_parser: &QueryAnalysisLayer,
         cache_keys: Vec<(String, Option<String>)>,
     ) {
-        self.query_planner_service.warm_up(cache_keys).await
-    }
-
-    /// Create a test service.
-    #[cfg(test)]
-    pub(crate) async fn for_tests(
-        supergraph_service: MockSupergraphService,
-    ) -> MockSupergraphCreator {
-        MockSupergraphCreator::new(supergraph_service).await
-    }
-}
-
-#[cfg(test)]
-#[derive(Clone)]
-pub(crate) struct MockSupergraphCreator {
-    supergraph_service: MockSupergraphService,
-    plugins: Arc<Plugins>,
-}
-
-#[cfg(test)]
-impl MockSupergraphCreator {
-    pub(crate) async fn new(supergraph_service: MockSupergraphService) -> Self {
-        let canned_schema = include_str!("../../testing_schema.graphql");
-        let configuration = Configuration::builder().build().unwrap();
-
-        use crate::router_factory::create_plugins;
-        let plugins = create_plugins(
-            &configuration,
-            &Schema::parse_test(canned_schema, &configuration).unwrap(),
-            None,
-        )
-        .await
-        .unwrap()
-        .into_iter()
-        .collect();
-
-        Self {
-            supergraph_service,
-            plugins: Arc::new(plugins),
-        }
-    }
-}
-
-#[cfg(test)]
-impl HasPlugins for MockSupergraphCreator {
-    fn plugins(&self) -> Arc<Plugins> {
-        self.plugins.clone()
-    }
-}
-
-#[cfg(test)]
-impl ServiceFactory<supergraph::Request> for MockSupergraphCreator {
-    type Service = supergraph::BoxService;
-    fn create(&self) -> Self::Service {
-        self.supergraph_service.clone().boxed()
+        self.query_planner_service
+            .warm_up(query_parser, cache_keys)
+            .await
     }
 }
 

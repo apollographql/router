@@ -1,5 +1,4 @@
 //! Configuration for apollo telemetry exporter.
-// This entire file is license key functionality
 use std::error::Error;
 use std::fmt::Debug;
 use std::io::Write;
@@ -59,8 +58,9 @@ impl ExportError for ApolloExportError {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) enum Sender {
+    #[default]
     Noop,
     Apollo(mpsc::Sender<SingleReport>),
 }
@@ -78,12 +78,6 @@ impl Sender {
                 }
             }
         }
-    }
-}
-
-impl Default for Sender {
-    fn default() -> Self {
-        Sender::Noop
     }
 }
 
@@ -185,7 +179,8 @@ impl ApolloExporter {
 
     pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
         // We may be sending traces but with no operation count
-        if report.operation_count_by_type.is_empty() && report.traces_per_query.is_empty() {
+        if report.licensed_operation_count_by_type.is_empty() && report.traces_per_query.is_empty()
+        {
             return Ok(());
         }
 

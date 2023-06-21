@@ -31,15 +31,11 @@ struct FormatTest {
     is_deferred: bool,
 }
 
+#[derive(Default)]
 enum FederationVersion {
+    #[default]
     Fed1,
     Fed2,
-}
-
-impl Default for FederationVersion {
-    fn default() -> Self {
-        FederationVersion::Fed1
-    }
 }
 
 impl FormatTest {

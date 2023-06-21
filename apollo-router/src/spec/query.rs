@@ -5,10 +5,12 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
+use apollo_compiler::FileId;
 use apollo_compiler::HirDatabase;
 use derivative::Derivative;
 use serde::de::Visitor;
@@ -17,7 +19,6 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use tokio::sync::Mutex;
 use tokio::sync::MutexGuard;
-use tokio::sync::OnceCell;
 use tracing::level_filters::LevelFilter;
 
 use crate::error::FetchError;
@@ -37,7 +38,11 @@ use crate::spec::Selection;
 use crate::spec::SpecError;
 use crate::Configuration;
 
+pub(crate) mod transform;
+pub(crate) mod traverse;
+
 pub(crate) const TYPENAME: &str = "__typename";
+pub(crate) const QUERY_EXECUTABLE: &str = "query";
 
 /// A GraphQL query.
 #[derive(Derivative, Default, Serialize, Deserialize)]
@@ -46,13 +51,15 @@ pub(crate) struct Query {
     pub(crate) string: String,
     #[derivative(PartialEq = "ignore", Hash = "ignore", Debug = "ignore")]
     #[serde(skip)]
-    pub(crate) compiler: OnceCell<Mutex<ApolloCompiler>>,
+    pub(crate) compiler: Arc<Mutex<ApolloCompiler>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<SubSelection, Query>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) filtered_query: Option<Arc<Query>>,
 }
 
 #[derive(Debug, Derivative, Default)]
@@ -261,16 +268,64 @@ impl Query {
         vec![]
     }
 
+    pub(crate) fn make_compiler(
+        query: &str,
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> (ApolloCompiler, FileId) {
+        let mut compiler = ApolloCompiler::new()
+            .recursion_limit(configuration.preview_operation_limits.parser_max_recursion)
+            .token_limit(configuration.preview_operation_limits.parser_max_tokens);
+        compiler.set_type_system_hir(schema.type_system.clone());
+        let id = compiler.add_executable(query, QUERY_EXECUTABLE);
+        (compiler, id)
+    }
+
     pub(crate) fn parse(
         query: impl Into<String>,
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
         let query = query.into();
-        let mut compiler = ApolloCompiler::new()
-            .recursion_limit(configuration.preview_operation_limits.parser_max_recursion)
-            .token_limit(configuration.preview_operation_limits.parser_max_tokens);
-        let id = compiler.add_executable(&query, "query");
+
+        let (compiler, id) = Self::make_compiler(&query, schema, configuration);
+        let (fragments, operations) = Self::extract_query_information(&compiler, id, schema)?;
+
+        Ok(Query {
+            string: query,
+            compiler: Arc::new(Mutex::new(compiler)),
+            fragments,
+            operations,
+            subselections: HashMap::new(),
+            filtered_query: None,
+        })
+    }
+
+    pub(crate) async fn parse_with_compiler(
+        query: String,
+        compiler: Arc<Mutex<ApolloCompiler>>,
+        id: FileId,
+        schema: &Schema,
+    ) -> Result<Self, SpecError> {
+        let compiler_guard = compiler.lock().await;
+        let (fragments, operations) = Self::extract_query_information(&compiler_guard, id, schema)?;
+        drop(compiler_guard);
+
+        Ok(Query {
+            string: query,
+            compiler,
+            fragments,
+            operations,
+            subselections: HashMap::new(),
+            filtered_query: None,
+        })
+    }
+
+    fn extract_query_information(
+        compiler: &ApolloCompiler,
+        id: FileId,
+        schema: &Schema,
+    ) -> Result<(Fragments, Vec<Operation>), SpecError> {
         let ast = compiler.db.ast(id);
 
         // Trace log recursion limit data
@@ -288,7 +343,7 @@ impl Query {
             return Err(SpecError::ParsingError(errors));
         }
 
-        let fragments = Fragments::from_hir(&compiler, schema)?;
+        let fragments = Fragments::from_hir(compiler, schema)?;
 
         let operations = compiler
             .db
@@ -297,21 +352,11 @@ impl Query {
             .map(|operation| Operation::from_hir(operation, schema))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
-        Ok(Query {
-            string: query,
-            compiler: OnceCell::from(Mutex::new(compiler)),
-            fragments,
-            operations,
-            subselections: HashMap::new(),
-        })
+        Ok((fragments, operations))
     }
 
-    pub(crate) async fn compiler(&self, schema: Option<&Schema>) -> MutexGuard<'_, ApolloCompiler> {
-        self.compiler
-            .get_or_init(|| async { Mutex::new(self.uncached_compiler(schema)) })
-            .await
-            .lock()
-            .await
+    pub(crate) async fn compiler(&self) -> MutexGuard<'_, ApolloCompiler> {
+        self.compiler.lock().await
     }
 
     /// Create a new compiler for this query, without caching it
@@ -323,7 +368,7 @@ impl Query {
         // As long as this is the only executable document in this compiler
         // we can use compiler’s `all_operations` and `all_fragments`.
         // If that changes, we’ll need to carry around this ID somehow.
-        let _id = compiler.add_executable(&self.string, "query");
+        let _id = compiler.add_executable(&self.string, QUERY_EXECUTABLE);
         compiler
     }
 
@@ -968,7 +1013,7 @@ impl Query {
         })
     }
 
-    pub(crate) fn operation(&self, operation_name: Option<&str>) -> Option<&Operation> {
+    pub(crate) fn operation(&self, operation_name: Option<impl AsRef<str>>) -> Option<&Operation> {
         match operation_name {
             Some(name) => self
                 .operations
@@ -976,7 +1021,7 @@ impl Query {
                 // we should have an error if the only operation is anonymous but the query specifies a name
                 .find(|op| {
                     if let Some(op_name) = op.name.as_deref() {
-                        op_name == name
+                        op_name == name.as_ref()
                     } else {
                         false
                     }
@@ -1025,7 +1070,7 @@ struct FormatParameters<'a> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Operation {
-    name: Option<String>,
+    pub(crate) name: Option<String>,
     kind: OperationKind,
     selection_set: Vec<Selection>,
     variables: HashMap<ByteString, Variable>,
@@ -1038,7 +1083,10 @@ pub(crate) struct Variable {
 }
 
 impl Operation {
-    fn from_hir(operation: &hir::OperationDefinition, schema: &Schema) -> Result<Self, SpecError> {
+    pub(crate) fn from_hir(
+        operation: &hir::OperationDefinition,
+        schema: &Schema,
+    ) -> Result<Self, SpecError> {
         let name = operation.name().map(|s| s.to_owned());
         let kind = operation.operation_ty().into();
         if kind == OperationKind::Subscription {

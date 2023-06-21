@@ -17,10 +17,12 @@ use crate::plugin::PluginInit;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::execution;
+use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::router;
 use crate::services::router_service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::services::HasSchema;
 use crate::services::SupergraphCreator;
 
 #[cfg(test)]
@@ -89,14 +91,18 @@ impl<'a> TestHarness<'a> {
     /// Specifies the logging level. Note that this function may not be called more than once.
     /// log_level is in RUST_LOG format.
     pub fn log_level(self, log_level: &'a str) -> Self {
-        init_telemetry(log_level).expect("failed to setup logging");
+        // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
+        let log_level = format!("{log_level},salsa=error");
+        init_telemetry(&log_level).expect("failed to setup logging");
         self
     }
 
     /// Specifies the logging level. Note that this function will silently fail if called more than once.
     /// log_level is in RUST_LOG format.
     pub fn try_log_level(self, log_level: &'a str) -> Self {
-        let _ = init_telemetry(log_level);
+        // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
+        let log_level = format!("{log_level},salsa=error");
+        let _ = init_telemetry(&log_level);
         self
     }
 
@@ -194,7 +200,9 @@ impl<'a> TestHarness<'a> {
         self
     }
 
-    async fn build_common(self) -> Result<(Arc<Configuration>, SupergraphCreator), BoxError> {
+    pub(crate) async fn build_common(
+        self,
+    ) -> Result<(Arc<Configuration>, SupergraphCreator), BoxError> {
         let builder = if self.schema.is_none() {
             self.subgraph_hook(|subgraph_name, default| match subgraph_name {
                 "products" => canned::products_subgraph().boxed(),
@@ -255,7 +263,12 @@ impl<'a> TestHarness<'a> {
     /// Builds the router service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
         let (config, supergraph_creator) = self.build_common().await?;
-        let router_creator = RouterCreator::new(Arc::new(supergraph_creator), &config).await;
+        let router_creator = RouterCreator::new(
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
+            Arc::new(supergraph_creator),
+            config,
+        )
+        .await;
 
         Ok(tower::service_fn(move |request: router::Request| {
             let router = ServiceBuilder::new().service(router_creator.make()).boxed();
@@ -270,17 +283,22 @@ impl<'a> TestHarness<'a> {
         use crate::axum_factory::tests::make_axum_router;
         use crate::axum_factory::ListenAddrAndRouter;
         use crate::router_factory::RouterFactory;
-        use crate::uplink::entitlement::EntitlementState;
+        use crate::uplink::license_enforcement::LicenseState;
 
         let (config, supergraph_creator) = self.build_common().await?;
-        let router_creator = RouterCreator::new(Arc::new(supergraph_creator), &config).await;
+        let router_creator = RouterCreator::new(
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
+            Arc::new(supergraph_creator),
+            Arc::clone(&config),
+        )
+        .await;
         let web_endpoints = router_creator.web_endpoints();
 
         let routers = make_axum_router(
             router_creator,
             &config,
             web_endpoints,
-            EntitlementState::Unentitled,
+            LicenseState::Unlicensed,
         )?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
         Ok(router.boxed())

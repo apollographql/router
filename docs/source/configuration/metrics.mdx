@@ -99,14 +99,14 @@ All cache metrics listed above have the following attributes:
 - `apollo_router_uplink_fetch_duration_seconds_bucket` - Uplink request duration, attributes:
 
   - `url`: The Uplink URL that was polled
-  - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `Entitlement`)
+  - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `License`)
   - `kind`: (`new`, `unchanged`, `http_error`, `uplink_error`)
   - `code`: The error code depending on type (if an error occurred)
   - `error`: The error message (if an error occurred)
 
 - `apollo_router_uplink_fetch_count_total`
   - `status`: (`success`, `failure`)
-  - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `Entitlement`)
+  - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `License`)
 
 Note that the initial call to uplink during router startup will not be reflected in metrics.
 
@@ -232,6 +232,26 @@ To fetch the value of the field `isImportant`, the corresponding path is `.items
 To fetch the value of the field `x`, the corresponding path is `.items[0].wanted.x`.
 
 JSON path queries always begin with a period `.`
+
+## Changing default buckets for histograms
+
+You can customize the buckets for all generated histograms:
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    common:
+      buckets:
+        - 0.05
+        - 0.10
+        - 0.25
+        - 0.50
+        - 1.00
+        - 2.50
+        - 5.00
+        - 10.00
+        - 20.00
+```
 
 ## Adding custom resources
 

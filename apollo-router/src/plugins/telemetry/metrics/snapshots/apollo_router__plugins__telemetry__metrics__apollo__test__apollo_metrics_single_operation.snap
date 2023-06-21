@@ -52,10 +52,10 @@ expression: results
         }
       }
     },
-    "operation_count_by_type": {
+    "licensed_operation_count_by_type": {
       "type": "query",
       "subtype": null,
-      "operation_count": 1
+      "licensed_operation_count": 1
     }
   }
 ]
