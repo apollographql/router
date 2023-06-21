@@ -96,15 +96,15 @@ pub(crate) struct FetchNode {
     pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
 }
 
-struct Variables {
-    variables: Object,
-    paths: HashMap<Path, usize>,
+pub(crate) struct Variables {
+    pub(crate) variables: Object,
+    pub(crate) paths: HashMap<Path, usize>,
 }
 
 impl Variables {
     #[instrument(skip_all, level = "debug", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
-    async fn new(
+    pub(super) async fn new(
         requires: &[Selection],
         variable_usages: &[String],
         data: &Value,
@@ -224,8 +224,7 @@ impl FetchNode {
                     .uri(
                         parameters
                             .schema
-                            .subgraphs()
-                            .find_map(|(name, url)| (name == service_name).then_some(url))
+                            .subgraph_url(service_name)
                             .unwrap_or_else(|| {
                                 panic!(
                                     "schema uri for subgraph '{service_name}' should already have been checked"

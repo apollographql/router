@@ -21,6 +21,8 @@ use crate::configuration::TlsSubgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
+use crate::plugins::subscription::Subscription;
+use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
@@ -165,6 +167,12 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
 
+        let subscription_plugin_conf = plugins
+            .iter()
+            .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
+            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
+            .map(|p| p.config.clone());
+
         for (name, _) in schema.subgraphs() {
             let subgraph_root_store = configuration
                 .tls
@@ -195,10 +203,19 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                                 .unwrap_or(configuration.apq.subgraph.all.enabled),
                             subgraph_root_store,
                             shaping.enable_subgraph_http2(name),
+                            subscription_plugin_conf.clone(),
+                            configuration.notify.clone(),
                         ),
                     ),
                 ),
-                None => Either::B(SubgraphService::new(name, false, subgraph_root_store, true)),
+                None => Either::B(SubgraphService::new(
+                    name,
+                    false,
+                    subgraph_root_store,
+                    true,
+                    subscription_plugin_conf.clone(),
+                    configuration.notify.clone(),
+                )),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -274,6 +291,11 @@ impl YamlRouterFactory {
         let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
 
+        let subscription_plugin_conf = plugins
+            .iter()
+            .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
+            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
+            .map(|p| p.config.clone());
         for (name, _) in schema.subgraphs() {
             let subgraph_root_store = configuration
                 .tls
@@ -304,10 +326,19 @@ impl YamlRouterFactory {
                                 .unwrap_or(configuration.apq.subgraph.all.enabled),
                             subgraph_root_store,
                             shaping.enable_subgraph_http2(name),
+                            subscription_plugin_conf.clone(),
+                            configuration.notify.clone(),
                         ),
                     ),
                 ),
-                None => Either::B(SubgraphService::new(name, false, subgraph_root_store, true)),
+                None => Either::B(SubgraphService::new(
+                    name,
+                    false,
+                    subgraph_root_store,
+                    true,
+                    subscription_plugin_conf.clone(),
+                    configuration.notify.clone(),
+                )),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -404,6 +435,7 @@ pub(crate) async fn create_plugins(
     let plugin_registry: Vec<&'static Lazy<PluginFactory>> = crate::plugin::plugins().collect();
     let mut plugin_instances = Vec::new();
     let extra = extra_plugins.unwrap_or_default();
+    let notify = configuration.notify.clone();
 
     for (name, mut configuration) in configuration.plugins().into_iter() {
         if extra.iter().any(|(n, _)| *n == name) {
@@ -422,7 +454,7 @@ pub(crate) async fn create_plugins(
                     inject_schema_id(schema, &mut configuration);
                 }
                 match factory
-                    .create_instance(&configuration, schema.as_string().clone())
+                    .create_instance(&configuration, schema.as_string().clone(), notify.clone())
                     .await
                 {
                     Ok(plugin) => {
@@ -473,7 +505,7 @@ pub(crate) async fn create_plugins(
                             inject_schema_id(schema, &mut config);
                         }
                         match factory
-                            .create_instance(&config, schema.as_string().clone())
+                            .create_instance(&config, schema.as_string().clone(), notify.clone())
                             .await
                         {
                             Ok(plugin) => {

@@ -108,6 +108,8 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
             &Default::default(),
             &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
             sender,
+            None,
+            &None,
         )
         .await;
     assert_eq!(result.errors.len(), 1);
@@ -165,6 +167,8 @@ async fn fetch_includes_operation_name() {
             &Default::default(),
             &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
             sender,
+            None,
+            &None,
         )
         .await;
 
@@ -219,6 +223,8 @@ async fn fetch_makes_post_requests() {
             &Default::default(),
             &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
             sender,
+            None,
+            &None,
         )
         .await;
 
@@ -356,7 +362,15 @@ async fn defer() {
     });
 
     let response = query_plan
-        .execute(&Context::new(), &sf, &Default::default(), &schema, sender)
+        .execute(
+            &Context::new(),
+            &sf,
+            &Default::default(),
+            &schema,
+            sender,
+            None,
+            &None,
+        )
         .await;
 
     // primary response
@@ -437,7 +451,6 @@ async fn defer_if_condition() {
         )])),
         plugins: Default::default(),
     });
-
     let defer_primary_response = query_plan
         .execute(
             &Context::new(),
@@ -453,6 +466,8 @@ async fn defer_if_condition() {
             ),
             &schema,
             sender,
+            None,
+            &None,
         )
         .await;
 
@@ -471,6 +486,8 @@ async fn defer_if_condition() {
             &Default::default(),
             &schema,
             default_sender,
+            None,
+            &None,
         )
         .await;
 
@@ -495,6 +512,8 @@ async fn defer_if_condition() {
             ),
             &schema,
             sender,
+            None,
+            &None,
         )
         .await;
     insta::assert_json_snapshot!(defer_disabled);
@@ -612,6 +631,8 @@ async fn dependent_mutations() {
             &Default::default(),
             &Arc::new(Schema::parse_test(schema, &Default::default()).unwrap()),
             sender,
+            None,
+            &None,
         )
         .await;
 }
