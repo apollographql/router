@@ -33,6 +33,7 @@ pub(crate) struct Override {
 
 pub(crate) enum ValueType {
     String,
+    #[allow(dead_code)]
     Number,
     Bool,
 }
@@ -107,7 +108,7 @@ impl Expansion {
             .override_config(
                 Override::builder()
                     .config_path("supergraph.listen")
-                    .env_name("APOLLO_ROUTER_SUPERGRAPH_LISTEN")
+                    .env_name("APOLLO_ROUTER_LISTEN_ADDRESS")
                     .value_type(ValueType::String)
                     .build(),
             )

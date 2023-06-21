@@ -232,13 +232,13 @@ pub struct Opt {
     #[clap(long, default_value = "30s", value_parser = humantime::parse_duration, env)]
     apollo_uplink_timeout: Duration,
 
+    /// The listen address for the router. Overrides `supergraph.listen` in router.yaml.
+    #[clap(long = "listen", env = "APOLLO_ROUTER_LISTEN_ADDRESS")]
+    listen_address: Option<SocketAddr>,
+
     /// Display version and exit.
     #[clap(action = ArgAction::SetTrue, long, short = 'V')]
     pub(crate) version: bool,
-
-    /// Set the listen address for the router. This argument overrides the `supergraph.listen` property in the router configuration file.
-    #[clap(long = "listen", env = "APOLLO_ROUTER_SUPERGRAPH_LISTEN")]
-    supergraph_listen: Option<SocketAddr>,
 }
 
 /// Wrapper so that clap can display the default config path in the help message.
