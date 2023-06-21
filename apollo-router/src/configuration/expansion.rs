@@ -47,21 +47,20 @@ impl Override {
         match (
             self.env_name
                 .as_ref()
-                .map(|name| std::env::var(name).ok())
-                .flatten(),
+                .and_then(|name| std::env::var(name).ok()),
             self.value.clone(),
         ) {
             (Some(value), _) => {
                 // Coerce the env variable into the correct format, otherwise let it through as a string
                 let parsed = Value::from_str(&value);
                 let string_var = Value::String(value);
-                return Some(match (&self.value_type, parsed) {
+                Some(match (&self.value_type, parsed) {
                     (ValueType::Bool, Ok(Value::Bool(bool))) => Value::Bool(bool),
                     (ValueType::Number, Ok(Value::Number(number))) => Value::Number(number),
                     _ => string_var,
-                });
+                })
             }
-            (_, Some(value)) => return Some(value),
+            (_, Some(value)) => Some(value),
             _ => None,
         }
     }
@@ -270,10 +269,12 @@ pub(crate) fn coerce(expanded: &str) -> Value {
 #[cfg(test)]
 mod test {
     use insta::assert_yaml_snapshot;
-    use serde_json::{json, Value};
+    use serde_json::json;
+    use serde_json::Value;
 
+    use crate::configuration::expansion::dev_mode_defaults;
     use crate::configuration::expansion::Override;
-    use crate::configuration::expansion::{dev_mode_defaults, ValueType};
+    use crate::configuration::expansion::ValueType;
     use crate::configuration::Expansion;
 
     #[test]
