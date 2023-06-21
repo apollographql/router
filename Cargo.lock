@@ -214,25 +214,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c7d0618f0e0b7e8ff11427422b64564d5fb0be1940354bfe2e0529b18a9d9b8"
 
 [[package]]
-name = "apollo-ariadne"
-version = "0.2.0-alpha.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28d0599491753b640c75cdaefc2cb1c9b9ba5787a461cb7c821f37e9e6694f0a"
-dependencies = [
- "unicode-width",
- "yansi",
-]
-
-[[package]]
 name = "apollo-compiler"
-version = "0.8.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adfb4c7364494ca41e3fec600b6a4570320db83ae0aa938ca70036632bb9365e"
+checksum = "4593ed026f92c0e79bc11a050f060af72a4fadaccdfefd211263d85f9be8048b"
 dependencies = [
- "apollo-ariadne",
  "apollo-parser 0.5.3",
+ "ariadne",
  "indexmap",
- "ordered-float 2.10.0",
+ "ordered-float 3.7.0",
  "rowan",
  "salsa",
  "thiserror",
@@ -483,6 +473,16 @@ name = "arcstr"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f907281554a3d0312bb7aab855a8e0ef6cbf1614d06de54105039ca8b34460e"
+
+[[package]]
+name = "ariadne"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72fe02fc62033df9ba41cba57ee19acf5e742511a140c7dbc3a873e19a19a1bd"
+dependencies = [
+ "unicode-width",
+ "yansi",
+]
 
 [[package]]
 name = "ascii"
@@ -4013,9 +4013,9 @@ dependencies = [
 
 [[package]]
 name = "ordered-float"
-version = "2.10.0"
+version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7940cf2ca942593318d07fcf2596cdca60a85c9e7fab408a5e21a4f9dcd40d87"
+checksum = "2fc2dbde8f8a79f2102cc474ceb0ad68e3b80b85289ea62389b60e66777e4213"
 dependencies = [
  "num-traits",
 ]

@@ -345,19 +345,19 @@ fn ty(hir: &hir::Type) -> apollo_encoder::Type_ {
 fn value(hir: &hir::Value) -> Result<apollo_encoder::Value, BoxError> {
     Ok(match hir {
         hir::Value::Variable(val) => apollo_encoder::Value::Variable(val.name().into()),
-        hir::Value::Int(val) => {
-            apollo_encoder::Value::Int(val.to_i32_checked().ok_or("Int value overflows i32")?)
+        hir::Value::Int { value, .. } => {
+            apollo_encoder::Value::Int(value.to_i32_checked().ok_or("Int value overflows i32")?)
         }
-        hir::Value::Float(val) => apollo_encoder::Value::Float(val.get()),
-        hir::Value::String(val) => apollo_encoder::Value::String(val.clone()),
-        hir::Value::Boolean(val) => apollo_encoder::Value::Boolean(*val),
-        hir::Value::Null => apollo_encoder::Value::Null,
-        hir::Value::Enum(val) => apollo_encoder::Value::Enum(val.src().into()),
-        hir::Value::List(val) => {
-            apollo_encoder::Value::List(val.iter().map(value).collect::<Result<Vec<_>, _>>()?)
+        hir::Value::Float { value, .. } => apollo_encoder::Value::Float(value.get()),
+        hir::Value::String { value, .. } => apollo_encoder::Value::String(value.clone()),
+        hir::Value::Boolean { value, .. } => apollo_encoder::Value::Boolean(*value),
+        hir::Value::Null { .. } => apollo_encoder::Value::Null,
+        hir::Value::Enum { value, .. } => apollo_encoder::Value::Enum(value.src().into()),
+        hir::Value::List { value: list, .. } => {
+            apollo_encoder::Value::List(list.iter().map(value).collect::<Result<Vec<_>, _>>()?)
         }
-        hir::Value::Object(val) => apollo_encoder::Value::Object(
-            val.iter()
+        hir::Value::Object { value: obj, .. } => apollo_encoder::Value::Object(
+            obj.iter()
                 .map(|(k, v)| Ok::<_, BoxError>((k.src().to_string(), value(v)?)))
                 .collect::<Result<Vec<_>, _>>()?,
         ),
@@ -411,7 +411,7 @@ fn test_add_directive_to_fields() {
     let mut visitor = AddDirective(&compiler);
     let expected = "query($id: ID = null) {
   a @added
-  ... on Query @defer {
+  ... @defer {
     b @added
   }
   ...F
