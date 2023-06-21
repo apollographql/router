@@ -1,6 +1,7 @@
 //! Calls out to nodejs query planner
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
@@ -25,6 +26,7 @@ use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::introspection::Introspection;
+use crate::query_planner::labeler::add_defer_labels;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -267,14 +269,32 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         let fut = async move {
             let start = Instant::now();
 
-            let compiler_guard = compiler.lock().await;
+            let mut compiler_guard = compiler.lock().await;
             let file_id = compiler_guard
                 .db
                 .source_file(QUERY_EXECUTABLE.into())
                 .ok_or(QueryPlannerError::SpecError(SpecError::ParsingError(
                     "missing input file for query".to_string(),
                 )))?;
+
             let filtered_query = compiler_guard.db.source_code(file_id);
+
+            println!("query before adding labels:\n{}", filtered_query);
+            let added_labels = match add_defer_labels(file_id, &mut *compiler_guard) {
+                Err(e) => {
+                    return Err(QueryPlannerError::SpecError(SpecError::ParsingError(
+                        e.to_string(),
+                    )))
+                }
+                Ok((modified_query, added_labels)) => {
+                    compiler_guard.update_executable(file_id, &modified_query);
+                    added_labels
+                }
+            };
+
+            let filtered_query = compiler_guard.db.source_code(file_id);
+            println!("query after adding labels:\n{}", filtered_query);
+
             drop(compiler_guard);
 
             let res = this
@@ -282,6 +302,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     original_query,
                     filtered_query.to_string(),
                     operation_name.to_owned(),
+                    added_labels,
                     compiler,
                 )
                 .await;
@@ -325,6 +346,7 @@ impl BridgeQueryPlanner {
         original_query: String,
         filtered_query: String,
         operation_name: Option<String>,
+        added_labels: HashSet<String>,
         compiler: Arc<Mutex<ApolloCompiler>>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let mut selections = self
@@ -333,6 +355,7 @@ impl BridgeQueryPlanner {
                 compiler.clone(),
             )
             .await?;
+        selections.added_labels = added_labels;
 
         if selections.contains_introspection() {
             // If we have only one operation containing only the root field `__typename`
@@ -554,6 +577,7 @@ mod tests {
                 original_query.to_string(),
                 filtered_query.to_string(),
                 operation_name,
+                HashSet::new(),
                 Arc::new(Mutex::new(compiler)),
             )
             .await

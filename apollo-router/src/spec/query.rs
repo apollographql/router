@@ -60,6 +60,8 @@ pub(crate) struct Query {
     pub(crate) subselections: HashMap<SubSelection, Query>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) filtered_query: Option<Arc<Query>>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) added_labels: HashSet<String>,
 }
 
 #[derive(Debug, Derivative, Default)]
@@ -298,6 +300,7 @@ impl Query {
             operations,
             subselections: HashMap::new(),
             filtered_query: None,
+            added_labels: HashSet::new(),
         })
     }
 
@@ -318,6 +321,7 @@ impl Query {
             operations,
             subselections: HashMap::new(),
             filtered_query: None,
+            added_labels: HashSet::new(),
         })
     }
 

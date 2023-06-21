@@ -254,7 +254,7 @@ fn get_field_type(visitor: &impl Visitor, parent: &str, field_name: &str) -> Opt
     })
 }
 
-fn selection_set(
+pub(crate) fn selection_set(
     visitor: &mut impl Visitor,
     hir: &hir::SelectionSet,
     parent_type: &str,
@@ -306,7 +306,9 @@ fn variable_definition(
     Ok(Some(encoder_node))
 }
 
-fn directive(hir: &hir::Directive) -> Result<Option<apollo_encoder::Directive>, BoxError> {
+pub(crate) fn directive(
+    hir: &hir::Directive,
+) -> Result<Option<apollo_encoder::Directive>, BoxError> {
     let name = hir.name().into();
     let mut encoder_directive = apollo_encoder::Directive::new(name);
 
