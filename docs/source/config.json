@@ -57,14 +57,20 @@
       "@defer support": "/executing-operations/defer-support",
       "Request format": "/executing-operations/requests",
       "GraphQL Subscriptions": {
-        "Overview": [
+        "Subscriptions setup": [
           "/executing-operations/subscription-support",
           [
             "enterprise"
           ]
         ],
-        "HTTP callback protocol": [
+        "Subgraph protocol: HTTP callback": [
           "/executing-operations/subscription-callback-protocol",
+          [
+            "enterprise"
+          ]
+        ],
+        "Client protocol: HTTP multipart": [
+          "/executing-operations/subscription-multipart-protocol",
           [
             "enterprise"
           ]

@@ -70,7 +70,7 @@ flowchart LR;
     }
     ```
 
-   - **The client does _not_ use a WebSocket protocol!** Instead, it uses [HTTP with chunked multipart responses](https://github.com/graphql/graphql-over-http/blob/main/rfcs/IncrementalDelivery.md).
+   - **The client does _not_ use a WebSocket protocol!** Instead, it uses [HTTP with chunked multipart responses](./subscription-multipart-protocol/).
    - By using HTTP for subscriptions, clients can execute _all_ GraphQL operation types over HTTP instead of using two different protocols.
    - Apollo Client for [Web](/react/), [Kotlin](/kotlin/), and [iOS](/ios/) all support GraphQL subscriptions over HTTP. See each library's documentation for configuration details.
 
@@ -324,7 +324,7 @@ content-type: application/json
 
 > This example subscription only emits three events and then directly closes the connection.
 >
-> For more information on this multipart HTTP subscription protocol, see [this document](https://github.com/graphql/graphql-over-http/blob/main/rfcs/IncrementalDelivery.md).
+> For more information on this multipart HTTP subscription protocol, see [this article](./subscription-multipart-protocol/).
 
 ## Subscription deduplication
 
