@@ -68,7 +68,7 @@ atty = "0.2.14"
 axum = { version = "0.6.18", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.67"
 base64 = "0.20.0"
-buildstructor = "0.5.2"
+buildstructor = "0.5.3"
 bytes = "1.4.0"
 clap = { version = "4.3.3", default-features = false, features = [
     "env",
@@ -235,7 +235,7 @@ uname = "0.1.1"
 tikv-jemallocator = "0.5"
 
 [dev-dependencies]
-axum = { version = "0.6.6", features = ["headers", "json", "original-uri", "ws"] }
+axum = { version = "0.6.18", features = ["headers", "json", "original-uri", "ws"] }
 ecdsa = { version = "0.15.1", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "6.3.0", features = ["enable-rustls", "no-client-setname"] }
 futures-test = "0.3.28"
