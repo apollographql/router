@@ -154,6 +154,10 @@ impl LicenseEnforcementReport {
                 .path("$.traffic_shaping..experimental_entity_caching")
                 .name("Subgraph entity caching")
                 .build(),
+            ConfigurationRestriction::builder()
+                .path("$.subscription")
+                .name("Federated subscriptions")
+                .build(),
             // Per-operation limits are restricted but parser limits like `parser_max_recursion`
             // where the Router only configures apollo-rs are not.
             ConfigurationRestriction::builder()

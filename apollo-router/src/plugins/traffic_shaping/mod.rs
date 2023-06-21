@@ -754,7 +754,7 @@ mod test {
         )
         .unwrap();
 
-        let shaping_config = TrafficShaping::new(PluginInit::new(config, Default::default()))
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
             .await
             .unwrap();
 

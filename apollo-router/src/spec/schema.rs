@@ -145,6 +145,11 @@ impl Schema {
         self.subgraphs.iter()
     }
 
+    /// Return the subgraph URI given the service name
+    pub(crate) fn subgraph_url(&self, service_name: &str) -> Option<&Uri> {
+        self.subgraphs.get(service_name)
+    }
+
     pub(crate) fn api_schema(&self) -> &Schema {
         match &self.api_schema {
             Some(schema) => schema,

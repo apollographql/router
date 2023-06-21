@@ -1089,9 +1089,6 @@ impl Operation {
     ) -> Result<Self, SpecError> {
         let name = operation.name().map(|s| s.to_owned());
         let kind = operation.operation_ty().into();
-        if kind == OperationKind::Subscription {
-            return Err(SpecError::SubscriptionNotSupported);
-        }
         let current_field_type = FieldType::new_named(schema.root_operation_name(kind));
         let selection_set = operation
             .selection_set()

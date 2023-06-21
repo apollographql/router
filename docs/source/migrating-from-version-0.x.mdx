@@ -83,7 +83,7 @@ The Apollo Router **renames** the following environment variables used by `@apol
 
 ## `ApolloGateway` constructor options
 
-The number of options you currently provide to your `ApolloGateway` constructor varies depending on whether you're using [managed federation](./managed-federation/overview/). If you _are_ using managed federation, you might even be providing _zero_ options to this constructor!
+The number of options you currently provide to your `ApolloGateway` constructor varies depending on whether you're using [managed federation](/federation/managed-federation/overview/). If you _are_ using managed federation, you might even be providing _zero_ options to this constructor!
 
 ### `supergraphSdl`
 
@@ -91,7 +91,7 @@ The [`supergraphSdl` option](/apollo-server/using-federation/api/apollo-gateway/
 
 You can achieve this option's effect with the Apollo Router in one of the following ways:
 
-* [Move to managed federation](./managed-federation/setup/) with your move to the Apollo Router.
+* [Move to managed federation](/federation/managed-federation/setup/) with your move to the Apollo Router.
 * Provide the `--supergraph` command-line argument to the Apollo Router on startup:
 
     ```
@@ -104,7 +104,7 @@ You can achieve this option's effect with the Apollo Router in one of the follow
 
 If you provide one of these constructor options, your gateway performs its _own_ supergraph schema composition on startup. **The Apollo Router does not support this in-process composition.**
 
-Instead, you need to perform composition using [managed federation](./managed-federation/setup/) or the [Rover CLI](/rover/commands/supergraphs/). With either of these methods, the Apollo Router can hot-reload its supergraph schema without restarting, and you avoid the possibility of a composition failure that results in downtime.
+Instead, you need to perform composition using [managed federation](/federation/managed-federation/setup/) or the [Rover CLI](/rover/commands/supergraphs/). With either of these methods, the Apollo Router can hot-reload its supergraph schema without restarting, and you avoid the possibility of a composition failure that results in downtime.
 
 ### `buildService`
 
