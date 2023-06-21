@@ -158,7 +158,7 @@ Below are 2 example [Rhai script](../customizations/rhai/) customizations that d
 
 ### Example: Forwarding claims to subgraphs
 
-> ⚠️ This example forwards JWT claims via headers. When combined with [header propagation](./header-propagation/) this can introduce a security risk. If you are relying on header-based forwarding, **be sure not to propagate matching headers**.
+> ⚠️ This example forwards JWT claims via headers. When combined with [header propagation](./header-propagation/) this can introduce a security risk. If you're relying on header-based forwarding, **make sure not to propagate matching headers**.
 
 Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
