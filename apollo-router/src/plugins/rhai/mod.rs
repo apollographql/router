@@ -676,14 +676,13 @@ macro_rules! gen_map_router_deferred_response {
                                 // throw away our response and custom build an error response
                                 let error_response = graphql::Response::builder()
                                     .errors(vec![error]).build();
-                                let error_body = hyper::Body::from(serde_json::to_vec(&error_response)?);
-                                return hyper::body::to_bytes(error_body).await.map_err(BoxError::from);
+                                return Ok(serde_json::to_vec(&error_response)?.into());
                             }
 
                             let response_opt = shared_response.lock().unwrap().take();
                             let $rhai_deferred_response { response, .. } =
                                 response_opt.unwrap();
-                            hyper::body::to_bytes(response).await.map_err(BoxError::from)
+                            Ok(response)
                         }
                     });
 

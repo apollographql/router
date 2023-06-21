@@ -582,10 +582,9 @@ mod router_plugin {
     ) -> Result<String, Box<EvalAltResult>> {
         // Get the body
         let bytes = obj.with_mut(|response| {
-            let body = std::mem::take(&mut response.response);
-            let bytes = http_body_as_bytes(body)?;
+            let bytes = std::mem::take(&mut response.response);
             // Copy back the response so it can continue to be used
-            response.response = bytes.clone().into();
+            response.response = bytes.clone();
             Ok::<Bytes, Box<EvalAltResult>>(bytes)
         })?;
 
@@ -709,7 +708,7 @@ mod router_plugin {
         body: String,
     ) -> Result<(), Box<EvalAltResult>> {
         let bytes = Bytes::from(body);
-        obj.with_mut(|response| response.response = bytes.into());
+        obj.with_mut(|response| response.response = bytes);
         Ok(())
     }
 
@@ -1031,7 +1030,7 @@ pub(crate) struct RhaiRouterResponse {
 #[derive(Default)]
 pub(crate) struct RhaiRouterDeferredResponse {
     pub(crate) context: Context,
-    pub(crate) response: Body,
+    pub(crate) response: Bytes,
 }
 
 #[derive(Default)]
