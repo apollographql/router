@@ -8,6 +8,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
 
 use super::log;
+use super::subscription::SubscriptionHandle;
 use super::DeferredNode;
 use super::PlanNode;
 use super::QueryPlan;
@@ -17,6 +18,7 @@ use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
+use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::Primary;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
@@ -35,6 +37,7 @@ use crate::spec::Schema;
 use crate::Context;
 
 impl QueryPlan {
+    #[allow(clippy::too_many_arguments)]
     /// Execute the plan and return a [`Response`].
     pub(crate) async fn execute<'a>(
         &self,
@@ -43,11 +46,14 @@ impl QueryPlan {
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
         sender: futures::channel::mpsc::Sender<Response>,
+        subscription_handle: Option<SubscriptionHandle>,
+        subscription_config: &'a Option<SubscriptionConfig>,
     ) -> Response {
         let root = Path::empty();
 
         log::trace_query_plan(&self.root);
         let deferred_fetches = HashMap::new();
+
         let (value, subselection, errors) = self
             .root
             .execute_recursively(
@@ -58,6 +64,9 @@ impl QueryPlan {
                     supergraph_request,
                     deferred_fetches: &deferred_fetches,
                     query: &self.query,
+                    root_node: &self.root,
+                    subscription_handle: &subscription_handle,
+                    subscription_config,
                 },
                 &root,
                 &Value::default(),
@@ -85,10 +94,13 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
     pub(crate) deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,
+    pub(crate) root_node: &'a PlanNode,
+    pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
+    pub(crate) subscription_config: &'a Option<SubscriptionConfig>,
 }
 
 impl PlanNode {
-    fn execute_recursively<'a>(
+    pub(super) fn execute_recursively<'a>(
         &'a self,
         parameters: &'a ExecutionParameters<'a>,
         current_dir: &'a Path,
@@ -178,6 +190,27 @@ impl PlanNode {
                     errors = err;
                     subselection = subselect;
                 }
+                PlanNode::Subscription { primary, rest } => {
+                    if parameters.subscription_handle.is_some() {
+                        errors = primary
+                            .execute_recursively(
+                                parameters,
+                                current_dir,
+                                parent_value,
+                                sender,
+                                rest,
+                            )
+                            .await;
+                    } else {
+                        tracing::error!("No subscription handle provided for a subscription");
+                        errors = vec![Error::builder()
+                            .message("no subscription handle provided for a subscription")
+                            .extension_code("NO_SUBSCRIPTION_HANDLE")
+                            .build()];
+                    };
+
+                    value = Value::default();
+                }
                 PlanNode::Fetch(fetch_node) => {
                     let fetch_time_offset =
                         parameters.context.created_at.elapsed().as_nanos() as i64;
@@ -249,6 +282,9 @@ impl PlanNode {
                                         supergraph_request: parameters.supergraph_request,
                                         deferred_fetches: &deferred_fetches,
                                         query: parameters.query,
+                                        root_node: parameters.root_node,
+                                        subscription_handle: parameters.subscription_handle,
+                                        subscription_config: parameters.subscription_config,
                                     },
                                     current_dir,
                                     &value,
@@ -390,8 +426,11 @@ impl DeferredNode {
         let sc = parameters.schema.clone();
         let orig = parameters.supergraph_request.clone();
         let sf = parameters.service_factory.clone();
+        let root_node = parameters.root_node.clone();
         let ctx = parameters.context.clone();
         let query = parameters.query.clone();
+        let subscription_handle = parameters.subscription_handle.clone();
+        let subscription_config = parameters.subscription_config.clone();
         let mut primary_receiver = primary_sender.subscribe();
         let mut value = parent_value.clone();
         let depends_json = serde_json::to_string(&self.depends).unwrap_or_default();
@@ -428,6 +467,9 @@ impl DeferredNode {
                             supergraph_request: &orig,
                             deferred_fetches: &deferred_fetches,
                             query: &query,
+                            root_node: &root_node,
+                            subscription_handle: &subscription_handle,
+                            subscription_config: &subscription_config,
                         },
                         &Path::default(),
                         &value,
