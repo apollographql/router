@@ -5,7 +5,7 @@ expression: stream.next().await.unwrap().unwrap()
 {
   "errors": [
     {
-      "message": "validation error: cannot find type `defer` in this document",
+      "message": "validation error: cannot find directive `defer` in this document",
       "extensions": {
         "code": "VALIDATION_ERROR"
       }
