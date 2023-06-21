@@ -5,22 +5,24 @@ description: High-performance routing for self-hosted supergraphs
 
 import { Link } from 'gatsby';
 
-**The Apollo Router** is a configurable, high-performance router for a [self-hosted supergraph](/graphos/graphs/overview/#self-hosted-supergraphs):
+**The Apollo Router** is a configurable, high-performance router for your federated GraphQL API (also known as a [supergraph](/graphos/graphs/#self-hosted-supergraphs)):
 
 ```mermaid
 flowchart LR;
   clients(Clients);
   subgraph "Your infrastructure";
-  gateway(["Apollo Router"]);
-  serviceB[Products<br/>subgraph];
-  serviceC[Reviews<br/>subgraph];
-  gateway --- serviceB & serviceC;
+  router(["<b>Apollo Router</b>"]);
+  serviceB[Products<br/>API];
+  serviceC[Reviews<br/>API];
+  router -->|Sub-query| serviceB & serviceC;
   end;
-  clients -.- gateway;
+  clients -.->|Query| router;
   class clients secondary;
 ```
- 
-If you have an existing self-hosted supergraph that currently uses `@apollo/gateway`, you can move to the Apollo Router without changing any other part of your supergraph.
+
+The Apollo Router intelligently distributes inbound queries across your GraphQL-powered microservices, enabling clients to fetch data from multiple sources with a single request.
+
+If you have an existing federated graph that currently uses `@apollo/gateway`, you can move to the Apollo Router without changing any other part of your graph.
 
 <p>
   <Button
@@ -42,7 +44,7 @@ If you have an existing self-hosted supergraph that currently uses `@apollo/gate
   </Button>
 </p>
 
-> This documentation helps you run a _self-hosted_ instance of the Apollo Router. If you [create a cloud supergraph](/studio/getting-started/) with Apollo GraphOS, Apollo provisions and hosts your supergraph's router for you.
+> **This documentation helps you run a _self-hosted_ instance of the Apollo Router.** If you [create a cloud supergraph](/graphos/quickstart/cloud/) with Apollo GraphOS, Apollo provisions and hosts your router for you.
 >
 > Cloud supergraphs are recommended for organizations that don't need to host their router in their own infrastructure.
 
@@ -52,6 +54,7 @@ If you have an existing self-hosted supergraph that currently uses `@apollo/gate
 - Extensive declarative [configuration options](./configuration/overview) (header propagation, CORS settings, OpenTelemetry support, and more)
 - Support for [scripting](./customizations/rhai/) via the Rhai scripting language
 - Advanced [GraphOS Enterprise features](./enterprise-features), including:
+    - Real-time data via [GraphQL subscriptions](./executing-operations/subscription-support/)
     - [JWT authentication](./configuration/authn-jwt)
     - [Distributed caching](./configuration/distributed-caching/) for multi-router fleets
     - Customization in any language via [external coprocessing](./customizations/coprocessor/)
