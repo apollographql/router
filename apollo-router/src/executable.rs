@@ -232,13 +232,6 @@ pub struct Opt {
     #[clap(action = ArgAction::SetTrue, long, short = 'V')]
     pub(crate) version: bool,
 
-    /// Options that override the some of the configuration options.
-    #[clap(flatten)]
-    override_yaml_opts: OverrideYamlOpts,
-}
-
-#[derive(Parser, Debug)]
-pub(crate) struct OverrideYamlOpts {
     /// Set the listen address for the router. This argument overrides the `supergraph.listen` property in the router configuration file.
     #[clap(long = "listen", env = "APOLLO_ROUTER_SUPERGRAPH_LISTEN")]
     supergraph_listen: Option<SocketAddr>,
