@@ -10,7 +10,7 @@ The Apollo Router supports request authentication and key rotation via the [JSON
 
 By enabling JWT authentication, you can block malicious traffic at the edge of your graph instead of relying on [header forwarding](./header-propagation/) to propagate tokens to your subgraphs.
 
-> ⚠️ Under all circumstances, it is important that subgraphs are only accessible via the router, and not directly. This is especially true if you are relying on JWT authentication in the router. Be sure to [secure your subgraphs](/federation/building-supergraphs/subgraphs-overview/#securing-your-subgraphs).
+> ⚠️ Under all circumstances, your subgraphs should be accessible _only_ via the router—not directly by clients. This is especially true if you're relying on JWT authentication in the router. Make sure to [secure your subgraphs](/federation/building-supergraphs/subgraphs-overview/#securing-your-subgraphs).
 
 **To use this feature:**
 
