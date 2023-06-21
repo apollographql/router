@@ -53,7 +53,7 @@ features = ["docs_rs"]
 askama = "0.11.1"
 access-json = "0.1.0"
 anyhow = "1.0.71"
-apollo-compiler = "0.9.4"
+apollo-compiler = "0.10.0"
 apollo-parser = "0.5.3"
 arc-swap = "1.6.0"
 async-compression = { version = "0.3.15", features = [
