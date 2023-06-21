@@ -416,7 +416,7 @@ mod test {
     #[test]
     fn test_prefixed() {
         std::env::set_var("TEST_PREFIX_TEST_EXPANSION_VAR", "expanded");
-        std::env::set_var("TEST_DEFAULTED_VAR", "defaulted");
+        std::env::set_var("TEST_OVERRIDDEN_VAR", "overridden");
 
         let expansion = Expansion::builder()
             .prefix("TEST_PREFIX")
