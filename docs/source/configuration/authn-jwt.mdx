@@ -10,6 +10,8 @@ The Apollo Router supports request authentication and key rotation via the [JSON
 
 By enabling JWT authentication, you can block malicious traffic at the edge of your graph instead of relying on [header forwarding](./header-propagation/) to propagate tokens to your subgraphs.
 
+> ⚠️ Under all circumstances, it is important that subgraphs are only accessible via the router, and not directly. This is especially true if you are relying on JWT authentication in the router. Be sure to [secure your subgraphs](/federation/building-supergraphs/subgraphs-overview/#securing-your-subgraphs).
+
 **To use this feature:**
 
 - You must have an identity provider (**IdP**) or similar service that issues JWTs to authenticated clients using one of the signature algorithms supported by the [jsonwebtoken Rust library](https://crates.io/crates/jsonwebtoken) (most popular signing algorithms are supported).
@@ -155,6 +157,8 @@ Because claims are added to the context, you can define custom logic for handlin
 Below are 2 example [Rhai script](../customizations/rhai/) customizations that demonstrate actions the router can perform based on a request's claims.
 
 ### Example: Forwarding claims to subgraphs
+
+> ⚠️ This example forwards JWT claims via headers. When combined with [header propagation](./header-propagation/) this can introduce a security risk. If you are relying on header-based forwarding, **be sure not to propagate matching headers**.
 
 Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
