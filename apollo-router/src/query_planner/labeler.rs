@@ -99,7 +99,7 @@ impl<'a> Visitor for Labeler<'a> {
         for hir in hir.directives() {
             let is_defer = hir.name() == "defer";
             let has_label = hir.argument_by_name("label").and_then(|v| match v {
-                Value::String(s) => Some(s),
+                Value::String { value, .. } => Some(value),
                 _ => None,
             });
             if let Some(mut d) = directive(hir)? {
@@ -144,7 +144,7 @@ impl<'a> Visitor for Labeler<'a> {
         for hir in hir.directives() {
             let is_defer = hir.name() == "defer";
             let has_label = hir.argument_by_name("label").and_then(|v| match v {
-                Value::String(s) => Some(s),
+                Value::String { value, .. } => Some(value),
                 _ => None,
             });
             if let Some(mut d) = directive(hir)? {

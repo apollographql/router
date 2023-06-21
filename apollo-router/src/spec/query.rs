@@ -130,6 +130,7 @@ impl Query {
             operations: Vec::new(),
             subselections: HashMap::new(),
             filtered_query: None,
+            added_labels: HashSet::new(),
         }
     }
 
