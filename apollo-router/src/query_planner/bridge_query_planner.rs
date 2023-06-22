@@ -305,9 +305,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     "missing input file for query".to_string(),
                 )))?;
 
-            let filtered_query = compiler_guard.db.source_code(file_id);
-
-            let added_labels = match add_defer_labels(file_id, &mut compiler_guard) {
+            let added_labels = match add_defer_labels(file_id, &compiler_guard) {
                 Err(e) => {
                     return Err(QueryPlannerError::SpecError(SpecError::ParsingError(
                         e.to_string(),
@@ -444,10 +442,6 @@ mod tests {
     use test_log::test;
 
     use super::*;
-    use crate::json_ext::Path;
-    use crate::spec::query::SubSelection;
-    use crate::spec::query::SubSelections;
-
     const EXAMPLE_SCHEMA: &str = include_str!("testdata/schema.graphql");
 
     #[test(tokio::test)]
@@ -805,7 +799,7 @@ mod tests {
 
         dbg!(query);
         let result = plan(EXAMPLE_SCHEMA, query, query, None).await.unwrap();
-        if let QueryPlannerContent::Plan { plan, .. } = result {
+        if let QueryPlannerContent::Plan { .. } = result {
             //check_query_plan_coverage(&plan.root, &Path::empty(), None, &plan.query.subselections);
 
             let mut keys: Vec<String> = Vec::new();

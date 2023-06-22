@@ -116,9 +116,9 @@ where
 
             let entry = self.cache.get(&caching_key).await;
             if entry.is_first() {
-                let (mut compiler, file_id) = query_analysis.make_compiler(&query);
+                let (compiler, file_id) = query_analysis.make_compiler(&query);
 
-                if let Ok((modified_query, _)) = add_defer_labels(file_id, &mut compiler) {
+                if let Ok((modified_query, _)) = add_defer_labels(file_id, &compiler) {
                     query = modified_query;
                 }
 
@@ -198,7 +198,7 @@ where
                     compiler,
                 } = request;
 
-                let mut compiler_guard = compiler.lock().await;
+                let compiler_guard = compiler.lock().await;
                 let file_id = compiler_guard
                     .db
                     .source_file(QUERY_EXECUTABLE.into())
@@ -206,7 +206,7 @@ where
                         "missing input file for query".to_string(),
                     )))
                     .map_err(|e| CacheResolverError::RetrievalError(Arc::new(e)))?;
-                if let Ok((modified_query, _)) = add_defer_labels(file_id, &mut compiler_guard) {
+                if let Ok((modified_query, _)) = add_defer_labels(file_id, &compiler_guard) {
                     query = modified_query;
                 }
                 drop(compiler_guard);

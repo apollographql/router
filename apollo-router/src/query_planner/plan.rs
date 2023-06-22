@@ -8,7 +8,6 @@ use serde::Serialize;
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
 use super::subscription::SubscriptionNode;
-use crate::error::QueryPlannerError;
 use crate::json_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;

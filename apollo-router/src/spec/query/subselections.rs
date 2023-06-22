@@ -55,6 +55,7 @@ pub(crate) fn collect_subselections(
 ///
 /// They should be identical to paths and `subselection` strings found in
 /// `.primary` and `.deferred[i]` of `Defer` nodes of the query plan.
+#[allow(clippy::type_complexity)]
 fn subselection_keys(
     configuration: &Configuration,
     schema: &Schema,
@@ -129,7 +130,7 @@ fn has_defer(compiler: &ApolloCompiler, file_id: FileId) -> Result<HasDefer, Box
                         self.results.has_unconditional_defer = true;
                         self.results.has_defer = true;
                     }
-                    Some(hir::Value::Boolean { value, .. }) => {}
+                    Some(hir::Value::Boolean { .. }) => {}
                     Some(hir::Value::Variable(_)) => self.results.has_defer = true,
                     Some(_) => return Err("non-boolean `if` argument for `@defer`".into()),
                 }
@@ -278,10 +279,10 @@ fn conditional_defer_variable_names(
 
 /// Returns an iterator of functions, one per combination of boolean values of the given variables.
 /// The function return whether a given variable (by its name) is true in that combination.
-fn variable_combinations<'a>(
-    variables: &'a IndexSet<String>,
+fn variable_combinations(
+    variables: &IndexSet<String>,
     has_unconditional_defer: bool,
-) -> impl Iterator<Item = Combination<'a>> + 'a {
+) -> impl Iterator<Item = Combination> {
     // `N = variables.len()` boolean values have a total of 2^N combinations.
     // If we enumerate them by counting from 0 to 2^N - 1,
     // interpreting the N bits of the binary representation of the counter
@@ -315,7 +316,10 @@ struct Combination<'a> {
 
 impl<'a> Combination<'a> {
     fn is_present(&self, variable: &str) -> bool {
-        let index = self.variables.get_index_of(variable).unwrap();
+        let index = match self.variables.get_index_of(variable) {
+            Some(index) => index,
+            None => return false,
+        };
         (self.bits & (1 << index)) != 0
     }
 
@@ -327,12 +331,10 @@ impl<'a> Combination<'a> {
 pub(crate) fn generate_combination(variables_set: &IndexSet<String>, variables: &Object) -> i32 {
     let mut set = 0i32;
     for (i, variable) in variables_set.iter().enumerate() {
-        let is_set = match variables.get(variable.as_str()) {
-            Some(serde_json_bytes::Value::Bool(true)) => true,
-            _ => false,
-        };
-
-        if is_set {
+        if matches!(
+            variables.get(variable.as_str()),
+            Some(serde_json_bytes::Value::Bool(true))
+        ) {
             set &= 1 << i;
         }
     }
@@ -468,7 +470,11 @@ fn collect_subselections_keys(
             }
         }
         let non_empty = !subselection.is_empty();
-        Ok(non_empty.then(|| SelectionSet(subselection)))
+        Ok(if non_empty {
+            Some(SelectionSet(subselection))
+        } else {
+            None
+        })
     }
 
     fn arguments(hir: &[hir::Argument]) -> Result<Vec<apollo_encoder::Argument>, BoxError> {

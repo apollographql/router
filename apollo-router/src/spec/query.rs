@@ -14,7 +14,6 @@ use apollo_compiler::FileId;
 use apollo_compiler::HirDatabase;
 use derivative::Derivative;
 use indexmap::IndexSet;
-use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;

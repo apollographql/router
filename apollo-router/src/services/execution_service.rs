@@ -190,7 +190,7 @@ impl Service<ExecutionRequest> for ExecutionService {
                         ).into_iter());
                         nullified_paths.extend(paths.into_iter());
 
-                        if response.label.map(|label| query.added_labels.contains(&label)).unwrap_or(false) {
+                        if response.label.as_ref().map(|label| query.added_labels.contains(label)).unwrap_or(false) {
                             response.label = None;
                         }
                     });
