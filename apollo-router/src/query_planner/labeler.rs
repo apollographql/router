@@ -30,7 +30,8 @@ pub(crate) fn add_defer_labels(
         match document(&mut visitor, file_id) {
             Ok(modified_query) => {
                 let (_, added_labels) = visitor.unpack();
-                return Ok((modified_query.to_string(), added_labels));
+                let modified_query = modified_query.to_string();
+                return Ok((modified_query, added_labels));
             }
             Err(e) => {
                 // this can happen if one of the added labels is already used somewhere in the query

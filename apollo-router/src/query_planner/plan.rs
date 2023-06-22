@@ -14,7 +14,6 @@ use crate::json_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
-use crate::spec::query::SubSelection;
 use crate::spec::Query;
 use crate::spec::Schema;
 
@@ -188,7 +187,7 @@ impl PlanNode {
     pub(crate) fn parse_subselections(
         &self,
         schema: &Schema,
-    ) -> Result<HashMap<SubSelection, Query>, QueryPlannerError> {
+    ) -> Result<HashMap<Option<String>, Query>, QueryPlannerError> {
         // re-create full query with the right path
         // parse the subselection
         let mut subselections = HashMap::new();
@@ -202,6 +201,7 @@ impl PlanNode {
         self.collect_subselections(
             schema,
             &Path::default(),
+            None,
             &operation_kind,
             &mut subselections,
         )?;
@@ -213,24 +213,34 @@ impl PlanNode {
         &self,
         schema: &Schema,
         initial_path: &Path,
+        parent_label: Option<String>,
         kind: &OperationKind,
-        subselections: &mut HashMap<SubSelection, Query>,
+        subselections: &mut HashMap<Option<String>, Query>,
     ) -> Result<(), QueryPlannerError> {
         // re-create full query with the right path
         // parse the subselection
         match self {
             Self::Sequence { nodes } | Self::Parallel { nodes } => {
                 nodes.iter().try_fold(subselections, |subs, current| {
-                    current.collect_subselections(schema, initial_path, kind, subs)?;
+                    current.collect_subselections(
+                        schema,
+                        initial_path,
+                        parent_label.clone(),
+                        kind,
+                        subs,
+                    )?;
 
                     Ok::<_, QueryPlannerError>(subs)
                 })?;
                 Ok(())
             }
-            Self::Flatten(node) => {
-                node.node
-                    .collect_subselections(schema, initial_path, kind, subselections)
-            }
+            Self::Flatten(node) => node.node.collect_subselections(
+                schema,
+                initial_path,
+                parent_label,
+                kind,
+                subselections,
+            ),
             Self::Defer { primary, deferred } => {
                 let primary_path = initial_path.join(primary.path.clone().unwrap_or_default());
                 if let Some(primary_subselection) = &primary.subselection {
@@ -240,13 +250,8 @@ impl PlanNode {
                     let sub_selection = Query::parse(query, schema, &Default::default())?;
                     // ----------------------- END Parse ---------------------------------
 
-                    subselections.insert(
-                        SubSelection {
-                            path: primary_path,
-                            subselection: primary_subselection.clone(),
-                        },
-                        sub_selection,
-                    );
+                    println!("adding primary subselection at label {parent_label:?}");
+                    subselections.insert(parent_label, sub_selection);
                 }
 
                 deferred.iter().try_fold(subselections, |subs, current| {
@@ -257,11 +262,11 @@ impl PlanNode {
                         let sub_selection = Query::parse(query, schema, &Default::default())?;
                         // ----------------------- END Parse ---------------------------------
 
+                        println!("adding deferred subselection at label {:?}", current.label);
+
                         subs.insert(
-                            SubSelection {
-                                path: current.query_path.clone(),
-                                subselection: subselection.clone(),
-                            },
+                            // the labeler step made sure there is always a value i this option
+                            current.label.clone(),
                             sub_selection,
                         );
                     }
@@ -269,6 +274,7 @@ impl PlanNode {
                         current_node.collect_subselections(
                             schema,
                             &initial_path.join(&current.query_path),
+                            current.label.clone(),
                             kind,
                             subs,
                         )?;
@@ -281,7 +287,13 @@ impl PlanNode {
             Self::Fetch(..) => Ok(()),
             Self::Subscription { rest, .. } => {
                 if let Some(node) = rest {
-                    node.collect_subselections(schema, initial_path, kind, subselections)?;
+                    node.collect_subselections(
+                        schema,
+                        initial_path,
+                        parent_label,
+                        kind,
+                        subselections,
+                    )?;
                 }
                 Ok(())
             }
@@ -291,10 +303,22 @@ impl PlanNode {
                 ..
             } => {
                 if let Some(node) = if_clause {
-                    node.collect_subselections(schema, initial_path, kind, subselections)?;
+                    node.collect_subselections(
+                        schema,
+                        initial_path,
+                        parent_label.clone(),
+                        kind,
+                        subselections,
+                    )?;
                 }
                 if let Some(node) = else_clause {
-                    node.collect_subselections(schema, initial_path, kind, subselections)?;
+                    node.collect_subselections(
+                        schema,
+                        initial_path,
+                        parent_label,
+                        kind,
+                        subselections,
+                    )?;
                 }
                 Ok(())
             }

@@ -3,6 +3,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
 
+use apollo_compiler::InputDatabase;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
@@ -19,6 +20,7 @@ use tracing::Instrument;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
+use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -26,7 +28,9 @@ use crate::services::query_planner;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
+use crate::spec::query::QUERY_EXECUTABLE;
 use crate::spec::Schema;
+use crate::spec::SpecError;
 use crate::Configuration;
 use crate::Context;
 
@@ -102,7 +106,7 @@ where
         );
 
         let mut count = 0usize;
-        for (query, operation) in cache_keys {
+        for (mut query, operation) in cache_keys {
             let caching_key = CachingQueryKey {
                 schema_id: schema_id.clone(),
                 query: query.clone(),
@@ -112,7 +116,12 @@ where
 
             let entry = self.cache.get(&caching_key).await;
             if entry.is_first() {
-                let (compiler, _) = query_analysis.make_compiler(&query);
+                let (mut compiler, file_id) = query_analysis.make_compiler(&query);
+
+                if let Ok((modified_query, _)) = add_defer_labels(file_id, &mut compiler) {
+                    query = modified_query;
+                }
+
                 let request = QueryPlannerRequest {
                     query,
                     operation_name: operation,
@@ -183,11 +192,24 @@ where
             let entry = qp.cache.get(&caching_key).await;
             if entry.is_first() {
                 let query_planner::CachingRequest {
-                    query,
+                    mut query,
                     operation_name,
                     context,
                     compiler,
                 } = request;
+
+                let mut compiler_guard = compiler.lock().await;
+                let file_id = compiler_guard
+                    .db
+                    .source_file(QUERY_EXECUTABLE.into())
+                    .ok_or(QueryPlannerError::SpecError(SpecError::ParsingError(
+                        "missing input file for query".to_string(),
+                    )))
+                    .map_err(|e| CacheResolverError::RetrievalError(Arc::new(e)))?;
+                if let Ok((modified_query, _)) = add_defer_labels(file_id, &mut compiler_guard) {
+                    query = modified_query;
+                }
+                drop(compiler_guard);
 
                 let request = QueryPlannerRequest::builder()
                     .query(query)

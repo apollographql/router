@@ -196,7 +196,7 @@ impl Service<ExecutionRequest> for ExecutionService {
 
                             response.errors.retain(|error| match &error.path {
                                     None => true,
-                                    Some(error_path) => query.contains_error_path(operation_name.as_deref(), response.subselection.as_deref(), response.path.as_ref(), error_path),
+                                    Some(error_path) => query.contains_error_path(operation_name.as_deref(), &response.label, response.path.as_ref(), error_path),
                                 });
                             ready(Some(response))
                         }
@@ -252,7 +252,7 @@ impl Service<ExecutionRequest> for ExecutionService {
                                         .iter()
                                         .filter(|error| match &error.path {
                                             None => false,
-                                            Some(error_path) => query.contains_error_path(operation_name.as_deref(), response.subselection.as_deref(), response.path.as_ref(), error_path) &&  error_path.starts_with(&path),
+                                            Some(error_path) => query.contains_error_path(operation_name.as_deref(), &response.label, response.path.as_ref(), error_path) &&  error_path.starts_with(&path),
 
                                         })
                                         .cloned()

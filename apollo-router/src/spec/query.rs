@@ -59,7 +59,7 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) subselections: HashMap<SubSelection, Query>,
+    pub(crate) subselections: HashMap<Option<String>, Query>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) filtered_query: Option<Arc<Query>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
@@ -154,11 +154,20 @@ impl Query {
             Some(Value::Object(mut input)) => {
                 if is_deferred {
                     if let Some(subselection) = &response.subselection {
+                        /*println!(
+                            "looking for subselection at path {:?} and {} in\n{:?}",
+                            response.path.as_ref().map(|p| p.to_string()),
+                            subselection,
+                            self.subselections.keys().collect::<Vec<_>>()
+                        );*/
+                        println!(
+                            "looking for subselection at label {:?} in\n{:?}",
+                            response.label,
+                            self.subselections.keys().collect::<Vec<_>>()
+                        );
+
                         // Get subselection from hashmap
-                        match self.subselections.get(&SubSelection {
-                            path: response.path.clone().unwrap_or_default(),
-                            subselection: subselection.clone(),
-                        }) {
+                        match self.subselections.get(&response.label) {
                             Some(subselection_query) => {
                                 let mut output = Object::default();
                                 let operation = &subselection_query.operations[0];
@@ -1056,17 +1065,18 @@ impl Query {
 
     pub(crate) fn contains_error_path(
         &self,
-        operation_name: Option<&str>,
-        subselection: Option<&str>,
-        response_path: Option<&Path>,
+        _operation_name: Option<&str>,
+        label: &Option<String>,
+        _response_path: Option<&Path>,
         path: &Path,
     ) -> bool {
-        let operation = if let Some(subselection) = subselection {
+        let operation = match self.subselections.get(label) {
+            Some(subselection_query) => &subselection_query.operations[0],
+            None => return false,
+        };
+        /*let operation = if let Some(subselection) = subselection {
             // Get subselection from hashmap
-            match self.subselections.get(&SubSelection {
-                path: response_path.cloned().unwrap_or_default(),
-                subselection: subselection.to_string(),
-            }) {
+            match self.subselections.get(label) {
                 Some(subselection_query) => &subselection_query.operations[0],
                 None => return false,
             }
@@ -1075,7 +1085,7 @@ impl Query {
                 None => return false,
                 Some(op) => op,
             }
-        };
+        };*/
 
         operation
             .selection_set
