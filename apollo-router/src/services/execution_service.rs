@@ -192,9 +192,7 @@ impl Service<ExecutionRequest> for ExecutionService {
                         ).into_iter());
                         nullified_paths.extend(paths.into_iter());
 
-                        if response.label.as_ref().map(|label| query.added_labels.contains(label)).unwrap_or(false) {
-                            response.label = None;
-                        }
+                        
                     });
 
                     match (response.path.as_ref(), response.data.as_ref()) {
@@ -207,6 +205,10 @@ impl Service<ExecutionRequest> for ExecutionService {
                                     None => true,
                                     Some(error_path) => query.contains_error_path(operation_name.as_deref(), &response.label, response.path.as_ref(), error_path,  variables_set),
                                 });
+
+                                if response.label.as_ref().map(|label| query.added_labels.contains(label)).unwrap_or(false) {
+                                    response.label = None;
+                                }
                             ready(Some(response))
                         }
                         // if the deferred response specified a path, we must extract the
@@ -266,6 +268,10 @@ impl Service<ExecutionRequest> for ExecutionService {
                                         })
                                         .cloned()
                                         .collect::<Vec<_>>();
+
+                                    if response.label.as_ref().map(|label| query.added_labels.contains(label)).unwrap_or(false) {
+                                        response.label = None;
+                                    }
 
                                         let extensions: Object = response
                                         .extensions

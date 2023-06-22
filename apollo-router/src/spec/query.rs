@@ -1076,36 +1076,30 @@ impl Query {
 
     pub(crate) fn contains_error_path(
         &self,
-        _operation_name: Option<&str>,
+        operation_name: Option<&str>,
         label: &Option<String>,
         _response_path: Option<&Path>,
         path: &Path,
         variables_set: i32,
     ) -> bool {
+        println!("contains_error_path: op name={operation_name:?} label={label:?}, path={path}, variables={variables_set}\nin {:?}", self.subselections.keys().collect::<Vec<_>>());
+
         let operation = match self.subselections.get(&SubSelection {
             label: label.clone(),
             variables_set,
         }) {
             Some(subselection_query) => &subselection_query.operations[0],
-            None => return false,
-        };
-        /*let operation = if let Some(subselection) = subselection {
-            // Get subselection from hashmap
-            match self.subselections.get(label) {
-                Some(subselection_query) => &subselection_query.operations[0],
-                None => return false,
-            }
-        } else {
-            match self.operation(operation_name) {
+            None => match self.operation(operation_name) {
                 None => return false,
                 Some(op) => op,
-            }
-        };*/
+            },
+        };
 
-        operation
+        let res = operation
             .selection_set
             .iter()
-            .any(|selection| selection.contains_error_path(&path.0, &self.fragments))
+            .any(|selection| selection.contains_error_path(&path.0, &self.fragments));
+        res
     }
 
     pub(crate) fn defer_variables_set(&self, variables: &Object) -> i32 {
