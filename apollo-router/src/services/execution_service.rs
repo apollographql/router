@@ -166,6 +166,8 @@ impl Service<ExecutionRequest> for ExecutionService {
                     }
 
                     let has_next = response.has_next.unwrap_or(true);
+                    let variables_set = query.defer_variables_set(&variables);
+
                     tracing::debug_span!("format_response").in_scope(|| {
                         let mut paths = Vec::new();
                         if let Some(filtered_query) = query.filtered_query.as_ref() {
@@ -175,6 +177,7 @@ impl Service<ExecutionRequest> for ExecutionService {
                                 is_deferred,
                                 variables.clone(),
                                 schema.api_schema(),
+                                variables_set
                             );
                         }
 
@@ -183,7 +186,7 @@ impl Service<ExecutionRequest> for ExecutionService {
                             operation_name.as_deref(),
                             is_deferred,
                             variables.clone(),
-                            schema.api_schema(),
+                            schema.api_schema(), variables_set
                         ).into_iter());
                         nullified_paths.extend(paths.into_iter());
                     });
@@ -196,7 +199,7 @@ impl Service<ExecutionRequest> for ExecutionService {
 
                             response.errors.retain(|error| match &error.path {
                                     None => true,
-                                    Some(error_path) => query.contains_error_path(operation_name.as_deref(), &response.label, response.path.as_ref(), error_path),
+                                    Some(error_path) => query.contains_error_path(operation_name.as_deref(), &response.label, response.path.as_ref(), error_path,  variables_set),
                                 });
                             ready(Some(response))
                         }
@@ -252,7 +255,7 @@ impl Service<ExecutionRequest> for ExecutionService {
                                         .iter()
                                         .filter(|error| match &error.path {
                                             None => false,
-                                            Some(error_path) => query.contains_error_path(operation_name.as_deref(), &response.label, response.path.as_ref(), error_path) &&  error_path.starts_with(&path),
+                                            Some(error_path) => query.contains_error_path(operation_name.as_deref(), &response.label, response.path.as_ref(), error_path,  variables_set) &&  error_path.starts_with(&path),
 
                                         })
                                         .cloned()

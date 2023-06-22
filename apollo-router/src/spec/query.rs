@@ -13,6 +13,7 @@ use apollo_compiler::AstDatabase;
 use apollo_compiler::FileId;
 use apollo_compiler::HirDatabase;
 use derivative::Derivative;
+use indexmap::IndexSet;
 use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
@@ -30,6 +31,7 @@ use crate::json_ext::Path;
 use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
+use crate::spec::query::subselections::generate_combination;
 use crate::spec::FieldType;
 use crate::spec::Fragments;
 use crate::spec::InvalidValue;
@@ -38,6 +40,7 @@ use crate::spec::Selection;
 use crate::spec::SpecError;
 use crate::Configuration;
 
+pub(crate) mod subselections;
 pub(crate) mod transform;
 pub(crate) mod traverse;
 
@@ -55,34 +58,38 @@ pub(crate) struct Query {
     #[serde(default = "empty_compiler")]
     pub(crate) compiler: Arc<Mutex<ApolloCompiler>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    fragments: Fragments,
+    pub(crate) fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) subselections: HashMap<Option<String>, Query>,
+    pub(crate) subselections: SubSelections,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) filtered_query: Option<Arc<Query>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) added_labels: HashSet<String>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) defer_variables_set: IndexSet<String>,
 }
 
 fn empty_compiler() -> Arc<Mutex<ApolloCompiler>> {
     Arc::new(Mutex::new(ApolloCompiler::new()))
 }
 
-#[derive(Debug, Derivative, Default)]
+pub(crate) type SubSelections = HashMap<SubSelection, Query>;
+
+#[derive(Debug, Derivative, Default, Serialize, Deserialize)]
 #[derivative(PartialEq, Hash, Eq)]
 pub(crate) struct SubSelection {
-    pub(crate) path: Path,
-    pub(crate) subselection: String,
+    pub(crate) label: Option<String>,
+    pub(crate) variables_set: i32,
 }
 
-impl Serialize for SubSelection {
+/*impl Serialize for SubSelection {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        let s = format!("{}|{}", self.path, self.subselection);
+        let s = format!("{}|{}", self.label, self.variables_set);
         serializer.serialize_str(&s)
     }
 }
@@ -108,16 +115,16 @@ impl<'de> Visitor<'de> for SubSelectionVisitor {
     where
         E: serde::de::Error,
     {
-        if let Some((path, subselection)) = s.split_once('|') {
+        if let Some((label,variables_str)) = s.split_once('|') {
             Ok(SubSelection {
-                path: Path::from(path),
+                label:
                 subselection: subselection.to_string(),
             })
         } else {
             Err(E::custom("invalid subselection"))
         }
     }
-}
+}*/
 
 impl Query {
     pub(crate) fn empty() -> Self {
@@ -131,6 +138,7 @@ impl Query {
             subselections: HashMap::new(),
             filtered_query: None,
             added_labels: HashSet::new(),
+            defer_variables_set: IndexSet::new(),
         }
     }
 
@@ -146,6 +154,7 @@ impl Query {
         is_deferred: bool,
         variables: Object,
         schema: &Schema,
+        variables_set: i32,
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
 
@@ -167,7 +176,10 @@ impl Query {
                         );
 
                         // Get subselection from hashmap
-                        match self.subselections.get(&response.label) {
+                        match self.subselections.get(&SubSelection {
+                            label: response.label.clone(),
+                            variables_set,
+                        }) {
                             Some(subselection_query) => {
                                 let mut output = Object::default();
                                 let operation = &subselection_query.operations[0];
@@ -330,31 +342,11 @@ impl Query {
             subselections: HashMap::new(),
             filtered_query: None,
             added_labels: HashSet::new(),
+            defer_variables_set: IndexSet::new(),
         })
     }
 
-    pub(crate) async fn parse_with_compiler(
-        query: String,
-        compiler: Arc<Mutex<ApolloCompiler>>,
-        id: FileId,
-        schema: &Schema,
-    ) -> Result<Self, SpecError> {
-        let compiler_guard = compiler.lock().await;
-        let (fragments, operations) = Self::extract_query_information(&compiler_guard, id, schema)?;
-        drop(compiler_guard);
-
-        Ok(Query {
-            string: query,
-            compiler,
-            fragments,
-            operations,
-            subselections: HashMap::new(),
-            filtered_query: None,
-            added_labels: HashSet::new(),
-        })
-    }
-
-    fn extract_query_information(
+    pub(crate) fn extract_query_information(
         compiler: &ApolloCompiler,
         id: FileId,
         schema: &Schema,
@@ -1069,8 +1061,12 @@ impl Query {
         label: &Option<String>,
         _response_path: Option<&Path>,
         path: &Path,
+        variables_set: i32,
     ) -> bool {
-        let operation = match self.subselections.get(label) {
+        let operation = match self.subselections.get(&SubSelection {
+            label: label.clone(),
+            variables_set,
+        }) {
             Some(subselection_query) => &subselection_query.operations[0],
             None => return false,
         };
@@ -1091,6 +1087,10 @@ impl Query {
             .selection_set
             .iter()
             .any(|selection| selection.contains_error_path(&path.0, &self.fragments))
+    }
+
+    pub(crate) fn defer_variables_set(&self, variables: &Object) -> i32 {
+        generate_combination(&self.defer_variables_set, variables)
     }
 }
 
