@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use lazy_static::lazy_static;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
-use opentelemetry::Key;
 use opentelemetry::Value;
+use opentelemetry::{sdk, Key};
+use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -58,7 +59,7 @@ impl TracingConfigurator for Config {
             AgentEndpoint::Url(s) => Some(s),
         };
         let enable_span_mapping = self.enable_span_mapping.then_some(true);
-
+        let trace_config: sdk::trace::Config = trace_config.into();
         let exporter = opentelemetry_datadog::new_pipeline()
             .with(&url, |builder, e| {
                 builder.with_agent_endpoint(e.to_string().trim_end_matches('/'))
@@ -77,8 +78,15 @@ impl TracingConfigurator for Config {
                             .unwrap_or(span.name.as_ref())
                     })
             })
-            .with_service_name(trace_config.service_name.clone())
-            .with_trace_config(trace_config.into())
+            .with(
+                &trace_config.resource.get(SERVICE_NAME),
+                |builder, service_name| {
+                    // Datadog exporter incorrectly ignores the service name in the resource
+                    // Set it explicitly here
+                    builder.with_service_name(service_name.as_str())
+                },
+            )
+            .with_trace_config(trace_config)
             .build_exporter()?;
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
