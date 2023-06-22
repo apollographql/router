@@ -3,10 +3,11 @@
 use std::collections::HashMap;
 
 use lazy_static::lazy_static;
+use opentelemetry::sdk;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
+use opentelemetry::Key;
 use opentelemetry::Value;
-use opentelemetry::{sdk, Key};
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use schemars::JsonSchema;
 use serde::Deserialize;

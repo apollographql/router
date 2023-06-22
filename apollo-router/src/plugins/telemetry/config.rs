@@ -816,8 +816,10 @@ mod tests {
 
     #[test]
     fn test_service_name() {
-        let mut router_config = Trace::default();
-        router_config.service_name = "foo".to_string();
+        let router_config = Trace {
+            service_name: "foo".to_string(),
+            ..Default::default()
+        };
         let otel_config: Config = (&router_config).into();
         assert_eq!(
             Some(Value::String("foo".into())),
