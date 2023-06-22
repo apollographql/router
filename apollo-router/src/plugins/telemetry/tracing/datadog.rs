@@ -78,13 +78,6 @@ impl TracingConfigurator for Config {
                     })
             })
             .with_service_name(trace_config.service_name.clone())
-            .with_version(
-                opentelemetry::sdk::trace::Config::from(trace_config)
-                    .resource
-                    .get(opentelemetry_semantic_conventions::resource::SERVICE_VERSION)
-                    .expect("cargo version is set as a resource default;qed")
-                    .to_string(),
-            )
             .with_trace_config(trace_config.into())
             .build_exporter()?;
         Ok(builder.with_span_processor(

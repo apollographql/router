@@ -3,16 +3,17 @@ title: Enterprise features for the Apollo Router
 description: Available with GraphOS Enterprise
 ---
 
-The Apollo Router provides expanded security, performance, and customization features for organizations with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
+The Apollo Router provides expanded performance, security, and customization features for organizations with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
 
 > You can test out these features for free with an [Enterprise trial](/graphos/org/plans/#enterprise-trials).
 
 ## List of features
 
-- Authentication of inbound requests via [JSON Web Token (JWT)](./configuration/authn-jwt/)
-- Redis-backed [distributed caching of query plans and persisted queries](./configuration/distributed-caching/)
-- Custom request handling in any language via [external coprocessing](./customizations/coprocessor/)
-- Mitigation of potentially malicious requests via [operation limits](./configuration/operation-limits)
+- **Real-time updates** via [GraphQL subscriptions](./executing-operations/subscription-support/)
+- **Authentication of inbound requests** via [JSON Web Token (JWT)](./configuration/authn-jwt/)
+- Redis-backed [**distributed caching** of query plans and persisted queries](./configuration/distributed-caching/)
+- **Custom request handling** in any language via [external coprocessing](./customizations/coprocessor/)
+- **Mitigation of potentially malicious requests** via [operation limits](./configuration/operation-limits)
 
 Articles specifically about Enterprise features are marked with a **❖** icon in the left navigation.
 
@@ -20,10 +21,11 @@ Articles specifically about Enterprise features are marked with a **❖** icon i
 
 ## Enabling Enterprise features
 
-To enable support for the Apollo Router's Enterprise features:
+**To enable support for Apollo Router Enterprise features:**
 
 - Your organization must have a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
 - You must run v1.12 or later of the Apollo Router. [Download the latest version.](./quickstart#download-options)
+    - Certain Enterprise features might require a later router version. See a particular feature's documentation for details.
 - Your Apollo Router instances must connect to GraphOS with a **graph API key** and **graph ref** associated with your organization.
     - You connect your router to GraphOS by setting [these environment variables](./configuration/overview/#environment-variables) when starting the router.
     - If your router _already_ connects to your GraphOS Enterprise organization, no further action is required.

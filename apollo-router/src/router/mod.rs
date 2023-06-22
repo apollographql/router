@@ -322,7 +322,7 @@ impl TestRouterHttpServer {
         let state_machine_update_notifier = Arc::new(Notify::new());
 
         let server_factory = AxumHttpServerFactory::new();
-        let router_factory: OrbiterRouterSuperServiceFactory<YamlRouterFactory> =
+        let router_factory: OrbiterRouterSuperServiceFactory =
             OrbiterRouterSuperServiceFactory::new(YamlRouterFactory::default());
         let state_machine = StateMachine::for_tests(
             server_factory,

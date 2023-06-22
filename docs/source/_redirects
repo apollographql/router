@@ -1,3 +1,6 @@
+/managed-federation/overview /docs/federation/managed-federation/overview
+/managed-federation/setup /docs/federation/managed-federation/setup
+/managed-federation/federated-schema-checks /docs/federation/managed-federation/federated-schema-checks
 /configuration/external/ /docs/router/customizations/coprocessor/
 /configuration/caching/ /docs/router/configuration/in-memory-caching/
 /development-workflow/* /docs/router/executing-operations/:splat

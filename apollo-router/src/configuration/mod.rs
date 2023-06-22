@@ -18,6 +18,8 @@ use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
 use std::sync::Arc;
+#[cfg(not(test))]
+use std::time::Duration;
 
 use derivative::Derivative;
 use displaydoc::Display;
@@ -50,8 +52,20 @@ pub(crate) use self::schema::generate_upgrade;
 use self::subgraph::SubgraphConfiguration;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
+use crate::graphql;
+use crate::notification::Notify;
 use crate::plugin::plugins;
+#[cfg(not(test))]
+use crate::plugins::subscription::SubscriptionConfig;
+#[cfg(not(test))]
+use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
+#[cfg(not(test))]
+use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
 use crate::ApolloRouterError;
+
+// TODO: Talk it through with the teams
+#[cfg(not(test))]
+static HEARTBEAT_TIMEOUT_DURATION_SECONDS: u64 = 15;
 
 static SUPERGRAPH_ENDPOINT_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?P<first_path>.*/)(?P<sub_path>.+)\*$")
@@ -153,6 +167,9 @@ pub struct Configuration {
     #[serde(default)]
     #[serde(flatten)]
     pub(crate) apollo_plugins: ApolloPlugins,
+
+    #[serde(default, skip_serializing, skip_deserializing)]
+    pub(crate) notify: Notify<String, graphql::Response>,
 }
 
 #[derive(Clone, PartialEq, Eq, Derivative, Serialize, Deserialize, JsonSchema)]
@@ -238,11 +255,25 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         tls: Option<Tls>,
+        notify: Option<Notify<String, graphql::Response>>,
         apq: Option<Apq>,
         operation_limits: Option<OperationLimits>,
         chaos: Option<Chaos>,
         graphql_validation: Option<GraphQLValidation>,
     ) -> Result<Self, ConfigurationError> {
+        #[cfg(not(test))]
+        let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
+            Some(plugin_conf) => {
+                let conf = serde_json::from_value::<SubscriptionConfig>(plugin_conf.clone())
+                    .map_err(|err| ConfigurationError::PluginConfiguration {
+                        plugin: APOLLO_SUBSCRIPTION_PLUGIN.to_string(),
+                        error: format!("{err:?}"),
+                    })?;
+                conf.queue_capacity
+            }
+            None => None,
+        };
+
         let conf = Self {
             validated_yaml: Default::default(),
             supergraph: supergraph.unwrap_or_default(),
@@ -261,6 +292,11 @@ impl Configuration {
                 plugins: apollo_plugins,
             },
             tls: tls.unwrap_or_default(),
+            #[cfg(test)]
+            notify: notify.unwrap_or_default(),
+            #[cfg(not(test))]
+            notify: notify.map(|n| n.set_queue_size(notify_queue_cap))
+                .unwrap_or_else(|| Notify::builder().and_queue_size(notify_queue_cap).ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS)).heartbeat_error_message(graphql::Response::builder().errors(vec![graphql::Error::builder().message("the connection has been closed because it hasn't heartbeat for a while").extension_code("SUBSCRIPTION_HEARTBEAT_ERROR").build()]).build()).build()),
         };
 
         conf.validate()
@@ -310,6 +346,7 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         tls: Option<Tls>,
+        notify: Option<Notify<String, graphql::Response>>,
         apq: Option<Apq>,
         operation_limits: Option<OperationLimits>,
         chaos: Option<Chaos>,
@@ -332,6 +369,7 @@ impl Configuration {
                 plugins: apollo_plugins,
             },
             tls: tls.unwrap_or_default(),
+            notify: notify.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
         };
 

@@ -41,25 +41,21 @@ use crate::spec::Selection;
 use crate::spec::SpecError;
 use crate::Configuration;
 
+pub(crate) mod transform;
+pub(crate) mod traverse;
+
 pub(crate) const TYPENAME: &str = "__typename";
 pub(crate) const QUERY_EXECUTABLE: &str = "query";
 
-fn default_compiler() -> Arc<Mutex<ApolloCompiler>> {
-    Arc::new(Mutex::new(ApolloCompiler::new()))
-}
-
 /// A GraphQL query.
 #[derive(Derivative, Serialize, Deserialize)]
-#[derivative(PartialEq, Hash, Eq, Debug, Default)]
+#[derivative(PartialEq, Hash, Eq, Debug)]
 pub(crate) struct Query {
     pub(crate) string: String,
-    #[derivative(
-        PartialEq = "ignore",
-        Hash = "ignore",
-        Debug = "ignore",
-        Default(value = "default_compiler()")
-    )]
-    #[serde(skip, default = "default_compiler")]
+    #[derivative(PartialEq = "ignore", Hash = "ignore", Debug = "ignore")]
+    #[serde(skip)]
+    // FIXME: find a way to have a correct compiler when deserializing
+    #[serde(default = "empty_compiler")]
     pub(crate) compiler: Arc<Mutex<ApolloCompiler>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     fragments: Fragments,
@@ -74,6 +70,10 @@ pub(crate) struct Query {
     /// XXX(@goto-bus-stop): Remove when only Rust validation is used
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) validation_error: Option<SpecError>,
+}
+
+fn empty_compiler() -> Arc<Mutex<ApolloCompiler>> {
+    Arc::new(Mutex::new(ApolloCompiler::new()))
 }
 
 #[derive(Debug, Derivative, Default)]
@@ -126,6 +126,20 @@ impl<'de> Visitor<'de> for SubSelectionVisitor {
 }
 
 impl Query {
+    pub(crate) fn empty() -> Self {
+        Self {
+            string: String::new(),
+            compiler: empty_compiler(),
+            fragments: Fragments {
+                map: HashMap::new(),
+            },
+            operations: Vec::new(),
+            subselections: HashMap::new(),
+            filtered_query: None,
+            validation_error: None,
+        }
+    }
+
     /// Re-format the response value to match this query.
     ///
     /// This will discard unrequested fields and re-order the output to match the order of the
@@ -1132,9 +1146,6 @@ impl Operation {
     ) -> Result<Self, SpecError> {
         let name = operation.name().map(|s| s.to_owned());
         let kind = operation.operation_ty().into();
-        if kind == OperationKind::Subscription {
-            return Err(SpecError::SubscriptionNotSupported);
-        }
         let current_field_type = FieldType::new_named(schema.root_operation_name(kind));
         let selection_set = operation
             .selection_set()
