@@ -189,6 +189,10 @@ impl Service<ExecutionRequest> for ExecutionService {
                             schema.api_schema(), variables_set
                         ).into_iter());
                         nullified_paths.extend(paths.into_iter());
+
+                        if response.label.map(|label| query.added_labels.contains(&label)).unwrap_or(false) {
+                            response.label = None;
+                        }
                     });
 
                     match (response.path.as_ref(), response.data.as_ref()) {
