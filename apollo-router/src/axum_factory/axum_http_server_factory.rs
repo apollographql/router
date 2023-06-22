@@ -105,14 +105,18 @@ where
             Endpoint::from_router_service(
                 "/health".to_string(),
                 service_fn(move |req: router::Request| {
+                    let mut status_code = StatusCode::OK;
                     let health = if let Some(query) = req.router_request.uri().query() {
-                        tracing::info!("query: {query:?}");
                         let query_upper = query.to_ascii_uppercase();
                         // Could be more precise, but sloppy match is fine for this use case
                         if query_upper.starts_with("READY") {
                             let status = if LIVE_READY_STATE.read().ready {
                                 HealthStatus::Up
                             } else {
+                                // It's hard to get k8s to parse payloads. Especially since we
+                                // can't install curl or jq into our docker images because of CVEs.
+                                // So, compromise, k8s will interpret this as probe fail.
+                                status_code = StatusCode::SERVICE_UNAVAILABLE;
                                 HealthStatus::Down
                             };
                             Health { status }
@@ -120,6 +124,10 @@ where
                             let status = if LIVE_READY_STATE.read().live {
                                 HealthStatus::Up
                             } else {
+                                // It's hard to get k8s to parse payloads. Especially since we
+                                // can't install curl or jq into our docker images because of CVEs.
+                                // So, compromise, k8s will interpret this as probe fail.
+                                status_code = StatusCode::SERVICE_UNAVAILABLE;
                                 HealthStatus::Down
                             };
                             Health { status }
@@ -136,7 +144,7 @@ where
                     tracing::trace!(?health, request = ?req.router_request, "health check");
                     async move {
                         Ok(router::Response {
-                            response: http::Response::builder().body::<hyper::Body>(
+                            response: http::Response::builder().status(status_code).body::<hyper::Body>(
                                 serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
                             )?,
                             context: req.context,
