@@ -68,6 +68,8 @@ pub(crate) struct Query {
     pub(crate) added_labels: HashSet<String>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) defer_variables_set: IndexSet<String>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) is_original: bool,
 }
 
 fn empty_compiler() -> Arc<Mutex<ApolloCompiler>> {
@@ -138,6 +140,7 @@ impl Query {
             filtered_query: None,
             added_labels: HashSet::new(),
             defer_variables_set: IndexSet::new(),
+            is_original: true,
         }
     }
 
@@ -169,7 +172,7 @@ impl Query {
                             self.subselections.keys().collect::<Vec<_>>()
                         );*/
                         println!(
-                            "looking for subselection at label {:?} in\n{:?}",
+                            "looking for subselection at label {:?} and variables {variables_set} in\n{:?}",
                             response.label,
                             self.subselections.keys().collect::<Vec<_>>()
                         );
@@ -180,6 +183,8 @@ impl Query {
                             variables_set,
                         }) {
                             Some(subselection_query) => {
+                                println!("got subselection: {}", subselection_query.string);
+                                println!("data: {}", serde_json::to_string(&input).unwrap());
                                 let mut output = Object::default();
                                 let operation = &subselection_query.operations[0];
                                 let mut parameters = FormatParameters {
@@ -342,6 +347,7 @@ impl Query {
             filtered_query: None,
             added_labels: HashSet::new(),
             defer_variables_set: IndexSet::new(),
+            is_original: true,
         })
     }
 
@@ -735,6 +741,13 @@ impl Query {
                     };
 
                     if is_apply {
+                        // if this is the filtered query, we must keep the __typename field because the original query must know the type
+                        if !self.is_original {
+                            if let Some(input_type) = input.get(TYPENAME) {
+                                output.insert(TYPENAME, input_type.clone());
+                            }
+                        }
+
                         self.apply_selection_set(
                             selection_set,
                             parameters,
@@ -778,6 +791,13 @@ impl Query {
                         };
 
                         if is_apply {
+                            // if this is the filtered query, we must keep the __typename field because the original query must know the type
+                            if !self.is_original {
+                                if let Some(input_type) = input.get(TYPENAME) {
+                                    output.insert(TYPENAME, input_type.clone());
+                                }
+                            }
+
                             self.apply_selection_set(
                                 &fragment.selection_set,
                                 parameters,

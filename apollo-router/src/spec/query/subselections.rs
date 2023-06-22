@@ -44,6 +44,7 @@ pub(crate) fn collect_subselections(
     keys.into_iter()
         .map(|(key, path, subselection)| {
             let reconstructed = reconstruct_full_query(&path, &kind, &subselection);
+            println!("reconstructed query at key {key:?} and path {path}:\n{reconstructed}");
             let value = Query::parse(reconstructed, schema, &Default::default())?;
             Ok((key, value))
         })
@@ -441,6 +442,16 @@ fn collect_subselections_keys(
                             None
                         };
 
+                    let type_condition = hir.type_condition();
+                    if let Some(type_condition) = type_condition {
+                        visitor
+                            .current_path
+                            .push(PathElement::Fragment(type_condition.to_string()));
+                    }
+
+                    // visitor
+                    // .current_path
+                    // .push(PathElement::Key(path_element.into()));
                     if is_deferred {
                         // Omit this inline fragment from `subselection`,
                         // make it a separate key instead.
@@ -456,12 +467,23 @@ fn collect_subselections_keys(
                             }
                             add_key(visitor, deferred_label, deferred)
                         }
-                    } else if let Some(nested) =
+                    } else if let Some(SelectionSet(mut selection_set)) =
                         selection_set(visitor, label.clone(), hir.selection_set())?
                     {
+                        if let Some(name) = hir.type_condition() {
+                            selection_set = vec![Selection::InlineFragment {
+                                type_condition: Some(name.to_owned()),
+                                directives: Vec::new(),
+                                selection_set: SelectionSet(selection_set),
+                            }];
+                        }
                         // Non-deferred fragments appear to be flattened away
                         // in the string serialization of subselection from the query planner.
-                        subselection.extend(nested.0);
+                        subselection.extend(selection_set);
+                    }
+
+                    if type_condition.is_some() {
+                        visitor.current_path.pop();
                     }
                 }
 

@@ -171,6 +171,7 @@ impl Service<ExecutionRequest> for ExecutionService {
                     tracing::debug_span!("format_response").in_scope(|| {
                         let mut paths = Vec::new();
                         if let Some(filtered_query) = query.filtered_query.as_ref() {
+                            println!("\nformat with filtering query\n");
                             paths = filtered_query.format_response(
                                 &mut response,
                                 operation_name.as_deref(),
@@ -181,6 +182,7 @@ impl Service<ExecutionRequest> for ExecutionService {
                             );
                         }
 
+                        println!("\nformat with original query\n");
                         paths.extend(query.format_response(
                             &mut response,
                             operation_name.as_deref(),

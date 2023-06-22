@@ -180,6 +180,7 @@ impl BridgeQueryPlanner {
             subselections,
             added_labels,
             defer_variables_set,
+            is_original: true,
         };
         crate::spec::operation_limits::check(&self.configuration, &mut query, operation_name)
             .await?;
@@ -405,14 +406,15 @@ impl BridgeQueryPlanner {
         }
 
         if filtered_query != original_query {
-            selections.filtered_query = Some(Arc::new(
-                self.parse_selections(
+            let mut filtered = self
+                .parse_selections(
                     (filtered_query.clone(), operation_name.clone()),
                     added_labels,
                     compiler,
                 )
-                .await?,
-            ));
+                .await?;
+            filtered.is_original = false;
+            selections.filtered_query = Some(Arc::new(filtered));
         }
 
         self.plan(original_query, filtered_query, operation_name, selections)
