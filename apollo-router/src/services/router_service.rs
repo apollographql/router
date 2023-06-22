@@ -5,7 +5,6 @@ use std::task::Poll;
 
 use axum::body::StreamBody;
 use axum::response::*;
-use bytes::Bytes;
 use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream;
@@ -36,16 +35,20 @@ use super::layers::static_page::StaticPageLayer;
 use super::new_service::ServiceFactory;
 use super::router;
 use super::router::ClientRequestAccepts;
+#[cfg(test)]
 use super::supergraph;
 use super::HasPlugins;
-use super::HasSchema;
 #[cfg(test)]
+use super::HasSchema;
 use super::SupergraphCreator;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
+use super::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
 use crate::cache::DeduplicatingCache;
 use crate::graphql;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
+use crate::protocols::multipart::Multipart;
+use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::QueryPlanResult;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
@@ -59,22 +62,16 @@ use crate::ListenAddr;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
-pub(crate) struct RouterService<SF>
-where
-    SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
-{
-    supergraph_creator: Arc<SF>,
+pub(crate) struct RouterService {
+    supergraph_creator: Arc<SupergraphCreator>,
     apq_layer: APQLayer,
     query_analysis_layer: QueryAnalysisLayer,
     experimental_http_max_request_bytes: usize,
 }
 
-impl<SF> RouterService<SF>
-where
-    SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
-{
+impl RouterService {
     pub(crate) fn new(
-        supergraph_creator: Arc<SF>,
+        supergraph_creator: Arc<SupergraphCreator>,
         apq_layer: APQLayer,
         query_analysis_layer: QueryAnalysisLayer,
         experimental_http_max_request_bytes: usize,
@@ -111,9 +108,16 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
         supergraph_service
     });
 
+    let (_, supergraph_creator) = crate::TestHarness::builder()
+        .configuration(configuration.clone())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed())
+        .build_common()
+        .await
+        .unwrap();
+
     RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_service.schema(), Arc::clone(&configuration)).await,
-        Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
+        QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
+        Arc::new(supergraph_creator),
         configuration,
     )
     .await
@@ -152,23 +156,23 @@ pub(crate) async fn empty() -> impl Service<
         .expect_clone()
         .returning(MockSupergraphService::new);
 
+    let (_, supergraph_creator) = crate::TestHarness::builder()
+        .configuration(Default::default())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed())
+        .build_common()
+        .await
+        .unwrap();
+
     RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_service.schema(), Default::default()).await,
-        Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
+        QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
+        Arc::new(supergraph_creator),
         Default::default(),
     )
     .await
     .make()
 }
 
-impl<SF> Service<RouterRequest> for RouterService<SF>
-where
-    SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
-    <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
-    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
-        Send,
-{
+impl Service<RouterRequest> for RouterService {
     type Response = RouterResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -285,7 +289,8 @@ where
                     let ClientRequestAccepts {
                         wildcard: accepts_wildcard,
                         json: accepts_json,
-                        multipart: accepts_multipart,
+                        multipart_defer: accepts_multipart_defer,
+                        multipart_subscription: accepts_multipart_subscription,
                     } = context
                         .private_entries
                         .lock()
@@ -311,6 +316,7 @@ where
                         }
                         Some(response) => {
                             if !response.has_next.unwrap_or(false)
+                                && !response.subscribed.unwrap_or(false)
                                 && (accepts_json || accepts_wildcard)
                             {
                                 parts.headers.insert(
@@ -327,44 +333,33 @@ where
                                         context,
                                     })
                                 })
-                            } else if accepts_multipart {
-                                parts.headers.insert(
-                                    CONTENT_TYPE,
-                                    HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
-                                );
-
-                                // each chunk contains a response and the next delimiter, to let client parsers
-                                // know that they can process the response right away
-                                let mut first_buf = Vec::from(
-                                    &b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"[..],
-                                );
-                                serde_json::to_writer(&mut first_buf, &response)?;
-                                if response.has_next.unwrap_or(false) {
-                                    first_buf.extend_from_slice(b"\r\n--graphql\r\n");
-                                } else {
-                                    first_buf.extend_from_slice(b"\r\n--graphql--\r\n");
+                            } else if accepts_multipart_defer || accepts_multipart_subscription {
+                                if accepts_multipart_defer {
+                                    parts.headers.insert(
+                                        CONTENT_TYPE,
+                                        HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
+                                    );
+                                } else if accepts_multipart_subscription {
+                                    parts.headers.insert(
+                                        CONTENT_TYPE,
+                                        HeaderValue::from_static(
+                                            MULTIPART_SUBSCRIPTION_CONTENT_TYPE,
+                                        ),
+                                    );
                                 }
-
-                                let body = once(ready(Ok(Bytes::from(first_buf)))).chain(body.map(
-                                    |res| {
-                                        let mut buf = Vec::from(
-                                            &b"content-type: application/json\r\n\r\n"[..],
-                                        );
-                                        serde_json::to_writer(&mut buf, &res)?;
-
-                                        // the last chunk has a different end delimiter
-                                        if res.has_next.unwrap_or(false) {
-                                            buf.extend_from_slice(b"\r\n--graphql\r\n");
-                                        } else {
-                                            buf.extend_from_slice(b"\r\n--graphql--\r\n");
-                                        }
-
-                                        Ok::<_, BoxError>(buf.into())
-                                    },
-                                ));
+                                let multipart_stream = match response.subscribed {
+                                    Some(true) => StreamBody::new(Multipart::new(
+                                        body,
+                                        ProtocolMode::Subscription,
+                                    )),
+                                    _ => StreamBody::new(Multipart::new(
+                                        once(ready(response)).chain(body),
+                                        ProtocolMode::Defer,
+                                    )),
+                                };
 
                                 let response =
-                                    (parts, StreamBody::new(body)).into_response().map(|body| {
+                                    (parts, multipart_stream).into_response().map(|body| {
                                         // Axum makes this `body` have type:
                                         // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
                                         let mut body = Box::pin(body);
@@ -442,54 +437,25 @@ fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
-pub(crate) struct RouterCreator<SF>
-where
-    SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
-{
-    supergraph_creator: Arc<SF>,
+pub(crate) struct RouterCreator {
+    supergraph_creator: Arc<SupergraphCreator>,
     static_page: StaticPageLayer,
     apq_layer: APQLayer,
     query_analysis_layer: QueryAnalysisLayer,
     experimental_http_max_request_bytes: usize,
 }
 
-impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
-where
-    SF: HasSchema
-        + HasPlugins
-        + ServiceFactory<supergraph::Request>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
-    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
-        Send,
-{
+impl ServiceFactory<router::Request> for RouterCreator {
     type Service = router::BoxService;
     fn create(&self) -> Self::Service {
         self.make().boxed()
     }
 }
 
-impl<SF> RouterFactory for RouterCreator<SF>
-where
-    SF: HasSchema
-        + HasPlugins
-        + ServiceFactory<supergraph::Request>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
-    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
-        Send,
-{
+impl RouterFactory for RouterCreator {
     type RouterService = router::BoxService;
 
-    type Future = <<RouterCreator<SF> as ServiceFactory<router::Request>>::Service as Service<
+    type Future = <<RouterCreator as ServiceFactory<router::Request>>::Service as Service<
         router::Request,
     >>::Future;
 
@@ -503,23 +469,10 @@ where
     }
 }
 
-impl<SF> RouterCreator<SF>
-where
-    SF: HasSchema
-        + HasPlugins
-        + ServiceFactory<supergraph::Request>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
-    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
-        Send,
-{
+impl RouterCreator {
     pub(crate) async fn new(
         query_analysis_layer: QueryAnalysisLayer,
-        supergraph_creator: Arc<SF>,
+        supergraph_creator: Arc<SupergraphCreator>,
         configuration: Arc<Configuration>,
     ) -> Self {
         let static_page = StaticPageLayer::new(&configuration);
@@ -570,7 +523,7 @@ where
     }
 }
 
-impl RouterCreator<crate::services::supergraph_service::SupergraphCreator> {
+impl RouterCreator {
     pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
         self.supergraph_creator.cache_keys(count).await
     }

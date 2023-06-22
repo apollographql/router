@@ -4,6 +4,298 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.22.0] - 2023-06-21
+
+## 🚀 Features
+
+### Federated Subscriptions ([PR #3285](https://github.com/apollographql/router/pull/3285))
+
+> ⚠️ **This is an [Enterprise feature](https://www.apollographql.com/blog/platform/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
+>
+> If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](https://www.apollographql.com/docs/graphos/org/plans/#enterprise-trials).
+
+
+#### High-Level Overview
+
+##### What are Federated Subscriptions?
+
+This PR adds GraphQL subscription support to the Router for use with Federation. Clients can now use GraphQL subscriptions with the Router to receive realtime updates from a supergraph. With these changes, `subscription` operations are now a first-class supported feature of the Router and Federation, alongside queries and mutations.
+
+```mermaid
+flowchart LR;
+  client(Client);
+  subgraph "Your infrastructure";
+  router(["Apollo Router"]);
+  subgraphA[Products<br/>subgraph];
+  subgraphB[Reviews<br/>subgraph];
+  router---|Subscribes<br/>over WebSocket|subgraphA;
+  router-.-|Can query for<br/>entity fields|subgraphB;
+  end;
+  client---|Subscribes<br/>over HTTP|router;
+  class client secondary;
+```
+
+##### Client to Router Communication
+
+- Apollo has designed and implemented a new open protocol for handling subscriptions called [multipart subscriptions](https://github.com/apollographql/router/blob/dev/dev-docs/multipart-subscriptions-protocol.md)
+- With this new protocol clients can manage subscriptions with the Router over tried and true HTTP; WebSockets, SSE (server-sent events), etc. are not needed
+- All Apollo clients ([Apollo Client web](https://www.apollographql.com/docs/react/data/subscriptions), [Apollo Kotlin](https://www.apollographql.com/docs/kotlin/essentials/subscriptions), [Apollo iOS](https://www.apollographql.com/docs/ios/fetching/subscriptions)) have been updated to support multipart subscriptions, and can be used out of the box with little to no extra configuration
+- Subscription communication between clients and the Router must use the multipart subscription protocol, meaning only subscriptions over HTTP are supported at this time
+
+##### Router to Subgraph Communication
+
+- The Router communicates with subscription enabled subgraphs using WebSockets
+- By default, the router sends subscription requests to subgraphs using the [graphql-transport-ws protocol](https://github.com/enisdenjo/graphql-ws/blob/master/PROTOCOL.md) which is implemented in the [graphql-ws](https://github.com/enisdenjo/graphql-ws) library. You can also configure it to use the [graphql-ws protocol](https://github.com/apollographql/subscriptions-transport-ws/blob/master/PROTOCOL.md) which is implemented in the [subscriptions-transport-ws library](https://github.com/apollographql/subscriptions-transport-ws).
+- Subscription ready subgraphs can be introduced to Federation and the Router as is - no additional configuration is needed on the subgraph side
+
+##### Subscription Execution
+
+When the Router receives a GraphQL subscription request, the generated query plan will contain an initial subscription request to the subgraph that contributed the requested subscription root field.
+
+For example, as a result of a client sending this subscription request to the Router:
+
+```graphql
+subscription {
+  reviewAdded {
+    id
+    body
+    product {
+      id
+      name
+      createdBy {
+        name
+      }
+    }
+  }
+}
+```
+
+The router will send this request to the `reviews` subgraph:
+
+```graphql
+subscription {
+  reviewAdded {
+    id
+    body
+    product {
+      id
+    }
+  }
+}
+```
+
+When the `reviews` subgraph receives new data from its underlying source event stream, that data is sent back to the Router. Once received, the Router continues following the determined query plan to fetch any additional required data from other subgraphs:
+
+Example query sent to the `products` subgraph:
+
+```graphql
+query ($representations: [_Any!]!) {
+  _entities(representations: $representations) {
+    ... on Product {
+      name
+      createdBy {
+        __typename
+        email
+      }
+    }
+  }
+}
+```
+
+Example query sent to the `users` subgraph:
+
+```graphql
+query ($representations: [_Any!]!) {
+  _entities(representations: $representations) {
+    ... on User {
+      name
+    }
+  }
+}
+```
+
+When the Router finishes running the entire query plan, the data is merged back together and returned to the requesting client over HTTP (using the multipart subscriptions protocol).
+
+#### Configuration
+
+Here is a configuration example:
+
+```yaml title="router.yaml"
+subscription:
+  mode:
+    passthrough:
+      all: # The router uses these subscription settings UNLESS overridden per-subgraph
+        path: /subscriptions # The path to use for subgraph subscription endpoints (Default: /ws)
+      subgraphs: # Overrides subscription settings for individual subgraphs
+        reviews: # Overrides settings for the 'reviews' subgraph
+          path: /ws # Overrides '/subscriptions' defined above
+          protocol: graphql_transport_ws # The WebSocket-based protocol to use for subscription communication (Default: graphql_ws)
+```
+
+#### Usage Reporting
+
+Subscription use is tracked in the Router as follows:
+
+- **Subscription registration:** The initial subscription operation sent by a client to the Router that's responsible for starting a new subscription
+- **Subscription notification:** The resolution of the client subscription’s selection set in response to a subscription enabled subgraph source event
+
+Subscription registration and notification (with operation traces and statistics) are sent to Apollo Studio for observability.
+
+#### Advanced Features
+
+This PR includes the following configurable performance optimizations.
+
+#### Deduplication
+
+- If the Router detects that a client is using the same subscription as another client (ie. a subscription with the same HTTP headers and selection set), it will avoid starting a new subscription with the requested subgraph. The Router will reuse the same open subscription instead, and will send the same source events to the new client.
+- This helps reduce the number of WebSockets that need to be opened between the Router and subscription enabled subgraphs, thereby drastically reducing Router to subgraph network traffic and overall latency
+- For example, if 100 clients are subscribed to the same subscription there will be 100 open HTTP connections from the clients to the Router, but only 1 open WebSocket connection from the Router to the subgraph
+- Subscription deduplication between the Router and subgraphs is enabled by default (but can be disabled via the Router config file)
+
+#### Callback Mode
+
+- Instead of sending subscription data between a Router and subgraph over an open WebSocket, the Router can be configured to send the subgraph a callback URL that will then be used to receive all source stream events
+- Subscription enabled subgraphs send source stream events (subscription updates) back to the callback URL by making HTTP POST requests
+- Refer to the [callback mode documentation](https://github.com/apollographql/router/blob/dev/dev-docs/callback_protocol.md) for more details, including an explanation of the callback URL request/response payload format
+- This feature is still experimental and needs to be enabled explicitly in the Router config file 
+
+By [@bnjjj](https://github.com/bnjjj) and [@o0Ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/3285
+
+
+
+# [1.21.0] - 2023-06-20
+
+## 🚀 Features
+
+### Restore HTTP payload size limit, make it configurable ([Issue #2000](https://github.com/apollographql/router/issues/2000))
+
+Early versions of Apollo Router used to rely on a part of the Axum web framework
+that imposed a 2 MB limit on the size of the HTTP request body.
+Version 1.7 changed to read the body directly, unintentionally removing this limit.
+
+The limit is now restored to help protect against unbounded memory usage, but is now configurable:
+
+```yaml
+preview_operation_limits:
+  experimental_http_max_request_bytes: 2000000 # Default value: 2 MB
+```
+
+This limit is checked while reading from the network, before JSON parsing.
+Both the GraphQL document and associated variables count toward it.
+
+Before increasing this limit significantly consider testing performance
+in an environment similar to your production, especially if some clients are untrusted.
+Many concurrent large requests could cause the Router to run out of memory.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/3130
+
+### Add support for empty auth prefixes ([Issue #2909](https://github.com/apollographql/router/issues/2909))
+
+The `authentication.jwt` plugin now supports empty prefixes for the JWT header. Some companies use prefix-less headers; previously, the authentication plugin rejected requests even with an empty header explicitly set, such as: 
+
+```yml 
+authentication:
+  jwt:
+    header_value_prefix: ""
+```
+
+By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/3206
+
+## 🐛 Fixes
+
+### GraphQL introspection errors are now 400 errors ([Issue #3090](https://github.com/apollographql/router/issues/3090))
+
+If we get an introspection error during SupergraphService::plan_query(), then it is reported to the client as an HTTP 500 error. The Router now generates a valid GraphQL error for introspection errors whilst also modifying the HTTP status to be 400.
+
+Before:
+
+StatusCode:500
+```json
+{"errors":[{"message":"value retrieval failed: introspection error: introspection error : Field \"__schema\" of type \"__Schema!\" must have a selection of subfields. Did you mean \"__schema { ... }\"?","extensions":{"code":"INTERNAL_SERVER_ERROR"}}]}
+```
+
+After:
+
+StatusCode:400
+```json
+{"errors":[{"message":"introspection error : Field \"__schema\" of type \"__Schema!\" must have a selection of subfields. Did you mean \"__schema { ... }\"?","extensions":{"code":"INTROSPECTION_ERROR"}}]}
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3122
+
+### Restore missing debug tools in "debug" Docker images ([Issue #3249](https://github.com/apollographql/router/issues/3249))
+
+Debug Docker images were designed to make use of `heaptrack` for debugging memory issues. However, this functionality was inadvertently removed when we changed to multi-architecture Docker image builds.
+
+`heaptrack` functionality is now restored to our debug docker images.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3250
+
+### Federation v2.4.8 ([Issue #3217](https://github.com/apollographql/router/issues/3217), [Issue #3227](https://github.com/apollographql/router/issues/3227))
+
+This release bumps the Router's Federation support from v2.4.7 to v2.4.8, which brings in notable query planner fixes from [v2.4.8](https://github.com/apollographql/federation/releases/tag/@apollo/query-planner@2.4.8).  Of note from those releases, this brings query planner fixes that (per that dependency's changelog):
+
+- Fix bug in the handling of dependencies of subgraph fetches. This bug was manifesting itself as an assertion error ([apollographql/federation#2622](https://github.com/apollographql/federation/pull/2622))
+thrown during query planning with a message of the form `Root groups X should have no remaining groups unhandled (...)`.
+
+- Fix issues in code to reuse named fragments. One of the fixed issue would manifest as an assertion error with a message ([apollographql/federation#2619](https://github.com/apollographql/federation/pull/2619))
+looking like `Cannot add fragment of condition X (...) to parent type Y (...)`. Another would manifest itself by
+generating an invalid subgraph fetch where a field conflicts with another version of that field that is in a reused
+named fragment.
+
+These manifested as Router issues https://github.com/apollographql/router/issues/3217 and https://github.com/apollographql/router/issues/3227.
+
+By [@renovate](https://github.com/renovate) and [o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/3202
+
+### update Rhai to 1.15.0 to fix issue with hanging example test ([Issue #3213](https://github.com/apollographql/router/issues/3213))
+
+One of our Rhai examples' tests have been regularly hanging in the CI builds. Investigation uncovered a race condition within Rhai itself. This update brings in the fixed version of Rhai and should eliminate the hanging problem and improve build stability.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3273
+
+## 🛠 Maintenance
+
+### chore: split out router events into its own module ([PR #3235](https://github.com/apollographql/router/pull/3235))
+
+Breaks down `./apollo-router/src/router.rs` into its own module `./apollo-router/src/router/mod.rs` with a sub-module `./apollo-router/src/router/event/mod.rs` that contains all the streams that we combine to start a router (entitlement, schema, reload, configuration, shutdown, more streams to be added).
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/3235
+
+### Simplify router service tests ([PR #3259](https://github.com/apollographql/router/pull/3259))
+
+Parts of the router service creation were generic, to allow mocking, but the `TestHarness` API allows us to reuse the same code in all cases. Generic types have been removed to simplify the API.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3259
+
+## 📚 Documentation
+
+### Improve example Rhai scripts for JWT Authentication ([PR #3184](https://github.com/apollographql/router/pull/3184))
+
+Simplify the example Rhai scripts in the [JWT Authentication](https://www.apollographql.com/docs/router/configuration/authn-jwt) docs and includes a sample `main.rhai` file to make it clear how to use all scripts together.
+
+By [@dbanty](https://github.com/dbanty) in https://github.com/apollographql/router/pull/3184
+
+## 🧪 Experimental
+
+### Expose the apollo compiler at the supergraph service level (internal) ([PR #3200](https://github.com/apollographql/router/pull/3200))
+
+Add a query analysis phase inside the router service, before sending the query through the supergraph plugins. It makes a compiler available to supergraph plugins, to perform deeper analysis of the query. That compiler is then used in the query planner to create the `Query` object containing selections for response formatting.
+
+This is for internal use only for now, and the APIs are not considered stable.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) and [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3200
+
+### Query planner plugins (internal) ([Issue #3150](https://github.com/apollographql/router/issues/3150))
+
+Future functionality may need to modify a query between query plan caching and the query planner. This leads to the requirement to provide a query planner plugin capability.
+
+Query planner plugin functionality exposes an ApolloCompiler instance to perform preprocessing of a query before sending it to the query planner.
+
+This is for internal use only for now, and the APIs are not considered stable.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3177 and https://github.com/apollographql/router/pull/3252
+
+
 # [1.20.0] - 2023-05-31
 
 ## 🚀 Features

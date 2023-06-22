@@ -1227,6 +1227,149 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "subscription": {
+      "description": "Subscriptions configuration",
+      "type": "object",
+      "properties": {
+        "enable_deduplication": {
+          "description": "Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode) (default: true)",
+          "default": true,
+          "type": "boolean"
+        },
+        "max_opened_subscriptions": {
+          "description": "This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.",
+          "default": null,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true
+        },
+        "mode": {
+          "description": "Select a subscription mode (callback or passthrough)",
+          "default": {
+            "preview_callback": null,
+            "passthrough": null
+          },
+          "type": "object",
+          "properties": {
+            "passthrough": {
+              "description": "Enable passthrough mode for subgraph(s)",
+              "type": "object",
+              "properties": {
+                "all": {
+                  "description": "Configuration for all subgraphs",
+                  "default": null,
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "description": "Path on which WebSockets are listening",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "protocol": {
+                      "description": "Which WebSocket GraphQL protocol to use for this subgraph possible values are: 'graphql_ws' | 'graphql_transport_ws' (default: graphql_ws)",
+                      "default": "graphql_ws",
+                      "type": "string",
+                      "enum": [
+                        "graphql_ws",
+                        "graphql_transport_ws"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                },
+                "subgraphs": {
+                  "description": "Configuration for specific subgraphs",
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "description": "WebSocket configuration for a specific subgraph",
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "description": "Path on which WebSockets are listening",
+                        "default": null,
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "protocol": {
+                        "description": "Which WebSocket GraphQL protocol to use for this subgraph possible values are: 'graphql_ws' | 'graphql_transport_ws' (default: graphql_ws)",
+                        "default": "graphql_ws",
+                        "type": "string",
+                        "enum": [
+                          "graphql_ws",
+                          "graphql_transport_ws"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
+            "preview_callback": {
+              "description": "Enable callback mode for subgraph(s)",
+              "type": "object",
+              "required": [
+                "public_url"
+              ],
+              "properties": {
+                "listen": {
+                  "description": "Listen address on which the callback must listen (default: 127.0.0.1:4000)",
+                  "writeOnly": true,
+                  "anyOf": [
+                    {
+                      "description": "Socket address.",
+                      "type": "string"
+                    },
+                    {
+                      "description": "Unix socket.",
+                      "type": "string"
+                    }
+                  ],
+                  "nullable": true
+                },
+                "path": {
+                  "description": "Specify on which path you want to listen for callbacks (default: /callback)",
+                  "writeOnly": true,
+                  "type": "string",
+                  "nullable": true
+                },
+                "public_url": {
+                  "description": "URL used to access this router instance",
+                  "type": "string"
+                },
+                "subgraphs": {
+                  "description": "Specify on which subgraph we enable the callback mode for subscription If empty it applies to all subgraphs (passthrough mode takes precedence)",
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "uniqueItems": true
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "queue_capacity": {
+          "description": "It represent the capacity of the in memory queue to know how many events we can keep in a buffer",
+          "default": null,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true
+        }
+      },
+      "additionalProperties": false
+    },
     "supergraph": {
       "description": "Configuration for the supergraph",
       "default": {

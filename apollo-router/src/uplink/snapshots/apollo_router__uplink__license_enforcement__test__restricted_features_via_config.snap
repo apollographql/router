@@ -24,6 +24,9 @@ Configuration yaml:
 * Subgraph entity caching
   .traffic_shaping..experimental_entity_caching
 
+* Federated subscriptions
+  .subscription
+
 * Operation depth limiting
   .preview_operation_limits.max_depth
 

@@ -8,6 +8,7 @@ use serde::Serialize;
 
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
+use super::subscription::SubscriptionNode;
 use crate::error::QueryPlannerError;
 use crate::json_ext;
 use crate::json_ext::Object;
@@ -48,7 +49,7 @@ impl QueryPlan {
             }),
             root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
             formatted_query_plan: Default::default(),
-            query: Arc::new(Query::default()),
+            query: Arc::new(Query::empty()),
         }
     }
 }
@@ -56,6 +57,13 @@ impl QueryPlan {
 impl QueryPlan {
     pub(crate) fn is_deferred(&self, operation: Option<&str>, variables: &Object) -> bool {
         self.root.is_deferred(operation, variables, &self.query)
+    }
+
+    pub(crate) fn is_subscription(&self, operation: Option<&str>) -> bool {
+        match self.query.operation(operation) {
+            Some(op) => matches!(op.kind(), OperationKind::Subscription),
+            None => false,
+        }
     }
 }
 
@@ -86,6 +94,11 @@ pub(crate) enum PlanNode {
         deferred: Vec<DeferredNode>,
     },
 
+    Subscription {
+        primary: SubscriptionNode,
+        rest: Option<Box<PlanNode>>,
+    },
+
     #[serde(rename_all = "camelCase")]
     Condition {
         condition: String,
@@ -105,6 +118,7 @@ impl PlanNode {
                 .as_ref()
                 .map(|n| n.contains_mutations())
                 .unwrap_or(false),
+            Self::Subscription { .. } => false,
             Self::Flatten(_) => false,
             Self::Condition {
                 if_clause,
@@ -142,6 +156,7 @@ impl PlanNode {
             Self::Flatten(node) => node.node.is_deferred(operation, variables, query),
             Self::Fetch(..) => false,
             Self::Defer { .. } => true,
+            Self::Subscription { .. } => false,
             Self::Condition {
                 if_clause,
                 else_clause,
@@ -264,6 +279,12 @@ impl PlanNode {
                 Ok(())
             }
             Self::Fetch(..) => Ok(()),
+            Self::Subscription { rest, .. } => {
+                if let Some(node) = rest {
+                    node.collect_subselections(schema, initial_path, kind, subselections)?;
+                }
+                Ok(())
+            }
             Self::Condition {
                 if_clause,
                 else_clause,
@@ -290,6 +311,13 @@ impl PlanNode {
                 Box::new(nodes.iter().flat_map(|x| x.service_usage()))
             }
             Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
+            Self::Subscription { primary, rest } => match rest {
+                Some(rest) => Box::new(
+                    rest.service_usage()
+                        .chain(Some(primary.service_name.as_str()).into_iter()),
+                ) as Box<dyn Iterator<Item = &'a str> + 'a>,
+                None => Box::new(Some(primary.service_name.as_str()).into_iter()),
+            },
             Self::Flatten(flatten) => flatten.node.service_usage(),
             Self::Defer { primary, deferred } => primary
                 .node
