@@ -19,6 +19,7 @@ use tower::BoxError;
 
 use super::supergraph;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
+use super::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::services::TryIntoHeaderName;
@@ -218,7 +219,10 @@ impl Response {
                 .headers()
                 .get(CONTENT_TYPE)
                 .iter()
-                .any(|value| *value == HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE))
+                .any(|value| {
+                    *value == HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE)
+                        || *value == HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE)
+                })
             {
                 let multipart = Multipart::new(self.response.into_body(), "graphql");
 
@@ -248,7 +252,8 @@ impl Response {
 
 #[derive(Clone, Default)]
 pub(crate) struct ClientRequestAccepts {
-    pub(crate) multipart: bool,
+    pub(crate) multipart_defer: bool,
+    pub(crate) multipart_subscription: bool,
     pub(crate) json: bool,
     pub(crate) wildcard: bool,
 }
