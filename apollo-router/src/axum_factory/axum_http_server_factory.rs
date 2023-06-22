@@ -144,9 +144,11 @@ where
                     tracing::trace!(?health, request = ?req.router_request, "health check");
                     async move {
                         Ok(router::Response {
-                            response: http::Response::builder().status(status_code).body::<hyper::Body>(
-                                serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
-                            )?,
+                            response: http::Response::builder()
+                                .status(status_code)
+                                .body::<hyper::Body>(
+                                    serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
+                                )?,
                             context: req.context,
                         })
                     }
