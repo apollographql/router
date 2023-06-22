@@ -160,85 +160,87 @@ impl Query {
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
 
+        println!("format_response: is_deferred={is_deferred}");
+        println!("data: {}", serde_json::to_string(&data).unwrap());
+
         let original_operation = self.operation(operation_name);
         match data {
             Some(Value::Object(mut input)) => {
                 if is_deferred {
-                    if let Some(subselection) = &response.subselection {
-                        /*println!(
-                            "looking for subselection at path {:?} and {} in\n{:?}",
-                            response.path.as_ref().map(|p| p.to_string()),
-                            subselection,
-                            self.subselections.keys().collect::<Vec<_>>()
-                        );*/
-                        println!(
+                    println!("response subselection: {:?}", response.subselection);
+                    //if let Some(subselection) = &response.subselection {
+                    /*println!(
+                        "looking for subselection at path {:?} and {} in\n{:?}",
+                        response.path.as_ref().map(|p| p.to_string()),
+                        subselection,
+                        self.subselections.keys().collect::<Vec<_>>()
+                    );*/
+                    println!(
                             "looking for subselection at label {:?} and variables {variables_set} in\n{:?}",
                             response.label,
                             self.subselections.keys().collect::<Vec<_>>()
                         );
 
-                        // Get subselection from hashmap
-                        match self.subselections.get(&SubSelection {
-                            label: response.label.clone(),
-                            variables_set,
-                        }) {
-                            Some(subselection_query) => {
-                                println!("got subselection: {}", subselection_query.string);
-                                println!("data: {}", serde_json::to_string(&input).unwrap());
-                                let mut output = Object::default();
-                                let operation = &subselection_query.operations[0];
-                                let mut parameters = FormatParameters {
-                                    variables: &variables,
-                                    schema,
-                                    errors: Vec::new(),
-                                    nullified: Vec::new(),
-                                };
-                                // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
-                                // cf https://github.com/apollographql/router/issues/1677
-                                let operation_kind_if_root_typename =
-                                    original_operation.and_then(|op| {
-                                        op.selection_set
-                                            .iter()
-                                            .any(|f| f.is_typename_field())
-                                            .then(|| *op.kind())
-                                    });
-                                if let Some(operation_kind) = operation_kind_if_root_typename {
-                                    output.insert(TYPENAME, operation_kind.as_str().into());
-                                }
-
-                                response.data = Some(
-                                    match self.apply_root_selection_set(
-                                        operation,
-                                        &mut parameters,
-                                        &mut input,
-                                        &mut output,
-                                        &mut Vec::new(),
-                                    ) {
-                                        Ok(()) => output.into(),
-                                        Err(InvalidValue) => Value::Null,
-                                    },
-                                );
-
-                                if !parameters.errors.is_empty() {
-                                    if let Ok(value) =
-                                        serde_json_bytes::to_value(&parameters.errors)
-                                    {
-                                        response.extensions.insert("valueCompletion", value);
-                                    }
-                                }
-
-                                return parameters.nullified;
+                    // Get subselection from hashmap
+                    match self.subselections.get(&SubSelection {
+                        label: response.label.clone(),
+                        variables_set,
+                    }) {
+                        Some(subselection_query) => {
+                            println!("got subselection: {}", subselection_query.string);
+                            let mut output = Object::default();
+                            let operation = &subselection_query.operations[0];
+                            let mut parameters = FormatParameters {
+                                variables: &variables,
+                                schema,
+                                errors: Vec::new(),
+                                nullified: Vec::new(),
+                            };
+                            // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
+                            // cf https://github.com/apollographql/router/issues/1677
+                            let operation_kind_if_root_typename =
+                                original_operation.and_then(|op| {
+                                    op.selection_set
+                                        .iter()
+                                        .any(|f| f.is_typename_field())
+                                        .then(|| *op.kind())
+                                });
+                            if let Some(operation_kind) = operation_kind_if_root_typename {
+                                output.insert(TYPENAME, operation_kind.as_str().into());
                             }
-                            None => {
-                                failfast_debug!("can't find subselection for {:?}", subselection)
+
+                            response.data = Some(
+                                match self.apply_root_selection_set(
+                                    operation,
+                                    &mut parameters,
+                                    &mut input,
+                                    &mut output,
+                                    &mut Vec::new(),
+                                ) {
+                                    Ok(()) => output.into(),
+                                    Err(InvalidValue) => Value::Null,
+                                },
+                            );
+
+                            if !parameters.errors.is_empty() {
+                                if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
+                                    response.extensions.insert("valueCompletion", value);
+                                }
                             }
+
+                            return parameters.nullified;
                         }
-                    // the primary query was empty, we return an empty object
+                        None => {
+                            //failfast_debug!("can't find subselection for {:?}", subselection)
+                        }
+                    }
+                    /*// the primary query was empty, we return an empty object
                     } else {
                         response.data = Some(Value::Object(Object::default()));
                         return vec![];
-                    }
+                    }*/
                 } else if let Some(operation) = original_operation {
+                    println!("not deferred. subselection: {}", self.string);
                     let mut output = Object::default();
 
                     let all_variables = if operation.variables.is_empty() {
