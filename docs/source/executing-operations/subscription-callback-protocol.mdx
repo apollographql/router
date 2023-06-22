@@ -3,44 +3,112 @@ title: HTTP callback protocol for GraphQL subscriptions
 description: For federated subgraphs communicating with the Apollo Router
 ---
 
-## Communication
+> This protocol is currently in [preview](/resources/product-launch-stages#preview). Breaking changes might be introduced during the preview period.
+>
+> **You only need to read this reference if you're adding support for this protocol to a GraphQL server library or other system!**
 
-The callback protocol for GraphQL subscription aims to be an alternative to existing websocket protocols when using Apollo Federation and communicate between the Apollo Router and an event source (a subgraph for example).
+This reference describes a protocol for sending GraphQL subscription data to a subscribing client via HTTP callbacks. This protocol provides the following benefits:
 
-Main goal is to not keep an opened connection between a subgraph and the Apollo Router in order to be more efficient.
+- For systems with many simultaneous open subscriptions, this protocol scales better than WebSocket-based protocols, which require long-lasting connections between client and server.
+- This protocol enables subscription data to be sent to the subscribing client by a system _other than the GraphQL server itself,_ such as a Kafka consumer.
 
-**All** payloads contain the `kind` field outlining the kind of payload it is, in our case it will always be `"subscription"`. The payload also always contains the `action` field describing what kind of action we want to process, the `verifier` (to check that we're authorized to make that callback) the Apollo Router sent via `extensions` in the request and finally the `id` field which is the identifier (an uuid v4) for a specific opened subscription. 
+The Apollo Router provides [preview support for this protocol](./subscription-support/#http-callback-setup-preview), in which it acts as the _subscribing client_ to the individual subgraphs in your federated graph:
+
+```mermaid
+sequenceDiagram
+    participant Router as Apollo Router<br/>(subscribing client)
+    participant Subgraph as Subgraph
+    Router->>Subgraph: Registers subscription and<br/> callback URL over HTTP
+    Note over Subgraph: New data available
+    Subgraph->>Router: Sends new data via HTTP<br/>to callback URL
+    Note over Subgraph: New data available
+    Subgraph->>Router: Sends new data via HTTP<br/>to callback URL
+```
+
+> When an app queries the Apollo Router, the router acts as a GraphQL _server_. When the Apollo Router then queries its subgraphs, it acts as a GraphQL _client_.
+
+## Protocol flow
+
+All actions described in these steps are performed by one of **Client**, **Server**, or **Emitter**. When the Apollo Router subscribes to its subgraphs, it acts as **Client**.
+
+> **Emitter** is a system that sends new subscription data to **Client**. **Emitter** is commonly also **Server**, but it doesn't _have_ to be.
+
+### Initialization
+
+1. Before it executes a subscription operation, **Client** generates a unique ID (version 4 UUID recommended) to represent that operation.
+
+2. **Client** sends a GraphQL subscription operation to **Server** via HTTP POST using the standard [GraphQL request payload](https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#request-parameters):
+
+    ```json
+    {
+      "query": "subscription { userWasCreated { name reviews { body } } }",
+      "extensions": {
+        "subscription": {
+          "callback_url": "http://localhost:4000/callback/c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
+          "subscription_id": "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
+          "verifier": "XXX"
+        }
+      }
+    }
+    ```
+
+    The `extensions` property of this payload includes a `subscription` object with the following:
+
+    - `callback_url`: The URL that **Emitter** will send subscription data to
+    - `subscription_id`: The generated unique ID for the subscription operation
+    - `verifier`: A string that **Emitter** will include in all HTTP callback requests to verify its identity
+
+3. _Before **Server** responds to **Client**'s request,_ it sends a [`check` message](#check) to the provided `callback_url` for confirmation from **Client**:
+
+    ```json
+    {
+      "kind": "subscription",
+      "action": "check",
+      "id": "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
+      "verifier": "XXX"
+    }
+    ```
+
+    > All messages sent to `callback_url` are HTTP POST requests. Message types are [documented below](#message-types).
+
+    This helps ensure that **Server** is able to send callbacks successfully, and that the `id` and `verifier` fields are correct.
+
+4. **Client** validates the `check` message using its `id` and `verifier` fields.
+
+    > Again, **Server** has not yet responded to **Client**'s original request!
+
+    - If the `check` message is valid, **Client** responds with the following details:
+      - A 204 HTTP status code
+      - An empty response body
+      - The response header `subscription-protocol: callback`
+    - If the `check` message is _invalid_, **Client** responds with a status code _besides_ 204 (400-level recommended).
+      - If this occurs, **Server** then responds to **Client**'s request with a 400-level status code, and the subscription is canceled.
+
+5. If validation succeeds, **Server** spawns a background process or notifies a separate system (**Emitter**) to begin listening for subscription events.
+
+6. **Server** finally responds to **Client** with a 200-level status code. This indicates to **Client** that the subscription has been initialized.
+
+With initialization complete, the protocol commences its [main loop](#main-loop).
+
+### Main loop
+
+The protocol's main loop remains active for the duration of the subscription. During the main loop, all of the following occur:
+
+- Every 5 seconds, **Emitter** must send a [`heartbeat` message](#heartbeat) to **Client** to confirm that **Client** is still listening.
+- Whenever new subscription data is available, **Emitter** sends a [`next` message](#next) to **Client** containing the new data.
+- If an error occurs and the subscription must be terminated, **Emitter** sends a [`complete` message](#complete) to **Client** and includes the `errors` field.
+- If the subscription reaches the end of its stream and no new data is forthcoming, **Emitter** sends a [`complete` message](#complete) to **Client** and _omits_ the `errors` field.
+- If **Client** terminates a particular subscription, it should return a 404 status code for all future HTTP callbacks sent for that subscription.
+  - Relatedly, if **Emitter** receives a 404 status code from **Client** for an HTTP callback, it should consider the associated subscription terminated.
+
+## Message types
+
+**All** payloads contain the `kind` field outlining the kind of payload it is, in our case it will always be `"subscription"`. The payload also always contains the `action` field describing what kind of action we want to process, the `verifier` (to check that we're authorized to make that callback) the Apollo Router sent via `extensions` in the request and finally the `id` field which is the identifier (an uuid v4) for a specific opened subscription.
 
 Depending on the `action`, the payload can contain two more _optional_ fields:
 
 - `payload` holding the GraphQL Response when sending the subscription event from the source event to the Apollo Router.
 - `errors` used to complete a connection and add errors if critical errors happened. `errors` is an array of GraphQL error.
-
-When opening a GraphQL subscription on the Apollo Router it will directly send a request to the subgraph containing the original subscription and more data related to callback mode in GraphQL `extensions`. For example:
-
-```json
-{
-    "query": "subscription { userWasCreated { name reviews { body } } }",
-    "extensions": {
-        "subscription": {
-            "callback_url": "http://localhost:4000/callback/c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
-            "subscription_id": "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
-            "verifier": "XXX"
-        }
-    }
-}
-```
-
-When a subgraph receives a subscription request. It must first make a `check` request to the callback endpoint (see below) with the given data (`callback_url`, `subscription_id` and a `verifier`). This will ensure the subgraph is able to send source stream events, and that the `subscription_id` and the `verifier` are correct. A successful call to the callback URL with a `check` yields an empty body and a header `subscription-protocol: callback`. Only then can the subgraph can answer the initial subscription request, and start notifying the callback URL with subscription events.
-
-
-The event source can terminate a subscription any time by sending the `complete` action message (cf message types just below) and include `errors` if needed.
-
-
-If the subscription is closed or doesn't exist anymore on the Apollo Router then when the source event will send an event message to the callback endpoint it will returns a 404 HTTP status code.
-So at the event source side if you're receiving a 404 HTTP status code from the callback endpoint you must terminate the subscription.
-
-## Message types
 
 > Note that all messages are sent for the source event to the Apollo Router
 
@@ -124,53 +192,3 @@ It indicates that the requested GraphQL subscription execution has completed. If
 + The event source can't call the callback endpoint with the `check` message either because the subscription id is incorrect nor the callback endpoint is available.
 + Any messages sent to the callback endpoint by the source event is falling in error, if it's a 404 HTTP status code it means the subscription doesn't exist anymore and should be closed on the source event side. All other errors are unexpected and should result in a termination of the subscription at the source event level.
 + The source event didn't send the `check` message every 5 secs and so the subscription is automatically closed at the Apollo Router level and will cut the connection with the client.
-
-## Examples
-
-For the sake of clarity, the following examples demonstrate the callback protocol.
-
-### Streaming operation
-
-#### `subscription` operation
-
-1. _The Apollo Router_ receives a `subscription` operation
-2. _The Apollo Router_ generates an unique ID (uuid v4) for the following subscription
-3. _The Apollo Router_ sends a query containing a [GraphQL request payload](https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#request-parameters) with all callback data in `extensions`
-
-Example:
-
-```json
-{
-    "query": "subscription { userWasCreated { name reviews { body } } }",
-    "extensions": {
-        "subscription": {
-            "callback_url": "http://localhost:4000/callback/c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
-            "subscription_id": "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
-            "verifier": "XXX"
-        }
-    }
-}
-```
-
-4. _Event source_ receives the GraphQL `subscription` with all callback data directly in `extensions`.
-5. _Event source_ calls the callback endpoint given in `extensions` with a [`check`](#check) to init the subscription to _the Apollo Router_.
-
-Payload example for `POST` on `http://localhost:4000/callback/c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945`:
-
-```json
-{
-    "kind": "subscription",
-    "action": "check",
-    "id": "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
-    "verifier": "XXX"
-}
-```
-
-6. _Event source_ receives 204 HTTP status code from the call to the callback endpoint
-    - If an error happens or you don't receive 204 HTTP status code then directly return a >= 400 HTTP status code to the _Apollo Router_
-7. _Event source_ spawns a background task to listen on `subscription` events
-    - Every 5 seconds the _Event source_ must call the callback endpoint with a [`heartbeat` payload](#heartbeat) to heartbeat and confirm it's still listening to the subscription
-    - Every received events the _Event source_ calls the callback endpoint with a [`next` payload](#next)
-    - If an error appears the _Event source_ calls the callback endpoint with a [`complete` payload with errors field](#complete)
-    - If the stream of events is done then send a [`complete` payload WITHOUT errors field](#complete)
-8. _Event source_ returns empty body containing a new header `subscription-protocol: callback` in answer to the initial call from _Apollo Router_ 
