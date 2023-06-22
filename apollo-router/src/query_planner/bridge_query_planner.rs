@@ -279,7 +279,6 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 
             let filtered_query = compiler_guard.db.source_code(file_id);
 
-            println!("query before adding labels:\n{}", filtered_query);
             let added_labels = match add_defer_labels(file_id, &mut compiler_guard) {
                 Err(e) => {
                     return Err(QueryPlannerError::SpecError(SpecError::ParsingError(
@@ -293,8 +292,6 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
             };
 
             let filtered_query = compiler_guard.db.source_code(file_id);
-            println!("query after adding labels:\n{}", filtered_query);
-
             drop(compiler_guard);
 
             let res = this
