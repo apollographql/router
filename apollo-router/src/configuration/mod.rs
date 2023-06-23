@@ -1109,6 +1109,24 @@ impl From<SocketAddr> for ListenAddr {
     }
 }
 
+#[allow(clippy::from_over_into)]
+impl Into<serde_json::Value> for ListenAddr {
+    fn into(self) -> serde_json::Value {
+        match self {
+            // It avoids to prefix with `http://` when serializing and relying on the Display impl.
+            // Otherwise, it's converted to a `UnixSocket` in any case.
+            Self::SocketAddr(addr) => serde_json::Value::String(addr.to_string()),
+            #[cfg(unix)]
+            Self::UnixSocket(path) => serde_json::Value::String(
+                path.as_os_str()
+                    .to_str()
+                    .expect("unsupported non-UTF-8 path")
+                    .to_string(),
+            ),
+        }
+    }
+}
+
 #[cfg(unix)]
 impl From<tokio_util::either::Either<std::net::SocketAddr, tokio::net::unix::SocketAddr>>
     for ListenAddr
