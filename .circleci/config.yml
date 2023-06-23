@@ -567,7 +567,9 @@ jobs:
           path: artifacts/
       - when:
           condition:
-            equal: [ true, << parameters.nightly >> ]
+            and:
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
+              - equal: [ true, << parameters.nightly >> ]
           steps:
             - setup_remote_docker:
                 version: 20.10.11
