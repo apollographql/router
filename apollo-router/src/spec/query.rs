@@ -788,10 +788,6 @@ impl Query {
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        if fragment.include_skip.should_skip(parameters.variables) {
-                            continue;
-                        }
-
                         let is_apply = if let Some(input_type) =
                             input.get(TYPENAME).and_then(|val| val.as_str())
                         {
@@ -937,10 +933,6 @@ impl Query {
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        if fragment.include_skip.should_skip(parameters.variables) {
-                            continue;
-                        }
-
                         let operation_type_name =
                             parameters.schema.root_operation_name(operation.kind);
                         let is_apply = {
