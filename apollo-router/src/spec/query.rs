@@ -8,7 +8,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::hir;
-use apollo_compiler::hir::DefaultValue;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::FileId;
@@ -231,6 +230,8 @@ impl Query {
                             return parameters.nullified;
                         }
                         None => {
+                            response.data = Some(Value::Object(Object::default()));
+                            return vec![];
                             //failfast_debug!("can't find subselection for {:?}", subselection)
                         }
                     }

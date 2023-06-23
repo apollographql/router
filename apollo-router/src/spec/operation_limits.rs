@@ -11,7 +11,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use tokio::sync::Mutex;
 
-use crate::spec::Query;
 use crate::Configuration;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

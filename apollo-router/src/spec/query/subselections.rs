@@ -13,7 +13,6 @@ use super::traverse;
 use super::Query;
 use super::SubSelection;
 use super::SubSelections;
-use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::query_planner::reconstruct_full_query;
@@ -321,7 +320,9 @@ impl<'a> Combination<'a> {
             Some(index) => index,
             None => return false,
         };
-        (self.bits & (1 << index)) != 0
+        let res = (self.bits & (1 << index)) != 0;
+        println!("is variable {variable} present in {}: {res}", self.bits);
+        res
     }
 
     fn bitset(&self) -> i32 {
@@ -342,7 +343,11 @@ fn collect_subselections_keys(
     }
 
     fn add_key(visitor: &mut Visitor<'_>, label: Option<String>, subselection: SelectionSet) {
-        dbg!(visitor.current_path.to_string());
+        dbg!((
+            &label,
+            visitor.current_path.to_string(),
+            subselection.to_string()
+        ));
         visitor.subselection_keys.push((
             SubSelection {
                 label,

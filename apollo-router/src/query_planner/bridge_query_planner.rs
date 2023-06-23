@@ -179,7 +179,8 @@ impl BridgeQueryPlanner {
                 kind,
             )?;
         drop(compiler_guard);
-        let mut query = Query {
+
+        Ok(Query {
             string: query,
             compiler,
             fragments,
@@ -189,9 +190,7 @@ impl BridgeQueryPlanner {
             added_labels,
             defer_variables_set,
             is_original: true,
-        };
-
-        Ok(query)
+        })
     }
 
     async fn introspection(&self, query: String) -> Result<QueryPlannerContent, QueryPlannerError> {
@@ -450,11 +449,11 @@ mod tests {
     use serde_json::json;
     use test_log::test;
 
+    use super::*;
     use crate::json_ext::Path;
     use crate::spec::query::SubSelection;
     use crate::spec::query::SubSelections;
 
-    use super::*;
     const EXAMPLE_SCHEMA: &str = include_str!("testdata/schema.graphql");
 
     #[test(tokio::test)]
