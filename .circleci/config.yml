@@ -626,6 +626,50 @@ jobs:
                     ]
                   }
 
+  publish_nightly_docker:
+    docker:
+      - image: cimg/base:stable
+    resource_class: small
+    environment:
+      <<: *common_job_environment
+      VERSION: << pipeline.git.tag >>
+    steps:
+      - checkout
+      - attach_workspace:
+          at: artifacts
+      - gh/setup
+      - setup_remote_docker:
+          version: 20.10.11
+          docker_layer_caching: true
+      - run:
+          name: Docker build
+          command: |
+            ROUTER_TAG=ghcr.io/apollographql/router-nightly
+            # Create a multi-arch builder which works properly under qemu
+            docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+            docker context create buildx-build
+            docker buildx create --driver docker-container --use buildx-build
+            docker buildx inspect --bootstrap
+            # Note: GH Token owned by apollo-bot2, no expire
+            echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
+            # Build and push debug image
+            docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+            # Build and push release image
+            docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+      - run:
+          name: Helm build
+          command: |
+            # Install Helm
+            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+            # Package up the helm chart
+            helm package helm/chart/router
+            # Make sure we have the newest chart
+            CHART=$(ls -t router*.tgz| head -1)
+            # Note: GH Token owned by apollo-bot2, no expire
+            echo ${GITHUB_OCI_TOKEN} | helm registry login -u apollo-bot2 --password-stdin ghcr.io
+            # Push chart to repository
+            helm push ${CHART} oci://ghcr.io/apollographql/helm-charts-nightly
+
   publish_github_release:
     docker:
       - image: cimg/base:stable
@@ -740,38 +784,8 @@ workflows:
             parameters:
               platform:
                 [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
-    steps:
-      - setup_remote_docker:
-          version: 20.10.11
-          docker_layer_caching: true
-      - run:
-          name: Docker build
-          command: |
-            ROUTER_TAG=ghcr.io/apollographql/router-nightly
-            # Create a multi-arch builder which works properly under qemu
-            docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-            docker context create buildx-build
-            docker buildx create --driver docker-container --use buildx-build
-            docker buildx inspect --bootstrap
-            # Note: GH Token owned by apollo-bot2, no expire
-            echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
-            # Build and push debug image
-            docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
-            # Build and push release image
-            docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
-      - run:
-          name: Helm build
-          command: |
-            # Install Helm
-            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-            # Package up the helm chart
-            helm package helm/chart/router
-            # Make sure we have the newest chart
-            CHART=$(ls -t router*.tgz| head -1)
-            # Note: GH Token owned by apollo-bot2, no expire
-            echo ${GITHUB_OCI_TOKEN} | helm registry login -u apollo-bot2 --password-stdin ghcr.io
-            # Push chart to repository
-            helm push ${CHART} oci://ghcr.io/apollographql/helm-charts-nightly
+      - publish_nightly_docker:
+          requires: [ build_release ]
 
   release:
     when:
