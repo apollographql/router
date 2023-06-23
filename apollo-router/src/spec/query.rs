@@ -317,7 +317,8 @@ impl Query {
         let query = query.into();
 
         let (compiler, id) = Self::make_compiler(&query, schema, configuration);
-        let (fragments, operations) = Self::extract_query_information(&compiler, id, schema)?;
+        Self::parse_query(&compiler, id)?;
+        let (fragments, operations) = Self::extract_query_information(&compiler, schema)?;
 
         Ok(Query {
             string: query,
@@ -338,8 +339,8 @@ impl Query {
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
         let compiler_guard = compiler.lock().await;
-        let (fragments, operations) = Self::extract_query_information(&compiler_guard, id, schema)?;
 
+        Self::parse_query(&compiler_guard, id)?;
         let validation_error = match configuration.experimental_graphql_validation {
             GraphQLValidation::Legacy => None,
             GraphQLValidation::New => {
@@ -348,6 +349,8 @@ impl Query {
             }
             GraphQLValidation::Both => Self::validate_query(&compiler_guard, id).err(),
         };
+
+        let (fragments, operations) = Self::extract_query_information(&compiler_guard, schema)?;
 
         drop(compiler_guard);
 
@@ -362,6 +365,27 @@ impl Query {
         })
     }
 
+    /// Check for parse errors in a query in the compiler.
+    fn parse_query(compiler: &ApolloCompiler, id: FileId) -> Result<(), SpecError> {
+        let ast = compiler.db.ast(id);
+        // Trace log recursion limit data
+        let recursion_limit = ast.recursion_limit();
+        tracing::trace!(?recursion_limit, "recursion limit data");
+
+        let mut parse_errors = ast.errors().peekable();
+        if parse_errors.peek().is_some() {
+            let text = parse_errors
+                .map(|err| err.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            failfast_debug!("parsing error(s): {}", text);
+            return Err(SpecError::ParsingError(text));
+        }
+
+        Ok(())
+    }
+
+    /// Check for validation errors in a query in the compiler.
     fn validate_query(compiler: &ApolloCompiler, id: FileId) -> Result<(), SpecError> {
         // Bail out on validation errors, only if the input is expected to be valid
         let diagnostics = compiler.db.validate_executable(id);
@@ -380,26 +404,11 @@ impl Query {
         return Err(SpecError::ValidationError(errors.to_string()));
     }
 
+    /// Extract serializable data structures from the apollo-compiler HIR.
     fn extract_query_information(
         compiler: &ApolloCompiler,
-        id: FileId,
         schema: &Schema,
     ) -> Result<(Fragments, Vec<Operation>), SpecError> {
-        let ast = compiler.db.ast(id);
-        // Trace log recursion limit data
-        let recursion_limit = ast.recursion_limit();
-        tracing::trace!(?recursion_limit, "recursion limit data");
-
-        let mut parse_errors = ast.errors().peekable();
-        if parse_errors.peek().is_some() {
-            let text = parse_errors
-                .map(|err| err.to_string())
-                .collect::<Vec<_>>()
-                .join("\n");
-            failfast_debug!("parsing error(s): {}", text);
-            return Err(SpecError::ParsingError(text));
-        }
-
         let fragments = Fragments::from_hir(compiler, schema)?;
 
         let operations = compiler
