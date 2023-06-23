@@ -115,6 +115,34 @@ async fn api_schema_hides_field() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn api_schema_hides_field_rust_validation() {
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ topProducts { name inStock } }"#)
+        .variable("topProductsFirst", 2_i32)
+        .variable("reviewsForAuthorAuthorId", 1_i32)
+        .build()
+        .expect("expecting valid request");
+
+    let (actual, _) = query_rust_with_config(
+        request,
+        serde_json::json!({
+            "telemetry":{
+              "apollo": {
+                    "field_level_instrumentation_sampler": "always_off"
+                }
+            },
+            "experimental_graphql_validation": "new",
+        }),
+    )
+    .await;
+
+    assert!(actual.errors[0]
+        .message
+        .as_str()
+        .contains("cannot query field `inStock` on type `Product`"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn basic_mutation() {
     assert_federated_response!(
         r#"mutation {
