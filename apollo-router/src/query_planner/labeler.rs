@@ -8,9 +8,9 @@ use apollo_compiler::ApolloCompiler;
 use apollo_compiler::FileId;
 use apollo_encoder::Argument;
 use rand::distributions::Alphanumeric;
-use rand::rngs::ThreadRng;
-use rand::thread_rng;
+use rand::rngs::StdRng;
 use rand::Rng;
+use rand_core::SeedableRng;
 
 use crate::spec::query::transform::directive;
 use crate::spec::query::transform::document;
@@ -25,8 +25,9 @@ pub(crate) fn add_defer_labels(
     compiler: &ApolloCompiler,
 ) -> Result<(String, HashSet<String>), tower::BoxError> {
     let mut reserved_labels = HashSet::new();
+    let mut seed = 0u64;
     loop {
-        let mut visitor = Labeler::new(reserved_labels, compiler);
+        let mut visitor = Labeler::new(reserved_labels, compiler, seed);
         match document(&mut visitor, file_id) {
             Ok(modified_query) => {
                 let (_, added_labels) = visitor.unpack();
@@ -39,6 +40,7 @@ pub(crate) fn add_defer_labels(
                     let (new_reserved_labels, _) = visitor.unpack();
                     reserved_labels = new_reserved_labels;
 
+                    seed += 1;
                     continue;
                 } else {
                     return Err(e);
@@ -51,16 +53,17 @@ pub(crate) struct Labeler<'a> {
     reserved_labels: HashSet<String>,
     added_labels: HashSet<String>,
     compiler: &'a ApolloCompiler,
-    rng: ThreadRng,
+    rng: StdRng,
 }
 
 impl<'a> Labeler<'a> {
-    fn new(reserved_labels: HashSet<String>, compiler: &'a ApolloCompiler) -> Self {
+    fn new(reserved_labels: HashSet<String>, compiler: &'a ApolloCompiler, seed: u64) -> Self {
+        let rng = StdRng::seed_from_u64(seed);
         Self {
             reserved_labels,
             added_labels: HashSet::new(),
             compiler,
-            rng: thread_rng(),
+            rng,
         }
     }
 

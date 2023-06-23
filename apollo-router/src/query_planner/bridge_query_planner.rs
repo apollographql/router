@@ -137,7 +137,6 @@ impl BridgeQueryPlanner {
         &self,
         key: QueryKey,
         added_labels: HashSet<String>,
-
         compiler: Arc<Mutex<ApolloCompiler>>,
     ) -> Result<Query, QueryPlannerError> {
         let (query, operation_name) = key;
@@ -544,7 +543,7 @@ mod tests {
         let result = plan(EXAMPLE_SCHEMA, "", "", None).await;
 
         assert_eq!(
-            "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",
+            "spec error: parsing error: missing operation definition",
             result.unwrap_err().to_string()
         );
     }
