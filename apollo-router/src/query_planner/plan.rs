@@ -315,17 +315,6 @@ pub(crate) struct DeferredNode {
     pub(crate) node: Option<Arc<PlanNode>>,
 }
 
-impl DeferredNode {
-    pub(crate) fn subselection(&self) -> Option<String> {
-        self.subselection.clone().or_else(|| {
-            self.node.as_ref().and_then(|node| match node.as_ref() {
-                PlanNode::Defer { primary, .. } => primary.subselection.clone(),
-                _ => None,
-            })
-        })
-    }
-}
-
 /// A deferred node.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

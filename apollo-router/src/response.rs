@@ -49,9 +49,6 @@ pub struct Response {
     #[serde(skip, default)]
     pub created_at: Option<Instant>,
 
-    #[serde(skip_serializing)]
-    pub subselection: Option<String>,
-
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub incremental: Vec<IncrementalResponse>,
 }
@@ -67,7 +64,7 @@ impl Response {
         path: Option<Path>,
         errors: Vec<Error>,
         extensions: Map<ByteString, Value>,
-        subselection: Option<String>,
+        _subselection: Option<String>,
         has_next: Option<bool>,
         subscribed: Option<bool>,
         incremental: Vec<IncrementalResponse>,
@@ -79,7 +76,6 @@ impl Response {
             path,
             errors,
             extensions,
-            subselection,
             has_next,
             subscribed,
             incremental,
@@ -172,7 +168,6 @@ impl Response {
             path,
             errors,
             extensions,
-            subselection: None,
             has_next,
             subscribed: None,
             incremental,
