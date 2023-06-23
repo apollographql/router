@@ -354,11 +354,7 @@ impl Query {
         })
     }
 
-    pub(crate) fn extract_query_information(
-        compiler: &ApolloCompiler,
-        id: FileId,
-        schema: &Schema,
-    ) -> Result<(Fragments, Vec<Operation>), SpecError> {
+    pub(crate) fn check_errors(compiler: &ApolloCompiler, id: FileId) -> Result<(), SpecError> {
         let ast = compiler.db.ast(id);
 
         // Trace log recursion limit data
@@ -375,6 +371,16 @@ impl Query {
             failfast_debug!("parsing error(s): {}", errors);
             return Err(SpecError::ParsingError(errors));
         }
+
+        Ok(())
+    }
+
+    pub(crate) fn extract_query_information(
+        compiler: &ApolloCompiler,
+        id: FileId,
+        schema: &Schema,
+    ) -> Result<(Fragments, Vec<Operation>), SpecError> {
+        Self::check_errors(compiler, id)?;
 
         let fragments = Fragments::from_hir(compiler, schema)?;
 

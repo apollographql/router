@@ -29,6 +29,7 @@ use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::spec::query::QUERY_EXECUTABLE;
+use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
@@ -117,6 +118,12 @@ where
             let entry = self.cache.get(&caching_key).await;
             if entry.is_first() {
                 let (compiler, file_id) = query_analysis.make_compiler(&query);
+                let err_res = Query::check_errors(&compiler, file_id);
+                if let Err(error) = err_res {
+                    let e = Arc::new(QueryPlannerError::SpecError(error));
+                    entry.insert(Err(e.clone())).await;
+                    continue;
+                }
 
                 if let Ok((modified_query, _)) = add_defer_labels(file_id, &compiler) {
                     query = modified_query;
@@ -206,6 +213,7 @@ where
                         "missing input file for query".to_string(),
                     )))
                     .map_err(|e| CacheResolverError::RetrievalError(Arc::new(e)))?;
+
                 if let Ok((modified_query, _)) = add_defer_labels(file_id, &compiler_guard) {
                     query = modified_query;
                 }
@@ -224,6 +232,19 @@ where
                 // of restarting the query planner until another timeout
                 tokio::task::spawn(
                     async move {
+                        // we need to isolate the compiler guard here, otherwise rustc might believe we still hold it
+                        // when inserting the error in the entry
+                        let err_res = {
+                            let compiler_guard = request.compiler.lock().await;
+                            Query::check_errors(&compiler_guard, file_id)
+                        };
+
+                        if let Err(error) = err_res {
+                            let e = Arc::new(QueryPlannerError::SpecError(error));
+                            entry.insert(Err(e.clone())).await;
+                            return Err(CacheResolverError::RetrievalError(e));
+                        }
+
                         let res = qp.delegate.ready().await?.call(request).await;
 
                         match res {

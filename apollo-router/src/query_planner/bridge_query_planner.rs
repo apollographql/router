@@ -6,7 +6,9 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
 
+use apollo_compiler::validation::ValidationDatabase;
 use apollo_compiler::ApolloCompiler;
+use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
 use apollo_compiler::InputDatabase;
 use futures::future::BoxFuture;
@@ -150,6 +152,8 @@ impl BridgeQueryPlanner {
         .await?;
 
         let compiler_guard = compiler.lock().await;
+        println!("syntax errors: {:?}", compiler_guard.db.syntax_errors());
+
         let file_id = compiler_guard
             .db
             .source_file(QUERY_EXECUTABLE.into())
