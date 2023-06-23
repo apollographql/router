@@ -20,7 +20,6 @@ usage:
   configuration.headers.subgraphs.<redacted>.request.remove.named.<redacted>: 1
   configuration.override_subgraph_url.len: 1
   configuration.plugins.len: 0
-  configuration.telemetry.apollo.endpoint.<redacted>: 1
   configuration.telemetry.apollo.send_headers.len: 1
   configuration.telemetry.tracing.otlp.endpoint.<redacted>: 1
   configuration.telemetry.tracing.otlp.grpc.metadata.len: 2
