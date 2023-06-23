@@ -1117,7 +1117,12 @@ impl Into<serde_json::Value> for ListenAddr {
             // Otherwise, it's converted to a `UnixSocket` in any case.
             Self::SocketAddr(addr) => serde_json::Value::String(addr.to_string()),
             #[cfg(unix)]
-            Self::UnixSocket(path) => serde_json::Value::String(format!("{}", path.display())),
+            Self::UnixSocket(path) => serde_json::Value::String(
+                path.as_os_str()
+                    .to_str()
+                    .expect("unsupported non-UTF-8 path")
+                    .to_string(),
+            ),
         }
     }
 }
