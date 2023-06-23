@@ -572,7 +572,7 @@ async fn query_just_at_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_under_token_limit() {
     let config = serde_json::json!({
-        "preview_operation_limits": {"parser_max_tokens": 36_usize}
+        "preview_operation_limits": {"parser_max_tokens": 39_usize}
     });
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
@@ -593,7 +593,7 @@ async fn query_just_under_token_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_at_token_limit() {
     let config = serde_json::json!({
-        "preview_operation_limits": {"parser_max_tokens": 34_usize}
+        "preview_operation_limits": {"parser_max_tokens": 37_usize}
     });
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
