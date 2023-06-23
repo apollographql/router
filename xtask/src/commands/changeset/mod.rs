@@ -27,11 +27,11 @@ use std::fmt;
 use std::fs;
 use std::fs::remove_file;
 use std::fs::DirEntry;
-use std::path::PathBuf;
 use std::str::FromStr;
 
 use ::reqwest::Client;
 use anyhow::Result;
+use camino::Utf8PathBuf;
 use console::style;
 use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
@@ -362,7 +362,7 @@ impl Create {
                 };
 
                 let context: TemplateContext = if use_gh_cli && branch_name.is_some() {
-                    match get_token_from_gh_cli(gh_cli_path.unwrap()) {
+                    match get_token_from_gh_cli(Utf8PathBuf::try_from(gh_cli_path.unwrap()).expect("gh cli path not valid UTF-8")) {
                         Err(_) => default_context,
                         Ok(gh_token) => {
                             // Good for testing. ;)
@@ -497,7 +497,7 @@ impl Create {
     }
 }
 
-fn get_token_from_gh_cli(gh_cli_path: PathBuf) -> Result<String, &'static str> {
+fn get_token_from_gh_cli(gh_cli_path: Utf8PathBuf) -> Result<String, &'static str> {
     let result = std::process::Command::new(gh_cli_path)
         .args(["auth", "token"])
         .output()
@@ -593,7 +593,7 @@ pub fn slurp_and_remove_changesets() -> String {
 struct Changeset {
     classification: Classification,
     content: String,
-    path: PathBuf,
+    path: Utf8PathBuf,
 }
 
 impl std::cmp::PartialEq for Changeset {
@@ -620,7 +620,7 @@ impl TryFrom<&DirEntry> for Changeset {
                 .parse()
                 .map_err(|e: &str| e.to_string())?,
             content,
-            path,
+            path: Utf8PathBuf::try_from(path).map_err(|e| e.to_string())?,
         })
     }
 }

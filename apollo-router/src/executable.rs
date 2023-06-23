@@ -4,13 +4,13 @@ use std::env;
 use std::ffi::OsStr;
 use std::fmt;
 use std::fmt::Debug;
-use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use anyhow::Result;
+use camino::Utf8PathBuf;
 use clap::ArgAction;
 use clap::Args;
 use clap::CommandFactory;
@@ -127,7 +127,7 @@ enum ConfigSubcommand {
     Upgrade {
         /// The location of the config to upgrade.
         #[clap(value_parser, env = "APOLLO_ROUTER_CONFIG_PATH")]
-        config_path: PathBuf,
+        config_path: Utf8PathBuf,
 
         /// Print a diff.
         #[clap(action = ArgAction::SetTrue, long)]
@@ -169,7 +169,7 @@ pub struct Opt {
         value_parser,
         env = "APOLLO_ROUTER_CONFIG_PATH"
     )]
-    config_path: Option<PathBuf>,
+    config_path: Option<Utf8PathBuf>,
 
     /// Enable development mode.
     #[clap(
@@ -187,7 +187,7 @@ pub struct Opt {
         value_parser,
         env = "APOLLO_ROUTER_SUPERGRAPH_PATH"
     )]
-    supergraph_path: Option<PathBuf>,
+    supergraph_path: Option<Utf8PathBuf>,
 
     /// Prints the configuration schema.
     #[clap(long, action(ArgAction::SetTrue), hide(true))]
@@ -212,7 +212,7 @@ pub struct Opt {
 
     /// License location relative to the current directory.
     #[clap(long = "license", env = "APOLLO_ROUTER_LICENSE_PATH", hide(true))]
-    apollo_router_license_path: Option<PathBuf>,
+    apollo_router_license_path: Option<Utf8PathBuf>,
 
     /// The endpoints (comma separated) polled to fetch the latest supergraph schema.
     #[clap(long, env, action = ArgAction::Append)]
@@ -240,23 +240,24 @@ pub struct Opt {
 /// Uses ProjectDirs to get the default location.
 #[derive(Debug)]
 struct ProjectDir {
-    path: Option<PathBuf>,
+    path: Option<Utf8PathBuf>,
 }
 
 impl Default for ProjectDir {
     fn default() -> Self {
         let dirs = ProjectDirs::from("com", "Apollo", "Federation");
         Self {
-            path: dirs.map(|dirs| dirs.config_dir().to_path_buf()),
+            path: dirs.and_then(|dirs| Utf8PathBuf::try_from(dirs.config_dir().to_path_buf()).ok()),
         }
     }
 }
 
-impl From<&OsStr> for ProjectDir {
-    fn from(s: &OsStr) -> Self {
-        Self {
-            path: Some(PathBuf::from(s)),
-        }
+impl TryFrom<&OsStr> for ProjectDir {
+    type Error = camino::FromPathBufError;
+    fn try_from(s: &OsStr) -> Result<Self, Self::Error> {
+        Ok(Self {
+            path: Some(Utf8PathBuf::try_from(std::path::PathBuf::from(s))?),
+        })
     }
 }
 
@@ -267,7 +268,7 @@ impl fmt::Display for ProjectDir {
                 write!(f, "Unknown, -p option must be used.")
             }
             Some(path) => {
-                write!(f, "{}", path.to_string_lossy())
+                write!(f, "{}", path)
             }
         }
     }
@@ -430,7 +431,7 @@ impl Executable {
         if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
             return Err(anyhow!("apollo-uplink-poll-interval must be at least 10s"));
         }
-        let current_directory = std::env::current_dir()?;
+        let current_directory = Utf8PathBuf::try_from(std::env::current_dir()?)?;
         // Enable hot reload when dev mode is enabled
         opt.hot_reload = opt.hot_reload || opt.dev;
 

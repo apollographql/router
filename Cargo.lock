@@ -289,6 +289,7 @@ dependencies = [
  "brotli",
  "buildstructor 0.5.3",
  "bytes",
+ "camino",
  "ci_info",
  "clap 4.3.3",
  "console-subscriber",
@@ -418,6 +419,7 @@ dependencies = [
  "apollo-router",
  "apollo-smith",
  "arbitrary",
+ "camino",
  "criterion",
  "memory-stats",
  "once_cell",
@@ -431,6 +433,7 @@ name = "apollo-router-scaffold"
 version = "1.22.0"
 dependencies = [
  "anyhow",
+ "camino",
  "cargo-scaffold",
  "clap 4.3.3",
  "copy_dir",
@@ -555,6 +558,7 @@ dependencies = [
  "anyhow",
  "apollo-router",
  "async-trait",
+ "camino",
  "http",
  "schemars",
  "serde",
@@ -928,6 +932,15 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+]
+
+[[package]]
+name = "camino"
+version = "1.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c530edf18f37068ac2d977409ed5cd50d53d73bc653c7647b48eb78976ac9ae2"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

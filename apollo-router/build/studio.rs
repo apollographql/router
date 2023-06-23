@@ -1,9 +1,10 @@
 use std::error::Error;
-use std::path::PathBuf;
+
+use camino::Utf8PathBuf;
 
 pub fn main() -> Result<(), Box<dyn Error>> {
-    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    let src = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("src");
+    let out_dir = Utf8PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    let src = Utf8PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("src");
     let proto_dir = src.join("plugins").join("telemetry").join("proto");
     let reports_src = proto_dir.join("reports.proto");
     let reports_out = out_dir.join("reports.proto");
@@ -22,7 +23,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     content = content.replace("[(js_preEncoded) = true]", "");
     std::fs::write(&reports_out, &content)?;
 
-    println!("cargo:rerun-if-changed={}", reports_src.to_str().unwrap());
+    println!("cargo:rerun-if-changed={}", reports_src);
 
     // Process the proto files
 

@@ -10,6 +10,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
+use camino::Utf8PathBuf;
 use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
@@ -72,8 +73,8 @@ struct EngineBlock {
 
 impl EngineBlock {
     fn try_new(
-        scripts: Option<PathBuf>,
-        main: PathBuf,
+        scripts: Option<Utf8PathBuf>,
+        main: Utf8PathBuf,
         sdl: Arc<String>,
     ) -> Result<Self, BoxError> {
         let engine = Arc::new(Rhai::new_rhai_engine(
@@ -81,7 +82,7 @@ impl EngineBlock {
             sdl.to_string(),
             main.clone(),
         ));
-        let ast = engine.compile_file(main)?;
+        let ast = engine.compile_file(main.into_std_path_buf())?;
         let mut scope = Scope::new();
         // Keep these two lower cases ones as mistakes until 2.0
         // At 2.0 (or maybe before), replace with upper case
@@ -130,7 +131,7 @@ impl Plugin for Rhai {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let sdl = init.supergraph_sdl.clone();
         let scripts_path = match init.config.scripts {
-            Some(path) => path,
+            Some(path) => Utf8PathBuf::try_from(path)?,
             None => "./rhai".into(),
         };
 
@@ -210,7 +211,7 @@ impl Plugin for Rhai {
             )
             .unwrap_or_else(|_| panic!("could not create watch on: {watched_path:?}"));
             watcher
-                .watch(&watched_path, RecursiveMode::Recursive)
+                .watch(watched_path.as_std_path(), RecursiveMode::Recursive)
                 .unwrap_or_else(|_| panic!("could not watch: {watched_path:?}"));
             // Park the thread until this Rhai instance is dropped (see Drop impl)
             // We may actually unpark() before this code executes or exit from park() spuriously.

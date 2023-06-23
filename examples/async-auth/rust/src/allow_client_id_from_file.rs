@@ -1,5 +1,4 @@
 use std::ops::ControlFlow;
-use std::path::PathBuf;
 
 use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
@@ -7,6 +6,7 @@ use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::supergraph;
+use camino::Utf8PathBuf;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -24,7 +24,7 @@ struct AllowClientIdConfig {
 
 struct AllowClientIdFromFile {
     header: String,
-    allowed_ids_path: PathBuf,
+    allowed_ids_path: Utf8PathBuf,
 }
 
 #[async_trait::async_trait]
@@ -33,7 +33,7 @@ impl Plugin for AllowClientIdFromFile {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let AllowClientIdConfig { path, header } = init.config;
-        let allowed_ids_path = PathBuf::from(path.as_str());
+        let allowed_ids_path = Utf8PathBuf::from(path.as_str());
         Ok(Self {
             allowed_ids_path,
             header,

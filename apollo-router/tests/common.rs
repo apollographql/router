@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::fs;
 use std::net::SocketAddr;
 use std::net::TcpListener;
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
 use buildstructor::buildstructor;
+use camino::Utf8PathBuf;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use jsonpath_lib::Selector;
@@ -47,8 +47,8 @@ static LOCK: OnceCell<Arc<Mutex<bool>>> = OnceCell::new();
 
 pub struct IntegrationTest {
     router: Option<Child>,
-    test_config_location: PathBuf,
-    router_location: PathBuf,
+    test_config_location: Utf8PathBuf,
+    router_location: Utf8PathBuf,
     _lock: tokio::sync::OwnedMutexGuard<bool>,
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
@@ -127,7 +127,8 @@ impl IntegrationTest {
             .mount(&subgraphs)
             .await;
 
-        let mut test_config_location = std::env::temp_dir();
+        let mut test_config_location =
+            Utf8PathBuf::try_from(std::env::temp_dir()).expect("temp dir not valid UTF-8");
         test_config_location.push("test_config.yaml");
 
         fs::write(&test_config_location, config).expect("could not write config");
@@ -149,8 +150,8 @@ impl IntegrationTest {
         }
     }
 
-    pub fn router_location() -> PathBuf {
-        PathBuf::from(env!("CARGO_BIN_EXE_router"))
+    pub fn router_location() -> Utf8PathBuf {
+        Utf8PathBuf::from(env!("CARGO_BIN_EXE_router"))
     }
 
     #[allow(dead_code)]
@@ -159,10 +160,9 @@ impl IntegrationTest {
             .args([
                 "--hr",
                 "--config",
-                &self.test_config_location.to_string_lossy(),
+                self.test_config_location.as_str(),
                 "--supergraph",
-                &PathBuf::from_iter(["..", "examples", "graphql", "local.graphql"])
-                    .to_string_lossy(),
+                Utf8PathBuf::from_iter(["..", "examples", "graphql", "local.graphql"]).as_str(),
                 "--log",
                 "error,apollo_router=info",
             ])

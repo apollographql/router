@@ -2,12 +2,12 @@
 mod macos;
 
 use std::fmt;
-use std::path::Path;
 use std::str::FromStr;
 
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
+use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use xtask::*;
 
@@ -70,7 +70,7 @@ impl Package {
         let mut ar = tar::Builder::new(&mut file);
         eprintln!("Adding {release_path}...");
         ar.append_file(
-            Path::new("dist").join(RELEASE_BIN),
+            Utf8Path::new("dist").join(RELEASE_BIN),
             &mut std::fs::File::open(release_path).context("could not open binary")?,
         )
         .context("could not add file to TGZ archive")?;
@@ -78,7 +78,7 @@ impl Package {
         for path in INCLUDE {
             eprintln!("Adding {path}...");
             ar.append_file(
-                Path::new("dist").join(path),
+                Utf8Path::new("dist").join(path),
                 &mut std::fs::File::open(PKG_PROJECT_ROOT.join(path))
                     .context("could not open binary")?,
             )

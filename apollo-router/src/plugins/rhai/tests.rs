@@ -18,12 +18,12 @@ use uuid::Uuid;
 
 use super::process_error;
 use super::subgraph;
-use super::PathBuf;
 use super::Rhai;
 use super::RhaiExecutionDeferredResponse;
 use super::RhaiExecutionResponse;
 use super::RhaiSupergraphDeferredResponse;
 use super::RhaiSupergraphResponse;
+use super::Utf8PathBuf;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::http_ext;
@@ -155,7 +155,7 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
 // A Rhai engine suitable for minimal testing. There are no scripts and the SDL is an empty
 // string.
 fn new_rhai_test_engine() -> Engine {
-    Rhai::new_rhai_engine(None, "".to_string(), PathBuf::new())
+    Rhai::new_rhai_engine(None, "".to_string(), Utf8PathBuf::new())
 }
 
 // Some of these tests rely extensively on internal implementation details of the tracing_test crate.

@@ -1,9 +1,9 @@
-use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
+use camino::Utf8PathBuf;
 use http::header::InvalidHeaderName;
 use http::uri::Authority;
 use http::uri::Parts;
@@ -1076,7 +1076,11 @@ impl Rhai {
         Ok(())
     }
 
-    pub(super) fn new_rhai_engine(path: Option<PathBuf>, sdl: String, main: PathBuf) -> Engine {
+    pub(super) fn new_rhai_engine(
+        path: Option<Utf8PathBuf>,
+        sdl: String,
+        main: Utf8PathBuf,
+    ) -> Engine {
         let mut engine = Engine::new();
         // If we pass in a path, use it to configure our engine
         // with a FileModuleResolver which allows import to work
@@ -1095,7 +1099,7 @@ impl Rhai {
         let base64_module = exported_module!(router_base64);
 
         // Share main so we can move copies into each closure as required for logging
-        let shared_main = Arc::new(main.display().to_string());
+        let shared_main = Arc::new(main.to_string());
 
         let trace_main = shared_main.clone();
         let debug_main = shared_main.clone();

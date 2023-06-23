@@ -1,8 +1,8 @@
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::time::Duration;
 
+use camino::Utf8PathBuf;
 use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
@@ -41,7 +41,7 @@ pub enum LicenseSource {
     #[display(fmt = "File")]
     File {
         /// The path of the license file.
-        path: PathBuf,
+        path: Utf8PathBuf,
 
         /// `true` to watch the file for changes and hot apply them.
         watch: bool,
@@ -84,10 +84,7 @@ impl LicenseSource {
             LicenseSource::File { path, watch } => {
                 // Sanity check, does the schema file exists, if it doesn't then bail.
                 if !path.exists() {
-                    tracing::error!(
-                        "License file at path '{}' does not exist.",
-                        path.to_string_lossy()
-                    );
+                    tracing::error!("License file at path '{}' does not exist.", path);
                     stream::empty().boxed()
                 } else {
                     // The license file exists try and load it

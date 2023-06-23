@@ -1,7 +1,9 @@
+use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use camino::Utf8PathBuf;
 use derivative::Derivative;
 use futures::channel::oneshot;
 use futures::prelude::*;
@@ -207,13 +209,16 @@ impl Listener {
         match self {
             Listener::Tcp(listener) => listener.local_addr().map(Into::into),
             #[cfg(unix)]
-            Listener::Unix(listener) => listener.local_addr().map(|addr| {
-                ListenAddr::UnixSocket(
+            Listener::Unix(listener) => {
+                let addr = listener.local_addr()?;
+                let path = Utf8PathBuf::try_from(
                     addr.as_pathname()
                         .map(ToOwned::to_owned)
                         .unwrap_or_default(),
                 )
-            }),
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+                Ok(ListenAddr::UnixSocket(path.into_std_path_buf()))
+            }
             Listener::Tls { listener, .. } => listener.local_addr().map(Into::into),
         }
     }
@@ -276,7 +281,9 @@ mod tests {
     // TODO [igni]: add a check with extra endpoints
     async fn sanity_unix() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let sock = temp_dir.as_ref().join("sock");
+        let sock = Utf8PathBuf::try_from(temp_dir.into_path())
+            .expect("temp dir not valid UTF-8")
+            .join("sock");
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let listener = Listener::Unix(tokio::net::UnixListener::bind(&sock).unwrap());
         let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
@@ -284,7 +291,7 @@ mod tests {
         HttpServerHandle::new(
             shutdown_sender,
             futures::future::ready(Ok((listener, vec![]))).boxed(),
-            Some(ListenAddr::UnixSocket(sock)),
+            Some(ListenAddr::UnixSocket(sock.into_std_path_buf())),
             Default::default(),
             all_connections_stopped_sender,
         )

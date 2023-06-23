@@ -1,7 +1,7 @@
-use std::path::Path;
-use std::path::PathBuf;
 use std::time::Duration;
 
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use futures::channel::mpsc;
 use futures::prelude::*;
 use notify::event::DataChange;
@@ -28,14 +28,14 @@ const DEFAULT_WATCH_DURATION: Duration = Duration::from_millis(100);
 ///
 /// returns: impl Stream<Item=()>
 ///
-pub(crate) fn watch(path: &Path) -> impl Stream<Item = ()> {
+pub(crate) fn watch(path: &Utf8Path) -> impl Stream<Item = ()> {
     watch_with_duration(path, DEFAULT_WATCH_DURATION)
 }
 
-fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()> {
+fn watch_with_duration(path: &Utf8Path, duration: Duration) -> impl Stream<Item = ()> {
     // Due to the vagaries of file watching across multiple platforms, instead of watching the
     // supplied path (file), we are going to watch the parent (directory) of the path.
-    let config_file_path = PathBuf::from(path);
+    let config_file_path = Utf8PathBuf::from(path);
     let watched_path = config_file_path.clone();
 
     let (mut watch_sender, watch_receiver) = mpsc::channel(1);
@@ -56,7 +56,9 @@ fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()
                     event.kind,
                     EventKind::Modify(ModifyKind::Metadata(MetadataKind::WriteTime))
                         | EventKind::Modify(ModifyKind::Data(DataChange::Any))
-                ) && event.paths.contains(&watched_path)
+                ) && event
+                    .paths
+                    .contains(&watched_path.clone().into_std_path_buf())
                 {
                     loop {
                         match watch_sender.try_send(()) {
@@ -82,7 +84,7 @@ fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()
     )
     .unwrap_or_else(|_| panic!("could not create watch on: {config_file_path:?}"));
     watcher
-        .watch(&config_file_path, RecursiveMode::NonRecursive)
+        .watch(config_file_path.as_std_path(), RecursiveMode::NonRecursive)
         .unwrap_or_else(|_| panic!("could not watch: {config_file_path:?}"));
     // Tell watchers once they should read the file once,
     // then listen to fs events.
@@ -105,8 +107,8 @@ pub(crate) mod tests {
     use std::fs::File;
     use std::io::Seek;
     use std::io::Write;
-    use std::path::PathBuf;
 
+    use camino::Utf8PathBuf;
     use test_log::test;
 
     use super::*;
@@ -126,8 +128,10 @@ pub(crate) mod tests {
         assert!(futures::poll!(watch.next()).is_ready())
     }
 
-    pub(crate) fn create_temp_file() -> (PathBuf, File) {
-        let path = temp_dir().join(format!("{}", uuid::Uuid::new_v4()));
+    pub(crate) fn create_temp_file() -> (Utf8PathBuf, File) {
+        let path = Utf8PathBuf::try_from(temp_dir())
+            .expect("temp dir not valid UTF-8")
+            .join(format!("{}", uuid::Uuid::new_v4()));
         let file = std::fs::File::create(&path).unwrap();
         (path, file)
     }
