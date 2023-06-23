@@ -171,7 +171,6 @@ impl Service<ExecutionRequest> for ExecutionService {
                     tracing::debug_span!("format_response").in_scope(|| {
                         let mut paths = Vec::new();
                         if let Some(filtered_query) = query.filtered_query.as_ref() {
-                            println!("\nformat with filtering query\n");
                             paths = filtered_query.format_response(
                                 &mut response,
                                 operation_name.as_deref(),
@@ -182,7 +181,6 @@ impl Service<ExecutionRequest> for ExecutionService {
                             );
                         }
 
-                        println!("\nformat with original query\n");
                         paths.extend(query.format_response(
                             &mut response,
                             operation_name.as_deref(),
@@ -201,7 +199,11 @@ impl Service<ExecutionRequest> for ExecutionService {
 
                             response.errors.retain(|error| match &error.path {
                                     None => true,
-                                    Some(error_path) => query.contains_error_path(operation_name.as_deref(), &response.label, response.path.as_ref(), error_path,  variables_set),
+                                    Some(error_path) => query.contains_error_path(
+                                        operation_name.as_deref(),
+                                        &response.label,
+                                        error_path,
+                                        variables_set),
                                 });
 
                                 if response.label.as_ref().map(|label| query.added_labels.contains(label)).unwrap_or(false) {
@@ -261,7 +263,12 @@ impl Service<ExecutionRequest> for ExecutionService {
                                         .iter()
                                         .filter(|error| match &error.path {
                                             None => false,
-                                            Some(error_path) => query.contains_error_path(operation_name.as_deref(), &response.label, response.path.as_ref(), error_path,  variables_set) &&  error_path.starts_with(&path),
+                                            Some(error_path) => query.contains_error_path(
+                                                operation_name.as_deref(),
+                                                &response.label,
+                                                error_path,
+                                                variables_set)
+                                                && error_path.starts_with(&path),
 
                                         })
                                         .cloned()

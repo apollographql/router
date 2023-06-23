@@ -67,7 +67,6 @@ pub(crate) async fn check(
     operation_name: Option<String>,
 ) -> Result<(), OperationLimits<bool>> {
     let config_limits = &configuration.preview_operation_limits;
-    println!("operation limits: {config_limits:?}");
     let max = OperationLimits {
         depth: config_limits.max_depth,
         height: config_limits.max_height,

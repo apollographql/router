@@ -43,7 +43,6 @@ pub(crate) fn collect_subselections(
     keys.into_iter()
         .map(|(key, path, subselection)| {
             let reconstructed = reconstruct_full_query(&path, &kind, &subselection);
-            println!("reconstructed query at key {key:?} and path {path}:\n{reconstructed}");
             let value = Query::parse(reconstructed, schema, &Default::default())?;
             Ok((key, value))
         })
@@ -70,7 +69,6 @@ fn subselection_keys(
         return Ok((Vec::new(), IndexSet::new()));
     }
     let inlined = transform_fragment_spreads_to_inline_fragments(compiler, file_id)?.to_string();
-    dbg!(&inlined);
     let (compiler, file_id) = Query::make_compiler(&inlined, schema, configuration);
     let variables = conditional_defer_variable_names(&compiler, file_id)?;
     if variables.len() > MAX_DEFER_VARIABLES {
@@ -343,11 +341,6 @@ fn collect_subselections_keys(
     }
 
     fn add_key(visitor: &mut Visitor<'_>, label: Option<String>, subselection: SelectionSet) {
-        dbg!((
-            &label,
-            visitor.current_path.to_string(),
-            subselection.to_string()
-        ));
         visitor.subselection_keys.push((
             SubSelection {
                 label,
@@ -367,14 +360,6 @@ fn collect_subselections_keys(
         for selection in hir.selection() {
             match selection {
                 hir::Selection::Field(hir) => {
-                    // if let Some(alias) = hir.alias() {
-                    //     subselection.push_str(alias.name());
-                    //     subselection.push_str(": ");
-                    // }
-                    // subselection.push_str(hir.name());
-                    // arguments(hir.arguments(), subselection)?;
-                    // directives(hir.directives(), subselection)?;
-
                     let nested = if hir.selection_set().selection().is_empty() {
                         // Leaf field
                         SelectionSet(Vec::new())

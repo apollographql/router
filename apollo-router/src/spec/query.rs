@@ -84,48 +84,6 @@ pub(crate) struct SubSelection {
     pub(crate) variables_set: i32,
 }
 
-/*impl Serialize for SubSelection {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let s = format!("{}|{}", self.label, self.variables_set);
-        serializer.serialize_str(&s)
-    }
-}
-
-impl<'de> Deserialize<'de> for SubSelection {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_str(SubSelectionVisitor)
-    }
-}
-
-struct SubSelectionVisitor;
-impl<'de> Visitor<'de> for SubSelectionVisitor {
-    type Value = SubSelection;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("a string containing the path and the subselection separated by |")
-    }
-
-    fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        if let Some((label,variables_str)) = s.split_once('|') {
-            Ok(SubSelection {
-                label:
-                subselection: subselection.to_string(),
-            })
-        } else {
-            Err(E::custom("invalid subselection"))
-        }
-    }
-}*/
-
 impl Query {
     pub(crate) fn empty() -> Self {
         Self {
@@ -159,34 +117,16 @@ impl Query {
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
 
-        println!("format_response: is_deferred={is_deferred}");
-        println!("data: {}", serde_json::to_string(&data).unwrap());
-
         let original_operation = self.operation(operation_name);
         match data {
             Some(Value::Object(mut input)) => {
                 if is_deferred {
-                    println!("response subselection: {:?}", response.subselection);
-                    //if let Some(subselection) = &response.subselection {
-                    /*println!(
-                        "looking for subselection at path {:?} and {} in\n{:?}",
-                        response.path.as_ref().map(|p| p.to_string()),
-                        subselection,
-                        self.subselections.keys().collect::<Vec<_>>()
-                    );*/
-                    println!(
-                            "looking for subselection at label {:?} and variables {variables_set} in\n{:?}",
-                            response.label,
-                            self.subselections.keys().collect::<Vec<_>>()
-                        );
-
                     // Get subselection from hashmap
                     match self.subselections.get(&SubSelection {
                         label: response.label.clone(),
                         variables_set,
                     }) {
                         Some(subselection_query) => {
-                            println!("got subselection: {}", subselection_query.string);
                             let mut output = Object::default();
                             let operation = &subselection_query.operations[0];
                             let mut parameters = FormatParameters {
@@ -232,16 +172,9 @@ impl Query {
                         None => {
                             response.data = Some(Value::Object(Object::default()));
                             return vec![];
-                            //failfast_debug!("can't find subselection for {:?}", subselection)
                         }
                     }
-                    /*// the primary query was empty, we return an empty object
-                    } else {
-                        response.data = Some(Value::Object(Object::default()));
-                        return vec![];
-                    }*/
                 } else if let Some(operation) = original_operation {
-                    println!("not deferred. subselection: {}", self.string);
                     let mut output = Object::default();
 
                     let all_variables = if operation.variables.is_empty() {
@@ -1087,12 +1020,9 @@ impl Query {
         &self,
         operation_name: Option<&str>,
         label: &Option<String>,
-        _response_path: Option<&Path>,
         path: &Path,
         variables_set: i32,
     ) -> bool {
-        println!("contains_error_path: op name={operation_name:?} label={label:?}, path={path}, variables={variables_set}\nin {:?}", self.subselections.keys().collect::<Vec<_>>());
-
         let operation = match self.subselections.get(&SubSelection {
             label: label.clone(),
             variables_set,
@@ -1116,20 +1046,17 @@ impl Query {
         operation_name: Option<&str>,
         variables: &Object,
     ) -> i32 {
-        println!("generating variables set: variables={variables:?}");
         let mut set = 0i32;
         for (i, variable) in self.defer_variables_set.iter().enumerate() {
             let value = variables
                 .get(variable.as_str())
                 .or_else(|| self.default_variable_value(operation_name, variable));
-            println!("value for variable '{variable}': {value:?}");
 
             if matches!(value, Some(serde_json_bytes::Value::Bool(true))) {
                 set |= 1 << i;
             }
         }
 
-        println!("generated set: {set}");
         set
     }
 }
