@@ -329,20 +329,6 @@ impl<'a> Combination<'a> {
     }
 }
 
-pub(crate) fn generate_combination(variables_set: &IndexSet<String>, variables: &Object) -> i32 {
-    let mut set = 0i32;
-    for (i, variable) in variables_set.iter().enumerate() {
-        if matches!(
-            variables.get(variable.as_str()),
-            Some(serde_json_bytes::Value::Bool(true))
-        ) {
-            set &= 1 << i;
-        }
-    }
-
-    set
-}
-
 fn collect_subselections_keys(
     compiler: &ApolloCompiler,
     file_id: FileId,

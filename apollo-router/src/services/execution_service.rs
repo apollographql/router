@@ -166,7 +166,7 @@ impl Service<ExecutionRequest> for ExecutionService {
                     }
 
                     let has_next = response.has_next.unwrap_or(true);
-                    let variables_set = query.defer_variables_set(&variables);
+                    let variables_set = query.defer_variables_set(operation_name.as_deref(), &variables);
 
                     tracing::debug_span!("format_response").in_scope(|| {
                         let mut paths = Vec::new();

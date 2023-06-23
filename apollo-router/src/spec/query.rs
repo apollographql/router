@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::hir;
+use apollo_compiler::hir::DefaultValue;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::FileId;
@@ -30,7 +31,6 @@ use crate::json_ext::Path;
 use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
-use crate::spec::query::subselections::generate_combination;
 use crate::spec::FieldType;
 use crate::spec::Fragments;
 use crate::spec::InvalidValue;
@@ -1104,8 +1104,26 @@ impl Query {
         res
     }
 
-    pub(crate) fn defer_variables_set(&self, variables: &Object) -> i32 {
-        generate_combination(&self.defer_variables_set, variables)
+    pub(crate) fn defer_variables_set(
+        &self,
+        operation_name: Option<&str>,
+        variables: &Object,
+    ) -> i32 {
+        println!("generating variables set: variables={variables:?}");
+        let mut set = 0i32;
+        for (i, variable) in self.defer_variables_set.iter().enumerate() {
+            let value = variables
+                .get(variable.as_str())
+                .or_else(|| self.default_variable_value(operation_name, variable));
+            println!("value for variable '{variable}': {value:?}");
+
+            if matches!(value, Some(serde_json_bytes::Value::Bool(true))) {
+                set |= 1 << i;
+            }
+        }
+
+        println!("generated set: {set}");
+        set
     }
 }
 
