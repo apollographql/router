@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
@@ -8,6 +9,7 @@ use apollo_compiler::HirDatabase;
 use apollo_compiler::InputDatabase;
 use serde::Deserialize;
 use serde::Serialize;
+use tokio::sync::Mutex;
 
 use crate::spec::Query;
 use crate::Configuration;
@@ -61,10 +63,12 @@ impl OperationLimits<bool> {
 /// Returns which limits are exceeded by the given query, if any
 pub(crate) async fn check(
     configuration: &Configuration,
-    query: &mut Query,
+    query: &str,
+    compiler: &Arc<Mutex<ApolloCompiler>>,
     operation_name: Option<String>,
 ) -> Result<(), OperationLimits<bool>> {
     let config_limits = &configuration.preview_operation_limits;
+    println!("operation limits: {config_limits:?}");
     let max = OperationLimits {
         depth: config_limits.max_depth,
         height: config_limits.max_height,
@@ -76,7 +80,7 @@ pub(crate) async fn check(
         return Ok(());
     }
 
-    let compiler = query.compiler.lock().await;
+    let compiler = compiler.lock().await;
 
     let ids = compiler.db.executable_definition_files();
     // We create a new compiler for each query
@@ -115,7 +119,6 @@ pub(crate) async fn check(
             }
         });
         let message = messages.join(", ");
-        let query = &query.string;
         tracing::warn!(
             "request exceeded complexity limits: {message}, \
             query: {query:?}, operation name: {operation_name:?}"

@@ -140,6 +140,15 @@ impl BridgeQueryPlanner {
         compiler: Arc<Mutex<ApolloCompiler>>,
     ) -> Result<Query, QueryPlannerError> {
         let (query, operation_name) = key;
+
+        crate::spec::operation_limits::check(
+            &self.configuration,
+            &query,
+            &compiler,
+            operation_name.clone(),
+        )
+        .await?;
+
         let compiler_guard = compiler.lock().await;
         let file_id = compiler_guard
             .db
@@ -181,8 +190,7 @@ impl BridgeQueryPlanner {
             defer_variables_set,
             is_original: true,
         };
-        crate::spec::operation_limits::check(&self.configuration, &mut query, operation_name)
-            .await?;
+
         Ok(query)
     }
 
