@@ -754,10 +754,7 @@ mod tests {
                             variables_set: 0,
                         };
                         assert!(
-                            subselections
-                                .keys()
-                                .find(|k| k.label == key.label)
-                                .is_some(),
+                            subselections.keys().any(|k| k.label == key.label),
                             "Missing key: '{}' '{:?}' '{}' in {:?}",
                             path,
                             key.label,
@@ -773,10 +770,7 @@ mod tests {
                                 variables_set: 0,
                             };
                             assert!(
-                                subselections
-                                    .keys()
-                                    .find(|k| k.label == key.label)
-                                    .is_some(),
+                                subselections.keys().any(|k| k.label == key.label),
                                 "Missing key: '{}' '{:?}' '{}'",
                                 path,
                                 key.label,
@@ -816,7 +810,7 @@ mod tests {
                 }
                 PlanNode::Subscription { rest, .. } => {
                     if let Some(node) = rest {
-                        check_query_plan_coverage(node, path, parent_label.clone(), subselections)
+                        check_query_plan_coverage(node, path, parent_label, subselections)
                     }
                 }
             }
