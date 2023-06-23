@@ -45,12 +45,14 @@ pub(crate) const TYPENAME: &str = "__typename";
 pub(crate) const QUERY_EXECUTABLE: &str = "query";
 
 /// A GraphQL query.
-#[derive(Derivative, Default, Serialize, Deserialize)]
+#[derive(Derivative, Serialize, Deserialize)]
 #[derivative(PartialEq, Hash, Eq, Debug)]
 pub(crate) struct Query {
     pub(crate) string: String,
     #[derivative(PartialEq = "ignore", Hash = "ignore", Debug = "ignore")]
     #[serde(skip)]
+    // FIXME: find a way to have a correct compiler when deserializing
+    #[serde(default = "empty_compiler")]
     pub(crate) compiler: Arc<Mutex<ApolloCompiler>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     fragments: Fragments,
@@ -60,6 +62,10 @@ pub(crate) struct Query {
     pub(crate) subselections: HashMap<SubSelection, Query>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) filtered_query: Option<Arc<Query>>,
+}
+
+fn empty_compiler() -> Arc<Mutex<ApolloCompiler>> {
+    Arc::new(Mutex::new(ApolloCompiler::new()))
 }
 
 #[derive(Debug, Derivative, Default)]
@@ -112,6 +118,19 @@ impl<'de> Visitor<'de> for SubSelectionVisitor {
 }
 
 impl Query {
+    pub(crate) fn empty() -> Self {
+        Self {
+            string: String::new(),
+            compiler: empty_compiler(),
+            fragments: Fragments {
+                map: HashMap::new(),
+            },
+            operations: Vec::new(),
+            subselections: HashMap::new(),
+            filtered_query: None,
+        }
+    }
+
     /// Re-format the response value to match this query.
     ///
     /// This will discard unrequested fields and re-order the output to match the order of the
@@ -1173,14 +1192,14 @@ impl From<hir::OperationType> for OperationKind {
 pub(crate) fn parse_hir_value(value: &hir::Value) -> Option<Value> {
     match value {
         hir::Value::Variable(_) => None,
-        hir::Value::Int(val) => Some((val.get() as i64).into()),
-        hir::Value::Float(val) => Some(val.get().into()),
-        hir::Value::Null => Some(Value::Null),
-        hir::Value::String(val) => Some(val.as_str().into()),
-        hir::Value::Boolean(val) => Some((*val).into()),
-        hir::Value::Enum(name) => Some(name.src().into()),
-        hir::Value::List(list) => list.iter().map(parse_hir_value).collect(),
-        hir::Value::Object(obj) => obj
+        hir::Value::Int { value, .. } => Some((value.get() as i64).into()),
+        hir::Value::Float { value, .. } => Some(value.get().into()),
+        hir::Value::Null { .. } => Some(Value::Null),
+        hir::Value::String { value, .. } => Some(value.as_str().into()),
+        hir::Value::Boolean { value, .. } => Some((*value).into()),
+        hir::Value::Enum { value, .. } => Some(value.src().into()),
+        hir::Value::List { value, .. } => value.iter().map(parse_hir_value).collect(),
+        hir::Value::Object { value, .. } => value
             .iter()
             .map(|(k, v)| Some((k.src(), parse_hir_value(v)?)))
             .collect(),

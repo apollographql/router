@@ -49,7 +49,7 @@ impl QueryPlan {
             }),
             root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
             formatted_query_plan: Default::default(),
-            query: Arc::new(Query::default()),
+            query: Arc::new(Query::empty()),
         }
     }
 }

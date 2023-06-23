@@ -214,25 +214,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c7d0618f0e0b7e8ff11427422b64564d5fb0be1940354bfe2e0529b18a9d9b8"
 
 [[package]]
-name = "apollo-ariadne"
-version = "0.2.0-alpha.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28d0599491753b640c75cdaefc2cb1c9b9ba5787a461cb7c821f37e9e6694f0a"
-dependencies = [
- "unicode-width",
- "yansi",
-]
-
-[[package]]
 name = "apollo-compiler"
-version = "0.8.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adfb4c7364494ca41e3fec600b6a4570320db83ae0aa938ca70036632bb9365e"
+checksum = "4593ed026f92c0e79bc11a050f060af72a4fadaccdfefd211263d85f9be8048b"
 dependencies = [
- "apollo-ariadne",
  "apollo-parser 0.5.3",
+ "ariadne",
  "indexmap",
- "ordered-float 2.10.0",
+ "ordered-float 3.7.0",
  "rowan",
  "salsa",
  "thiserror",
@@ -297,7 +287,7 @@ dependencies = [
  "backtrace",
  "base64 0.20.0",
  "brotli",
- "buildstructor 0.5.2",
+ "buildstructor 0.5.3",
  "bytes",
  "ci_info",
  "clap 4.3.3",
@@ -483,6 +473,16 @@ name = "arcstr"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f907281554a3d0312bb7aab855a8e0ef6cbf1614d06de54105039ca8b34460e"
+
+[[package]]
+name = "ariadne"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72fe02fc62033df9ba41cba57ee19acf5e742511a140c7dbc3a873e19a19a1bd"
+dependencies = [
+ "unicode-width",
+ "yansi",
+]
 
 [[package]]
 name = "ascii"
@@ -866,14 +866,14 @@ dependencies = [
  "str_inflector",
  "syn 1.0.109",
  "thiserror",
- "try_match",
+ "try_match 0.3.0",
 ]
 
 [[package]]
 name = "buildstructor"
-version = "0.5.2"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a94acaaeac95a57c88e5b97fd3b5dda18b4578cb33cbba6791cc4f62918c2922"
+checksum = "af80267d1274ea0b4e454b1c747ba9d7c2c001f8e065043105318f53aabe320d"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -881,7 +881,7 @@ dependencies = [
  "str_inflector",
  "syn 2.0.18",
  "thiserror",
- "try_match",
+ "try_match 0.4.1",
 ]
 
 [[package]]
@@ -4013,9 +4013,9 @@ dependencies = [
 
 [[package]]
 name = "ordered-float"
-version = "2.10.0"
+version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7940cf2ca942593318d07fcf2596cdca60a85c9e7fab408a5e21a4f9dcd40d87"
+checksum = "2fc2dbde8f8a79f2102cc474ceb0ad68e3b80b85289ea62389b60e66777e4213"
 dependencies = [
  "num-traits",
 ]
@@ -4452,9 +4452,9 @@ checksum = "dc375e1527247fe1a97d8b7156678dfe7c1af2fc075c9a4db3690ecd2a148068"
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.59"
+version = "1.0.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6aeca18b86b413c660b781aa319e4e2648a3e6f9eadc9b47e9038e6fe9f3451b"
+checksum = "dec2b086b7a862cf4de201096214fa870344cf922b2b30c167badb3af3195406"
 dependencies = [
  "unicode-ident",
 ]
@@ -6516,7 +6516,16 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "789f9cd474cc74c591dcc98669b846e158f2409ace4e6e342502ab44a41c584b"
 dependencies = [
- "try_match_inner",
+ "try_match_inner 0.4.0",
+]
+
+[[package]]
+name = "try_match"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61ae3c1941e8859e30d28e572683fbfa89ae5330748b45139aedf488389e2be4"
+dependencies = [
+ "try_match_inner 0.5.1",
 ]
 
 [[package]]
@@ -6529,6 +6538,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "try_match_inner"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0a91713132798caecb23c977488945566875e7b61b902fb111979871cbff34e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.18",
 ]
 
 [[package]]
