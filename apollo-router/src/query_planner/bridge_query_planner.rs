@@ -443,10 +443,9 @@ mod tests {
     use serde_json::json;
     use test_log::test;
 
-    use crate::{
-        json_ext::Path,
-        spec::query::{SubSelection, SubSelections},
-    };
+    use crate::json_ext::Path;
+    use crate::spec::query::SubSelection;
+    use crate::spec::query::SubSelections;
 
     use super::*;
     const EXAMPLE_SCHEMA: &str = include_str!("testdata/schema.graphql");
