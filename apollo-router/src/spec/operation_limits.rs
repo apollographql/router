@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
@@ -9,7 +8,6 @@ use apollo_compiler::HirDatabase;
 use apollo_compiler::InputDatabase;
 use serde::Deserialize;
 use serde::Serialize;
-use tokio::sync::Mutex;
 
 use crate::Configuration;
 
@@ -60,10 +58,10 @@ impl OperationLimits<bool> {
 }
 
 /// Returns which limits are exceeded by the given query, if any
-pub(crate) async fn check(
+pub(crate) fn check(
     configuration: &Configuration,
     query: &str,
-    compiler: &Arc<Mutex<ApolloCompiler>>,
+    compiler: &ApolloCompiler,
     operation_name: Option<String>,
 ) -> Result<(), OperationLimits<bool>> {
     let config_limits = &configuration.preview_operation_limits;
@@ -77,8 +75,6 @@ pub(crate) async fn check(
         // No configured limit
         return Ok(());
     }
-
-    let compiler = compiler.lock().await;
 
     let ids = compiler.db.executable_definition_files();
     // We create a new compiler for each query
