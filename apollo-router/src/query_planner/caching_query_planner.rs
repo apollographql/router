@@ -240,6 +240,14 @@ where
                         };
 
                         if let Err(error) = err_res {
+                            request
+                                .context
+                                .private_entries
+                                .lock()
+                                .insert(UsageReporting {
+                                    stats_report_key: error.get_error_key().to_string(),
+                                    referenced_fields_by_type: HashMap::new(),
+                                });
                             let e = Arc::new(QueryPlannerError::SpecError(error));
                             entry.insert(Err(e.clone())).await;
                             return Err(CacheResolverError::RetrievalError(e));
