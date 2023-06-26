@@ -517,6 +517,8 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("override_subgraph_url");
     add_optional_apollo_plugin!("authorization");
     add_optional_apollo_plugin!("authentication");
+
+    // This relative ordering is documented in `docs/source/customizations/native.mdx`:
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
     add_user_plugins!();
