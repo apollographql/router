@@ -430,6 +430,60 @@ Currently, Rhai scripts _cannot_ do the following:
 
 If your router customization needs to do any of these, you can instead use [external co-processing](./coprocessor/) (this is an [Enterprise feature](../enterprise-features)).
 
+### Global variables
+
+The router's `Rhai` interface can simulate closures: https://rhai.rs/book/language/fn-closure.html
+
+However, and this is an important restriction:
+
+"
+The [anonymous function](https://rhai.rs/book/language/fn-anon.html) syntax, however, automatically captures [variables](https://rhai.rs/book/language/variables.html) that are not defined within the current scope, but are defined in the external scope – i.e. the scope where the [anonymous function](https://rhai.rs/book/language/fn-anon.html) is created.
+"
+
+Thus it's not possible for a `Rhai` closure to reference a global variable. For example: this kind of thing might be attempted:
+
+```rhai
+fn supergraph_service(service){
+    let f = |request| {
+        let v = Router.APOLLO_SDL;
+        print(v);
+    };
+    service.map_request(f);
+}
+```
+Note: `Router` is a global variable.
+
+That won't work and you'll get an error something like: `service callback failed: Variable not found: Router (line 4, position 17)`
+
+There are two workarounds. Either:
+
+1. Create a local copy of the global that can be captured by the closure:
+
+```rhai
+fn supergraph_service(service){
+    let v = Router.APOLLO_SDL;
+    let f = |request| {
+        print(v);
+    };
+    service.map_request(f);
+}
+```
+
+Or:
+
+2. Use a function pointer rather than closure syntax:
+
+```rhai
+fn supergraph_service(service) {
+    const request_callback = Fn("process_request");
+    service.map_request(request_callback);
+}
+
+fn process_request(request) {
+    print(`${Router.APOLLO_SDL}`);
+}
+```
+
 ### Avoiding deadlocks
 
 The Apollo Router requires that its Rhai engine implements the [sync feature](https://rhai.rs/book/start/features.html) to guarantee data integrity within the router's multi-threading execution environment. This means that [shared values](https://rhai.rs/book/language/fn-closure.html?highlight=deadlock#data-races-in-sync-builds-can-become-deadlocks) within Rhai might cause a deadlock.
