@@ -37,7 +37,7 @@ pub(crate) enum SpecError {
     ParsingError(String),
     /// validation error: {0}
     ValidationError(String),
-    /// unknown operation: {0}
+    /// Unknown operation named "{0}"
     UnknownOperation(String),
     /// missing operation
     MissingOperation,
@@ -49,9 +49,7 @@ impl SpecError {
     pub(crate) const fn get_error_key(&self) -> &'static str {
         match self {
             SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
-            SpecError::UnknownOperation(_) | SpecError::MissingOperation => {
-                "## GraphQLUnknownOperationName\n"
-            }
+            SpecError::UnknownOperation(_) => "## GraphQLUnknownOperationName\n",
             _ => "## GraphQLValidationFailure\n",
         }
     }
@@ -66,7 +64,7 @@ impl ErrorExtension for SpecError {
             SpecError::ParsingError(_) => "PARSING_ERROR",
             SpecError::ValidationError(_) => "VALIDATION_ERROR",
             SpecError::UnknownOperation(_) => "UNKNOWN_OPERATION_ERROR",
-            SpecError::MissingOperation => "MISSING_OPERATION_ERROR",
+            SpecError::MissingOperation => "VALIDATION_ERROR",
             SpecError::SubscriptionNotSupported => "SUBSCRIPTION_NOT_SUPPORTED",
         }
         .to_string()
