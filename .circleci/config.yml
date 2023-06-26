@@ -548,6 +548,12 @@ jobs:
                 command: |
                   # Install Helm
                   curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+            - run:
+                name: helm-docs install
+                command: |
+                  sudo apt update
+                  sudo apt install golang
+                  GOPATH="${HOME}/.local" GO111MODULE=on go get github.com/norwoodj/helm-docs/cmd/helm-docs
       - when:
           condition:
             or:
