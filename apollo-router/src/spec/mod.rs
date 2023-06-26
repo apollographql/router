@@ -63,8 +63,8 @@ impl ErrorExtension for SpecError {
             SpecError::InvalidField(_, _) => "INVALID_FIELD",
             SpecError::ParsingError(_) => "PARSING_ERROR",
             SpecError::ValidationError(_) => "VALIDATION_ERROR",
-            SpecError::UnknownOperation(_) => "UNKNOWN_OPERATION_ERROR",
-            SpecError::MissingOperation => "VALIDATION_ERROR",
+            SpecError::UnknownOperation(_) => "GRAPHQL_VALIDATION_FAILED",
+            SpecError::MissingOperation => "GRAPHQL_VALIDATION_FAILED",
             SpecError::SubscriptionNotSupported => "SUBSCRIPTION_NOT_SUPPORTED",
         }
         .to_string()
