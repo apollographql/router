@@ -170,7 +170,7 @@ reqwest = { version = "0.11.18", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = { path = "../../federation-rs/federation-2/router-bridge" }
+router-bridge = "0.2.8+v2.4.8"
 rust-embed="6.7.0"
 rustls = "0.20.8"
 rustls-pemfile = "1.0.2"
