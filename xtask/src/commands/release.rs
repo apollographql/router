@@ -122,13 +122,25 @@ impl Prepare {
                 "the 'git' executable could not be found in your PATH"
             ));
         }
+        if let Version::Nightly = &self.version {
+            if cfg!(target_arch = "x86_64") && cfg!(target_os = "linux") && cfg!(target_env = "gnu")
+            {
+                if which::which("helm").is_err() {
+                    return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
+                }
 
-        if which::which("helm").is_err() {
-            return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
-        }
+                if which::which("helm-docs").is_err() {
+                    return Err(anyhow!("the 'helm-docs' executable could not be found in your PATH.  Install it using the instructions at https://github.com/norwoodj/helm-docs#installation and try again."));
+                }
+            }
+        } else {
+            if which::which("helm").is_err() {
+                return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
+            }
 
-        if which::which("helm-docs").is_err() {
-            return Err(anyhow!("the 'helm-docs' executable could not be found in your PATH.  Install it using the instructions at https://github.com/norwoodj/helm-docs#installation and try again."));
+            if which::which("helm-docs").is_err() {
+                return Err(anyhow!("the 'helm-docs' executable could not be found in your PATH.  Install it using the instructions at https://github.com/norwoodj/helm-docs#installation and try again."));
+            }
         }
 
         if which::which("cargo-about").is_err() {
