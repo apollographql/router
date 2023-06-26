@@ -87,6 +87,7 @@ impl Prepare {
 
         if let Version::Nightly = &self.version {
             println!("Skipping various steps because this is a nightly build.");
+            self.update_helm_charts(&version)?;
         } else {
             self.update_install_script(&version)?;
             self.update_helm_charts(&version)?;
@@ -119,16 +120,12 @@ impl Prepare {
             ));
         }
 
-        if let Version::Nightly = &self.version {
-            println!("Skipping requirement that helm and helm-docs is installed because we're building a nightly that doesn't require those tools.");
-        } else {
-            if which::which("helm").is_err() {
-                return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
-            }
+        if which::which("helm").is_err() {
+            return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
+        }
 
-            if which::which("helm-docs").is_err() {
-                return Err(anyhow!("the 'helm-docs' executable could not be found in your PATH.  Install it using the instructions at https://github.com/norwoodj/helm-docs#installation and try again."));
-            }
+        if which::which("helm-docs").is_err() {
+            return Err(anyhow!("the 'helm-docs' executable could not be found in your PATH.  Install it using the instructions at https://github.com/norwoodj/helm-docs#installation and try again."));
         }
 
         if which::which("cargo-about").is_err() {
