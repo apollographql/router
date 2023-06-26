@@ -298,13 +298,7 @@ fn variable_combinations(
         1
     };
     let combinations = initial..combinations_count;
-    combinations.map(move |bits| {
-        Combination { variables, bits }
-        /*(bits, move |name: &str| {
-            let index = variables.get_index_of(name).unwrap();
-            (bits & (1 << index)) != 0
-        })*/
-    })
+    combinations.map(move |bits| Combination { variables, bits })
 }
 
 struct Combination<'a> {
@@ -318,9 +312,7 @@ impl<'a> Combination<'a> {
             Some(index) => index,
             None => return false,
         };
-        let res = (self.bits & (1 << index)) != 0;
-        println!("is variable {variable} present in {}: {res}", self.bits);
-        res
+        (self.bits & (1 << index)) != 0
     }
 
     fn bitset(&self) -> i32 {

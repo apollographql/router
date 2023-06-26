@@ -292,7 +292,7 @@ async fn queries_should_work_over_post() {
 async fn service_errors_should_be_propagated() {
     let message = "Unknown operation named \"invalidOperationName\"";
     let mut extensions_map = serde_json_bytes::map::Map::new();
-    extensions_map.insert("code", "PARSING_ERROR".into());
+    extensions_map.insert("code", "GRAPHQL_VALIDATION_FAILED".into());
     let expected_error = apollo_router::graphql::Error::builder()
         .message(message)
         .extensions(extensions_map)
