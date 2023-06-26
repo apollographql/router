@@ -539,6 +539,17 @@ jobs:
                   --output artifacts/
       - when:
           condition:
+            and:
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
+              - equal: [ true, << parameters.nightly >> ]
+          steps:
+            - run:
+                name: Helm install
+                command: |
+                  # Install Helm
+                  curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      - when:
+          condition:
             or:
               - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
               - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
@@ -595,8 +606,6 @@ jobs:
             - run:
                 name: Helm build
                 command: |
-                  # Install Helm
-                  curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
                   # Package up the helm chart
                   helm package helm/chart/router
                   # Make sure we have the newest chart
