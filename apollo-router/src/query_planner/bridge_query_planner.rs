@@ -155,7 +155,7 @@ impl BridgeQueryPlanner {
             .db
             .source_file(QUERY_EXECUTABLE.into())
             .ok_or_else(|| {
-                QueryPlannerError::SpecError(SpecError::ParsingError(
+                QueryPlannerError::SpecError(SpecError::ValidationError(
                     "missing input file for query".to_string(),
                 ))
             })?;
@@ -163,9 +163,10 @@ impl BridgeQueryPlanner {
             .db
             .find_operation(file_id, operation_name.clone())
             .ok_or_else(|| {
-                QueryPlannerError::SpecError(SpecError::ParsingError(
-                    "missing operation definition".to_string(),
-                ))
+                QueryPlannerError::SpecError(match operation_name {
+                    Some(op) => SpecError::UnknownOperation(op),
+                    _ => SpecError::MissingOperation,
+                })
             })?
             .operation_ty()
             .into();
@@ -551,7 +552,7 @@ mod tests {
         let result = plan(EXAMPLE_SCHEMA, "", "", None).await;
 
         assert_eq!(
-            "spec error: parsing error: missing operation definition",
+            "spec error: missing operation",
             result.unwrap_err().to_string()
         );
     }

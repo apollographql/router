@@ -386,7 +386,7 @@ pub(crate) fn value(hir: &hir::Value) -> Result<apollo_encoder::Value, BoxError>
 }
 
 #[test]
-pub(crate) fn test_add_directive_to_fields() {
+fn test_add_directive_to_fields() {
     struct AddDirective<'a>(&'a ApolloCompiler);
 
     impl<'a> Visitor for AddDirective<'a> {
