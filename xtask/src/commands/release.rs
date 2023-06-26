@@ -311,14 +311,6 @@ impl Prepare {
     fn update_helm_charts(&self, version: &str) -> Result<()> {
         println!("updating helm charts");
 
-        if let Version::Nightly = self.version {
-            replace_in_file!(
-                "./helm/chart/router/Chart.yaml",
-                "name: router",
-                "name: router-nightly"
-            );
-        }
-
         replace_in_file!(
             "./helm/chart/router/Chart.yaml",
             "^version:.*?$",
