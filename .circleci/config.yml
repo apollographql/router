@@ -597,7 +597,7 @@ jobs:
                   BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
                   ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
                   VERSION=$(echo "${BASE_VERSION}" | tr "+" "_")
-                  ROUTER_TAG=ghcr.io/apollographql/router
+                  ROUTER_TAG=ghcr.io/apollographql/router-nightly
                   # Create a multi-arch builder which works properly under qemu
                   docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
                   docker context create buildx-build
@@ -613,7 +613,8 @@ jobs:
                 name: Helm build
                 command: |
                   # Package up the helm chart
-                  helm package helm/chart/router
+                  mv helm/chart/router helm/chart/router-nightly
+                  helm package helm/chart/router-nightly
                   # Make sure we have the newest chart
                   CHART=$(ls -t router*.tgz| head -1)
                   # Note: GH Token owned by apollo-bot2, no expire
