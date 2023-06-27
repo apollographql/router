@@ -317,7 +317,7 @@ impl Query {
         let query = query.into();
 
         let (compiler, id) = Self::make_compiler(&query, schema, configuration);
-        Self::parse_query(&compiler, id)?;
+        Self::check_parse_errors(&compiler, id)?;
         let (fragments, operations) = Self::extract_query_information(&compiler, schema)?;
 
         Ok(Query {
@@ -340,7 +340,7 @@ impl Query {
     ) -> Result<Self, SpecError> {
         let compiler_guard = compiler.lock().await;
 
-        Self::parse_query(&compiler_guard, id)?;
+        Self::check_parse_errors(&compiler_guard, id)?;
         let validation_error = match configuration.experimental_graphql_validation {
             GraphQLValidation::Legacy => None,
             GraphQLValidation::New => {
@@ -366,7 +366,7 @@ impl Query {
     }
 
     /// Check for parse errors in a query in the compiler.
-    fn parse_query(compiler: &ApolloCompiler, id: FileId) -> Result<(), SpecError> {
+    fn check_parse_errors(compiler: &ApolloCompiler, id: FileId) -> Result<(), SpecError> {
         let ast = compiler.db.ast(id);
         // Trace log recursion limit data
         let recursion_limit = ast.recursion_limit();
