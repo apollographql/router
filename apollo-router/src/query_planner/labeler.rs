@@ -12,10 +12,13 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use rand_core::SeedableRng;
 
+use crate::spec::query::subselections::DEFER_DIRECTIVE_NAME;
 use crate::spec::query::transform::directive;
 use crate::spec::query::transform::document;
 use crate::spec::query::transform::selection_set;
 use crate::spec::query::transform::Visitor;
+
+const LABEL_NAME: &str = "name";
 
 /// go through the query and adds labels to defer fragments that do not have any
 ///
@@ -101,8 +104,8 @@ impl<'a> Visitor for Labeler<'a> {
         let name = hir.name();
         let mut encoder_node = apollo_encoder::FragmentSpread::new(name.into());
         for hir in hir.directives() {
-            let is_defer = hir.name() == "defer";
-            let has_label = hir.argument_by_name("label").and_then(|v| match v {
+            let is_defer = hir.name() == DEFER_DIRECTIVE_NAME;
+            let has_label = hir.argument_by_name(LABEL_NAME).and_then(|v| match v {
                 Value::String { value, .. } => Some(value),
                 _ => None,
             });
@@ -118,7 +121,7 @@ impl<'a> Visitor for Labeler<'a> {
                         None => {
                             let label = self.generate_label();
 
-                            d.arg(Argument::new("label".to_string(), label.into()));
+                            d.arg(Argument::new(LABEL_NAME.to_string(), label.into()));
                         }
                     }
                 }
@@ -146,8 +149,8 @@ impl<'a> Visitor for Labeler<'a> {
         );
 
         for hir in hir.directives() {
-            let is_defer = hir.name() == "defer";
-            let has_label = hir.argument_by_name("label").and_then(|v| match v {
+            let is_defer = hir.name() == DEFER_DIRECTIVE_NAME;
+            let has_label = hir.argument_by_name(LABEL_NAME).and_then(|v| match v {
                 Value::String { value, .. } => Some(value),
                 _ => None,
             });
@@ -163,7 +166,7 @@ impl<'a> Visitor for Labeler<'a> {
                         None => {
                             let label = self.generate_label();
 
-                            d.arg(Argument::new("label".to_string(), label.into()));
+                            d.arg(Argument::new(LABEL_NAME.to_string(), label.into()));
                         }
                     }
                 }

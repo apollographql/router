@@ -21,7 +21,7 @@ use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
 
-const DEFER_DIRECTIVE_NAME: &str = "defer";
+pub(crate) const DEFER_DIRECTIVE_NAME: &str = "defer";
 const IF_ARGUMENT_NAME: &str = "if";
 
 /// We generate subselections for all 2^N possible combinations of these boolean variables.
