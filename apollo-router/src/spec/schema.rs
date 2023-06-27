@@ -80,8 +80,8 @@ impl Schema {
         }
 
         fn as_string(value: &hir::Value) -> Option<&String> {
-            if let hir::Value::String(string) = value {
-                Some(string)
+            if let hir::Value::String { value, .. } = value {
+                Some(value)
             } else {
                 None
             }

@@ -123,21 +123,23 @@ If the supplied status code is not a valid HTTP status code, then a `500` respon
 Your Rhai customization can use the global `Router.APOLLO_START` constant to calculate durations. This is similar to `Epoch` in Unix environments.
 
 ```rhai
-fn supergraph_service(service) {
-    // Define a closure to process our response
-    let f = |response| {
-        // highlight-start
-        let start = Router.APOLLO_START.elapsed;
-        // Do some processing here...
-        let duration = Router.APOLLO_START.elapsed - start;
-        print(`response processing took: ${duration}`);
-        // highlight-end
+// Define a closure to process our response
+// Note: We can't use a closure in this example because we are referencing our global Router during function execution
+fn process_response(response) {
+    // highlight-start
+    let start = Router.APOLLO_START.elapsed;
+    // Do some processing here...
+    let duration = Router.APOLLO_START.elapsed - start;
+    print(`response processing took: ${duration}`);
+    // highlight-end
 
-        // Log out any errors we may have
-        print(response.body.errors);
-    };
-    // Map our response using our closure
-    service.map_response(f);
+    // Log out any errors we may have
+    print(response.body.errors);
+}
+
+fn supergraph_service(service) {
+    const response_callback = Fn("process_request");
+    service.map_response(response_callback);
 }
 ```
 
