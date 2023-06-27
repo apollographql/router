@@ -19,6 +19,7 @@ use crate::spec::query::transform::selection_set;
 use crate::spec::query::transform::Visitor;
 
 const LABEL_NAME: &str = "name";
+const LABEL_COLLISION_ERROR: &str = "label collision";
 
 /// go through the query and adds labels to defer fragments that do not have any
 ///
@@ -39,7 +40,7 @@ pub(crate) fn add_defer_labels(
             }
             Err(e) => {
                 // this can happen if one of the added labels is already used somewhere in the query
-                if e.to_string() == "label collision" {
+                if e.to_string() == LABEL_COLLISION_ERROR {
                     let (new_reserved_labels, _) = visitor.unpack();
                     reserved_labels = new_reserved_labels;
 
@@ -114,7 +115,7 @@ impl<'a> Visitor for Labeler<'a> {
                     match has_label {
                         Some(label) => {
                             if self.added_labels.contains(label) {
-                                return Err("label collision".into());
+                                return Err(LABEL_COLLISION_ERROR.into());
                             }
                             self.reserved_labels.insert(label.clone());
                         }
@@ -159,7 +160,7 @@ impl<'a> Visitor for Labeler<'a> {
                     match has_label {
                         Some(label) => {
                             if self.added_labels.contains(label) {
-                                return Err("label collision".into());
+                                return Err(LABEL_COLLISION_ERROR.into());
                             }
                             self.reserved_labels.insert(label.clone());
                         }
