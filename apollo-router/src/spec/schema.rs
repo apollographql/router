@@ -98,6 +98,8 @@ impl Schema {
             };
             errors.print();
 
+            // Only error out if new validation is used: with `Both`, we take the legacy
+            // validation as authoritative and only use the new result for comparison
             if configuration.experimental_graphql_validation == GraphQLValidation::New {
                 return Err(SchemaError::Parse(errors));
             }
