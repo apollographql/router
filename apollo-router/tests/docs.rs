@@ -1,8 +1,7 @@
 #[test]
 #[cfg(target_family = "unix")]
 fn check_config_json() {
-    use std::path::Path;
-
+    use camino::Utf8Path;
     use regex::Regex;
     use serde_json::Value;
 
@@ -20,7 +19,7 @@ fn check_config_json() {
                 );
                 if path != "/" {
                     let path_in_docs = format!("../docs/source{path}.mdx");
-                    let path_in_docs = Path::new(&path_in_docs);
+                    let path_in_docs = Utf8Path::new(&path_in_docs);
                     assert!(
                         path_in_docs.exists(),
                         "{path} in docs/source/config.json did not exist"

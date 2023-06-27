@@ -1,7 +1,7 @@
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::Duration;
 
+use camino::Utf8PathBuf;
 use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
@@ -34,7 +34,7 @@ pub enum SchemaSource {
     #[display(fmt = "File")]
     File {
         /// The path of the schema file.
-        path: PathBuf,
+        path: Utf8PathBuf,
 
         /// `true` to watch the file for changes and hot apply them.
         watch: bool,
@@ -89,10 +89,7 @@ impl SchemaSource {
             } => {
                 // Sanity check, does the schema file exists, if it doesn't then bail.
                 if !path.exists() {
-                    tracing::error!(
-                        "Schema file at path '{}' does not exist.",
-                        path.to_string_lossy()
-                    );
+                    tracing::error!("Schema file at path '{}' does not exist.", path);
                     stream::empty().boxed()
                 } else {
                     //The schema file exists try and load it
@@ -204,7 +201,9 @@ mod tests {
     #[test(tokio::test)]
     async fn schema_by_file_missing() {
         let mut stream = SchemaSource::File {
-            path: temp_dir().join("does_not_exist"),
+            path: Utf8PathBuf::try_from(temp_dir())
+                .expect("temp dir is not valid UTF-8")
+                .join("does_not_exist"),
             watch: true,
             delay: None,
         }

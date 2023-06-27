@@ -1,8 +1,8 @@
 use std::fs;
-use std::path::Path;
-use std::path::PathBuf;
 
 use anyhow::Result;
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use cargo_scaffold::ScaffoldDescription;
 use clap::Subcommand;
 use inflector::Inflector;
@@ -18,7 +18,7 @@ pub enum PluginAction {
 
         /// Optional override of the scaffold template path.
         #[clap(long)]
-        template_override: Option<PathBuf>,
+        template_override: Option<Utf8PathBuf>,
     },
 
     /// Remove a plugin.
@@ -40,7 +40,7 @@ impl PluginAction {
     }
 }
 
-fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
+fn create_plugin(name: &str, template_path: &Option<Utf8PathBuf>) -> Result<()> {
     let plugin_path = plugin_path(name);
     if plugin_path.exists() {
         return Err(anyhow::anyhow!("plugin '{}' already exists", name));
@@ -57,12 +57,12 @@ fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
     let version = get_router_version(cargo_toml);
 
     let opts = cargo_scaffold::Opts::builder()
-        .template_path(template_path.as_ref().unwrap_or(&PathBuf::from(
+        .template_path(template_path.as_ref().unwrap_or(&Utf8PathBuf::from(
             "https://github.com/apollographql/router.git",
         )))
         .git_ref(version)
         .repository_template_path(
-            PathBuf::from("apollo-router-scaffold")
+            Utf8PathBuf::from("apollo-router-scaffold")
                 .join("templates")
                 .join("plugin"),
         )
@@ -117,7 +117,7 @@ fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
 
     println!(
         "Plugin created at '{}'.\nRemember to add the plugin to your router.yaml to activate it.",
-        plugin_path.display()
+        plugin_path
     );
     Ok(())
 }
@@ -153,7 +153,7 @@ fn remove_plugin(name: &str) -> Result<()> {
 
     // Remove the mod;
     let mod_path = mod_path();
-    if Path::new(&mod_path).exists() {
+    if Utf8Path::new(&mod_path).exists() {
         let mut mod_rs = std::fs::read_to_string(&mod_path)?;
         let re = Regex::new(&format!(r"(?m)^mod {snake_name};$")).unwrap();
         mod_rs = re.replace(&mod_rs, "").to_string();
@@ -163,17 +163,17 @@ fn remove_plugin(name: &str) -> Result<()> {
 
     println!(
         "Plugin removed at '{}'. This is a best effort, and you may need to edit some files manually.",
-        plugin_path.display()
+        plugin_path
     );
     Ok(())
 }
 
-fn mod_path() -> PathBuf {
-    PathBuf::from("src").join("plugins").join("mod.rs")
+fn mod_path() -> Utf8PathBuf {
+    Utf8PathBuf::from("src").join("plugins").join("mod.rs")
 }
 
-fn plugin_path(name: &str) -> PathBuf {
-    PathBuf::from("src")
+fn plugin_path(name: &str) -> Utf8PathBuf {
+    Utf8PathBuf::from("src")
         .join("plugins")
         .join(format!("{}.rs", name.to_snake_case()))
 }

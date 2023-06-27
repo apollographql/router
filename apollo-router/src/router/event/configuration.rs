@@ -1,8 +1,8 @@
-use std::path::Path;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::Duration;
 
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
@@ -37,7 +37,7 @@ pub enum ConfigurationSource {
     #[display(fmt = "File")]
     File {
         /// The path of the configuration file.
-        path: PathBuf,
+        path: Utf8PathBuf,
 
         /// `true` to watch the file for changes and hot apply them.
         watch: bool,
@@ -71,10 +71,7 @@ impl ConfigurationSource {
             } => {
                 // Sanity check, does the config file exists, if it doesn't then bail.
                 if !path.exists() {
-                    tracing::error!(
-                        "configuration file at path '{}' does not exist.",
-                        path.to_string_lossy()
-                    );
+                    tracing::error!("configuration file at path '{}' does not exist.", path);
                     stream::empty().boxed()
                 } else {
                     match ConfigurationSource::read_config(&path) {
@@ -115,11 +112,11 @@ impl ConfigurationSource {
         .boxed()
     }
 
-    fn read_config(path: &Path) -> Result<Configuration, ReadConfigError> {
+    fn read_config(path: &Utf8Path) -> Result<Configuration, ReadConfigError> {
         let config = std::fs::read_to_string(path)?;
         config.parse().map_err(ReadConfigError::Validation)
     }
-    async fn read_config_async(path: &Path) -> Result<Configuration, ReadConfigError> {
+    async fn read_config_async(path: &Utf8Path) -> Result<Configuration, ReadConfigError> {
         let config = tokio::fs::read_to_string(path).await?;
         config.parse().map_err(ReadConfigError::Validation)
     }
@@ -178,7 +175,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn config_by_file_missing() {
         let mut stream = ConfigurationSource::File {
-            path: temp_dir().join("does_not_exit"),
+            path: Utf8PathBuf::try_from(temp_dir())
+                .expect("temp dir not valid UTF-8")
+                .join("does_not_exit"),
             watch: true,
             delay: None,
         }

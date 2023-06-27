@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::path::Path;
 
+use camino::Utf8Path;
 use jsonwebtoken::encode;
 use jsonwebtoken::get_current_timestamp;
 use jsonwebtoken::jwk::CommonParameters;
@@ -20,7 +20,7 @@ use crate::plugin::test;
 use crate::services::supergraph;
 
 fn create_an_url(filename: &str) -> String {
-    let jwks_base = Path::new("tests");
+    let jwks_base = Utf8Path::new("tests");
 
     let jwks_path = jwks_base.join("fixtures").join(filename);
 

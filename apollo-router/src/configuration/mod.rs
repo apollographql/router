@@ -16,6 +16,7 @@ use std::iter;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 #[cfg(not(test))]
@@ -1089,7 +1090,7 @@ pub enum ListenAddr {
     SocketAddr(SocketAddr),
     /// Unix socket.
     #[cfg(unix)]
-    UnixSocket(std::path::PathBuf),
+    UnixSocket(PathBuf),
 }
 
 impl ListenAddr {

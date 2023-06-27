@@ -1,5 +1,4 @@
 use std::io::Write as _;
-use std::path::Path;
 use std::process::Command;
 use std::process::Stdio;
 
@@ -7,6 +6,7 @@ use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
+use camino::Utf8Path;
 use serde_json_traversal::serde_json_traversal;
 use xtask::*;
 
@@ -44,7 +44,7 @@ pub struct PackageMacos {
 }
 
 impl PackageMacos {
-    pub fn run(&self, release_path: impl AsRef<Path>) -> Result<()> {
+    pub fn run(&self, release_path: impl AsRef<Utf8Path>) -> Result<()> {
         let release_path = release_path.as_ref();
         let temp = tempfile::tempdir().context("could not create temporary directory")?;
 
@@ -195,9 +195,9 @@ impl PackageMacos {
         let options = zip::write::FileOptions::default()
             .compression_method(zip::CompressionMethod::Stored)
             .unix_permissions(0o755);
-        let path = Path::new("dist").join(RELEASE_BIN);
-        eprintln!("Adding {} as {}...", release_path.display(), path.display());
-        zip.start_file(path.to_str().unwrap(), options)?;
+        let path = Utf8Path::new("dist").join(RELEASE_BIN);
+        eprintln!("Adding {} as {}...", release_path, path);
+        zip.start_file(path, options)?;
         std::io::copy(
             &mut std::io::BufReader::new(
                 std::fs::File::open(release_path).context("could not open file")?,

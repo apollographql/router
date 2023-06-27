@@ -26,13 +26,13 @@ impl RouterAction {
 mod test {
     use std::collections::BTreeMap;
     use std::env;
-    use std::path::Path;
-    use std::path::PathBuf;
     use std::path::MAIN_SEPARATOR;
     use std::process::Command;
 
     use anyhow::bail;
     use anyhow::Result;
+    use camino::Utf8Path;
+    use camino::Utf8PathBuf;
     use cargo_scaffold::Opts;
     use cargo_scaffold::ScaffoldDescription;
     use inflector::Inflector;
@@ -46,7 +46,7 @@ mod test {
     // let users know they should not worry and wait a bit.
     // Hang in there!
     fn test_scaffold() {
-        let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+        let manifest_dir = Utf8PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
         let repo_root = manifest_dir.parent().unwrap();
         let target_dir = repo_root.join("target");
         assert!(target_dir.exists());
@@ -60,12 +60,13 @@ mod test {
         )
         .unwrap();
 
-        let current_dir = env::current_dir().unwrap();
+        let current_dir = Utf8PathBuf::try_from(env::current_dir().unwrap())
+            .expect("current dir is not valid UTF-8");
         // Scaffold the main project
         let opts = Opts::builder()
             .project_name("temp")
             .target_dir(temp_dir.path())
-            .template_path(PathBuf::from("templates").join("base"))
+            .template_path(Utf8PathBuf::from("templates").join("base"))
             .force(true)
             .build();
         ScaffoldDescription::new(opts)
@@ -77,9 +78,7 @@ mod test {
                         "{}{}",
                         current_dir
                             .parent()
-                            .expect("current dir cannot be the root")
-                            .to_str()
-                            .expect("current dir must be convertable to string"),
+                            .expect("current dir cannot be the root"),
                         // add / or \ depending on windows or unix
                         MAIN_SEPARATOR,
                     )
@@ -117,12 +116,12 @@ mod test {
         test_build_with_backup_folder(&temp_dir, &target_dir).unwrap()
     }
 
-    fn scaffold_plugin(current_dir: &Path, dir: &TempDir, plugin_type: &str) -> Result<()> {
+    fn scaffold_plugin(current_dir: &Utf8Path, dir: &TempDir, plugin_type: &str) -> Result<()> {
         let opts = Opts::builder()
             .project_name(plugin_type)
             .target_dir(dir.path())
             .append(true)
-            .template_path(PathBuf::from("templates").join("plugin"))
+            .template_path(Utf8PathBuf::from("templates").join("plugin"))
             .build();
         ScaffoldDescription::new(opts)?.scaffold_with_parameters(BTreeMap::from([
             (
@@ -148,9 +147,7 @@ mod test {
                         "{}{}",
                         current_dir
                             .parent()
-                            .expect("current dir cannot be the root")
-                            .to_str()
-                            .expect("current dir must be convertable to string"),
+                            .expect("current dir cannot be the root"),
                         // add / or \ depending on windows or unix
                         MAIN_SEPARATOR,
                     )
@@ -162,7 +159,7 @@ mod test {
         Ok(())
     }
 
-    fn test_build_with_backup_folder(temp_dir: &TempDir, target_dir: &Path) -> Result<()> {
+    fn test_build_with_backup_folder(temp_dir: &TempDir, target_dir: &Utf8Path) -> Result<()> {
         test_build(temp_dir, target_dir).map_err(|e| {
             let mut output_dir = std::env::temp_dir();
             output_dir.push("test_scaffold_output");
@@ -178,7 +175,7 @@ mod test {
         })
     }
 
-    fn test_build(dir: &TempDir, target_dir: &Path) -> Result<()> {
+    fn test_build(dir: &TempDir, target_dir: &Utf8Path) -> Result<()> {
         let output = Command::new("cargo")
             .args(["test"])
             .env("CARGO_TARGET_DIR", target_dir)

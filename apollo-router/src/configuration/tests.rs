@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
 
+use camino::Utf8PathBuf;
 use http::Uri;
 #[cfg(unix)]
 use insta::assert_json_snapshot;
@@ -583,7 +583,7 @@ supergraph:
 
 #[test]
 fn expansion_from_file() {
-    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("src");
     path.push("configuration");
     path.push("testdata");
@@ -594,7 +594,7 @@ fn expansion_from_file() {
 supergraph:
   introspection: ${{file.{}}}
         "#,
-            path.to_string_lossy()
+            path
         ),
         Expansion::builder().supported_mode("file").build(),
         Mode::NoUpgrade,
@@ -736,19 +736,19 @@ fn test_configuration_validate_and_sanitize() {
 
 #[test]
 fn load_tls() {
-    let mut cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut cert_path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     cert_path.push("src");
     cert_path.push("configuration");
     cert_path.push("testdata");
     cert_path.push("server.crt");
-    let cert_path = cert_path.to_string_lossy();
+    let cert_path = cert_path.to_string();
 
-    let mut key_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut key_path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     key_path.push("src");
     key_path.push("configuration");
     key_path.push("testdata");
     key_path.push("server.key");
-    let key_path = key_path.to_string_lossy();
+    let key_path = key_path.to_string();
 
     let cfg = validate_yaml_configuration(
         &format!(

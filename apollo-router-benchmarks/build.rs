@@ -1,7 +1,9 @@
+use camino::Utf8PathBuf;
+
 const GENERATED_QUERIES_COUNT: usize = 100;
 
 fn main() {
-    let out_dir = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    let out_dir = Utf8PathBuf::from(std::env::var("OUT_DIR").unwrap());
 
     // used by `benches/memory_use.rs`
     let queries_path = out_dir.join("queries.rs");
