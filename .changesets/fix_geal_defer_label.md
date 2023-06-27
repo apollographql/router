@@ -1,7 +1,6 @@
-### Fix defered response formatting when filtering queries ([PR #3298](https://github.com/apollographql/router/pull/3298))
+### Fix deferred response formatting when filtering queries ([PR #3298](https://github.com/apollographql/router/pull/3298))
 
-We currently use a path and subselection to identify deferred fragments and format individual responses. Unfortunately, with query filtering, matching those fragments between the original and filtered query is hard because they can have a different shape, and thus a different subselection.
-As an alternative solution, we can add a label to every deferred fragment. The label argument in the `@defer` directive is optional, but unique across the entire query. Some clients use it for that exact purpose, identifying each deferred response.
-So the idea here is to add labels when they are not present, use all the labels to identify the fragments, and then remove the extraneous labels from the responses sent to the client
+Filtering queries requires two levels of response formatting, and its implementation shone light on issues with deferred responses. The response formatting side needs to recognize which deferred fragment generated it, and the deferred response shapes can change depending on request variables, due to the `@defer` directive's `if` argument. So far the response formatting code was not handling those variables.
+For now, this is solved by generating the response shapes for primary and deferred responses, for each combination of the variables used in `@defer` applications, limited to 32 unique variables. There will be follow up work with another approach that removes this limitation, but it will require a lot of deep changes in response formatting, so it will have to land a bit later.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3298

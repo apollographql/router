@@ -121,7 +121,7 @@ where
                 let err_res = Query::check_errors(&compiler, file_id);
                 if let Err(error) = err_res {
                     let e = Arc::new(QueryPlannerError::SpecError(error));
-                    entry.insert(Err(e.clone())).await;
+                    entry.insert(Err(e)).await;
                     continue;
                 }
 
