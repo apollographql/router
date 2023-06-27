@@ -18,7 +18,7 @@ use crate::spec::query::transform::document;
 use crate::spec::query::transform::selection_set;
 use crate::spec::query::transform::Visitor;
 
-const LABEL_NAME: &str = "name";
+const LABEL_NAME: &str = "label";
 const LABEL_COLLISION_ERROR: &str = "label collision";
 
 /// go through the query and adds labels to defer fragments that do not have any
