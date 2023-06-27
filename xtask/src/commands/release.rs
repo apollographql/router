@@ -206,7 +206,7 @@ impl Prepare {
                     "./apollo-router/Cargo.toml",
                     r#"^(?P<existingVersion>version\s*=\s*)"[^"]+""#,
                     format!(
-                        "${{existingVersion}}\"0.0.0-nightly.{}-{}\"",
+                        "${{existingVersion}}\"0.0.0-nightly.{}+{}\"",
                         Utc::now().format("%Y%m%d"),
                         head_commit
                     )
