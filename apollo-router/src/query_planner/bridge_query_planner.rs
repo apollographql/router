@@ -85,7 +85,9 @@ impl BridgeQueryPlanner {
             }
         };
 
-        if configuration.experimental_graphql_validation == GraphQLValidation::Both {
+        if configuration.experimental_graphql_validation == GraphQLValidation::Both
+            && schema.has_errors()
+        {
             tracing::warn!(
                 monotonic_counter.apollo_router_validation_false_positive = 1,
                 "query planner did not report validation error, but apollo-rs did"
