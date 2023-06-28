@@ -505,8 +505,8 @@ where
             // Now that we've finished processing our inputs, decide if we are ready or live
             {
                 let mut write_guard = LIVE_READY_STATE.write();
-                // We are ready if we are not shutting down
-                if matches!(state, State::Shutdown { .. }) {
+                // We are ready if we are not stopped
+                if matches!(state, State::Stopped { .. }) {
                     write_guard.ready = false;
                 } else {
                     write_guard.ready = true;
