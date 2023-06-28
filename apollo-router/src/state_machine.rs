@@ -230,7 +230,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         match self {
             Running {
                 server_handle: Some(server_handle),
-                all_connections_stopped_signals,
+                mut all_connections_stopped_signals,
                 ..
             } => {
                 tracing::info!("shutting down");
@@ -238,10 +238,12 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     .shutdown()
                     .map_ok_or_else(Errored, |_| Stopped)
                     .await;
-                for mut receiver in all_connections_stopped_signals.into_iter() {
-                    //FIXME: we might want to set a timeout here
-                    receiver.recv().await;
-                }
+                let futs: futures::stream::FuturesUnordered<_> = all_connections_stopped_signals
+                    .iter_mut()
+                    .map(|receiver| receiver.recv())
+                    .collect();
+                // We ignore the results of recv()
+                let _: Vec<_> = futs.collect().await;
                 tracing::info!("all connections shut down");
                 state
             }
