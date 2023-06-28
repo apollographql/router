@@ -97,18 +97,9 @@ mod router_base64 {
 mod router_expansion {
     pub(crate) type Expansion = expansion::Expansion;
 
-    #[rhai_fn(return_raw)]
-    pub(crate) fn create() -> Result<Expansion, Box<EvalAltResult>> {
-        Expansion::default_rhai().map_err(|e| e.to_string().into())
-    }
-
-    // Note: This must be marked global so that Expansion objects may be interacted with in global
-    // scope using method notation. i.e.: obj.env("whatever")
-    #[rhai_fn(name = "env", pure, global, return_raw)]
-    pub(crate) fn expansion_env(
-        expander: &mut Expansion,
-        key: &str,
-    ) -> Result<String, Box<EvalAltResult>> {
+    #[rhai_fn(name = "get", return_raw)]
+    pub(crate) fn expansion_env(key: &str) -> Result<String, Box<EvalAltResult>> {
+        let expander = Expansion::default_rhai().map_err(|e| e.to_string())?;
         expander
             .expand_env(key)
             .map_err(|e| e.to_string())?
@@ -1143,7 +1134,8 @@ impl Rhai {
             // Register our base64 module (not global)
             .register_static_module("base64", base64_module.into())
             // Register our expansion module (not global)
-            .register_static_module("expansion", expansion_module.into())
+            // Hide the fact that it is an expansion module by calling it "router_env"
+            .register_static_module("router_env", expansion_module.into())
             // Register HeaderMap as an iterator so we can loop over contents
             .register_iterator::<HeaderMap>()
             // Register a series of logging functions

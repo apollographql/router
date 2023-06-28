@@ -738,7 +738,7 @@ async fn it_mentions_source_when_syntax_error_occurs() {
 
 #[test]
 #[should_panic(
-    expected = "can use expansion: ErrorRuntime(\"could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found\", 3:19)"
+    expected = "can use env: ErrorRuntime(\"could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found\", none)"
 )]
 fn it_cannot_expand_missing_environment_variable() {
     assert!(std::env::var("THIS_SHOULD_NOT_EXIST").is_err());
@@ -746,10 +746,9 @@ fn it_cannot_expand_missing_environment_variable() {
     let _: String = engine
         .eval(
             r#"
-        let expansion = expansion::create();
-        expansion.env("THIS_SHOULD_NOT_EXIST")"#,
+        router_env::get("THIS_SHOULD_NOT_EXIST")"#,
         )
-        .expect("can use expansion");
+        .expect("can use env");
 }
 
 // POSIX specifies HOME is always set
@@ -760,24 +759,8 @@ fn it_can_expand_environment_variable() {
     let env_variable: String = engine
         .eval(
             r#"
-        let expansion = expansion::create();
-        expansion.env("HOME")"#,
+        router_env::get("HOME")"#,
         )
-        .expect("can use expansion");
+        .expect("can use env");
     assert_eq!(home, env_variable);
-}
-
-#[test]
-#[should_panic(
-    expected = "can use expansion: ErrorFunctionNotFound(\"env (&str | ImmutableString | String, &str | ImmutableString | String)\", 3:19)"
-)]
-fn it_can_only_access_env_method_from_expansion_instances() {
-    let engine = new_rhai_test_engine();
-    let _: String = engine
-        .eval(
-            r#"
-        let expansion = "5";
-        expansion.env("HOME")"#,
-        )
-        .expect("can use expansion");
 }
