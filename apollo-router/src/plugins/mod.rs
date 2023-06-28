@@ -20,7 +20,7 @@ macro_rules! schemar_fn {
     };
 }
 
-mod authentication;
+pub(crate) mod authentication;
 mod authorization;
 mod coprocessor;
 #[cfg(test)]
@@ -32,5 +32,6 @@ mod headers;
 mod include_subgraph_errors;
 pub(crate) mod override_url;
 pub(crate) mod rhai;
+pub(crate) mod subscription;
 pub(crate) mod telemetry;
 pub(crate) mod traffic_shaping;

@@ -1,4 +1,5 @@
 #![allow(missing_docs)] // FIXME
+use std::time::Instant;
 
 use bytes::Bytes;
 use serde::Deserialize;
@@ -41,8 +42,12 @@ pub struct Response {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub has_next: Option<bool>,
 
-    #[serde(skip_serializing)]
-    pub subselection: Option<String>,
+    #[serde(skip, default)]
+    pub subscribed: Option<bool>,
+
+    /// Used for subscription event to compute the duration of a subscription event
+    #[serde(skip, default)]
+    pub created_at: Option<Instant>,
 
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub incremental: Vec<IncrementalResponse>,
@@ -59,9 +64,11 @@ impl Response {
         path: Option<Path>,
         errors: Vec<Error>,
         extensions: Map<ByteString, Value>,
-        subselection: Option<String>,
+        _subselection: Option<String>,
         has_next: Option<bool>,
+        subscribed: Option<bool>,
         incremental: Vec<IncrementalResponse>,
+        created_at: Option<Instant>,
     ) -> Self {
         Self {
             label,
@@ -69,9 +76,10 @@ impl Response {
             path,
             errors,
             extensions,
-            subselection,
             has_next,
+            subscribed,
             incremental,
+            created_at,
         }
     }
 
@@ -160,9 +168,10 @@ impl Response {
             path,
             errors,
             extensions,
-            subselection: None,
             has_next,
+            subscribed: None,
             incremental,
+            created_at: None,
         })
     }
 }

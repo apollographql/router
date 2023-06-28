@@ -720,6 +720,22 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
     }
 }
 
+#[tokio::test]
+async fn it_mentions_source_when_syntax_error_occurs() {
+    let err: Box<dyn std::error::Error> = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.rhai")
+        .expect("Plugin not found")
+        .create_instance_without_schema(
+            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"syntax_errors.rhai"}"#)
+                .unwrap(),
+        )
+        .await
+        .err()
+        .unwrap();
+
+    assert!(err.to_string().contains("syntax_errors.rhai"));
+}
+
 #[test]
 #[should_panic(
     expected = "can use expansion: ErrorRuntime(\"could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found\", 3:19)"

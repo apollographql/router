@@ -66,6 +66,7 @@ use self::reload::reload_fmt;
 use self::reload::reload_metrics;
 use self::reload::NullFieldFormatter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
+use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::reload::ReloadTracer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -126,7 +127,9 @@ pub(crate) const EXECUTION_SPAN_NAME: &str = "execution";
 const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
-const OPERATION_KIND: &str = "apollo_telemetry::operation_kind";
+pub(crate) const OPERATION_KIND: &str = "apollo_telemetry::operation_kind";
+pub(crate) const GRAPHQL_OPERATION_NAME_CONTEXT_KEY: &str =
+    "apollo_telemetry::graphql_operation_name";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
@@ -270,7 +273,7 @@ impl Plugin for Telemetry {
                     let response: Result<router::Response, BoxError> = fut.await;
 
                     span.record(
-                        "apollo_private.duration_ns",
+                        APOLLO_PRIVATE_DURATION_NS,
                         start.elapsed().as_nanos() as i64,
                     );
 
@@ -672,6 +675,11 @@ impl Telemetry {
                 .operation_name
                 .as_deref()
                 .unwrap_or_default();
+            if let Some(operation_name) = &http_request.body().operation_name {
+                let _ = request
+                    .context
+                    .insert(GRAPHQL_OPERATION_NAME_CONTEXT_KEY, operation_name.clone());
+            }
 
             let span = info_span!(
                 SUPERGRAPH_SPAN_NAME,
@@ -1079,6 +1087,8 @@ impl Telemetry {
         match result {
             Err(e) => {
                 if !matches!(sender, Sender::Noop) {
+                    let operation_subtype = (operation_kind == OperationKind::Subscription)
+                        .then_some(OperationSubType::SubscriptionRequest);
                     Self::update_apollo_metrics(
                         ctx,
                         field_level_instrumentation_ratio,
@@ -1086,7 +1096,7 @@ impl Telemetry {
                         true,
                         start.elapsed(),
                         operation_kind,
-                        None,
+                        operation_subtype,
                     );
                 }
                 let mut metric_attrs = Vec::new();
@@ -1116,29 +1126,60 @@ impl Telemetry {
             }
             Ok(router_response) => {
                 let mut has_errors = !router_response.response.status().is_success();
-
+                if operation_kind == OperationKind::Subscription {
+                    Self::update_apollo_metrics(
+                        ctx,
+                        field_level_instrumentation_ratio,
+                        sender.clone(),
+                        has_errors,
+                        start.elapsed(),
+                        operation_kind,
+                        Some(OperationSubType::SubscriptionRequest),
+                    );
+                }
                 Ok(router_response.map(move |response_stream| {
                     let sender = sender.clone();
                     let ctx = ctx.clone();
 
                     response_stream
-                        .map(move |response| {
+                        .enumerate()
+                        .map(move |(idx, response)| {
                             if !response.errors.is_empty() {
                                 has_errors = true;
                             }
 
-                            if !response.has_next.unwrap_or(false)
-                                && !matches!(sender, Sender::Noop)
-                            {
-                                Self::update_apollo_metrics(
-                                    &ctx,
-                                    field_level_instrumentation_ratio,
-                                    sender.clone(),
-                                    has_errors,
-                                    start.elapsed(),
-                                    operation_kind,
-                                    None,
-                                );
+                            if !matches!(sender, Sender::Noop) {
+                                if operation_kind == OperationKind::Subscription {
+                                    // Don't send for the first empty response because it's a heartbeat
+                                    if idx != 0 {
+                                        // Only for subscription events
+                                        Self::update_apollo_metrics(
+                                            &ctx,
+                                            field_level_instrumentation_ratio,
+                                            sender.clone(),
+                                            has_errors,
+                                            response
+                                                .created_at
+                                                .map(|c| c.elapsed())
+                                                .unwrap_or_else(|| start.elapsed()),
+                                            operation_kind,
+                                            Some(OperationSubType::SubscriptionEvent),
+                                        );
+                                    }
+                                } else {
+                                    // If it's the last response
+                                    if !response.has_next.unwrap_or(false) {
+                                        Self::update_apollo_metrics(
+                                            &ctx,
+                                            field_level_instrumentation_ratio,
+                                            sender.clone(),
+                                            has_errors,
+                                            start.elapsed(),
+                                            operation_kind,
+                                            None,
+                                        );
+                                    }
+                                }
                             }
 
                             response
@@ -1665,6 +1706,7 @@ mod tests {
             .create_instance(
                 &serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}),
                 Default::default(),
+                Default::default(),
             )
             .await
             .unwrap();
@@ -1812,6 +1854,7 @@ mod tests {
                         }
                     }
                 }),
+                Default::default(),
                 Default::default(),
             )
             .await
@@ -1980,6 +2023,7 @@ mod tests {
             }"#,
                 )
                 .unwrap(),
+                Default::default(),
                 Default::default(),
             )
             .await
@@ -2261,6 +2305,7 @@ mod tests {
             }"#,
                 )
                 .unwrap(),
+                Default::default(),
                 Default::default(),
             )
             .await

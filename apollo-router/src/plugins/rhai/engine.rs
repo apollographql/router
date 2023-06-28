@@ -36,6 +36,7 @@ use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::http_ext;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::Context;
 
 const CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE: &str =
@@ -1173,6 +1174,10 @@ impl Rhai {
         global_variables.insert(
             "APOLLO_AUTHENTICATION_JWT_CLAIMS".into(),
             APOLLO_AUTHENTICATION_JWT_CLAIMS.to_string().into(),
+        );
+        global_variables.insert(
+            "APOLLO_SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS".into(),
+            SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS.to_string().into(),
         );
 
         let shared_globals = Arc::new(global_variables);
