@@ -166,6 +166,8 @@ impl Service<ExecutionRequest> for ExecutionService {
                     }
 
                     let has_next = response.has_next.unwrap_or(true);
+                    let variables_set = query.defer_variables_set(operation_name.as_deref(), &variables);
+
                     tracing::debug_span!("format_response").in_scope(|| {
                         let mut paths = Vec::new();
                         if let Some(filtered_query) = query.filtered_query.as_ref() {
@@ -175,6 +177,7 @@ impl Service<ExecutionRequest> for ExecutionService {
                                 is_deferred,
                                 variables.clone(),
                                 schema.api_schema(),
+                                variables_set
                             );
                         }
 
@@ -183,7 +186,7 @@ impl Service<ExecutionRequest> for ExecutionService {
                             operation_name.as_deref(),
                             is_deferred,
                             variables.clone(),
-                            schema.api_schema(),
+                            schema.api_schema(), variables_set
                         ).into_iter());
                         nullified_paths.extend(paths.into_iter());
                     });
@@ -196,8 +199,16 @@ impl Service<ExecutionRequest> for ExecutionService {
 
                             response.errors.retain(|error| match &error.path {
                                     None => true,
-                                    Some(error_path) => query.contains_error_path(operation_name.as_deref(), response.subselection.as_deref(), response.path.as_ref(), error_path),
+                                    Some(error_path) => query.contains_error_path(
+                                        operation_name.as_deref(),
+                                        &response.label,
+                                        error_path,
+                                        variables_set),
                                 });
+
+                                if response.label.as_ref().map(|label| query.added_labels.contains(label)).unwrap_or(false) {
+                                    response.label = None;
+                                }
                             ready(Some(response))
                         }
                         // if the deferred response specified a path, we must extract the
@@ -252,11 +263,20 @@ impl Service<ExecutionRequest> for ExecutionService {
                                         .iter()
                                         .filter(|error| match &error.path {
                                             None => false,
-                                            Some(error_path) => query.contains_error_path(operation_name.as_deref(), response.subselection.as_deref(), response.path.as_ref(), error_path) &&  error_path.starts_with(&path),
+                                            Some(error_path) => query.contains_error_path(
+                                                operation_name.as_deref(),
+                                                &response.label,
+                                                error_path,
+                                                variables_set)
+                                                && error_path.starts_with(&path),
 
                                         })
                                         .cloned()
                                         .collect::<Vec<_>>();
+
+                                    if response.label.as_ref().map(|label| query.added_labels.contains(label)).unwrap_or(false) {
+                                        response.label = None;
+                                    }
 
                                         let extensions: Object = response
                                         .extensions

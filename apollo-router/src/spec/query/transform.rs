@@ -87,6 +87,21 @@ pub(crate) trait Visitor: Sized {
     ) -> Result<Option<apollo_encoder::InlineFragment>, BoxError> {
         inline_fragment(self, parent_type, hir)
     }
+
+    /// Transform a selection within a selection set.
+    ///
+    /// Call the [`selection`] free function for the default behavior.
+    /// Return `Ok(None)` to remove this selection from the selection set.
+    ///
+    /// Compared to `field`, `fragment_spread`, or `inline_fragment` trait methods,
+    /// this allows returning a different kind of selection.
+    fn selection(
+        &mut self,
+        hir: &hir::Selection,
+        parent_type: &str,
+    ) -> Result<Option<apollo_encoder::Selection>, BoxError> {
+        selection(self, hir, parent_type)
+    }
 }
 
 /// The default behavior for transforming an operation.
@@ -241,7 +256,11 @@ pub(crate) fn inline_fragment(
     Ok(Some(encoder_node))
 }
 
-fn get_field_type(visitor: &impl Visitor, parent: &str, field_name: &str) -> Option<String> {
+pub(crate) fn get_field_type(
+    visitor: &impl Visitor,
+    parent: &str,
+    field_name: &str,
+) -> Option<String> {
     Some(if field_name == "__typename" {
         "String".into()
     } else {
@@ -254,7 +273,7 @@ fn get_field_type(visitor: &impl Visitor, parent: &str, field_name: &str) -> Opt
     })
 }
 
-fn selection_set(
+pub(crate) fn selection_set(
     visitor: &mut impl Visitor,
     hir: &hir::SelectionSet,
     parent_type: &str,
@@ -262,17 +281,17 @@ fn selection_set(
     let selections = hir
         .selection()
         .iter()
-        .filter_map(|hir| selection(visitor, hir, parent_type).transpose())
+        .filter_map(|hir| visitor.selection(hir, parent_type).transpose())
         .collect::<Result<Vec<_>, _>>()?;
     Ok((!selections.is_empty()).then(|| apollo_encoder::SelectionSet::with_selections(selections)))
 }
 
-fn selection(
+pub(crate) fn selection(
     visitor: &mut impl Visitor,
-    selection: &hir::Selection,
+    hir: &hir::Selection,
     parent_type: &str,
 ) -> Result<Option<apollo_encoder::Selection>, BoxError> {
-    Ok(match selection {
+    Ok(match hir {
         hir::Selection::Field(hir) => visitor
             .field(parent_type, hir)?
             .map(apollo_encoder::Selection::Field),
@@ -285,7 +304,7 @@ fn selection(
     })
 }
 
-fn variable_definition(
+pub(crate) fn variable_definition(
     hir: &hir::VariableDefinition,
 ) -> Result<Option<apollo_encoder::VariableDefinition>, BoxError> {
     let name = hir.name();
@@ -306,7 +325,9 @@ fn variable_definition(
     Ok(Some(encoder_node))
 }
 
-fn directive(hir: &hir::Directive) -> Result<Option<apollo_encoder::Directive>, BoxError> {
+pub(crate) fn directive(
+    hir: &hir::Directive,
+) -> Result<Option<apollo_encoder::Directive>, BoxError> {
     let name = hir.name().into();
     let mut encoder_directive = apollo_encoder::Directive::new(name);
 
@@ -322,7 +343,7 @@ fn directive(hir: &hir::Directive) -> Result<Option<apollo_encoder::Directive>, 
 
 // FIXME: apollo-rs should provide these three conversions, or unify types
 
-fn operation_type(hir: hir::OperationType) -> apollo_encoder::OperationType {
+pub(crate) fn operation_type(hir: hir::OperationType) -> apollo_encoder::OperationType {
     match hir {
         hir::OperationType::Query => apollo_encoder::OperationType::Query,
         hir::OperationType::Mutation => apollo_encoder::OperationType::Mutation,
@@ -330,7 +351,7 @@ fn operation_type(hir: hir::OperationType) -> apollo_encoder::OperationType {
     }
 }
 
-fn ty(hir: &hir::Type) -> apollo_encoder::Type_ {
+pub(crate) fn ty(hir: &hir::Type) -> apollo_encoder::Type_ {
     match hir {
         hir::Type::NonNull { ty: hir, .. } => apollo_encoder::Type_::NonNull {
             ty: Box::new(ty(hir)),
@@ -342,7 +363,7 @@ fn ty(hir: &hir::Type) -> apollo_encoder::Type_ {
     }
 }
 
-fn value(hir: &hir::Value) -> Result<apollo_encoder::Value, BoxError> {
+pub(crate) fn value(hir: &hir::Value) -> Result<apollo_encoder::Value, BoxError> {
     Ok(match hir {
         hir::Value::Variable(val) => apollo_encoder::Value::Variable(val.name().into()),
         hir::Value::Int { value, .. } => {
