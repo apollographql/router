@@ -469,10 +469,6 @@ where
         while let Some(event) = messages.next().await {
             let event_name = format!("{event:?}");
             let last_state = format!("{state:?}");
-            // Before we start processing the event, mark ourselves not ready. This will prevent
-            // k8s from using us until such a time as we mark ourselves ready again. That's a
-            // desirable characterstic during event processing.
-            LIVE_READY_STATE.write().ready = false;
 
             state = match event {
                 UpdateConfiguration(configuration) => {
@@ -498,15 +494,13 @@ where
             };
 
             // Now that we've finished processing our inputs, decide if we are ready or live
-            // Note: Our state may not have changed, but since we marked ourselves as not ready
-            // above, we still need to check.
             {
                 let mut write_guard = LIVE_READY_STATE.write();
-                // We are ready if we are Running
-                if matches!(state, State::Running { .. }) {
-                    write_guard.ready = true;
-                } else {
+                // We are ready if we are not shutting down
+                if matches!(state, State::Shutdown { .. }) {
                     write_guard.ready = false;
+                } else {
+                    write_guard.ready = true;
                 }
                 // We are live if we are not Errored
                 if matches!(state, State::Errored(_)) {
