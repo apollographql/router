@@ -60,7 +60,7 @@ enum State<FA: RouterSuperServiceFactory> {
         license: LicenseState,
         server_handle: Option<HttpServerHandle>,
         router_service_factory: FA::RouterFactory,
-        all_connections_stopped_signal: mpsc::Receiver<()>,
+        all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
     },
     Stopped,
     Errored(ApolloRouterError),
@@ -144,6 +144,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                             schema.clone(),
                             *license,
                             listen_addresses_guard,
+                            vec![],
                         )
                         .map_ok_or_else(Errored, |f| f)
                         .await,
@@ -156,7 +157,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 license,
                 server_handle,
                 router_service_factory,
-                all_connections_stopped_signal: _,
+                all_connections_stopped_signals,
             } => {
                 tracing::info!(
                     new_schema = new_schema.is_some(),
@@ -187,6 +188,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 }
 
                 let mut guard = state_machine.listen_addresses.clone().write_owned().await;
+                let signals = std::mem::take(all_connections_stopped_signals);
                 new_state = match Self::try_start(
                     state_machine,
                     server_handle,
@@ -195,6 +197,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     schema.clone(),
                     *license,
                     &mut guard,
+                    signals,
                 )
                 .await
                 {
@@ -227,7 +230,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         match self {
             Running {
                 server_handle: Some(server_handle),
-                mut all_connections_stopped_signal,
+                mut all_connections_stopped_signals,
                 ..
             } => {
                 tracing::info!("shutting down");
@@ -235,8 +238,12 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     .shutdown()
                     .map_ok_or_else(Errored, |_| Stopped)
                     .await;
-                //FIXME: we might want to set a timeout here
-                let _ = all_connections_stopped_signal.recv().await;
+                let futs: futures::stream::FuturesUnordered<_> = all_connections_stopped_signals
+                    .iter_mut()
+                    .map(|receiver| receiver.recv())
+                    .collect();
+                // We ignore the results of recv()
+                let _: Vec<_> = futs.collect().await;
                 tracing::info!("all connections shut down");
                 state
             }
@@ -253,6 +260,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         schema: Arc<String>,
         license: LicenseState,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
+        mut all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
     ) -> Result<State<FA>, ApolloRouterError>
     where
         S: HttpServerFactory,
@@ -313,6 +321,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         // used to track if there are still in flight connections when shutting down
         let (all_connections_stopped_sender, all_connections_stopped_signal) =
             mpsc::channel::<()>(1);
+        all_connections_stopped_signals.push(all_connections_stopped_signal);
         let web_endpoints = router_service_factory.web_endpoints();
 
         // The point of no return. We take the previous server handle.
@@ -363,7 +372,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             license,
             server_handle: Some(server_handle),
             router_service_factory,
-            all_connections_stopped_signal,
+            all_connections_stopped_signals,
         })
     }
 }
