@@ -3,8 +3,6 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 
 use futures::prelude::*;
-use once_cell::sync::Lazy;
-use parking_lot::RwLock as PLRwLock;
 use tokio::sync::mpsc;
 #[cfg(test)]
 use tokio::sync::Notify;
@@ -67,15 +65,6 @@ enum State<FA: RouterSuperServiceFactory> {
     Stopped,
     Errored(ApolloRouterError),
 }
-
-#[derive(Default)]
-pub(crate) struct LiveReadyState {
-    pub(crate) live: bool,
-    pub(crate) ready: bool,
-}
-
-pub(crate) static LIVE_READY_STATE: Lazy<PLRwLock<LiveReadyState>> =
-    Lazy::new(|| PLRwLock::new(Default::default()));
 
 impl<FA: RouterSuperServiceFactory> Debug for State<FA> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -472,7 +461,8 @@ where
         };
 
         // Mark ourselves as live at this point
-        LIVE_READY_STATE.write().live = true;
+
+        self.http_server_factory.live(true);
 
         // Process all the events in turn until we get to error state or we run out of events.
         while let Some(event) = messages.next().await {
@@ -503,20 +493,17 @@ where
             };
 
             // Now that we've finished processing our inputs, decide if we are ready or live
-            {
-                let mut write_guard = LIVE_READY_STATE.write();
-                // We are ready if we are not stopped
-                if matches!(state, State::Stopped { .. }) {
-                    write_guard.ready = false;
-                } else {
-                    write_guard.ready = true;
-                }
-                // We are live if we are not Errored
-                if matches!(state, State::Errored(_)) {
-                    write_guard.live = false;
-                } else {
-                    write_guard.live = true;
-                }
+            // We are ready if we are not stopped
+            if matches!(state, State::Stopped { .. }) {
+                self.http_server_factory.ready(false);
+            } else {
+                self.http_server_factory.ready(true);
+            }
+            // We are live if we are not Errored
+            if matches!(state, State::Errored(_)) {
+                self.http_server_factory.live(false);
+            } else {
+                self.http_server_factory.live(true);
             }
 
             // Update the shared state
@@ -1103,6 +1090,8 @@ mod tests {
             let res = self.create_server(configuration, main_listener);
             Box::pin(async move { res })
         }
+        fn live(&self, _live: bool) {}
+        fn ready(&self, _ready: bool) {}
     }
 
     async fn execute(

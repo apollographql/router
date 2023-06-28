@@ -69,7 +69,16 @@ async fn make_router_service(
         )
         .await?;
     let web_endpoints = service_factory.web_endpoints();
-    let routers = make_axum_router(service_factory, &configuration, web_endpoints, license)?;
+    let live = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let routers = make_axum_router(
+        live,
+        ready,
+        service_factory,
+        &configuration,
+        web_endpoints,
+        license,
+    )?;
     let ListenAddrAndRouter(_listener, router) = routers.main;
 
     Ok(router

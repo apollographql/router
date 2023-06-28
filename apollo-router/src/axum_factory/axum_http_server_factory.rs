@@ -1,5 +1,6 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::pin::Pin;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -56,18 +57,22 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
-use crate::state_machine::LIVE_READY_STATE;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
-#[derive(Debug)]
-pub(crate) struct AxumHttpServerFactory;
+#[derive(Debug, Default)]
+pub(crate) struct AxumHttpServerFactory {
+    live: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
+}
 
 impl AxumHttpServerFactory {
     pub(crate) fn new() -> Self {
-        Self
+        Self {
+            ..Default::default()
+        }
     }
 }
 
@@ -85,6 +90,8 @@ struct Health {
 }
 
 pub(crate) fn make_axum_router<RF>(
+    live: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
@@ -110,7 +117,7 @@ where
                         let query_upper = query.to_ascii_uppercase();
                         // Could be more precise, but sloppy match is fine for this use case
                         if query_upper.starts_with("READY") {
-                            let status = if LIVE_READY_STATE.read().ready {
+                            let status = if ready.load(Ordering::SeqCst) {
                                 HealthStatus::Up
                             } else {
                                 // It's hard to get k8s to parse payloads. Especially since we
@@ -121,7 +128,7 @@ where
                             };
                             Health { status }
                         } else if query_upper.starts_with("LIVE") {
-                            let status = if LIVE_READY_STATE.read().live {
+                            let status = if live.load(Ordering::SeqCst) {
                                 HealthStatus::Up
                             } else {
                                 // It's hard to get k8s to parse payloads. Especially since we
@@ -199,9 +206,17 @@ impl HttpServerFactory for AxumHttpServerFactory {
     where
         RF: RouterFactory,
     {
+        let live = self.live.clone();
+        let ready = self.ready.clone();
         Box::pin(async move {
-            let all_routers =
-                make_axum_router(service_factory, &configuration, extra_endpoints, license)?;
+            let all_routers = make_axum_router(
+                live.clone(),
+                ready.clone(),
+                service_factory,
+                &configuration,
+                extra_endpoints,
+                license,
+            )?;
 
             // serve main router
 
@@ -335,6 +350,14 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 all_connections_stopped_sender,
             ))
         })
+    }
+
+    fn live(&self, live: bool) {
+        self.live.store(live, Ordering::SeqCst);
+    }
+
+    fn ready(&self, ready: bool) {
+        self.ready.store(ready, Ordering::SeqCst);
     }
 }
 
