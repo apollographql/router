@@ -280,18 +280,25 @@ pub(crate) struct LicensedOperationCountByType {
 #[derive(Debug, Serialize, PartialEq, Eq, Hash, Clone, Copy)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum OperationSubType {
-    // TODO
+    SubscriptionEvent,
+    SubscriptionRequest,
 }
 
 impl OperationSubType {
     pub(crate) const fn as_str(&self) -> &'static str {
-        ""
+        match self {
+            OperationSubType::SubscriptionEvent => "subscription-event",
+            OperationSubType::SubscriptionRequest => "subscription-request",
+        }
     }
 }
 
 impl Display for OperationSubType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "")
+        match self {
+            OperationSubType::SubscriptionEvent => write!(f, "subscription-event"),
+            OperationSubType::SubscriptionRequest => write!(f, "subscription-request"),
+        }
     }
 }
 

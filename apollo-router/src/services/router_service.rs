@@ -5,7 +5,6 @@ use std::task::Poll;
 
 use axum::body::StreamBody;
 use axum::response::*;
-use bytes::Bytes;
 use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream;
@@ -43,10 +42,13 @@ use super::HasPlugins;
 use super::HasSchema;
 use super::SupergraphCreator;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
+use super::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
 use crate::cache::DeduplicatingCache;
 use crate::graphql;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
+use crate::protocols::multipart::Multipart;
+use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::QueryPlanResult;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
@@ -287,7 +289,8 @@ impl Service<RouterRequest> for RouterService {
                     let ClientRequestAccepts {
                         wildcard: accepts_wildcard,
                         json: accepts_json,
-                        multipart: accepts_multipart,
+                        multipart_defer: accepts_multipart_defer,
+                        multipart_subscription: accepts_multipart_subscription,
                     } = context
                         .private_entries
                         .lock()
@@ -313,6 +316,7 @@ impl Service<RouterRequest> for RouterService {
                         }
                         Some(response) => {
                             if !response.has_next.unwrap_or(false)
+                                && !response.subscribed.unwrap_or(false)
                                 && (accepts_json || accepts_wildcard)
                             {
                                 parts.headers.insert(
@@ -329,44 +333,33 @@ impl Service<RouterRequest> for RouterService {
                                         context,
                                     })
                                 })
-                            } else if accepts_multipart {
-                                parts.headers.insert(
-                                    CONTENT_TYPE,
-                                    HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
-                                );
-
-                                // each chunk contains a response and the next delimiter, to let client parsers
-                                // know that they can process the response right away
-                                let mut first_buf = Vec::from(
-                                    &b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"[..],
-                                );
-                                serde_json::to_writer(&mut first_buf, &response)?;
-                                if response.has_next.unwrap_or(false) {
-                                    first_buf.extend_from_slice(b"\r\n--graphql\r\n");
-                                } else {
-                                    first_buf.extend_from_slice(b"\r\n--graphql--\r\n");
+                            } else if accepts_multipart_defer || accepts_multipart_subscription {
+                                if accepts_multipart_defer {
+                                    parts.headers.insert(
+                                        CONTENT_TYPE,
+                                        HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
+                                    );
+                                } else if accepts_multipart_subscription {
+                                    parts.headers.insert(
+                                        CONTENT_TYPE,
+                                        HeaderValue::from_static(
+                                            MULTIPART_SUBSCRIPTION_CONTENT_TYPE,
+                                        ),
+                                    );
                                 }
-
-                                let body = once(ready(Ok(Bytes::from(first_buf)))).chain(body.map(
-                                    |res| {
-                                        let mut buf = Vec::from(
-                                            &b"content-type: application/json\r\n\r\n"[..],
-                                        );
-                                        serde_json::to_writer(&mut buf, &res)?;
-
-                                        // the last chunk has a different end delimiter
-                                        if res.has_next.unwrap_or(false) {
-                                            buf.extend_from_slice(b"\r\n--graphql\r\n");
-                                        } else {
-                                            buf.extend_from_slice(b"\r\n--graphql--\r\n");
-                                        }
-
-                                        Ok::<_, BoxError>(buf.into())
-                                    },
-                                ));
+                                let multipart_stream = match response.subscribed {
+                                    Some(true) => StreamBody::new(Multipart::new(
+                                        body,
+                                        ProtocolMode::Subscription,
+                                    )),
+                                    _ => StreamBody::new(Multipart::new(
+                                        once(ready(response)).chain(body),
+                                        ProtocolMode::Defer,
+                                    )),
+                                };
 
                                 let response =
-                                    (parts, StreamBody::new(body)).into_response().map(|body| {
+                                    (parts, multipart_stream).into_response().map(|body| {
                                         // Axum makes this `body` have type:
                                         // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
                                         let mut body = Box::pin(body);

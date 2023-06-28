@@ -566,7 +566,7 @@ async fn query_just_at_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_under_token_limit() {
     let config = serde_json::json!({
-        "preview_operation_limits": {"parser_max_tokens": 36_usize}
+        "preview_operation_limits": {"parser_max_tokens": 39_usize}
     });
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
@@ -587,7 +587,7 @@ async fn query_just_under_token_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_at_token_limit() {
     let config = serde_json::json!({
-        "preview_operation_limits": {"parser_max_tokens": 34_usize}
+        "preview_operation_limits": {"parser_max_tokens": 37_usize}
     });
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
@@ -1137,4 +1137,21 @@ async fn all_stock_router_example_yamls_are_valid() {
             }
         }
     }
+}
+
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn test_starstuff_supergraph_is_valid() {
+    let schema = include_str!("../../examples/graphql/supergraph.graphql");
+    apollo_router::TestHarness::builder()
+        .schema(schema)
+        .build_router()
+        .await
+        .expect(
+            r#"Couldn't parse the supergraph example.
+This file is being used in the router documentation, as a quickstart example.
+Make sure it is accessible, and the configuration is working with the router."#,
+        );
+
+    insta::assert_snapshot!(include_str!("../../examples/graphql/supergraph.graphql"));
 }
