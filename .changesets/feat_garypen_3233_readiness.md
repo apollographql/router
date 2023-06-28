@@ -24,9 +24,8 @@ Both of these questions are significantly complicated by the fact that the route
 
 Ready
 
- - Not currently processing a change to its set of inputs
  - Is in state Running
- - Is live
+ - Is `Live`
 
 Live
  - Is not in state Errored
