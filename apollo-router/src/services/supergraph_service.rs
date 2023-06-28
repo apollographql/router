@@ -11,7 +11,6 @@ use http::StatusCode;
 use indexmap::IndexMap;
 use router_bridge::planner::Planner;
 use tokio::sync::Mutex;
-use tower::util::Either;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -440,15 +439,14 @@ impl SupergraphCreator {
             .schema(self.schema.clone())
             .build();
 
-        let supergraph_service = match self
+        let shaping = self
             .plugins
             .iter()
             .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
             .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
-        {
-            Some(shaping) => Either::A(shaping.supergraph_service_internal(supergraph_service)),
-            None => Either::B(supergraph_service),
-        };
+            .expect("traffic shaping should always be part of the plugin list");
+
+        let supergraph_service = shaping.supergraph_service_internal(supergraph_service);
 
         ServiceBuilder::new()
             .layer(content_negociation::SupergraphLayer::default())

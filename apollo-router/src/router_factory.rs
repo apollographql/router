@@ -9,7 +9,6 @@ use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
 use tower::service_fn;
-use tower::util::Either;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -184,39 +183,29 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                 .transpose()?
                 .or_else(|| tls_root_store.clone());
 
-            let subgraph_service = match plugins
+            let shaping = plugins
                 .iter()
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
                 .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
-            {
-                Some(shaping) => Either::A(
-                    shaping.subgraph_service_internal(
-                        name,
-                        SubgraphService::new(
-                            name,
-                            configuration
-                                .apq
-                                .subgraph
-                                .subgraphs
-                                .get(name)
-                                .map(|apq| apq.enabled)
-                                .unwrap_or(configuration.apq.subgraph.all.enabled),
-                            subgraph_root_store,
-                            shaping.enable_subgraph_http2(name),
-                            subscription_plugin_conf.clone(),
-                            configuration.notify.clone(),
-                        ),
-                    ),
-                ),
-                None => Either::B(SubgraphService::new(
+                .expect("traffic shaping should always be part of the plugin list");
+
+            let subgraph_service = shaping.subgraph_service_internal(
+                name,
+                SubgraphService::new(
                     name,
-                    false,
+                    configuration
+                        .apq
+                        .subgraph
+                        .subgraphs
+                        .get(name)
+                        .map(|apq| apq.enabled)
+                        .unwrap_or(configuration.apq.subgraph.all.enabled),
                     subgraph_root_store,
-                    true,
+                    shaping.enable_subgraph_http2(name),
                     subscription_plugin_conf.clone(),
                     configuration.notify.clone(),
-                )),
-            };
+                ),
+            );
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
 
@@ -307,39 +296,29 @@ impl YamlRouterFactory {
                 .transpose()?
                 .or_else(|| tls_root_store.clone());
 
-            let subgraph_service = match plugins
+            let shaping = plugins
                 .iter()
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
                 .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
-            {
-                Some(shaping) => Either::A(
-                    shaping.subgraph_service_internal(
-                        name,
-                        SubgraphService::new(
-                            name,
-                            configuration
-                                .apq
-                                .subgraph
-                                .subgraphs
-                                .get(name)
-                                .map(|apq| apq.enabled)
-                                .unwrap_or(configuration.apq.subgraph.all.enabled),
-                            subgraph_root_store,
-                            shaping.enable_subgraph_http2(name),
-                            subscription_plugin_conf.clone(),
-                            configuration.notify.clone(),
-                        ),
-                    ),
-                ),
-                None => Either::B(SubgraphService::new(
+                .expect("traffic shaping should always be part of the plugin list");
+
+            let subgraph_service = shaping.subgraph_service_internal(
+                name,
+                SubgraphService::new(
                     name,
-                    false,
+                    configuration
+                        .apq
+                        .subgraph
+                        .subgraphs
+                        .get(name)
+                        .map(|apq| apq.enabled)
+                        .unwrap_or(configuration.apq.subgraph.all.enabled),
                     subgraph_root_store,
-                    true,
+                    shaping.enable_subgraph_http2(name),
                     subscription_plugin_conf.clone(),
                     configuration.notify.clone(),
-                )),
-            };
+                ),
+            );
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
 
