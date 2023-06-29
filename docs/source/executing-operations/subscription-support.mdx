@@ -380,8 +380,9 @@ To specify a _custom_ payload for  the`connection_init` message, you can write a
 
 ```rhai
 fn subgraph_service(service, subgraph) {
+  let params = Router.APOLLO_SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
   let f = |request| {
-    request.context[Router.APOLLO_SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS] = #{
+    request.context[params] = #{
 			my_token: "here is my token"
 		};
   };
