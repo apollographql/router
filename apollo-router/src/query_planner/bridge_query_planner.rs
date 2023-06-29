@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ApolloCompiler;
-use apollo_compiler::HirDatabase;
 use apollo_compiler::InputDatabase;
 use futures::future::BoxFuture;
 use router_bridge::planner::IncrementalDeliverySupport;
@@ -148,7 +147,6 @@ impl BridgeQueryPlanner {
             &compiler_guard,
             operation_name.clone(),
         )?;
-
         let file_id = compiler_guard
             .db
             .source_file(QUERY_EXECUTABLE.into())
@@ -157,29 +155,15 @@ impl BridgeQueryPlanner {
                     "missing input file for query".to_string(),
                 ))
             })?;
-        let kind = compiler_guard
-            .db
-            .find_operation(file_id, operation_name.clone())
-            .ok_or_else(|| {
-                QueryPlannerError::SpecError(match operation_name {
-                    Some(op) => SpecError::UnknownOperation(op),
-                    _ => SpecError::MissingOperation,
-                })
-            })?
-            .operation_ty()
-            .into();
-        let (fragments, operations) =
+        let (fragments, operations, defer_stats) =
             Query::extract_query_information(&compiler_guard, file_id, &self.schema)?;
-        let (subselections, defer_variables_set) =
-            crate::spec::query::subselections::collect_subselections(
-                &self.configuration,
-                &self.schema,
-                &compiler_guard,
-                file_id,
-                kind,
-            )?;
         drop(compiler_guard);
-
+        let subselections = crate::spec::query::subselections::collect_subselections(
+            &self.configuration,
+            &operations,
+            &fragments.map,
+            &defer_stats,
+        )?;
         Ok(Query {
             string: query,
             compiler,
@@ -188,7 +172,7 @@ impl BridgeQueryPlanner {
             filtered_query: None,
             subselections,
             added_labels,
-            defer_variables_set,
+            defer_stats,
             is_original: true,
         })
     }
@@ -451,8 +435,8 @@ mod tests {
 
     use super::*;
     use crate::json_ext::Path;
-    use crate::spec::query::SubSelectionKey;
-    use crate::spec::query::SubSelections;
+    use crate::spec::query::subselections::SubSelectionKey;
+    use crate::spec::query::subselections::SubSelectionValue;
 
     const EXAMPLE_SCHEMA: &str = include_str!("testdata/schema.graphql");
 
@@ -550,7 +534,7 @@ mod tests {
         let result = plan(EXAMPLE_SCHEMA, "", "", None).await;
 
         assert_eq!(
-            "spec error: missing operation",
+            "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",
             result.unwrap_err().to_string()
         );
     }
@@ -742,21 +726,17 @@ mod tests {
             node: &PlanNode,
             path: &Path,
             parent_label: Option<String>,
-            subselections: &SubSelections,
+            subselections: &HashMap<SubSelectionKey, SubSelectionValue>,
         ) {
             match node {
                 PlanNode::Defer { primary, deferred } => {
                     if let Some(subselection) = primary.subselection.clone() {
                         let path = path.join(primary.path.clone().unwrap_or_default());
-                        let key = SubSelectionKey {
-                            label: parent_label,
-                            variables_set: 0,
-                        };
                         assert!(
-                            subselections.keys().any(|k| k.label == key.label),
+                            subselections.keys().any(|k| k.defer_label == parent_label),
                             "Missing key: '{}' '{:?}' '{}' in {:?}",
                             path,
-                            key.label,
+                            parent_label,
                             subselection,
                             subselections.keys().collect::<Vec<_>>()
                         );
@@ -764,15 +744,13 @@ mod tests {
                     for deferred in deferred {
                         if let Some(subselection) = deferred.subselection.clone() {
                             let path = deferred.query_path.clone();
-                            let key = SubSelectionKey {
-                                label: deferred.label.clone(),
-                                variables_set: 0,
-                            };
                             assert!(
-                                subselections.keys().any(|k| k.label == key.label),
+                                subselections
+                                    .keys()
+                                    .any(|k| k.defer_label == deferred.label),
                                 "Missing key: '{}' '{:?}' '{}'",
                                 path,
-                                key.label,
+                                deferred.label,
                                 subselection
                             );
                         }
@@ -869,7 +847,7 @@ mod tests {
                 serialize_selection_set(&value.selection_set, &mut serialized);
                 keys.push(format!(
                     "{:?} {} {}",
-                    key.label, key.variables_set, serialized
+                    key.defer_label, key.defer_conditions.bits, serialized
                 ))
             }
             keys.sort();
