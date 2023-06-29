@@ -125,7 +125,7 @@ impl FormatTest {
                 .unwrap()
                 .clone(),
             api_schema,
-            0,
+            BooleanValues { bits: 0 },
         );
 
         if let Some(e) = self.expected {
@@ -4822,7 +4822,7 @@ fn fragment_on_interface_on_query() {
         false,
         Default::default(),
         api_schema,
-        0,
+        BooleanValues { bits: 0 },
     );
     assert_eq_and_ordered!(
         response.data.as_ref().unwrap(),
@@ -5426,7 +5426,7 @@ fn test_error_path_works_across_inline_fragments() {
         None,
         &None,
         &Path::from("rootType/edges/0/node/subType/edges/0/node/myField"),
-        0
+        BooleanValues { bits: 0 }
     ));
 }
 
