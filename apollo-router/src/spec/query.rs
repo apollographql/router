@@ -21,6 +21,9 @@ use tokio::sync::Mutex;
 use tokio::sync::MutexGuard;
 use tracing::level_filters::LevelFilter;
 
+use self::subselections::BooleanValues;
+use self::subselections::SubSelectionKey;
+use self::subselections::SubSelectionValue;
 use crate::error::FetchError;
 use crate::graphql::Error;
 use crate::graphql::Request;
@@ -60,13 +63,13 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) subselections: SubSelections,
+    pub(crate) subselections: HashMap<SubSelectionKey, SubSelectionValue>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) filtered_query: Option<Arc<Query>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) added_labels: HashSet<String>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) defer_variables_set: IndexSet<String>,
+    pub(crate) defer_stats: DeferStats,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) is_original: bool,
 }
@@ -75,19 +78,16 @@ fn empty_compiler() -> Arc<Mutex<ApolloCompiler>> {
     Arc::new(Mutex::new(ApolloCompiler::new()))
 }
 
-pub(crate) type SubSelections = HashMap<SubSelectionKey, SubSelectionValue>;
-
-#[derive(Debug, Derivative, Serialize, Deserialize)]
-#[derivative(PartialEq, Hash, Eq)]
-pub(crate) struct SubSelectionKey {
-    pub(crate) label: Option<String>,
-    pub(crate) variables_set: i32,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct SubSelectionValue {
-    pub(crate) selection_set: Vec<Selection>,
-    pub(crate) type_name: String,
+pub(crate) struct DeferStats {
+    /// Is `@defer` used at all (except `@defer(if=false)`)
+    pub(crate) has_defer: bool,
+
+    /// Is `@defer` used without `if` (or `@defer(if=true)`)
+    pub(crate) has_unconditional_defer: bool,
+
+    /// Names of boolean variables used in `@defer(if=$var)`
+    pub(crate) conditional_defer_variable_names: IndexSet<String>,
 }
 
 impl Query {
@@ -102,7 +102,11 @@ impl Query {
             subselections: HashMap::new(),
             filtered_query: None,
             added_labels: HashSet::new(),
-            defer_variables_set: IndexSet::new(),
+            defer_stats: DeferStats {
+                has_defer: false,
+                has_unconditional_defer: false,
+                conditional_defer_variable_names: IndexSet::new(),
+            },
             is_original: true,
         }
     }
@@ -119,7 +123,7 @@ impl Query {
         is_deferred: bool,
         variables: Object,
         schema: &Schema,
-        variables_set: i32,
+        defer_conditions: BooleanValues,
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
 
@@ -129,8 +133,8 @@ impl Query {
                 if is_deferred {
                     // Get subselection from hashmap
                     match self.subselections.get(&SubSelectionKey {
-                        label: response.label.clone(),
-                        variables_set,
+                        defer_label: response.label.clone(),
+                        defer_conditions,
                     }) {
                         Some(subselection) => {
                             let mut output = Object::default();
@@ -272,6 +276,7 @@ impl Query {
         (compiler, id)
     }
 
+    #[cfg(test)]
     pub(crate) fn parse(
         query: impl Into<String>,
         schema: &Schema,
@@ -280,7 +285,8 @@ impl Query {
         let query = query.into();
 
         let (compiler, id) = Self::make_compiler(&query, schema, configuration);
-        let (fragments, operations) = Self::extract_query_information(&compiler, id, schema)?;
+        let (fragments, operations, defer_stats) =
+            Self::extract_query_information(&compiler, id, schema)?;
 
         Ok(Query {
             string: query,
@@ -290,7 +296,7 @@ impl Query {
             subselections: HashMap::new(),
             filtered_query: None,
             added_labels: HashSet::new(),
-            defer_variables_set: IndexSet::new(),
+            defer_stats,
             is_original: true,
         })
     }
@@ -320,19 +326,23 @@ impl Query {
         compiler: &ApolloCompiler,
         id: FileId,
         schema: &Schema,
-    ) -> Result<(Fragments, Vec<Operation>), SpecError> {
+    ) -> Result<(Fragments, Vec<Operation>, DeferStats), SpecError> {
         Self::check_errors(compiler, id)?;
 
-        let fragments = Fragments::from_hir(compiler, schema)?;
-
+        let mut defer_stats = DeferStats {
+            has_defer: false,
+            has_unconditional_defer: false,
+            conditional_defer_variable_names: IndexSet::new(),
+        };
+        let fragments = Fragments::from_hir(compiler, schema, &mut defer_stats)?;
         let operations = compiler
             .db
             .all_operations()
             .iter()
-            .map(|operation| Operation::from_hir(operation, schema))
+            .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
-        Ok((fragments, operations))
+        Ok((fragments, operations, defer_stats))
     }
 
     pub(crate) async fn compiler(&self) -> MutexGuard<'_, ApolloCompiler> {
@@ -664,6 +674,8 @@ impl Query {
                     type_condition,
                     selection_set,
                     include_skip,
+                    defer: _,
+                    defer_label: _,
                     known_type,
                 } => {
                     if include_skip.should_skip(parameters.variables) {
@@ -712,6 +724,8 @@ impl Query {
                     name,
                     known_type,
                     include_skip,
+                    defer: _,
+                    defer_label: _,
                 } => {
                     if include_skip.should_skip(parameters.variables) {
                         continue;
@@ -864,6 +878,8 @@ impl Query {
                     name,
                     known_type: _,
                     include_skip,
+                    defer: _,
+                    defer_label: _,
                 } => {
                     if include_skip.should_skip(parameters.variables) {
                         continue;
@@ -1023,11 +1039,11 @@ impl Query {
         operation_name: Option<&str>,
         label: &Option<String>,
         path: &Path,
-        variables_set: i32,
+        defer_conditions: BooleanValues,
     ) -> bool {
         let selection_set = match self.subselections.get(&SubSelectionKey {
-            label: label.clone(),
-            variables_set,
+            defer_label: label.clone(),
+            defer_conditions,
         }) {
             Some(subselection) => &subselection.selection_set,
             None => match self.operation(operation_name) {
@@ -1044,19 +1060,24 @@ impl Query {
         &self,
         operation_name: Option<&str>,
         variables: &Object,
-    ) -> i32 {
-        let mut set = 0i32;
-        for (i, variable) in self.defer_variables_set.iter().enumerate() {
+    ) -> BooleanValues {
+        let mut bits = 0_u32;
+        for (i, variable) in self
+            .defer_stats
+            .conditional_defer_variable_names
+            .iter()
+            .enumerate()
+        {
             let value = variables
                 .get(variable.as_str())
                 .or_else(|| self.default_variable_value(operation_name, variable));
 
             if matches!(value, Some(serde_json_bytes::Value::Bool(true))) {
-                set |= 1 << i;
+                bits |= 1 << i;
             }
         }
 
-        set
+        BooleanValues { bits }
     }
 }
 
@@ -1072,6 +1093,7 @@ struct FormatParameters<'a> {
 pub(crate) struct Operation {
     pub(crate) name: Option<String>,
     kind: OperationKind,
+    type_name: String,
     pub(crate) selection_set: Vec<Selection>,
     variables: HashMap<ByteString, Variable>,
 }
@@ -1086,16 +1108,19 @@ impl Operation {
     pub(crate) fn from_hir(
         operation: &hir::OperationDefinition,
         schema: &Schema,
+        defer_stats: &mut DeferStats,
     ) -> Result<Self, SpecError> {
         let name = operation.name().map(|s| s.to_owned());
         let kind = operation.operation_ty().into();
-        let current_field_type = FieldType::new_named(schema.root_operation_name(kind));
+        let type_name = schema.root_operation_name(kind).to_owned();
+        let current_field_type = FieldType::new_named(&type_name);
         let selection_set = operation
             .selection_set()
             .selection()
             .iter()
             .filter_map(|selection| {
-                Selection::from_hir(selection, &current_field_type, schema, 0).transpose()
+                Selection::from_hir(selection, &current_field_type, schema, 0, defer_stats)
+                    .transpose()
             })
             .collect::<Result<_, _>>()?;
         let variables = operation
@@ -1113,6 +1138,7 @@ impl Operation {
         Ok(Operation {
             selection_set,
             name,
+            type_name,
             variables,
             kind,
         })
