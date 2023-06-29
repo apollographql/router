@@ -1,11 +1,13 @@
 //! Calls out to nodejs query planner
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ApolloCompiler;
+use apollo_compiler::HirDatabase;
 use apollo_compiler::InputDatabase;
 use futures::future::BoxFuture;
 use router_bridge::planner::IncrementalDeliverySupport;
@@ -26,6 +28,7 @@ use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::introspection::Introspection;
+use crate::query_planner::labeler::add_defer_labels;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -163,31 +166,74 @@ impl BridgeQueryPlanner {
     async fn parse_selections(
         &self,
         key: QueryKey,
+        added_labels: HashSet<String>,
         compiler: Arc<Mutex<ApolloCompiler>>,
     ) -> Result<Query, QueryPlannerError> {
         let (query, operation_name) = key;
-        let schema = self.schema.clone();
-        let configuration = self.configuration.clone();
+        let compiler_guard = compiler.lock().await;
 
-        let file_id = compiler
-            .lock()
-            .await
+        crate::spec::operation_limits::check(
+            &self.configuration,
+            &query,
+            &compiler_guard,
+            operation_name.clone(),
+        )?;
+
+        let file_id = compiler_guard
             .db
             .source_file(QUERY_EXECUTABLE.into())
-            .ok_or(QueryPlannerError::SpecError(SpecError::ParsingError(
-                "missing input file for query".to_string(),
-            )))?;
+            .ok_or_else(|| {
+                QueryPlannerError::SpecError(SpecError::ValidationError(
+                    "missing input file for query".to_string(),
+                ))
+            })?;
 
-        let mut query = Query::parse_with_compiler(
-            query,
+        let kind = compiler_guard
+            .db
+            .find_operation(file_id, operation_name.clone())
+            .ok_or_else(|| {
+                QueryPlannerError::SpecError(match operation_name {
+                    Some(op) => SpecError::UnknownOperation(op),
+                    _ => SpecError::MissingOperation,
+                })
+            })?
+            .operation_ty()
+            .into();
+
+        Query::check_errors(&compiler_guard, file_id)?;
+        let validation_error = match self.configuration.experimental_graphql_validation {
+            GraphQLValidation::Legacy => None,
+            GraphQLValidation::New => {
+                Query::validate_query(&compiler_guard, file_id)?;
+                None
+            }
+            GraphQLValidation::Both => Query::validate_query(&compiler_guard, file_id).err(),
+        };
+
+        let (fragments, operations) =
+            Query::extract_query_information(&compiler_guard, &self.schema)?;
+        let (subselections, defer_variables_set) =
+            crate::spec::query::subselections::collect_subselections(
+                &self.configuration,
+                &self.schema,
+                &compiler_guard,
+                file_id,
+                kind,
+            )?;
+        drop(compiler_guard);
+
+        Ok(Query {
+            string: query,
             compiler,
-            file_id,
-            schema.api_schema(),
-            &configuration,
-        )
-        .await?;
-        crate::spec::operation_limits::check(&configuration, &mut query, operation_name).await?;
-        Ok(query)
+            fragments,
+            operations,
+            filtered_query: None,
+            subselections,
+            added_labels,
+            defer_variables_set,
+            is_original: true,
+            validation_error,
+        })
     }
 
     async fn introspection(&self, query: String) -> Result<QueryPlannerContent, QueryPlannerError> {
@@ -211,8 +257,7 @@ impl BridgeQueryPlanner {
         original_query: String,
         filtered_query: String,
         operation: Option<String>,
-
-        mut selections: Query,
+        selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let planner_result = self
             .planner
@@ -255,9 +300,6 @@ impl BridgeQueryPlanner {
                     },
                 mut usage_reporting,
             } => {
-                let subselections = node.parse_subselections(&self.schema)?;
-                selections.subselections = subselections;
-
                 if let Some(sig) = operation_signature {
                     usage_reporting.stats_report_key = sig;
                 }
@@ -317,13 +359,26 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         let fut = async move {
             let start = Instant::now();
 
-            let compiler_guard = compiler.lock().await;
+            let mut compiler_guard = compiler.lock().await;
             let file_id = compiler_guard
                 .db
                 .source_file(QUERY_EXECUTABLE.into())
                 .ok_or(QueryPlannerError::SpecError(SpecError::ParsingError(
                     "missing input file for query".to_string(),
                 )))?;
+
+            let added_labels = match add_defer_labels(file_id, &compiler_guard) {
+                Err(e) => {
+                    return Err(QueryPlannerError::SpecError(SpecError::ParsingError(
+                        e.to_string(),
+                    )))
+                }
+                Ok((modified_query, added_labels)) => {
+                    compiler_guard.update_executable(file_id, &modified_query);
+                    added_labels
+                }
+            };
+
             let filtered_query = compiler_guard.db.source_code(file_id);
             drop(compiler_guard);
 
@@ -332,6 +387,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     original_query,
                     filtered_query.to_string(),
                     operation_name.to_owned(),
+                    added_labels,
                     compiler,
                 )
                 .await;
@@ -375,14 +431,17 @@ impl BridgeQueryPlanner {
         original_query: String,
         filtered_query: String,
         operation_name: Option<String>,
+        added_labels: HashSet<String>,
         compiler: Arc<Mutex<ApolloCompiler>>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let mut selections = self
             .parse_selections(
                 (original_query.clone(), operation_name.clone()),
+                added_labels.clone(),
                 compiler.clone(),
             )
             .await?;
+        selections.added_labels = added_labels.clone();
 
         if selections.contains_introspection() {
             // If we have only one operation containing only the root field `__typename`
@@ -408,10 +467,15 @@ impl BridgeQueryPlanner {
         }
 
         if filtered_query != original_query {
-            selections.filtered_query = Some(Arc::new(
-                self.parse_selections((filtered_query.clone(), operation_name.clone()), compiler)
-                    .await?,
-            ));
+            let mut filtered = self
+                .parse_selections(
+                    (filtered_query.clone(), operation_name.clone()),
+                    added_labels,
+                    compiler,
+                )
+                .await?;
+            filtered.is_original = false;
+            selections.filtered_query = Some(Arc::new(filtered));
         }
 
         self.plan(original_query, filtered_query, operation_name, selections)
@@ -441,6 +505,9 @@ mod tests {
     use test_log::test;
 
     use super::*;
+    use crate::json_ext::Path;
+    use crate::spec::query::SubSelection;
+    use crate::spec::query::SubSelections;
 
     const EXAMPLE_SCHEMA: &str = include_str!("testdata/schema.graphql");
 
@@ -535,7 +602,7 @@ mod tests {
         let result = plan(EXAMPLE_SCHEMA, "", "", None).await;
 
         assert_eq!(
-            "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",
+            "spec error: missing operation",
             result.unwrap_err().to_string()
         );
     }
@@ -580,6 +647,245 @@ mod tests {
         }
     }
 
+    #[test(tokio::test)]
+    async fn test_subselections() {
+        macro_rules! s {
+            ($query: expr) => {
+                insta::assert_snapshot!(subselections_keys($query).await);
+            };
+        }
+        s!("query Q { me { username name { first last }}}");
+        s!(r#"query Q { me {
+            username
+            name {
+                first
+                ... @defer(label: "A") { last }
+            }
+        }}"#);
+        s!(r#"query Q { me {
+            username
+            name {
+                ... @defer(label: "A") { first }
+                ... @defer(label: "B") { last }
+            }
+        }}"#);
+        // Aliases
+        // FIXME: uncomment myName alias when this is fixed:
+        // https://github.com/apollographql/router/issues/3263
+        s!(r#"query Q { me {
+            username
+            # myName:
+             name {
+                firstName: first
+                ... @defer(label: "A") { lastName: last }
+            }
+        }}"#);
+        // Arguments
+        s!(r#"query Q { user(id: 42) {
+            username
+            name {
+                first
+                ... @defer(label: "A") { last }
+            }
+        }}"#);
+        // Type condition
+        s!(r#"query Q { me {
+            username
+            ... on User {
+                name {
+                    first
+                    ... @defer(label: "A") { last }
+                }
+            }
+        }}"#);
+        s!(r#"query Q { me {
+            username
+            ... on User @defer(label: "A") {
+                name { first last }
+            }
+        }}"#);
+        s!(r#"query Q { me {
+            username
+            ... @defer(label: "A") {
+                ... on User {
+                    name { first last }
+                }
+            }
+        }}"#);
+        // Array + argument
+        s!(r#"query Q { me {
+            id
+            reviews {
+                id
+                ... @defer(label: "A") { body(format: true) }
+            }
+        }}"#);
+        // Fragment spread becomes inline fragment
+        s!(r#"
+            query Q { me { username name { ... FirstLast @defer(label: "A") }}}
+            fragment FirstLast on Name { first last }
+        "#);
+        s!(r#"
+            query Q { me { username name { ... FirstLast @defer(label: "A") }}}
+            fragment FirstLast on Name { first ... @defer(label: "B") { last }}
+        "#);
+        // Nested
+        s!(r#"query Q { me {
+            username
+            ... @defer(label: "A") { name {
+                first
+                ... @defer(label: "B") { last }
+            }}
+        }}"#);
+        s!(r#"query Q { me {
+            id
+            ... @defer(label: "A") {
+                username
+                ... @defer(label: "B") { name {
+                    first
+                    ... @defer(label: "C") { last }
+                }}
+            }
+        }}"#);
+        // Conditional
+        s!(r#"query Q($d1:Boolean!) { me {
+            username
+            name {
+                first
+                ... @defer(if: $d1, label: "A") { last }
+            }
+        }}"#);
+        s!(r#"query Q($d1:Boolean!, $d2:Boolean!) { me {
+            username
+            ... @defer(if: $d1, label: "A") { name {
+                first
+                ... @defer(if: $d2, label: "B") { last }
+            }}
+        }}"#);
+        s!(r#"query Q($d1:Boolean!, $d2:Boolean!) { me {
+            username
+            name {
+                ... @defer(if: $d1, label: "A") { first }
+                ... @defer(if: $d2, label: "B") { last }
+            }
+        }}"#);
+        // Mixed conditional and unconditional
+        s!(r#"query Q($d1:Boolean!) { me {
+            username
+            name {
+                ... @defer(label: "A") { first }
+                ... @defer(if: $d1, label: "B") { last }
+            }
+        }}"#);
+        // Include/skip
+        s!(r#"query Q($s1:Boolean!) { me {
+            username
+            name {
+                ... @defer(label: "A") { 
+                    first
+                    last @skip(if: $s1)
+                }
+            }
+        }}"#);
+    }
+
+    async fn subselections_keys(query: &str) -> String {
+        fn check_query_plan_coverage(
+            node: &PlanNode,
+            path: &Path,
+            parent_label: Option<String>,
+            subselections: &SubSelections,
+        ) {
+            match node {
+                PlanNode::Defer { primary, deferred } => {
+                    if let Some(subselection) = primary.subselection.clone() {
+                        let path = path.join(primary.path.clone().unwrap_or_default());
+                        let key = SubSelection {
+                            label: parent_label,
+                            variables_set: 0,
+                        };
+                        assert!(
+                            subselections.keys().any(|k| k.label == key.label),
+                            "Missing key: '{}' '{:?}' '{}' in {:?}",
+                            path,
+                            key.label,
+                            subselection,
+                            subselections.keys().collect::<Vec<_>>()
+                        );
+                    }
+                    for deferred in deferred {
+                        if let Some(subselection) = deferred.subselection.clone() {
+                            let path = deferred.query_path.clone();
+                            let key = SubSelection {
+                                label: deferred.label.clone(),
+                                variables_set: 0,
+                            };
+                            assert!(
+                                subselections.keys().any(|k| k.label == key.label),
+                                "Missing key: '{}' '{:?}' '{}'",
+                                path,
+                                key.label,
+                                subselection
+                            );
+                        }
+                        if let Some(node) = &deferred.node {
+                            check_query_plan_coverage(
+                                node,
+                                &deferred.query_path,
+                                deferred.label.clone(),
+                                subselections,
+                            )
+                        }
+                    }
+                }
+                PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
+                    for node in nodes {
+                        check_query_plan_coverage(node, path, parent_label.clone(), subselections)
+                    }
+                }
+                PlanNode::Fetch(_) => {}
+                PlanNode::Flatten(flatten) => {
+                    check_query_plan_coverage(&flatten.node, path, parent_label, subselections)
+                }
+                PlanNode::Condition {
+                    condition: _,
+                    if_clause,
+                    else_clause,
+                } => {
+                    if let Some(node) = if_clause {
+                        check_query_plan_coverage(node, path, parent_label.clone(), subselections)
+                    }
+                    if let Some(node) = else_clause {
+                        check_query_plan_coverage(node, path, parent_label, subselections)
+                    }
+                }
+                PlanNode::Subscription { rest, .. } => {
+                    if let Some(node) = rest {
+                        check_query_plan_coverage(node, path, parent_label, subselections)
+                    }
+                }
+            }
+        }
+
+        dbg!(query);
+        let result = plan(EXAMPLE_SCHEMA, query, query, None).await.unwrap();
+        if let QueryPlannerContent::Plan { plan, .. } = result {
+            check_query_plan_coverage(&plan.root, &Path::empty(), None, &plan.query.subselections);
+
+            let mut keys: Vec<String> = Vec::new();
+            for (key, value) in plan.query.subselections.iter() {
+                keys.push(format!(
+                    "{:?} {} {}",
+                    key.label, key.variables_set, value.string
+                ))
+            }
+            keys.sort();
+            keys.join("\n")
+        } else {
+            panic!()
+        }
+    }
+
     async fn plan(
         schema: &str,
         original_query: &str,
@@ -606,6 +912,7 @@ mod tests {
                 original_query.to_string(),
                 filtered_query.to_string(),
                 operation_name,
+                HashSet::new(),
                 Arc::new(Mutex::new(compiler)),
             )
             .await

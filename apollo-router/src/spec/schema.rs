@@ -5,7 +5,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use apollo_compiler::diagnostics::ApolloDiagnostic;
-use apollo_compiler::diagnostics::DiagnosticData;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;

@@ -322,7 +322,7 @@ impl SubscriptionNode {
         match rest {
             Some(rest) => {
                 let created_at = val.created_at.take();
-                let (value, subselection, mut errors) = rest
+                let (value, mut errors) = rest
                     .execute_recursively(
                         parameters,
                         current_dir,
@@ -339,7 +339,6 @@ impl SubscriptionNode {
                         Response::builder()
                             .data(value)
                             .and_subscribed(val.subscribed)
-                            .and_subselection(subselection)
                             .errors(errors)
                             .extensions(val.extensions)
                             .and_path(val.path)

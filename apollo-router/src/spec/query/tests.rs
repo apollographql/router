@@ -118,6 +118,7 @@ impl FormatTest {
                 .unwrap()
                 .clone(),
             api_schema,
+            0,
         );
 
         if let Some(e) = self.expected {
@@ -4806,7 +4807,14 @@ fn fragment_on_interface_on_query() {
         }})
         .build();
 
-    query.format_response(&mut response, None, false, Default::default(), api_schema);
+    query.format_response(
+        &mut response,
+        None,
+        false,
+        Default::default(),
+        api_schema,
+        0,
+    );
     assert_eq_and_ordered!(
         response.data.as_ref().unwrap(),
         &json! {{
@@ -5399,9 +5407,9 @@ fn test_error_path_works_across_inline_fragments() {
 
     assert!(query.contains_error_path(
         None,
-        None,
-        None,
-        &Path::from("rootType/edges/0/node/subType/edges/0/node/myField")
+        &None,
+        &Path::from("rootType/edges/0/node/subType/edges/0/node/myField"),
+        0
     ));
 }
 

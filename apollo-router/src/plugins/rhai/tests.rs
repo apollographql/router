@@ -719,3 +719,48 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
         panic!("error processed incorrectly");
     }
 }
+
+#[tokio::test]
+async fn it_mentions_source_when_syntax_error_occurs() {
+    let err: Box<dyn std::error::Error> = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.rhai")
+        .expect("Plugin not found")
+        .create_instance_without_schema(
+            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"syntax_errors.rhai"}"#)
+                .unwrap(),
+        )
+        .await
+        .err()
+        .unwrap();
+
+    assert!(err.to_string().contains("syntax_errors.rhai"));
+}
+
+#[test]
+#[should_panic(
+    expected = "can use env: ErrorRuntime(\"could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found\", none)"
+)]
+fn it_cannot_expand_missing_environment_variable() {
+    assert!(std::env::var("THIS_SHOULD_NOT_EXIST").is_err());
+    let engine = new_rhai_test_engine();
+    let _: String = engine
+        .eval(
+            r#"
+        env::get("THIS_SHOULD_NOT_EXIST")"#,
+        )
+        .expect("can use env");
+}
+
+// POSIX specifies HOME is always set
+#[test]
+fn it_can_expand_environment_variable() {
+    let home = std::env::var("HOME").expect("can always read HOME");
+    let engine = new_rhai_test_engine();
+    let env_variable: String = engine
+        .eval(
+            r#"
+        env::get("HOME")"#,
+        )
+        .expect("can use env");
+    assert_eq!(home, env_variable);
+}
