@@ -3,11 +3,9 @@ use std::path::Path;
 use std::process::Command;
 use std::process::Stdio;
 
-use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
-use serde_json_traversal::serde_json_traversal;
 use xtask::*;
 
 const ENTITLEMENTS: &str = "macos-entitlements.plist";
@@ -205,6 +203,10 @@ impl PackageMacos {
             &mut zip,
         )?;
         zip.finish()?;
+
+        let dist_zip = dist_zip
+            .to_str()
+            .unwrap_or_else(|| panic!("'{} is not valid UTF-8", dist_zip.display()));
 
         eprintln!("Beginning notarization process...");
         let output = Command::new("xcrun")
