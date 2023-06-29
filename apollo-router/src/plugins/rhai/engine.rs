@@ -1134,8 +1134,8 @@ impl Rhai {
             // Register our base64 module (not global)
             .register_static_module("base64", base64_module.into())
             // Register our expansion module (not global)
-            // Hide the fact that it is an expansion module by calling it "router_env"
-            .register_static_module("router_env", expansion_module.into())
+            // Hide the fact that it is an expansion module by calling it "env"
+            .register_static_module("env", expansion_module.into())
             // Register HeaderMap as an iterator so we can loop over contents
             .register_iterator::<HeaderMap>()
             // Register a series of logging functions

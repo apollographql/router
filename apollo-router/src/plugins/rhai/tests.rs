@@ -746,7 +746,7 @@ fn it_cannot_expand_missing_environment_variable() {
     let _: String = engine
         .eval(
             r#"
-        router_env::get("THIS_SHOULD_NOT_EXIST")"#,
+        env::get("THIS_SHOULD_NOT_EXIST")"#,
         )
         .expect("can use env");
 }
@@ -759,7 +759,7 @@ fn it_can_expand_environment_variable() {
     let env_variable: String = engine
         .eval(
             r#"
-        router_env::get("HOME")"#,
+        env::get("HOME")"#,
         )
         .expect("can use env");
     assert_eq!(home, env_variable);

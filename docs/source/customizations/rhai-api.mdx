@@ -245,20 +245,20 @@ fn supergraph_service(service) {
 
 ## Environment Variables
 
-Your Rhai customization can access environment variables using the `router_env` module. Use the `router_env::get()` function.
+Your Rhai customization can access environment variables using the `env` module. Use the `env::get()` function.
 
 ```rhai
 fn router_service(service) {
     try {
-        print(`HOME: ${router_env::get("HOME")}`);
-        print(`LANG: ${router_env::get("LANG")}`);
+        print(`HOME: ${env::get("HOME")}`);
+        print(`LANG: ${env::get("LANG")}`);
     } catch(err) {
         print(`exception: ${err}`);
     }
 }
 ```
 
-Note: You don't need to import the "router_env" module. It is imported in the router.
+Note: You don't need to import the "env" module. It is imported in the router.
 Note: get() may fail, so it's best to handle exceptions when using it.
 
 ## `Request` interface
