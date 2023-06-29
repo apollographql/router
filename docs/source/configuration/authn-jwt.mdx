@@ -158,8 +158,6 @@ Below are 2 example [Rhai script](../customizations/rhai/) customizations that d
 
 ### Example: Forwarding claims to subgraphs as headers
 
-> ⚠️ This example forwards JWT claims via headers. When combined with [header propagation](./header-propagation/) this can introduce a security risk. If you're relying on header-based forwarding, **make sure not to propagate matching headers**. For example, if you had the claim "admin" in your JWT which was forwarded as a header, and a matching header propagation rule (e.g., all headers via `.*`) an attacker could send the "admin" header in their requests to impersonate an admin.
-
 Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
 > This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
@@ -186,6 +184,8 @@ fn process_request(request) {
 ```
 
 </ExpansionPanel>
+
+> ⚠️ Explicitly listing claims and _always_ setting headers for them is strongly recommended to avoid possible security issues when [forwarding headers](./header-propagation/) to subgraphs.
 
 ### Example: Forwarding claims to subgraphs as GraphQL extensions
 
