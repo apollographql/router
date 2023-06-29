@@ -451,7 +451,7 @@ mod tests {
 
     use super::*;
     use crate::json_ext::Path;
-    use crate::spec::query::SubSelection;
+    use crate::spec::query::SubSelectionKey;
     use crate::spec::query::SubSelections;
 
     const EXAMPLE_SCHEMA: &str = include_str!("testdata/schema.graphql");
@@ -748,7 +748,7 @@ mod tests {
                 PlanNode::Defer { primary, deferred } => {
                     if let Some(subselection) = primary.subselection.clone() {
                         let path = path.join(primary.path.clone().unwrap_or_default());
-                        let key = SubSelection {
+                        let key = SubSelectionKey {
                             label: parent_label,
                             variables_set: 0,
                         };
@@ -764,7 +764,7 @@ mod tests {
                     for deferred in deferred {
                         if let Some(subselection) = deferred.subselection.clone() {
                             let path = deferred.query_path.clone();
-                            let key = SubSelection {
+                            let key = SubSelectionKey {
                                 label: deferred.label.clone(),
                                 variables_set: 0,
                             };
@@ -815,6 +815,49 @@ mod tests {
             }
         }
 
+        fn serialize_selection_set(selection_set: &[crate::spec::Selection], to: &mut String) {
+            if let Some((first, rest)) = selection_set.split_first() {
+                to.push_str("{ ");
+                serialize_selection(first, to);
+                for sel in rest {
+                    to.push(' ');
+                    serialize_selection(sel, to);
+                }
+                to.push_str(" }");
+            }
+        }
+
+        fn serialize_selection(selection: &crate::spec::Selection, to: &mut String) {
+            match selection {
+                crate::spec::Selection::Field {
+                    name,
+                    alias,
+                    selection_set,
+                    ..
+                } => {
+                    if let Some(alias) = alias {
+                        to.push_str(alias.as_str());
+                        to.push_str(": ");
+                    }
+                    to.push_str(name.as_str());
+                    if let Some(sel) = selection_set {
+                        to.push(' ');
+                        serialize_selection_set(sel, to)
+                    }
+                }
+                crate::spec::Selection::InlineFragment {
+                    type_condition,
+                    selection_set,
+                    ..
+                } => {
+                    to.push_str("... on ");
+                    to.push_str(type_condition);
+                    serialize_selection_set(selection_set, to)
+                }
+                crate::spec::Selection::FragmentSpread { .. } => unreachable!(),
+            }
+        }
+
         dbg!(query);
         let result = plan(EXAMPLE_SCHEMA, query, query, None).await.unwrap();
         if let QueryPlannerContent::Plan { plan, .. } = result {
@@ -822,9 +865,11 @@ mod tests {
 
             let mut keys: Vec<String> = Vec::new();
             for (key, value) in plan.query.subselections.iter() {
+                let mut serialized = String::from("query");
+                serialize_selection_set(&value.selection_set, &mut serialized);
                 keys.push(format!(
                     "{:?} {} {}",
-                    key.label, key.variables_set, value.string
+                    key.label, key.variables_set, serialized
                 ))
             }
             keys.sort();

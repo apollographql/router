@@ -4,6 +4,6 @@ expression: "subselections_keys(r#\"query Q($d1:Boolean!) { me {\n            us
 ---
 None 0 query{ me { username name { last } } }
 None 1 query{ me { username } }
-Some("A") 0 query{ me{ name{ first } } }
-Some("A") 1 query{ me{ name{ first } } }
-Some("B") 1 query{ me{ name{ last } } }
+Some("A") 0 query{ me { name { first } } }
+Some("A") 1 query{ me { name { first } } }
+Some("B") 1 query{ me { name { last } } }

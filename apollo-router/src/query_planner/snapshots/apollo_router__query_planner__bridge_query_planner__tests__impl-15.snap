@@ -5,7 +5,7 @@ expression: "subselections_keys(r#\"query Q($d1:Boolean!, $d2:Boolean!) { me {\n
 None 1 query{ me { username } }
 None 2 query{ me { username name { first } } }
 None 3 query{ me { username } }
-Some("A") 1 query{ me{ name { first last } } }
-Some("A") 3 query{ me{ name { first } } }
-Some("B") 2 query{ me{ name{ last } } }
-Some("B") 3 query{ me{ name{ last } } }
+Some("A") 1 query{ me { name { first last } } }
+Some("A") 3 query{ me { name { first } } }
+Some("B") 2 query{ me { name { last } } }
+Some("B") 3 query{ me { name { last } } }

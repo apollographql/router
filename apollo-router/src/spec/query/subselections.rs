@@ -11,7 +11,8 @@ use tower::BoxError;
 use super::transform;
 use super::traverse;
 use super::Query;
-use super::SubSelection;
+use super::SubSelectionKey;
+use super::SubSelectionValue;
 use super::SubSelections;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
@@ -41,9 +42,13 @@ pub(crate) fn collect_subselections(
     let (keys, defer_variables_set) = subselection_keys(configuration, schema, compiler, file_id)
         .map_err(|e| SpecError::ParsingError(e.to_string()))?;
     keys.into_iter()
-        .map(|(key, path, subselection)| {
+        .map(|(key, path, subselection, type_name)| {
             let reconstructed = reconstruct_full_query(&path, &kind, &subselection);
-            let value = Query::parse(reconstructed, schema, &Default::default())?;
+            let mut query = Query::parse(reconstructed, schema, &Default::default())?;
+            let value = SubSelectionValue {
+                selection_set: std::mem::take(&mut query.operations[0].selection_set),
+                type_name,
+            };
             Ok((key, value))
         })
         .collect::<Result<SubSelections, SpecError>>()
@@ -60,7 +65,13 @@ fn subselection_keys(
     schema: &Schema,
     compiler: &ApolloCompiler,
     file_id: FileId,
-) -> Result<(Vec<(SubSelection, Path, String)>, IndexSet<String>), BoxError> {
+) -> Result<
+    (
+        Vec<(SubSelectionKey, Path, String, String)>,
+        IndexSet<String>,
+    ),
+    BoxError,
+> {
     let HasDefer {
         has_defer,
         has_unconditional_defer,
@@ -324,22 +335,29 @@ fn collect_subselections_keys(
     compiler: &ApolloCompiler,
     file_id: FileId,
     combination: Combination,
-    subselection_keys: &mut Vec<(SubSelection, Path, String)>,
+    subselection_keys: &mut Vec<(SubSelectionKey, Path, String, String)>,
 ) -> Result<(), BoxError> {
     struct Visitor<'a> {
+        compiler: &'a ApolloCompiler,
         combination: Combination<'a>,
         current_path: Path,
-        subselection_keys: &'a mut Vec<(SubSelection, Path, String)>,
+        subselection_keys: &'a mut Vec<(SubSelectionKey, Path, String, String)>,
     }
 
-    fn add_key(visitor: &mut Visitor<'_>, label: Option<String>, subselection: SelectionSet) {
+    fn add_key(
+        visitor: &mut Visitor<'_>,
+        label: Option<String>,
+        subselection: SelectionSet,
+        type_name: String,
+    ) {
         visitor.subselection_keys.push((
-            SubSelection {
+            SubSelectionKey {
                 label,
                 variables_set: visitor.combination.bitset(),
             },
             visitor.current_path.clone(),
             subselection.to_string(),
+            type_name,
         ))
     }
 
@@ -433,7 +451,12 @@ fn collect_subselections_keys(
                                     selection_set: deferred,
                                 }]);
                             }
-                            add_key(visitor, deferred_label, deferred)
+                            let type_name = hir
+                                .parent_type(&visitor.compiler.db)
+                                .ok_or("Missing type definition")?
+                                .name()
+                                .to_owned();
+                            add_key(visitor, deferred_label, deferred, type_name)
                         }
                     } else if let Some(SelectionSet(mut selection_set)) =
                         selection_set(visitor, label.clone(), hir.selection_set())?
@@ -490,13 +513,18 @@ fn collect_subselections_keys(
     }
 
     let mut visitor = Visitor {
+        compiler,
         combination,
         current_path: Path::empty(),
         subselection_keys,
     };
+    let schema_def = compiler.db.schema();
     for hir in compiler.db.operations(file_id).iter() {
         if let Some(primary) = selection_set(&mut visitor, None, hir.selection_set())? {
-            add_key(&mut visitor, None, primary)
+            let type_name = schema_def
+                .root_operation_name(hir.operation_ty())
+                .ok_or("Missing root operation definition")?;
+            add_key(&mut visitor, None, primary, type_name.to_owned())
         }
     }
     Ok(())
@@ -504,7 +532,7 @@ fn collect_subselections_keys(
 
 /// Similar to `apollo_encoder::SelectionSet` but with serialization matching
 /// <https://github.com/apollographql/federation/blob/3299d5269/internals-js/src/operations.ts#L1823-L1851>
-struct SelectionSet(Vec<Selection>);
+pub(crate) struct SelectionSet(Vec<Selection>);
 
 enum Selection {
     Field {
