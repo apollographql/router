@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use futures::Stream;
 use graphql_client::QueryBody;
-use once_cell::sync::Lazy;
 use thiserror::Error;
 use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
