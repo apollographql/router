@@ -12,14 +12,14 @@ use serde_json::Value;
 use super::ConfigurationError;
 use crate::executable::APOLLO_ROUTER_DEV_ENV;
 
-#[derive(buildstructor::Builder)]
+#[derive(buildstructor::Builder, Clone)]
 pub(crate) struct Expansion {
     prefix: Option<String>,
     supported_modes: Vec<String>,
     override_configs: Vec<Override>,
 }
 
-#[derive(buildstructor::Builder)]
+#[derive(buildstructor::Builder, Clone)]
 pub(crate) struct Override {
     /// The path to the config value to override.
     config_path: String,
@@ -31,6 +31,7 @@ pub(crate) struct Override {
     value_type: ValueType,
 }
 
+#[derive(Clone)]
 pub(crate) enum ValueType {
     String,
     #[allow(dead_code)]
@@ -68,13 +69,8 @@ impl Override {
 
 impl Expansion {
     pub(crate) fn default() -> Result<Self, ConfigurationError> {
-        // APOLLO_ROUTER_CONFIG_ENV_PREFIX and APOLLO_ROUTER_CONFIG_SUPPORTED_MODES are unsupported and may change in future.
-        // If you need this functionality then raise an issue and we can look to promoting this to official support.
-        let prefix = match env::var("APOLLO_ROUTER_CONFIG_ENV_PREFIX") {
-            Ok(v) => Some(v),
-            Err(VarError::NotPresent) => None,
-            Err(VarError::NotUnicode(_)) => Err(ConfigurationError::InvalidExpansionModeConfig)?,
-        };
+        let prefix = Expansion::prefix_from_env()?;
+
         let supported_expansion_modes = match env::var("APOLLO_ROUTER_CONFIG_SUPPORTED_MODES") {
             Ok(v) => v,
             Err(VarError::NotPresent) => "env,file".to_string(),
@@ -120,6 +116,22 @@ impl Expansion {
             )
             .override_configs(dev_mode_defaults)
             .build())
+    }
+
+    pub(crate) fn default_rhai() -> Result<Self, ConfigurationError> {
+        Ok(Expansion::builder()
+            .and_prefix(Expansion::prefix_from_env()?)
+            .build())
+    }
+
+    fn prefix_from_env() -> Result<Option<String>, ConfigurationError> {
+        // APOLLO_ROUTER_CONFIG_ENV_PREFIX and APOLLO_ROUTER_CONFIG_SUPPORTED_MODES are unsupported and may change in future.
+        // If you need this functionality then raise an issue and we can look to promoting this to official support.
+        match env::var("APOLLO_ROUTER_CONFIG_ENV_PREFIX") {
+            Ok(v) => Ok(Some(v)),
+            Err(VarError::NotPresent) => Ok(None),
+            Err(VarError::NotUnicode(_)) => Err(ConfigurationError::InvalidExpansionModeConfig),
+        }
     }
 }
 
@@ -173,15 +185,7 @@ impl Expansion {
             }
 
             if let Some(key) = key.strip_prefix("env.") {
-                return match self.prefix.as_ref() {
-                    None => env::var(key),
-                    Some(prefix) => env::var(format!("{prefix}_{key}")),
-                }
-                .map(Some)
-                .map_err(|cause| ConfigurationError::CannotExpandVariable {
-                    key: key.to_string(),
-                    cause: format!("{cause}"),
-                });
+                return self.expand_env(key);
             }
             if let Some(key) = key.strip_prefix("file.") {
                 if !std::path::Path::new(key).exists() {
@@ -197,6 +201,18 @@ impl Expansion {
             }
             Err(ConfigurationError::InvalidExpansionModeConfig)
         }
+    }
+
+    pub(crate) fn expand_env(&self, key: &str) -> Result<Option<String>, ConfigurationError> {
+        match self.prefix.as_ref() {
+            None => env::var(key),
+            Some(prefix) => env::var(format!("{prefix}_{key}")),
+        }
+        .map(Some)
+        .map_err(|cause| ConfigurationError::CannotExpandVariable {
+            key: key.to_string(),
+            cause: format!("{cause}"),
+        })
     }
 
     pub(crate) fn expand(
