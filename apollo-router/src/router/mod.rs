@@ -336,11 +336,12 @@ mod tests {
     use serde_json::to_string_pretty;
 
     use super::*;
-    use crate::graphql;
     use crate::graphql::Request;
     use crate::router::Event::UpdateConfiguration;
     use crate::router::Event::UpdateLicense;
     use crate::router::Event::UpdateSchema;
+    use crate::uplink::license_enforcement::LicenseState;
+    use crate::{graphql, Configuration};
 
     fn init_with_server() -> RouterHttpServer {
         let configuration =
