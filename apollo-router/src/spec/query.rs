@@ -75,13 +75,19 @@ fn empty_compiler() -> Arc<Mutex<ApolloCompiler>> {
     Arc::new(Mutex::new(ApolloCompiler::new()))
 }
 
-pub(crate) type SubSelections = HashMap<SubSelection, Query>;
+pub(crate) type SubSelections = HashMap<SubSelectionKey, SubSelectionValue>;
 
-#[derive(Debug, Derivative, Default, Serialize, Deserialize)]
+#[derive(Debug, Derivative, Serialize, Deserialize)]
 #[derivative(PartialEq, Hash, Eq)]
-pub(crate) struct SubSelection {
+pub(crate) struct SubSelectionKey {
     pub(crate) label: Option<String>,
     pub(crate) variables_set: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct SubSelectionValue {
+    pub(crate) selection_set: Vec<Selection>,
+    pub(crate) type_name: String,
 }
 
 impl Query {
@@ -122,13 +128,12 @@ impl Query {
             Some(Value::Object(mut input)) => {
                 if is_deferred {
                     // Get subselection from hashmap
-                    match self.subselections.get(&SubSelection {
+                    match self.subselections.get(&SubSelectionKey {
                         label: response.label.clone(),
                         variables_set,
                     }) {
-                        Some(subselection_query) => {
+                        Some(subselection) => {
                             let mut output = Object::default();
-                            let operation = &subselection_query.operations[0];
                             let mut parameters = FormatParameters {
                                 variables: &variables,
                                 schema,
@@ -150,7 +155,8 @@ impl Query {
 
                             response.data = Some(
                                 match self.apply_root_selection_set(
-                                    operation,
+                                    &subselection.type_name,
+                                    &subselection.selection_set,
                                     &mut parameters,
                                     &mut input,
                                     &mut output,
@@ -191,6 +197,7 @@ impl Query {
                             .collect()
                     };
 
+                    let operation_type_name = schema.root_operation_name(operation.kind);
                     let mut parameters = FormatParameters {
                         variables: &all_variables,
                         schema,
@@ -200,7 +207,8 @@ impl Query {
 
                     response.data = Some(
                         match self.apply_root_selection_set(
-                            operation,
+                            operation_type_name,
+                            &operation.selection_set,
                             &mut parameters,
                             &mut input,
                             &mut output,
@@ -762,15 +770,14 @@ impl Query {
 
     fn apply_root_selection_set<'a: 'b, 'b>(
         &'a self,
-        operation: &'a Operation,
+        root_type_name: &str,
+        selection_set: &'a [Selection],
         parameters: &mut FormatParameters,
         input: &mut Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
-        let operation_type_name = parameters.schema.root_operation_name(operation.kind);
-
-        for selection in &operation.selection_set {
+        for selection in selection_set {
             match selection {
                 Selection::Field {
                     name,
@@ -813,16 +820,13 @@ impl Query {
                         res?
                     } else if name.as_str() == TYPENAME {
                         if !output.contains_key(field_name_str) {
-                            output.insert(
-                                field_name.clone(),
-                                Value::String(operation_type_name.into()),
-                            );
+                            output.insert(field_name.clone(), Value::String(root_type_name.into()));
                         }
                     } else if field_type.is_non_null() {
                         parameters.errors.push(Error {
                             message: format!(
                                 "Cannot return null for non-nullable field {}.{field_name_str}",
-                                operation_type_name
+                                root_type_name
                             ),
                             path: Some(Path::from_response_slice(path)),
                             ..Error::default()
@@ -839,7 +843,7 @@ impl Query {
                     ..
                 } => {
                     // top level objects will not provide a __typename field
-                    if type_condition.as_str() != operation_type_name {
+                    if type_condition.as_str() != root_type_name {
                         return Err(InvalidValue);
                     }
 
@@ -873,10 +877,10 @@ impl Query {
                         let is_apply = {
                             // check if the fragment matches the input type directly, and if not, check if the
                             // input type is a subtype of the fragment's type condition (interface, union)
-                            operation_type_name == fragment.type_condition.as_str()
+                            root_type_name == fragment.type_condition.as_str()
                                 || parameters
                                     .schema
-                                    .is_subtype(&fragment.type_condition, operation_type_name)
+                                    .is_subtype(&fragment.type_condition, root_type_name)
                         };
 
                         if !is_apply {
@@ -889,7 +893,7 @@ impl Query {
                             input,
                             output,
                             path,
-                            &FieldType::new_named(operation_type_name).0,
+                            &FieldType::new_named(root_type_name).0,
                         )?;
                     } else {
                         // the fragment should have been already checked with the schema
@@ -1021,22 +1025,19 @@ impl Query {
         path: &Path,
         variables_set: i32,
     ) -> bool {
-        let operation = match self.subselections.get(&SubSelection {
+        let selection_set = match self.subselections.get(&SubSelectionKey {
             label: label.clone(),
             variables_set,
         }) {
-            Some(subselection_query) => &subselection_query.operations[0],
+            Some(subselection) => &subselection.selection_set,
             None => match self.operation(operation_name) {
                 None => return false,
-                Some(op) => op,
+                Some(op) => &op.selection_set,
             },
         };
-
-        let res = operation
-            .selection_set
+        selection_set
             .iter()
-            .any(|selection| selection.contains_error_path(&path.0, &self.fragments));
-        res
+            .any(|selection| selection.contains_error_path(&path.0, &self.fragments))
     }
 
     pub(crate) fn defer_variables_set(
@@ -1071,7 +1072,7 @@ struct FormatParameters<'a> {
 pub(crate) struct Operation {
     pub(crate) name: Option<String>,
     kind: OperationKind,
-    selection_set: Vec<Selection>,
+    pub(crate) selection_set: Vec<Selection>,
     variables: HashMap<ByteString, Variable>,
 }
 
