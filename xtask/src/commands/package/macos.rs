@@ -24,10 +24,6 @@ pub struct PackageMacos {
     #[clap(long)]
     cert_bundle_password: String,
 
-    /// Primary bundle ID.
-    #[clap(long)]
-    primary_bundle_id: String,
-
     /// Apple team ID.
     #[clap(long)]
     apple_team_id: String,
