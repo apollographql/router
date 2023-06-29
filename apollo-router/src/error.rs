@@ -499,13 +499,34 @@ pub(crate) enum SchemaError {
     UrlParse(String, http::uri::InvalidUri),
     /// Could not find an URL for subgraph {0}
     MissingSubgraphUrl(String),
+    /// GraphQL parser error(s).
+    Parse(ParseErrors),
     /// GraphQL parser or validation error(s).
-    Parse(ValidationErrors),
+    Validate(ValidationErrors),
     /// Api error(s): {0}
     Api(String),
 }
 
-/// Collection of schema parsing errors.
+/// Collection of schema validation errors.
+#[derive(Clone, Debug)]
+pub(crate) struct ParseErrors {
+    pub(crate) errors: Vec<apollo_parser::Error>,
+}
+
+impl std::fmt::Display for ParseErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut errors = self.errors.iter();
+        if let Some(error) = errors.next() {
+            write!(f, "{}", error.message())?;
+        }
+        for error in errors {
+            write!(f, "\n{}", error.message())?;
+        }
+        Ok(())
+    }
+}
+
+/// Collection of schema validation errors.
 #[derive(Clone, Debug)]
 pub(crate) struct ValidationErrors {
     pub(crate) errors: Vec<apollo_compiler::ApolloDiagnostic>,

@@ -15,6 +15,7 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use crate::configuration::GraphQLValidation;
+use crate::error::ParseErrors;
 use crate::error::SchemaError;
 use crate::error::ValidationErrors;
 use crate::query_planner::OperationKind;
@@ -68,6 +69,12 @@ impl Schema {
         let recursion_limit = ast.recursion_limit();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
+        let mut parse_errors = ast.errors().peekable();
+        if parse_errors.peek().is_some() {
+            let errors = parse_errors.cloned().collect::<Vec<_>>();
+            return Err(SchemaError::Parse(ParseErrors { errors }));
+        }
+
         let diagnostics =
             if configuration.experimental_graphql_validation == GraphQLValidation::Legacy {
                 vec![]
@@ -79,19 +86,6 @@ impl Schema {
                     .collect::<Vec<_>>()
             };
 
-        // Only bail out on parser errors for now: validation errors will be checked with the query
-        // planner result
-        if diagnostics
-            .iter()
-            .any(|err| matches!(*err.data, DiagnosticData::SyntaxError { .. }))
-        {
-            let errors = ValidationErrors {
-                errors: diagnostics,
-            };
-            errors.print();
-            return Err(SchemaError::Parse(errors));
-        }
-
         if !diagnostics.is_empty() {
             let errors = ValidationErrors {
                 errors: diagnostics.clone(),
@@ -101,7 +95,7 @@ impl Schema {
             // Only error out if new validation is used: with `Both`, we take the legacy
             // validation as authoritative and only use the new result for comparison
             if configuration.experimental_graphql_validation == GraphQLValidation::New {
-                return Err(SchemaError::Parse(errors));
+                return Err(SchemaError::Validate(errors));
             }
         }
 
