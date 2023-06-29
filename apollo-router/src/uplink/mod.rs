@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use futures::Stream;
 use graphql_client::QueryBody;
+use once_cell::sync::Lazy;
 use thiserror::Error;
 use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
@@ -322,8 +323,7 @@ async fn http_request<Query>(
 where
     Query: graphql_client::GraphQLQuery,
 {
-    let client = reqwest::Client::builder().timeout(timeout).build()?;
-    let res = client.post(url).json(request_body).send().await?;
+    let res = UPLINK_CLIENT.post(url).json(request_body).send().await?;
     tracing::debug!("uplink response {:?}", res);
     let response_body: graphql_client::Response<Query::ResponseData> = res.json().await?;
     Ok(response_body)
