@@ -23,87 +23,19 @@ use futures::channel::mpsc::SendError;
 use futures::channel::oneshot;
 use futures::prelude::*;
 use futures::FutureExt;
-use http_body::Body as _;
-use hyper::Body;
 #[cfg(test)]
 use tokio::sync::Notify;
 use tokio::sync::RwLock;
 use tokio::task::spawn;
-use tower::BoxError;
-use tower::ServiceExt;
 use tracing_futures::WithSubscriber;
 
-use crate::axum_factory::make_axum_router;
 use crate::axum_factory::AxumHttpServerFactory;
-use crate::axum_factory::ListenAddrAndRouter;
-use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::orbiter::OrbiterRouterSuperServiceFactory;
-use crate::plugin::DynPlugin;
-use crate::router_factory::RouterFactory;
-use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
-use crate::services::router;
 use crate::state_machine::ListenAddresses;
 use crate::state_machine::StateMachine;
-use crate::uplink::license_enforcement::LicenseState;
 
-// For now this is unused:
-// TODO: Check with simon once the refactor is complete
-#[allow(unused)]
-// Later we might add a public API for this (probably a builder similar to `test_harness.rs`),
-// see https://github.com/apollographql/router/issues/1496.
-// In the meantime keeping this function helps make sure it still compiles.
-async fn make_router_service(
-    schema: &str,
-    configuration: Arc<Configuration>,
-    extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
-    license: LicenseState,
-) -> Result<router::BoxCloneService, BoxError> {
-    let service_factory = YamlRouterFactory
-        .create(
-            configuration.clone(),
-            schema.to_string(),
-            None,
-            Some(extra_plugins),
-        )
-        .await?;
-    let web_endpoints = service_factory.web_endpoints();
-    let live = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let routers = make_axum_router(
-        live,
-        ready,
-        service_factory,
-        &configuration,
-        web_endpoints,
-        license,
-    )?;
-    let ListenAddrAndRouter(_listener, router) = routers.main;
-
-    Ok(router
-        .map_request(|req: router::Request| req.router_request)
-        .map_err(|error| match error {})
-        .map_response(|res| {
-            res.map(|body| {
-                // Axum makes this `body` have type:
-                // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
-                let mut body = Box::pin(body);
-                // We make a stream based on its `poll_data` method
-                // in order to create a `hyper::Body`.
-                Body::wrap_stream(stream::poll_fn(move |ctx| body.as_mut().poll_data(ctx)))
-                // … but we ignore the `poll_trailers` method:
-                // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
-                // Apparently HTTP/2 trailers are like headers, except after the response body.
-                // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
-                // so ignoring `poll_trailers` is fine.
-                // If we want to use trailers, we may need remove this convertion to `hyper::Body`
-                // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
-            })
-            .into()
-        })
-        .boxed_clone())
-}
 /// The entry point for running the Router’s HTTP server.
 ///
 /// # Examples
