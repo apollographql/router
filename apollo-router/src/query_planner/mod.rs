@@ -14,9 +14,12 @@ pub(crate) mod fetch;
 mod plan;
 pub(crate) mod rewrites;
 mod selection;
+pub(crate) mod subscription;
 pub use plan::*;
+mod labeler;
 
 pub(crate) const FETCH_SPAN_NAME: &str = "fetch";
+pub(crate) const SUBSCRIBE_SPAN_NAME: &str = "subscribe";
 pub(crate) const FLATTEN_SPAN_NAME: &str = "flatten";
 pub(crate) const SEQUENCE_SPAN_NAME: &str = "sequence";
 pub(crate) const PARALLEL_SPAN_NAME: &str = "parallel";

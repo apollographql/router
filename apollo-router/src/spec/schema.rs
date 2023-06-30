@@ -80,8 +80,8 @@ impl Schema {
         }
 
         fn as_string(value: &hir::Value) -> Option<&String> {
-            if let hir::Value::String(string) = value {
-                Some(string)
+            if let hir::Value::String { value, .. } = value {
+                Some(value)
             } else {
                 None
             }
@@ -143,6 +143,11 @@ impl Schema {
     /// Return an iterator over subgraphs that yields the subgraph name and its URL.
     pub(crate) fn subgraphs(&self) -> impl Iterator<Item = (&String, &Uri)> {
         self.subgraphs.iter()
+    }
+
+    /// Return the subgraph URI given the service name
+    pub(crate) fn subgraph_url(&self, service_name: &str) -> Option<&Uri> {
+        self.subgraphs.get(service_name)
     }
 
     pub(crate) fn api_schema(&self) -> &Schema {

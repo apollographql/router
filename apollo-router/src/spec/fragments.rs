@@ -11,7 +11,7 @@ use crate::spec::Schema;
 use crate::spec::Selection;
 use crate::spec::SpecError;
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Fragments {
     pub(crate) map: HashMap<String, Fragment>,
 }

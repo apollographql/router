@@ -762,6 +762,8 @@ mod test {
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,
             context: ctx,
+            subscription_stream: None,
+            connection_closed_signal: None,
         }
     }
 
