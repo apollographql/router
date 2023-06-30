@@ -210,14 +210,14 @@ impl ExecutionService {
         }
 
         let has_next = response.has_next.unwrap_or(true);
-        let variables_set = query.defer_variables_set(operation_name.as_deref(), &variables);
+        let variables_set = query.defer_variables_set(operation_name, variables);
 
         tracing::debug_span!("format_response").in_scope(|| {
             let mut paths = Vec::new();
             if let Some(filtered_query) = query.filtered_query.as_ref() {
                 paths = filtered_query.format_response(
                     &mut response,
-                    operation_name.as_deref(),
+                    operation_name,
                     is_deferred,
                     variables.clone(),
                     schema.api_schema(),
@@ -229,7 +229,7 @@ impl ExecutionService {
                 query
                     .format_response(
                         &mut response,
-                        operation_name.as_deref(),
+                        operation_name,
                         is_deferred,
                         variables.clone(),
                         schema.api_schema(),
@@ -249,7 +249,7 @@ impl ExecutionService {
                 response.errors.retain(|error| match &error.path {
                     None => true,
                     Some(error_path) => query.contains_error_path(
-                        operation_name.as_deref(),
+                        operation_name,
                         &response.label,
                         error_path,
                         variables_set,
@@ -291,7 +291,7 @@ impl ExecutionService {
                 // been returned (at least not in that particular response). And while this is probably only
                 // true in fairly contrived examples, this is not working as intended by the query planner,
                 // so it is dodgy and could create bigger problems in the future.
-                response_data.select_values_and_paths(&schema, response_path, |path, value| {
+                response_data.select_values_and_paths(schema, response_path, |path, value| {
                     // if the deferred path points to an array, split it into multiple subresponses
                     // because the root must be an object
                     if let Value::Array(array) = value {
@@ -327,7 +327,6 @@ impl ExecutionService {
         sub_responses: Vec<(Path, Value)>,
     ) -> Option<Response> {
         let query = query.clone();
-        let operation_name = operation_name.clone();
 
         let incremental = sub_responses
             .into_iter()
