@@ -184,10 +184,16 @@ impl ExecutionService {
         mut response: Response,
     ) -> Option<Response> {
         // responses that would fall under a path that was previously nullified are not sent
-        if nullified_paths.iter().any(|path| match &response.path {
-            None => false,
-            Some(response_path) => response_path.starts_with(path),
-        }) {
+        if response
+            .path
+            .as_ref()
+            .map(|response_path| {
+                nullified_paths
+                    .iter()
+                    .any(|path| response_path.starts_with(path))
+            })
+            .unwrap_or(false)
+        {
             if response.has_next == Some(false) {
                 return Some(Response::builder().has_next(false).build());
             } else {
@@ -300,108 +306,118 @@ impl ExecutionService {
                     }
                 });
 
-                let query = query.clone();
-                let operation_name = operation_name.clone();
-
-                let incremental = sub_responses
-                    .into_iter()
-                    .filter_map(move |(path, data)| {
-                        // filter errors that match the path of this incremental response
-                        let errors = response
-                            .errors
-                            .iter()
-                            .filter(|error| match &error.path {
-                                None => false,
-                                Some(error_path) => {
-                                    query.contains_error_path(
-                                        operation_name.as_deref(),
-                                        &response.label,
-                                        error_path,
-                                        variables_set,
-                                    ) && error_path.starts_with(&path)
-                                }
-                            })
-                            .cloned()
-                            .collect::<Vec<_>>();
-
-                        if response
-                            .label
-                            .as_ref()
-                            .map(|label| query.added_labels.contains(label))
-                            .unwrap_or(false)
-                        {
-                            response.label = None;
-                        }
-
-                        let extensions: Object = response
-                            .extensions
-                            .iter()
-                            .map(|(key, value)| {
-                                if key.as_str() == "valueCompletion" {
-                                    let value = match value.as_array() {
-                                        None => Value::Null,
-                                        Some(v) => Value::Array(
-                                            v.iter()
-                                                .filter(|ext| {
-                                                    match ext
-                                                        .as_object()
-                                                        .as_ref()
-                                                        .and_then(|ext| ext.get("path"))
-                                                        .and_then(|v| {
-                                                            let p: Option<Path> =
-                                                                serde_json_bytes::from_value(
-                                                                    v.clone(),
-                                                                )
-                                                                .ok();
-                                                            p
-                                                        }) {
-                                                        None => false,
-                                                        Some(ext_path) => {
-                                                            ext_path.starts_with(&path)
-                                                        }
-                                                    }
-                                                })
-                                                .cloned()
-                                                .collect(),
-                                        ),
-                                    };
-
-                                    (key.clone(), value)
-                                } else {
-                                    (key.clone(), value.clone())
-                                }
-                            })
-                            .collect();
-
-                        // an empty response should not be sent
-                        // still, if there's an error or extension to show, we should
-                        // send it
-                        if !data.is_null() || !errors.is_empty() || !extensions.is_empty() {
-                            Some(
-                                IncrementalResponse::builder()
-                                    .and_label(response.label.clone())
-                                    .data(data)
-                                    .path(path)
-                                    .errors(errors)
-                                    .extensions(extensions)
-                                    .build(),
-                            )
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                Some(
-                    Response::builder()
-                        .has_next(has_next)
-                        .incremental(incremental)
-                        .build(),
+                Self::split_incremental_response(
+                    query,
+                    operation_name,
+                    has_next,
+                    variables_set,
+                    response,
+                    sub_responses,
                 )
             }
         }
     }
+
+    fn split_incremental_response(
+        query: &Arc<Query>,
+        operation_name: Option<&str>,
+        has_next: bool,
+        variables_set: i32,
+        mut response: Response,
+        sub_responses: Vec<(Path, Value)>,
+    ) -> Option<Response> {
+        let query = query.clone();
+        let operation_name = operation_name.clone();
+
+        let incremental = sub_responses
+            .into_iter()
+            .filter_map(move |(path, data)| {
+                // filter errors that match the path of this incremental response
+                let errors = response
+                    .errors
+                    .iter()
+                    .filter(|error| match &error.path {
+                        None => false,
+                        Some(error_path) => {
+                            query.contains_error_path(
+                                operation_name.as_deref(),
+                                &response.label,
+                                error_path,
+                                variables_set,
+                            ) && error_path.starts_with(&path)
+                        }
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+
+                if response
+                    .label
+                    .as_ref()
+                    .map(|label| query.added_labels.contains(label))
+                    .unwrap_or(false)
+                {
+                    response.label = None;
+                }
+
+                let extensions: Object = response
+                    .extensions
+                    .iter()
+                    .map(|(key, value)| {
+                        if key.as_str() == "valueCompletion" {
+                            let value = match value.as_array() {
+                                None => Value::Null,
+                                Some(v) => Value::Array(
+                                    v.iter()
+                                        .filter(|ext| {
+                                            ext.as_object()
+                                                .and_then(|ext| ext.get("path"))
+                                                .and_then(|v| {
+                                                    serde_json_bytes::from_value::<Path>(v.clone())
+                                                        .ok()
+                                                })
+                                                .map(|ext_path| ext_path.starts_with(&path))
+                                                .unwrap_or(false)
+                                        })
+                                        .cloned()
+                                        .collect(),
+                                ),
+                            };
+
+                            (key.clone(), value)
+                        } else {
+                            (key.clone(), value.clone())
+                        }
+                    })
+                    .collect();
+
+                // an empty response should not be sent
+                // still, if there's an error or extension to show, we should
+                // send it
+                if !data.is_null() || !errors.is_empty() || !extensions.is_empty() {
+                    Some(
+                        IncrementalResponse::builder()
+                            .and_label(response.label.clone())
+                            .data(data)
+                            .path(path)
+                            .errors(errors)
+                            .extensions(extensions)
+                            .build(),
+                    )
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Some(
+            Response::builder()
+                .has_next(has_next)
+                .incremental(incremental)
+                .build(),
+        )
+    }
 }
+
 #[derive(Clone, Copy)]
 enum StreamMode {
     Defer,
