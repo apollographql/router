@@ -31,6 +31,7 @@ use super::subgraph;
 use super::supergraph;
 use super::Rhai;
 use super::ServiceStep;
+use crate::configuration::expansion;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::http_ext;
@@ -40,6 +41,8 @@ use crate::Context;
 
 const CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE: &str =
     "cannot access headers on a deferred response";
+
+const CANNOT_GET_ENVIRONMENT_VARIABLE: &str = "environment variable not found";
 
 pub(super) trait OptionDance<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R;
@@ -87,6 +90,20 @@ mod router_base64 {
     #[rhai_fn(pure)]
     pub(crate) fn encode(input: &mut ImmutableString) -> String {
         base64::encode(input.as_bytes())
+    }
+}
+
+#[export_module]
+mod router_expansion {
+    pub(crate) type Expansion = expansion::Expansion;
+
+    #[rhai_fn(name = "get", return_raw)]
+    pub(crate) fn expansion_env(key: &str) -> Result<String, Box<EvalAltResult>> {
+        let expander = Expansion::default_rhai().map_err(|e| e.to_string())?;
+        expander
+            .expand_env(key)
+            .map_err(|e| e.to_string())?
+            .ok_or(CANNOT_GET_ENVIRONMENT_VARIABLE.into())
     }
 }
 
@@ -1093,6 +1110,7 @@ impl Rhai {
         combine_with_exported_module!(&mut module, "context", router_context);
 
         let base64_module = exported_module!(router_base64);
+        let expansion_module = exported_module!(router_expansion);
 
         // Share main so we can move copies into each closure as required for logging
         let shared_main = Arc::new(main.display().to_string());
@@ -1115,6 +1133,9 @@ impl Rhai {
             .register_global_module(module.into())
             // Register our base64 module (not global)
             .register_static_module("base64", base64_module.into())
+            // Register our expansion module (not global)
+            // Hide the fact that it is an expansion module by calling it "env"
+            .register_static_module("env", expansion_module.into())
             // Register HeaderMap as an iterator so we can loop over contents
             .register_iterator::<HeaderMap>()
             // Register a series of logging functions
