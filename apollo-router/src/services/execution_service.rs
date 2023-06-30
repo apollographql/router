@@ -1,7 +1,6 @@
 //! Implements the Execution phase of the request lifecycle.
 
 use std::future::ready;
-use std::future::Ready;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Context;
@@ -157,7 +156,7 @@ impl ExecutionService {
 
         let stream = stream
             .filter_map(move |response: Response| {
-                Self::process_graphql_response(
+                ready(Self::process_graphql_response(
                     &query,
                     operation_name.as_deref(),
                     &variables,
@@ -165,7 +164,7 @@ impl ExecutionService {
                     &schema,
                     &mut nullified_paths,
                     response,
-                )
+                ))
             })
             .boxed();
 
@@ -183,16 +182,16 @@ impl ExecutionService {
         schema: &Arc<Schema>,
         nullified_paths: &mut Vec<Path>,
         mut response: Response,
-    ) -> Ready<Option<Response>> {
+    ) -> Option<Response> {
         // responses that would fall under a path that was previously nullified are not sent
         if nullified_paths.iter().any(|path| match &response.path {
             None => false,
             Some(response_path) => response_path.starts_with(path),
         }) {
             if response.has_next == Some(false) {
-                return ready(Some(Response::builder().has_next(false).build()));
+                return Some(Response::builder().has_next(false).build());
             } else {
-                return ready(None);
+                return None;
             }
         }
 
@@ -201,7 +200,7 @@ impl ExecutionService {
             && response.data.is_none()
             && response.errors.is_empty()
         {
-            return ready(response.into());
+            return response.into();
         }
 
         let has_next = response.has_next.unwrap_or(true);
@@ -259,7 +258,7 @@ impl ExecutionService {
                 {
                     response.label = None;
                 }
-                ready(Some(response))
+                Some(response)
             }
             // if the deferred response specified a path, we must extract the
             // values matched by that path and create a separate response for
@@ -393,12 +392,12 @@ impl ExecutionService {
                     })
                     .collect();
 
-                ready(Some(
+                Some(
                     Response::builder()
                         .has_next(has_next)
                         .incremental(incremental)
                         .build(),
-                ))
+                )
             }
         }
     }
