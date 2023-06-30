@@ -264,7 +264,7 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
 28. Update the release notes on the now-published [GitHub Releases](https://github.com/apollographql/router/releases) (this needs to be moved to CI, but requires `this_release.md` which we created earlier):
 
     ```
-    gh release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" -F ./this_release.md
+    gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" -F ./this_release.md
     ```
 
 29. Publish the Crate from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
