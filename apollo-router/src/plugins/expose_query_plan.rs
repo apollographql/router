@@ -227,7 +227,7 @@ mod tests {
 
         assert_eq!(
             serde_json::to_string(&response).unwrap(),
-            serde_json::to_string(&*body).unwrap()
+            serde_json::to_string(body).unwrap()
         );
     }
 
