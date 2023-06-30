@@ -70,7 +70,7 @@ executors:
 parameters:
   toolchain_version:
     type: string
-    default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
+    default: '{{ checksum ".circleci/config.yml" }}-v2-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
   xtask_version:
     type: string
     default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}'
@@ -91,7 +91,7 @@ parameters:
 # forks of the project to run their own tests on their own CircleCI deployments with no
 # additional configuration.
 common_job_environment: &common_job_environment
-  CARGO_NET_GIT_FETCH_WITH_CLI: true
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   RUST_BACKTRACE: full
   CARGO_INCREMENTAL: 0
 commands:
@@ -107,7 +107,7 @@ commands:
       - restore_cache:
           keys:
             - "<< pipeline.parameters.toolchain_version >>"
-      - install_debian_packages:
+      - install_packages:
           platform: << parameters.platform >>
       - install_protoc:
           platform: << parameters.platform >>
@@ -205,7 +205,7 @@ commands:
             echo "${CIRCLE_PROJECT_REPONAME}-${COMMON_ANCESTOR_REF}" > ~/.merge_version
 
   # Linux specific step to install packages that are needed
-  install_debian_packages:
+  install_packages:
     parameters:
       platform:
         type: executor
@@ -222,11 +222,10 @@ commands:
                 name: Update and install dependencies
                 command: |
                   if [[ ! -d "$HOME/.deb" ]]; then
-                    mkdir ~/.deb
+                    mkdir $HOME/.deb
                     sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install libssl-dev libdw-dev cmake
                   fi
-                  sudo dpkg -i ~/.deb/*.deb
-
+                  sudo dpkg -i $HOME/.deb/*.deb
   install_protoc:
     parameters:
       platform:
@@ -507,7 +506,6 @@ jobs:
       RELEASE_BIN: router
       APPLE_TEAM_ID: "YQK948L752"
       APPLE_USERNAME: "opensource@apollographql.com"
-      MACOS_PRIMARY_BUNDLE_ID: com.apollographql.router
     steps:
       - checkout
       - setup_environment:
@@ -536,7 +534,6 @@ jobs:
                   --cert-bundle-password ${MACOS_CERT_BUNDLE_PASSWORD}
                   --keychain-password ${MACOS_KEYCHAIN_PASSWORD}
                   --notarization-password ${MACOS_NOTARIZATION_PASSWORD}
-                  --primary-bundle-id ${MACOS_PRIMARY_BUNDLE_ID}
                   --output artifacts/
       - when:
           condition:

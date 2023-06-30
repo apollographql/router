@@ -30,6 +30,10 @@ type Mutation {
   createReview(body: String, id: ID!, upc: ID!): Review @join__field(graph: REVIEWS)
 }
 
+type Subscription {
+  userWasCreated: User @join__field(graph: ACCOUNTS)
+}
+
 type Product
   @join__owner(graph: PRODUCTS)
   @join__type(graph: PRODUCTS, key: "upc")

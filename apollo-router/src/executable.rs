@@ -4,6 +4,7 @@ use std::env;
 use std::ffi::OsStr;
 use std::fmt;
 use std::fmt::Debug;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -230,6 +231,10 @@ pub struct Opt {
     /// The timeout for an http call to Apollo uplink. Defaults to 30s.
     #[clap(long, default_value = "30s", value_parser = humantime::parse_duration, env)]
     apollo_uplink_timeout: Duration,
+
+    /// The listen address for the router. Overrides `supergraph.listen` in router.yaml.
+    #[clap(long = "listen", env = "APOLLO_ROUTER_LISTEN_ADDRESS")]
+    listen_address: Option<SocketAddr>,
 
     /// Display version and exit.
     #[clap(action = ArgAction::SetTrue, long, short = 'V')]
@@ -519,7 +524,7 @@ impl Executable {
       $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 
       For details, see the Apollo docs:
-      https://www.apollographql.com/docs/router/managed-federation/setup
+      https://www.apollographql.com/docs/federation/managed-federation/setup
 
 🔬 TESTING THINGS OUT?
 
@@ -577,6 +582,7 @@ impl Executable {
             .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
             .start();
+
         if let Err(err) = router.await {
             tracing::error!("{}", err);
             return Err(err.into());
