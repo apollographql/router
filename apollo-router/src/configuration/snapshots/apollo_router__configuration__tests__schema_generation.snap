@@ -1116,6 +1116,32 @@ expression: "&schema"
               "type": "boolean"
             }
           }
+        },
+        "test.always_fails_to_start": {
+          "description": "Configuration for the test plugin",
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "description": "The name of the test",
+              "type": "string"
+            }
+          }
+        },
+        "test.always_starts_and_stops": {
+          "description": "Configuration for the test plugin",
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "description": "The name of the test",
+              "type": "string"
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -4774,32 +4800,6 @@ expression: "&schema"
         }
       },
       "additionalProperties": false
-    },
-    "test.always_fails_to_start": {
-      "description": "Configuration for the test plugin",
-      "type": "object",
-      "required": [
-        "name"
-      ],
-      "properties": {
-        "name": {
-          "description": "The name of the test",
-          "type": "string"
-        }
-      }
-    },
-    "test.always_starts_and_stops": {
-      "description": "Configuration for the test plugin",
-      "type": "object",
-      "required": [
-        "name"
-      ],
-      "properties": {
-        "name": {
-          "description": "The name of the test",
-          "type": "string"
-        }
-      }
     },
     "tls": {
       "description": "TLS related configuration options.",

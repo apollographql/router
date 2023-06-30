@@ -206,7 +206,6 @@ mod apq_tests {
     use tower::Service;
 
     use super::*;
-    use crate::configuration::Apq;
     use crate::error::Error;
     use crate::graphql::Response;
     use crate::services::router::ClientRequestAccepts;
@@ -458,10 +457,7 @@ mod apq_tests {
         };
 
         let mut config = Configuration::default();
-        config.apq = Apq {
-            enabled: false,
-            ..Default::default()
-        };
+        config.apq.enabled = false;
 
         let mut router_service = from_supergraph_mock_callback_and_configuration(
             move |req| {
