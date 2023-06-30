@@ -340,7 +340,7 @@ impl ExecutionService {
                         None => false,
                         Some(error_path) => {
                             query.contains_error_path(
-                                operation_name.as_deref(),
+                                operation_name,
                                 &response.label,
                                 error_path,
                                 variables_set,
