@@ -109,6 +109,7 @@ lazy_static = "1.4.0"
 libc = "0.2.147"
 linkme = "0.3.10"
 lru = "0.8.1"
+maplit = "1.0.2"
 mediatype = "0.19.14"
 mockall = "0.11.4"
 miette = { version = "5.9.0", features = ["fancy"] }
@@ -214,6 +215,7 @@ url = { version = "2.4.0", features = ["serde"] }
 urlencoding = "2.1.2"
 uuid = { version = "1.4.0", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
+wiremock = "0.5.19"
 wsl = "0.1.0"
 tokio-tungstenite = { version = "0.18.0", features = ["rustls-tls-native-roots"] }
 tokio-rustls = "0.23.4"

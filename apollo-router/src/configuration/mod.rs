@@ -2,6 +2,7 @@
 pub(crate) mod cors;
 pub(crate) mod expansion;
 mod experimental;
+mod persisted_query;
 mod schema;
 pub(crate) mod subgraph;
 #[cfg(test)]
@@ -25,6 +26,8 @@ use derivative::Derivative;
 use displaydoc::Display;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
+pub(crate) use persisted_query::PersistedQueries;
+pub(crate) use persisted_query::PersistedQueriesSafelist;
 use regex::Regex;
 use rustls::Certificate;
 use rustls::PrivateKey;
@@ -61,6 +64,7 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 #[cfg(not(test))]
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
+use crate::uplink::UplinkConfig;
 use crate::ApolloRouterError;
 
 // TODO: Talk it through with the teams
@@ -145,6 +149,12 @@ pub struct Configuration {
     pub(crate) apq: Apq,
 
     // NOTE: when renaming this to move out of preview, also update paths
+    // in `uplink/license.rs`.
+    /// Configures managed persisted queries
+    #[serde(default)]
+    pub preview_persisted_queries: PersistedQueries,
+
+    // NOTE: when renaming this to move out of preview, also update paths
     // in `configuration/expansion.rs` and `uplink/license.rs`.
     /// Operation limits
     #[serde(default)]
@@ -163,6 +173,10 @@ pub struct Configuration {
     #[serde(default)]
     #[serde(flatten)]
     pub(crate) apollo_plugins: ApolloPlugins,
+
+    /// Uplink configuration.
+    #[serde(skip)]
+    pub uplink: Option<UplinkConfig>,
 
     #[serde(default, skip_serializing, skip_deserializing)]
     pub(crate) notify: Notify<String, graphql::Response>,
@@ -188,8 +202,11 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apollo_plugins: ApolloPlugins,
             tls: Tls,
             apq: Apq,
+            preview_persisted_queries: PersistedQueries,
             preview_operation_limits: OperationLimits,
             experimental_chaos: Chaos,
+            #[serde(skip)]
+            uplink: UplinkConfig,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -203,8 +220,10 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .apollo_plugins(ad_hoc.apollo_plugins.plugins)
             .tls(ad_hoc.tls)
             .apq(ad_hoc.apq)
+            .persisted_query(ad_hoc.preview_persisted_queries)
             .operation_limits(ad_hoc.preview_operation_limits)
             .chaos(ad_hoc.experimental_chaos)
+            .uplink(ad_hoc.uplink)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -236,8 +255,10 @@ impl Configuration {
         tls: Option<Tls>,
         notify: Option<Notify<String, graphql::Response>>,
         apq: Option<Apq>,
+        persisted_query: Option<PersistedQueries>,
         operation_limits: Option<OperationLimits>,
         chaos: Option<Chaos>,
+        uplink: Option<UplinkConfig>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -260,6 +281,7 @@ impl Configuration {
             homepage: homepage.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
+            preview_persisted_queries: persisted_query.unwrap_or_default(),
             preview_operation_limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
             plugins: UserPlugins {
@@ -269,6 +291,7 @@ impl Configuration {
                 plugins: apollo_plugins,
             },
             tls: tls.unwrap_or_default(),
+            uplink,
             #[cfg(test)]
             notify: notify.unwrap_or_default(),
             #[cfg(not(test))]
@@ -302,8 +325,10 @@ impl Configuration {
         tls: Option<Tls>,
         notify: Option<Notify<String, graphql::Response>>,
         apq: Option<Apq>,
+        persisted_query: Option<PersistedQueries>,
         operation_limits: Option<OperationLimits>,
         chaos: Option<Chaos>,
+        uplink: Option<UplinkConfig>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -323,6 +348,8 @@ impl Configuration {
             tls: tls.unwrap_or_default(),
             notify: notify.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
+            preview_persisted_queries: persisted_query.unwrap_or_default(),
+            uplink,
         };
 
         configuration.validate()
@@ -681,6 +708,18 @@ pub(crate) struct Apq {
 
     #[serde(default)]
     pub(crate) subgraph: SubgraphConfiguration<SubgraphApq>,
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Apq {
+    #[builder]
+    pub(crate) fn fake_new(enabled: Option<bool>) -> Self {
+        Self {
+            enabled: enabled.unwrap_or_else(default_apq),
+            ..Default::default()
+        }
+    }
 }
 
 /// Subgraph level Automatic Persisted Queries (APQ) configuration
