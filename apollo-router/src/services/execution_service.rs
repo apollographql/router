@@ -1,6 +1,7 @@
 //! Implements the Execution phase of the request lifecycle.
 
 use std::future::ready;
+use std::future::Ready;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Context;
@@ -40,6 +41,7 @@ use crate::query_planner::subscription::SubscriptionHandle;
 use crate::services::execution;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
+use crate::spec::Query;
 use crate::spec::Schema;
 
 /// [`Service`] for query execution.
@@ -154,209 +156,16 @@ impl ExecutionService {
         let mut nullified_paths: Vec<Path> = vec![];
 
         let stream = stream
-            .filter_map(move |mut response: Response| {
-                // responses that would fall under a path that was previously nullified are not sent
-                if nullified_paths.iter().any(|path| match &response.path {
-                    None => false,
-                    Some(response_path) => response_path.starts_with(path),
-                }) {
-                    if response.has_next == Some(false) {
-                        return ready(Some(Response::builder().has_next(false).build()));
-                    } else {
-                        return ready(None);
-                    }
-                }
-
-                // Empty response (could happen when a subscription stream is closed from the subgraph)
-                if response.subscribed == Some(false) && response.data.is_none() && response.errors.is_empty() {
-                    return ready(response.into());
-                }
-
-                let has_next = response.has_next.unwrap_or(true);
-                let variables_set = query.defer_variables_set(operation_name.as_deref(), &variables);
-
-                tracing::debug_span!("format_response").in_scope(|| {
-                    let mut paths = Vec::new();
-                    if let Some(filtered_query) = query.filtered_query.as_ref() {
-                        paths = filtered_query.format_response(
-                            &mut response,
-                            operation_name.as_deref(),
-                            is_deferred,
-                            variables.clone(),
-                            schema.api_schema(),
-                            variables_set
-                        );
-                    }
-
-                    paths.extend(query.format_response(
-                        &mut response,
-                        operation_name.as_deref(),
-                        is_deferred,
-                        variables.clone(),
-                        schema.api_schema(), variables_set
-                    ).into_iter());
-                    nullified_paths.extend(paths.into_iter());
-                });
-
-                match (response.path.as_ref(), response.data.as_ref()) {
-                    (None, _) | (_, None) => {
-                        if is_deferred {
-                            response.has_next = Some(has_next);
-                        }
-
-                        response.errors.retain(|error| match &error.path {
-                                None => true,
-                                Some(error_path) => query.contains_error_path(
-                                    operation_name.as_deref(),
-                                    &response.label,
-                                    error_path,
-                                    variables_set),
-                            });
-
-                            if response.label.as_ref().map(|label| query.added_labels.contains(label)).unwrap_or(false) {
-                                response.label = None;
-                            }
-                        ready(Some(response))
-                    }
-                    // if the deferred response specified a path, we must extract the
-                    // values matched by that path and create a separate response for
-                    // each of them.
-                    // While { "data": { "a": { "b": 1 } } } and { "data": { "b": 1 }, "path: ["a"] }
-                    // would merge in the same ways, some clients will generate code
-                    // that checks the specific type of the deferred response at that
-                    // path, instead of starting from the root object, so to support
-                    // this, we extract the value at that path.
-                    // In particular, that means that a deferred fragment in an object
-                    // under an array would generate one response par array element
-                    (Some(response_path), Some(response_data)) => {
-                        let mut sub_responses = Vec::new();
-                        // TODO: this selection at `response_path` below is applied on the response data _after_
-                        // is has been post-processed with the user query (in the "format_response" span above).
-                        // It is not quite right however, because `response_path` (sent by the query planner) 
-                        // may contain `PathElement::Fragment`, whose goal is to filter out only those entities that
-                        // match the fragment type. However, because the data is been filtered, `response_data` will
-                        // not contain the `__typename` value for entities (even though those are in the unfiltered
-                        // data), at least unless the user query selects them manually. The result being that those
-                        // `PathElement::Fragment` in the path will be essentially ignored (we'll match any object
-                        // for which we don't have a `__typename` as we would otherwise miss the data that we need
-                        // to return). I believe this might make it possible to return some data that should not have
-                        // been returned (at least not in that particular response). And while this is probably only
-                        // true in fairly contrived examples, this is not working as intended by the query planner,
-                        // so it is dodgy and could create bigger problems in the future.
-                        response_data.select_values_and_paths(&schema, response_path, |path, value| {
-                            // if the deferred path points to an array, split it into multiple subresponses
-                            // because the root must be an object
-                            if let Value::Array(array) = value {
-                                let mut parent = path.clone();
-                                for (i, value) in array.iter().enumerate() {
-                                    parent.push(PathElement::Index(i));
-                                    sub_responses.push((parent.clone(), value.clone()));
-                                    parent.pop();
-                                }
-                            } else {
-                                sub_responses.push((path.clone(), value.clone()));
-                            }
-                        });
-
-                        let query = query.clone();
-                        let operation_name = operation_name.clone();
-
-                        let incremental = sub_responses
-                            .into_iter()
-                            .filter_map(move |(path, data)| {
-                                // filter errors that match the path of this incremental response
-                                let errors = response
-                                    .errors
-                                    .iter()
-                                    .filter(|error| match &error.path {
-                                        None => false,
-                                        Some(error_path) => query.contains_error_path(
-                                            operation_name.as_deref(),
-                                            &response.label,
-                                            error_path,
-                                            variables_set)
-                                            && error_path.starts_with(&path),
-
-                                    })
-                                    .cloned()
-                                    .collect::<Vec<_>>();
-
-                                if response.label.as_ref().map(|label| query.added_labels.contains(label)).unwrap_or(false) {
-                                    response.label = None;
-                                }
-
-                                    let extensions: Object = response
-                                    .extensions
-                                    .iter()
-                                    .map(|(key, value)| {
-                                        if key.as_str() == "valueCompletion" {
-                                            let value = match value.as_array() {
-                                                None => Value::Null,
-                                                Some(v) => Value::Array(
-                                                    v.iter()
-                                                        .filter(|ext| {
-                                                            match ext
-                                                                .as_object()
-                                                                .as_ref()
-                                                                .and_then(|ext| {
-                                                                    ext.get("path")
-                                                                })
-                                                                .and_then(|v| {
-                                                                    let p:Option<Path> = serde_json_bytes::from_value(v.clone()).ok();
-                                                                    p
-                                                                }) {
-                                                                None => false,
-                                                                Some(ext_path) => {
-                                                                    ext_path
-                                                                        .starts_with(
-                                                                            &path,
-                                                                        )
-                                                                }
-                                                            }
-                                                        })
-                                                        .cloned()
-                                                        .collect(),
-                                                ),
-                                            };
-
-                                            (key.clone(), value)
-                                        } else {
-                                            (key.clone(), value.clone())
-                                        }
-                                    })
-                                    .collect();
-
-                                // an empty response should not be sent
-                                // still, if there's an error or extension to show, we should
-                                // send it
-                                if !data.is_null()
-                                    || !errors.is_empty()
-                                    || !extensions.is_empty()
-                                {
-                                    Some(
-                                        IncrementalResponse::builder()
-                                            .and_label(response.label.clone())
-                                            .data(data)
-                                            .path(path)
-                                            .errors(errors)
-                                            .extensions(extensions)
-                                            .build(),
-                                    )
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-
-                        ready(Some(
-                            Response::builder()
-                                .has_next(has_next)
-                                .incremental(incremental)
-                                .build(),
-                        ))
-
-                    }
-                }
+            .filter_map(move |response: Response| {
+                Self::process_graphql_response(
+                    &query,
+                    operation_name.as_deref(),
+                    &variables,
+                    is_deferred,
+                    &schema,
+                    &mut nullified_paths,
+                    response,
+                )
             })
             .boxed();
 
@@ -364,6 +173,234 @@ impl ExecutionService {
             http::Response::new(stream as _),
             ctx,
         ))
+    }
+
+    fn process_graphql_response(
+        query: &Arc<Query>,
+        operation_name: Option<&str>,
+        variables: &Object,
+        is_deferred: bool,
+        schema: &Arc<Schema>,
+        nullified_paths: &mut Vec<Path>,
+        mut response: Response,
+    ) -> Ready<Option<Response>> {
+        // responses that would fall under a path that was previously nullified are not sent
+        if nullified_paths.iter().any(|path| match &response.path {
+            None => false,
+            Some(response_path) => response_path.starts_with(path),
+        }) {
+            if response.has_next == Some(false) {
+                return ready(Some(Response::builder().has_next(false).build()));
+            } else {
+                return ready(None);
+            }
+        }
+
+        // Empty response (could happen when a subscription stream is closed from the subgraph)
+        if response.subscribed == Some(false)
+            && response.data.is_none()
+            && response.errors.is_empty()
+        {
+            return ready(response.into());
+        }
+
+        let has_next = response.has_next.unwrap_or(true);
+        let variables_set = query.defer_variables_set(operation_name.as_deref(), &variables);
+
+        tracing::debug_span!("format_response").in_scope(|| {
+            let mut paths = Vec::new();
+            if let Some(filtered_query) = query.filtered_query.as_ref() {
+                paths = filtered_query.format_response(
+                    &mut response,
+                    operation_name.as_deref(),
+                    is_deferred,
+                    variables.clone(),
+                    schema.api_schema(),
+                    variables_set,
+                );
+            }
+
+            paths.extend(
+                query
+                    .format_response(
+                        &mut response,
+                        operation_name.as_deref(),
+                        is_deferred,
+                        variables.clone(),
+                        schema.api_schema(),
+                        variables_set,
+                    )
+                    .into_iter(),
+            );
+            nullified_paths.extend(paths.into_iter());
+        });
+
+        match (response.path.as_ref(), response.data.as_ref()) {
+            (None, _) | (_, None) => {
+                if is_deferred {
+                    response.has_next = Some(has_next);
+                }
+
+                response.errors.retain(|error| match &error.path {
+                    None => true,
+                    Some(error_path) => query.contains_error_path(
+                        operation_name.as_deref(),
+                        &response.label,
+                        error_path,
+                        variables_set,
+                    ),
+                });
+
+                if response
+                    .label
+                    .as_ref()
+                    .map(|label| query.added_labels.contains(label))
+                    .unwrap_or(false)
+                {
+                    response.label = None;
+                }
+                ready(Some(response))
+            }
+            // if the deferred response specified a path, we must extract the
+            // values matched by that path and create a separate response for
+            // each of them.
+            // While { "data": { "a": { "b": 1 } } } and { "data": { "b": 1 }, "path: ["a"] }
+            // would merge in the same ways, some clients will generate code
+            // that checks the specific type of the deferred response at that
+            // path, instead of starting from the root object, so to support
+            // this, we extract the value at that path.
+            // In particular, that means that a deferred fragment in an object
+            // under an array would generate one response par array element
+            (Some(response_path), Some(response_data)) => {
+                let mut sub_responses = Vec::new();
+                // TODO: this selection at `response_path` below is applied on the response data _after_
+                // is has been post-processed with the user query (in the "format_response" span above).
+                // It is not quite right however, because `response_path` (sent by the query planner)
+                // may contain `PathElement::Fragment`, whose goal is to filter out only those entities that
+                // match the fragment type. However, because the data is been filtered, `response_data` will
+                // not contain the `__typename` value for entities (even though those are in the unfiltered
+                // data), at least unless the user query selects them manually. The result being that those
+                // `PathElement::Fragment` in the path will be essentially ignored (we'll match any object
+                // for which we don't have a `__typename` as we would otherwise miss the data that we need
+                // to return). I believe this might make it possible to return some data that should not have
+                // been returned (at least not in that particular response). And while this is probably only
+                // true in fairly contrived examples, this is not working as intended by the query planner,
+                // so it is dodgy and could create bigger problems in the future.
+                response_data.select_values_and_paths(&schema, response_path, |path, value| {
+                    // if the deferred path points to an array, split it into multiple subresponses
+                    // because the root must be an object
+                    if let Value::Array(array) = value {
+                        let mut parent = path.clone();
+                        for (i, value) in array.iter().enumerate() {
+                            parent.push(PathElement::Index(i));
+                            sub_responses.push((parent.clone(), value.clone()));
+                            parent.pop();
+                        }
+                    } else {
+                        sub_responses.push((path.clone(), value.clone()));
+                    }
+                });
+
+                let query = query.clone();
+                let operation_name = operation_name.clone();
+
+                let incremental = sub_responses
+                    .into_iter()
+                    .filter_map(move |(path, data)| {
+                        // filter errors that match the path of this incremental response
+                        let errors = response
+                            .errors
+                            .iter()
+                            .filter(|error| match &error.path {
+                                None => false,
+                                Some(error_path) => {
+                                    query.contains_error_path(
+                                        operation_name.as_deref(),
+                                        &response.label,
+                                        error_path,
+                                        variables_set,
+                                    ) && error_path.starts_with(&path)
+                                }
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>();
+
+                        if response
+                            .label
+                            .as_ref()
+                            .map(|label| query.added_labels.contains(label))
+                            .unwrap_or(false)
+                        {
+                            response.label = None;
+                        }
+
+                        let extensions: Object = response
+                            .extensions
+                            .iter()
+                            .map(|(key, value)| {
+                                if key.as_str() == "valueCompletion" {
+                                    let value = match value.as_array() {
+                                        None => Value::Null,
+                                        Some(v) => Value::Array(
+                                            v.iter()
+                                                .filter(|ext| {
+                                                    match ext
+                                                        .as_object()
+                                                        .as_ref()
+                                                        .and_then(|ext| ext.get("path"))
+                                                        .and_then(|v| {
+                                                            let p: Option<Path> =
+                                                                serde_json_bytes::from_value(
+                                                                    v.clone(),
+                                                                )
+                                                                .ok();
+                                                            p
+                                                        }) {
+                                                        None => false,
+                                                        Some(ext_path) => {
+                                                            ext_path.starts_with(&path)
+                                                        }
+                                                    }
+                                                })
+                                                .cloned()
+                                                .collect(),
+                                        ),
+                                    };
+
+                                    (key.clone(), value)
+                                } else {
+                                    (key.clone(), value.clone())
+                                }
+                            })
+                            .collect();
+
+                        // an empty response should not be sent
+                        // still, if there's an error or extension to show, we should
+                        // send it
+                        if !data.is_null() || !errors.is_empty() || !extensions.is_empty() {
+                            Some(
+                                IncrementalResponse::builder()
+                                    .and_label(response.label.clone())
+                                    .data(data)
+                                    .path(path)
+                                    .errors(errors)
+                                    .extensions(extensions)
+                                    .build(),
+                            )
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                ready(Some(
+                    Response::builder()
+                        .has_next(has_next)
+                        .incremental(incremental)
+                        .build(),
+                ))
+            }
+        }
     }
 }
 #[derive(Clone, Copy)]
