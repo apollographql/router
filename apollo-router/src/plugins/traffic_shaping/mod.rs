@@ -8,9 +8,9 @@
 //!
 mod cache;
 mod deduplication;
-mod rate;
+pub(crate) mod rate;
 mod retry;
-mod timeout;
+pub(crate) mod timeout;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
@@ -34,7 +34,7 @@ use self::cache::SubgraphCacheLayer;
 use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
 pub(crate) use self::rate::RateLimited;
-use self::retry::RetryPolicy;
+pub(crate) use self::retry::RetryPolicy;
 pub(crate) use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
 use crate::cache::redis::RedisCacheStorage;
@@ -234,6 +234,43 @@ impl Merge for RateLimitConf {
             },
         }
     }
+}
+
+pub(crate) trait SubService<S>:
+    Service<
+        subgraph::Request,
+        Response = subgraph::Response,
+        Error = BoxError,
+        Future = Either<
+            Either<
+                BoxFuture<'static, Result<subgraph::Response, BoxError>>,
+                Either<
+                    BoxFuture<'static, Result<subgraph::Response, BoxError>>,
+                    timeout::future::ResponseFuture<
+                        Oneshot<
+                            Either<
+                                Retry<RetryPolicy, Either<rate::service::RateLimit<S>, S>>,
+                                Either<rate::service::RateLimit<S>, S>,
+                            >,
+                            subgraph::Request,
+                        >,
+                    >,
+                >,
+            >,
+            <S as Service<subgraph::Request>>::Future,
+        >,
+    > + Clone
+    + Send
+    + Sync
+    + 'static
+where
+    S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <S as Service<subgraph::Request>>::Future: std::marker::Send,
+{
 }
 
 // FIXME: This struct is pub(crate) because we need its configuration in the query planner service.

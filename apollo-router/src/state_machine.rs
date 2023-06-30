@@ -3,6 +3,8 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 
 use futures::prelude::*;
+use once_cell::sync::Lazy;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 #[cfg(test)]
 use tokio::sync::Notify;
@@ -44,6 +46,11 @@ pub(crate) struct ListenAddresses {
     pub(crate) graphql_listen_address: Option<ListenAddr>,
     pub(crate) extra_listen_addresses: Vec<ListenAddr>,
 }
+
+pub(crate) static ROUTER_UPDATED: Lazy<(
+    broadcast::Sender<(Arc<Configuration>, Arc<Schema>)>,
+    broadcast::Receiver<(Arc<Configuration>, Arc<Schema>)>,
+)> = Lazy::new(|| broadcast::channel(2));
 
 /// This state maintains private information that is not exposed to the user via state listener.
 #[allow(clippy::large_enum_variant)]
@@ -309,7 +316,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             )
             .await
             .map_err(ServiceCreationError)?;
-
         // used to track if there are still in flight connections when shutting down
         let (all_connections_stopped_sender, all_connections_stopped_signal) =
             mpsc::channel::<()>(1);
@@ -356,6 +362,11 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             discussed.log_experimental_used(yaml);
             discussed.log_preview_used(yaml);
         }
+
+        // Send the update
+        let _ = ROUTER_UPDATED
+            .0
+            .send((configuration.clone(), parsed_schema));
 
         Ok(Running {
             configuration,

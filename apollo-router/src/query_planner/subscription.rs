@@ -1,5 +1,6 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Instant;
 
 use futures::channel::mpsc;
@@ -8,11 +9,13 @@ use futures::future;
 use futures::SinkExt;
 use futures::Stream;
 use futures::StreamExt;
+use indexmap::IndexMap;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::Value;
 use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
 use tower::ServiceExt;
 use tracing::field;
 use tracing::Span;
@@ -36,7 +39,12 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATIO
 use crate::plugins::telemetry::GRAPHQL_OPERATION_NAME_CONTEXT_KEY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
+use crate::router_factory::create_plugins;
+use crate::router_factory::create_subgraph_services;
+use crate::services::MakeSubgraphService;
 use crate::services::SubgraphRequest;
+use crate::services::SubgraphServiceFactory;
+use crate::state_machine::ROUTER_UPDATED;
 
 pub(crate) const SUBSCRIPTION_EVENT_SPAN_NAME: &str = "subscription_event";
 pub(crate) static OPENED_SUBSCRIPTIONS: AtomicUsize = AtomicUsize::new(0);
@@ -175,7 +183,7 @@ impl SubscriptionNode {
 
                         Self::task(
                             sub_handle,
-                            &parameters,
+                            parameters,
                             rest,
                             output_rewrites,
                             &current_dir_cloned,
@@ -220,7 +228,7 @@ impl SubscriptionNode {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn task<'a>(
         mut receiver: impl Stream<Item = graphql::Response> + Unpin,
-        parameters: &'a ExecutionParameters<'a>,
+        parameters: ExecutionParameters<'a>,
         rest: Option<Box<PlanNode>>,
         output_rewrites: Option<Vec<DataRewrite>>,
         current_dir: &'a Path,
@@ -259,6 +267,9 @@ impl SubscriptionNode {
             .flatten()
             .unwrap_or_default();
         let display_body = parameters.context.contains_key(LOGGING_DISPLAY_BODY);
+        let mut router_updated_rx = BroadcastStream::new(ROUTER_UPDATED.0.subscribe());
+        let mut schema = None;
+        let mut service_factory = None;
 
         loop {
             tokio::select! {
@@ -276,9 +287,26 @@ impl SubscriptionNode {
                                 rewrites::apply_rewrites(parameters.schema, data, &output_rewrites);
                             }
 
+                            let parameters = ExecutionParameters {
+                                context: parameters.context,
+                                service_factory: match &service_factory {
+                                    Some(sf) => sf,
+                                    None => parameters.service_factory,
+                                },
+                                schema: match &schema {
+                                    Some(schema) => schema,
+                                    None => parameters.schema,
+                                },
+                                supergraph_request: parameters.supergraph_request,
+                                deferred_fetches: parameters.deferred_fetches,
+                                query: parameters.query,
+                                root_node: parameters.root_node,
+                                subscription_handle: parameters.subscription_handle,
+                                subscription_config: parameters.subscription_config
+                            };
 
                             if let Err(err) =
-                                Self::dispatch_value(val, parameters, &rest, current_dir, sender.clone())
+                                Self::dispatch_value(val, &parameters, &rest, current_dir, sender.clone())
                                     .instrument(tracing::info_span!(SUBSCRIPTION_EVENT_SPAN_NAME,
                                         graphql.document = parameters.query.string,
                                         graphql.operation.name = %operation_name,
@@ -296,6 +324,38 @@ impl SubscriptionNode {
                         }
                         None => break,
                     }
+                }
+                Some(Ok((new_configuration, new_schema))) = router_updated_rx.next() => {
+                    if new_schema.raw_sdl != parameters.schema.raw_sdl {
+                        let _ = sender
+                            .send(
+                                Response::builder()
+                                    .subscribed(false)
+                                    .error(graphql::Error::builder().message("subscription has been closed due to a schema reload").extension_code("SUBSCRIPTION_SCHEMA_RELOAD").build())
+                                    .build(),
+                            )
+                            .await;
+
+                        break;
+                    }
+
+                    let plugins = match create_plugins(&new_configuration, &new_schema, None).await {
+                        Ok(plugins) => plugins,
+                        Err(err) => {
+                            tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
+                            break;
+                        },
+                    };
+                    let subgraph_services = match create_subgraph_services(&plugins, &new_schema, &new_configuration).await {
+                        Ok(subgraph_services) => subgraph_services,
+                        Err(err) => {
+                            tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
+                            break;
+                        },
+                    };
+
+                    schema = Some(new_schema.clone());
+                    service_factory = Some(Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), Arc::new(IndexMap::from_iter(plugins)))));
                 }
             }
         }

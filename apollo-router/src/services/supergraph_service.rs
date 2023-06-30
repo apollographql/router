@@ -489,6 +489,7 @@ mod tests {
     use super::*;
     use crate::plugin::test::MockSubgraph;
     use crate::services::supergraph;
+    use crate::state_machine::ROUTER_UPDATED;
     use crate::test_harness::MockedSubgraphs;
     use crate::Notify;
     use crate::TestHarness;
@@ -1077,6 +1078,72 @@ mod tests {
                     .build(),
             )
             .await
+            .unwrap();
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn subscription_callback_schema_reload() {
+        let mut notify = Notify::builder().build();
+        let (handle, _) = notify
+            .create_or_subscribe("TEST_TOPIC".to_string(), false)
+            .await
+            .unwrap();
+        let subgraphs = MockedSubgraphs([
+            ("user", MockSubgraph::builder().with_json(
+                    serde_json::json!{{"query":"subscription{userWasCreated{name activeOrganization{__typename id}}}"}},
+                    serde_json::json!{{"data": {"userWasCreated": { "__typename": "User", "id": "1", "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
+                ).with_subscription_stream(handle.clone()).build()),
+            ("orga", MockSubgraph::builder().with_json(
+                serde_json::json!{{
+                    "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{id name}}}}",
+                    "variables": {
+                        "representations":[{"__typename": "Organization", "id":"0"}]
+                    }
+                }},
+                serde_json::json!{{
+                    "data": {
+                        "_entities": [{ "suborga": [
+                        { "__typename": "Organization", "id": "1", "name": "A"},
+                        { "__typename": "Organization", "id": "2", "name": "B"},
+                        { "__typename": "Organization", "id": "3", "name": "C"},
+                        ] }]
+                    },
+                    }}
+            ).build())
+        ].into_iter().collect());
+
+        let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
+        configuration.notify = notify.clone();
+        let configuration = Arc::new(configuration);
+        let service = TestHarness::builder()
+            .configuration(configuration.clone())
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(
+                "subscription { userWasCreated { name activeOrganization { id  suborga { id name } } } }",
+            )
+            .context(subscription_context())
+            .build()
+            .unwrap();
+        let mut stream = service.oneshot(request).await.unwrap();
+        let res = stream.next_response().await.unwrap();
+        assert_eq!(&res.data, &Some(serde_json_bytes::Value::Null));
+        insta::assert_json_snapshot!(res);
+        notify.broadcast(graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": { "name": "test", "activeOrganization": { "__typename": "Organization", "id": "0" }}})).build()).await.unwrap();
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+
+        let new_schema = format!("{SCHEMA}  ");
+        // reload schema
+        let schema = Schema::parse(&new_schema, &configuration, None).unwrap();
+        let _ = ROUTER_UPDATED
+            .0
+            .send((Arc::default(), Arc::new(schema)))
             .unwrap();
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
     }
