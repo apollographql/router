@@ -78,8 +78,8 @@ impl BridgeQueryPlanner {
 
                     if has_validation_errors && !schema.has_errors() {
                         tracing::warn!(
-                            monotonic_counter.apollo_router_validation_false_negative = 1,
-                            "query planner reported a validation error, but apollo-rs did not"
+                            monotonic_counter.apollo_router_schema_validation_false_negative = 1,
+                            "validation mismatch: JS query planner reported a schema validation error, but apollo-rs did not"
                         );
                     }
                 }
@@ -92,8 +92,8 @@ impl BridgeQueryPlanner {
             && schema.has_errors()
         {
             tracing::warn!(
-                monotonic_counter.apollo_router_validation_false_positive = 1,
-                "query planner did not report validation error, but apollo-rs did"
+                monotonic_counter.apollo_router_schema_validation_false_positive = 1,
+                "validation mismatch: apollo-rs reported a schema validation error, but JS query planner did not"
             );
         }
 
@@ -268,11 +268,19 @@ impl BridgeQueryPlanner {
             .map_err(|err| {
                 let is_validation_error = err.errors.iter().all(|err| err.validation_error);
                 match (is_validation_error, &selections.validation_error) {
-                    // if both JS and Rust returned an error, it worked as expected, so we can
-                    // return the Rust error
-                    (true, Some(prev_err)) => {
-                        return QueryPlannerError::from(prev_err.clone());
+                    (false, Some(_)) => {
+                        tracing::warn!(
+                            monotonic_counter.apollo_router_query_validation_false_positive = 1,
+                            "validation mismatch: JS query planner did not report query validation error, but apollo-rs did"
+                        );
                     }
+                    (true, None) => {
+                        tracing::warn!(
+                            monotonic_counter.apollo_router_query_validation_false_negative = 1,
+                            "validation mismatch: apollo-rs did not report query validation error, but JS query planner did"
+                        );
+                    }
+                    // if JS and Rust implementations agree, we return the JS result for now.
                     _ => (),
                 }
 

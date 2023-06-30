@@ -111,7 +111,7 @@ async fn api_schema_hides_field() {
     assert!(actual.errors[0]
         .message
         .as_str()
-        .contains("cannot query field 'inStock' on type 'Product'"));
+        .contains(r#"Cannot query field "inStock" on type "Product""#));
 }
 
 #[tokio::test(flavor = "multi_thread")]
