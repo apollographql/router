@@ -170,7 +170,7 @@ impl BridgeQueryPlanner {
             .into();
         let (fragments, operations) =
             Query::extract_query_information(&compiler_guard, file_id, &self.schema)?;
-        let (subselections, defer_variables_set) =
+        let (subselections, defer_variables_set, always_defer) =
             crate::spec::query::subselections::collect_subselections(
                 &self.configuration,
                 &self.schema,
@@ -190,6 +190,7 @@ impl BridgeQueryPlanner {
             added_labels,
             defer_variables_set,
             is_original: true,
+            always_defer,
         })
     }
 

@@ -34,12 +34,13 @@ pub(crate) fn collect_subselections(
     compiler: &ApolloCompiler,
     file_id: FileId,
     kind: OperationKind,
-) -> Result<(SubSelections, IndexSet<String>), SpecError> {
+) -> Result<(SubSelections, IndexSet<String>, bool), SpecError> {
     if !configuration.supergraph.defer_support {
-        return Ok((SubSelections::new(), IndexSet::new()));
+        return Ok((SubSelections::new(), IndexSet::new(), false));
     }
-    let (keys, defer_variables_set) = subselection_keys(configuration, schema, compiler, file_id)
-        .map_err(|e| SpecError::ParsingError(e.to_string()))?;
+    let (keys, defer_variables_set, always_defer) =
+        subselection_keys(configuration, schema, compiler, file_id)
+            .map_err(|e| SpecError::ParsingError(e.to_string()))?;
     keys.into_iter()
         .map(|(key, path, subselection)| {
             let reconstructed = reconstruct_full_query(&path, &kind, &subselection);
@@ -47,7 +48,7 @@ pub(crate) fn collect_subselections(
             Ok((key, value))
         })
         .collect::<Result<SubSelections, SpecError>>()
-        .map(|keys| (keys, defer_variables_set))
+        .map(|keys| (keys, defer_variables_set, always_defer))
 }
 
 /// Generate the keys of the eventual `Query::subselections` hashmap.
@@ -60,13 +61,13 @@ fn subselection_keys(
     schema: &Schema,
     compiler: &ApolloCompiler,
     file_id: FileId,
-) -> Result<(Vec<(SubSelection, Path, String)>, IndexSet<String>), BoxError> {
+) -> Result<(Vec<(SubSelection, Path, String)>, IndexSet<String>, bool), BoxError> {
     let HasDefer {
         has_defer,
         has_unconditional_defer,
     } = has_defer(compiler, file_id)?;
     if !has_defer {
-        return Ok((Vec::new(), IndexSet::new()));
+        return Ok((Vec::new(), IndexSet::new(), false));
     }
     let inlined = transform_fragment_spreads_to_inline_fragments(compiler, file_id)?.to_string();
     let (compiler, file_id) = Query::make_compiler(&inlined, schema, configuration);
@@ -78,7 +79,7 @@ fn subselection_keys(
     for combination in variable_combinations(&variables, has_unconditional_defer) {
         collect_subselections_keys(&compiler, file_id, combination, &mut keys)?
     }
-    Ok((keys, variables))
+    Ok((keys, variables, has_unconditional_defer))
 }
 
 struct HasDefer {

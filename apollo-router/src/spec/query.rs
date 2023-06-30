@@ -69,6 +69,8 @@ pub(crate) struct Query {
     pub(crate) defer_variables_set: IndexSet<String>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) is_original: bool,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) always_defer: bool,
 }
 
 fn empty_compiler() -> Arc<Mutex<ApolloCompiler>> {
@@ -98,6 +100,7 @@ impl Query {
             added_labels: HashSet::new(),
             defer_variables_set: IndexSet::new(),
             is_original: true,
+            always_defer: false,
         }
     }
 
@@ -110,7 +113,6 @@ impl Query {
         &self,
         response: &mut Response,
         operation_name: Option<&str>,
-        is_deferred: bool,
         variables: Object,
         schema: &Schema,
         variables_set: i32,
@@ -120,7 +122,7 @@ impl Query {
         let original_operation = self.operation(operation_name);
         match data {
             Some(Value::Object(mut input)) => {
-                if is_deferred {
+                if self.is_deferred(variables_set) {
                     // Get subselection from hashmap
                     match self.subselections.get(&SubSelection {
                         label: response.label.clone(),
@@ -284,6 +286,7 @@ impl Query {
             added_labels: HashSet::new(),
             defer_variables_set: IndexSet::new(),
             is_original: true,
+            always_defer: false,
         })
     }
 
@@ -1058,6 +1061,10 @@ impl Query {
         }
 
         set
+    }
+
+    pub(crate) fn is_deferred(&self, variables_set: i32) -> bool {
+        self.always_defer || variables_set != 0
     }
 }
 
