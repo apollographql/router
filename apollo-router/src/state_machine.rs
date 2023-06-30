@@ -47,6 +47,7 @@ pub(crate) struct ListenAddresses {
     pub(crate) extra_listen_addresses: Vec<ListenAddr>,
 }
 
+#[allow(clippy::type_complexity)]
 pub(crate) static ROUTER_UPDATED: Lazy<(
     broadcast::Sender<(Arc<Configuration>, Arc<Schema>)>,
     broadcast::Receiver<(Arc<Configuration>, Arc<Schema>)>,
