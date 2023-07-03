@@ -157,7 +157,7 @@ pub struct Configuration {
 
     /// Plugin configuration
     #[serde(default)]
-    plugins: UserPlugins,
+    pub(crate) plugins: UserPlugins,
 
     /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
     #[serde(default)]
@@ -210,7 +210,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
     }
 }
 
-const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
+pub(crate) const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
 
 fn default_graphql_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
@@ -277,29 +277,6 @@ impl Configuration {
         };
 
         conf.validate()
-    }
-
-    pub(crate) fn plugins(&self) -> Vec<(String, Value)> {
-        let mut plugins = vec![];
-
-        // Add all the apollo plugins
-        for (plugin, config) in &self.apollo_plugins.plugins {
-            let plugin_full_name = format!("{APOLLO_PLUGIN_PREFIX}{plugin}");
-            tracing::debug!(
-                "adding plugin {} with user provided configuration",
-                plugin_full_name.as_str()
-            );
-            plugins.push((plugin_full_name, config.clone()));
-        }
-
-        // Add all the user plugins
-        if let Some(config_map) = self.plugins.plugins.as_ref() {
-            for (plugin, config) in config_map {
-                plugins.push((plugin.clone(), config.clone()));
-            }
-        }
-
-        plugins
     }
 }
 

@@ -3,5 +3,5 @@ source: apollo-router/src/query_planner/bridge_query_planner.rs
 expression: "subselections_keys(r#\"\n            query Q { me { username name { ... FirstLast @defer(label: \"A\") }}}\n            fragment FirstLast on Name { first ... @defer(label: \"B\") { last }}\n        \"#).await"
 ---
 None 0 query{ me { username } }
-Some("A") 0 query{ me{ name{ ... on Name{ ... on Name { first } } } } }
-Some("B") 0 query{ me{ name{ ... on Name{ last } } } }
+Some("A") 0 query{ me { name { first } } }
+Some("B") 0 query{ me { name { last } } }

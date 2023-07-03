@@ -1,5 +1,6 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::pin::Pin;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -61,12 +62,17 @@ use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
-#[derive(Debug)]
-pub(crate) struct AxumHttpServerFactory;
+#[derive(Debug, Default)]
+pub(crate) struct AxumHttpServerFactory {
+    live: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
+}
 
 impl AxumHttpServerFactory {
     pub(crate) fn new() -> Self {
-        Self
+        Self {
+            ..Default::default()
+        }
     }
 }
 
@@ -84,6 +90,8 @@ struct Health {
 }
 
 pub(crate) fn make_axum_router<RF>(
+    live: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
@@ -104,15 +112,50 @@ where
             Endpoint::from_router_service(
                 "/health".to_string(),
                 service_fn(move |req: router::Request| {
-                    let health = Health {
-                        status: HealthStatus::Up,
+                    let mut status_code = StatusCode::OK;
+                    let health = if let Some(query) = req.router_request.uri().query() {
+                        let query_upper = query.to_ascii_uppercase();
+                        // Could be more precise, but sloppy match is fine for this use case
+                        if query_upper.starts_with("READY") {
+                            let status = if ready.load(Ordering::SeqCst) {
+                                HealthStatus::Up
+                            } else {
+                                // It's hard to get k8s to parse payloads. Especially since we
+                                // can't install curl or jq into our docker images because of CVEs.
+                                // So, compromise, k8s will interpret this as probe fail.
+                                status_code = StatusCode::SERVICE_UNAVAILABLE;
+                                HealthStatus::Down
+                            };
+                            Health { status }
+                        } else if query_upper.starts_with("LIVE") {
+                            let status = if live.load(Ordering::SeqCst) {
+                                HealthStatus::Up
+                            } else {
+                                // It's hard to get k8s to parse payloads. Especially since we
+                                // can't install curl or jq into our docker images because of CVEs.
+                                // So, compromise, k8s will interpret this as probe fail.
+                                status_code = StatusCode::SERVICE_UNAVAILABLE;
+                                HealthStatus::Down
+                            };
+                            Health { status }
+                        } else {
+                            Health {
+                                status: HealthStatus::Up,
+                            }
+                        }
+                    } else {
+                        Health {
+                            status: HealthStatus::Up,
+                        }
                     };
                     tracing::trace!(?health, request = ?req.router_request, "health check");
                     async move {
                         Ok(router::Response {
-                            response: http::Response::builder().body::<hyper::Body>(
-                                serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
-                            )?,
+                            response: http::Response::builder()
+                                .status(status_code)
+                                .body::<hyper::Body>(
+                                    serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
+                                )?,
                             context: req.context,
                         })
                     }
@@ -163,9 +206,17 @@ impl HttpServerFactory for AxumHttpServerFactory {
     where
         RF: RouterFactory,
     {
+        let live = self.live.clone();
+        let ready = self.ready.clone();
         Box::pin(async move {
-            let all_routers =
-                make_axum_router(service_factory, &configuration, extra_endpoints, license)?;
+            let all_routers = make_axum_router(
+                live.clone(),
+                ready.clone(),
+                service_factory,
+                &configuration,
+                extra_endpoints,
+                license,
+            )?;
 
             // serve main router
 
@@ -299,6 +350,14 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 all_connections_stopped_sender,
             ))
         })
+    }
+
+    fn live(&self, live: bool) {
+        self.live.store(live, Ordering::SeqCst);
+    }
+
+    fn ready(&self, ready: bool) {
+        self.ready.store(ready, Ordering::SeqCst);
     }
 }
 

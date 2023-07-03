@@ -9,6 +9,7 @@ use http::uri::Authority;
 use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::HeaderMap;
+use http::Method;
 use http::Uri;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
@@ -104,6 +105,26 @@ mod router_expansion {
             .expand_env(key)
             .map_err(|e| e.to_string())?
             .ok_or(CANNOT_GET_ENVIRONMENT_VARIABLE.into())
+    }
+}
+
+#[export_module]
+mod router_method {
+    pub(crate) type Method = http::Method;
+
+    #[rhai_fn(name = "to_string", pure)]
+    pub(crate) fn method_to_string(method: &mut Method) -> String {
+        method.as_str().to_string()
+    }
+
+    #[rhai_fn(name = "==", pure)]
+    pub(crate) fn method_equal_comparator(method: &mut Method, other: &str) -> bool {
+        method.as_str().to_uppercase() == other.to_uppercase()
+    }
+
+    #[rhai_fn(name = "!=", pure)]
+    pub(crate) fn method_not_equal_comparator(method: &mut Method, other: &str) -> bool {
+        method.as_str().to_uppercase() != other.to_uppercase()
     }
 }
 
@@ -995,6 +1016,13 @@ macro_rules! register_rhai_interface {
             );
 
             $engine.register_get(
+                "method",
+                |obj: &mut SharedMut<$base::Request>| -> Result<Method, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|request| request.supergraph_request.method().clone()))
+                }
+            );
+
+            $engine.register_get(
                 "body",
                 |obj: &mut SharedMut<$base::Request>| -> Result<Request, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|request| request.supergraph_request.body().clone()))
@@ -1106,6 +1134,7 @@ impl Rhai {
         // The macro call creates a Rhai module from the plugin module.
         let mut module = exported_module!(router_plugin);
         combine_with_exported_module!(&mut module, "header", router_header_map);
+        combine_with_exported_module!(&mut module, "method", router_method);
         combine_with_exported_module!(&mut module, "json", router_json);
         combine_with_exported_module!(&mut module, "context", router_context);
 

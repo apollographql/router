@@ -1,4 +1,3 @@
-use std::fmt::Write;
 use std::sync::Arc;
 
 use router_bridge::planner::UsageReporting;
@@ -8,7 +7,6 @@ use serde::Serialize;
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
 use super::subscription::SubscriptionNode;
-use crate::json_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
@@ -229,40 +227,6 @@ impl PlanNode {
             },
         }
     }
-}
-
-pub(crate) fn reconstruct_full_query(
-    path: &Path,
-    kind: &OperationKind,
-    subselection: &str,
-) -> String {
-    let mut len = 0;
-    let mut query = match kind {
-        OperationKind::Query => "query",
-        OperationKind::Mutation => "mutation",
-        OperationKind::Subscription => "subscription",
-    }
-    .to_string();
-    for path_elt in path.iter() {
-        match path_elt {
-            json_ext::PathElement::Flatten | json_ext::PathElement::Index(_) => {}
-            json_ext::PathElement::Key(key) => {
-                write!(&mut query, "{{ {key}")
-                    .expect("writing to a String should not fail because it can reallocate");
-                len += 1;
-            }
-            json_ext::PathElement::Fragment(name) => {
-                write!(&mut query, "{{ ... on {name}")
-                    .expect("writing to a String should not fail because it can reallocate");
-                len += 1;
-            }
-        }
-    }
-
-    query.push_str(subselection);
-    query.push_str(&" }".repeat(len));
-
-    query
 }
 
 /// A flatten node.

@@ -39,8 +39,6 @@ pub(crate) enum SpecError {
     ValidationError(String),
     /// Unknown operation named "{0}"
     UnknownOperation(String),
-    /// missing operation
-    MissingOperation,
     /// subscription operation is not supported
     SubscriptionNotSupported,
 }
@@ -64,7 +62,6 @@ impl ErrorExtension for SpecError {
             SpecError::ParsingError(_) => "PARSING_ERROR",
             SpecError::ValidationError(_) => "VALIDATION_ERROR",
             SpecError::UnknownOperation(_) => "GRAPHQL_VALIDATION_FAILED",
-            SpecError::MissingOperation => "GRAPHQL_VALIDATION_FAILED",
             SpecError::SubscriptionNotSupported => "SUBSCRIPTION_NOT_SUPPORTED",
         }
         .to_string()
