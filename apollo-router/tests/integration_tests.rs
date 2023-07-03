@@ -399,12 +399,6 @@ async fn automated_persisted_queries() {
 
     let expected_apq_miss_error = apollo_router::graphql::Error::builder()
         .message("PersistedQueryNotFound")
-        .extension(
-            "exception",
-            json!({
-                "stacktrace": ["PersistedQueryNotFoundError: PersistedQueryNotFound"]
-            }),
-        )
         .extension_code("PERSISTED_QUERY_NOT_FOUND")
         .build();
 
@@ -572,7 +566,7 @@ async fn query_just_at_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_under_token_limit() {
     let config = serde_json::json!({
-        "preview_operation_limits": {"parser_max_tokens": 36_usize}
+        "preview_operation_limits": {"parser_max_tokens": 39_usize}
     });
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
@@ -593,7 +587,7 @@ async fn query_just_under_token_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_at_token_limit() {
     let config = serde_json::json!({
-        "preview_operation_limits": {"parser_max_tokens": 34_usize}
+        "preview_operation_limits": {"parser_max_tokens": 37_usize}
     });
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)

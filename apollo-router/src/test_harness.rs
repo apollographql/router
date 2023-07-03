@@ -294,7 +294,11 @@ impl<'a> TestHarness<'a> {
         .await;
         let web_endpoints = router_creator.web_endpoints();
 
+        let live = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let routers = make_axum_router(
+            live,
+            ready,
             router_creator,
             &config,
             web_endpoints,
