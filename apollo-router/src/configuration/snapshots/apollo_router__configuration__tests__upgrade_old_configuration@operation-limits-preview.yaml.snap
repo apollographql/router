@@ -4,5 +4,5 @@ expression: new_config
 ---
 ---
 limits:
-  parser_max_recursion: 100
+  parser_max_recursion: 1000
 
