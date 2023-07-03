@@ -521,7 +521,7 @@ const PARSER_LIMITS_TEST_QUERY_RECURSION: usize = 6;
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_under_recursion_limit() {
     let config = serde_json::json!({
-        "preview_operation_limits": {
+        "limits": {
             "parser_max_recursion": PARSER_LIMITS_TEST_QUERY_RECURSION
         }
     });
@@ -544,7 +544,7 @@ async fn query_just_under_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_at_recursion_limit() {
     let config = serde_json::json!({
-        "preview_operation_limits": {
+        "limits": {
             "parser_max_recursion": PARSER_LIMITS_TEST_QUERY_RECURSION - 1
         }
     });
@@ -575,7 +575,7 @@ async fn query_just_at_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_under_token_limit() {
     let config = serde_json::json!({
-        "preview_operation_limits": {
+        "limits": {
             "parser_max_tokens": PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT,
         }
     });
@@ -598,7 +598,7 @@ async fn query_just_under_token_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_at_token_limit() {
     let config = serde_json::json!({
-        "preview_operation_limits": {
+        "limits": {
             "parser_max_tokens": PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT - 1,
         }
     });
