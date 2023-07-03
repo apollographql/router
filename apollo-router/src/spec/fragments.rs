@@ -5,6 +5,7 @@ use apollo_compiler::HirDatabase;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::spec::query::DeferStats;
 use crate::spec::FieldType;
 use crate::spec::Schema;
 use crate::spec::Selection;
@@ -16,7 +17,11 @@ pub(crate) struct Fragments {
 }
 
 impl Fragments {
-    pub(crate) fn from_hir(compiler: &ApolloCompiler, schema: &Schema) -> Result<Self, SpecError> {
+    pub(crate) fn from_hir(
+        compiler: &ApolloCompiler,
+        schema: &Schema,
+        defer_stats: &mut DeferStats,
+    ) -> Result<Self, SpecError> {
         let map = compiler
             .db
             .all_fragments()
@@ -31,7 +36,8 @@ impl Fragments {
                         .selection()
                         .iter()
                         .filter_map(|selection| {
-                            Selection::from_hir(selection, &current_type, schema, 0).transpose()
+                            Selection::from_hir(selection, &current_type, schema, 0, defer_stats)
+                                .transpose()
                         })
                         .collect::<Result<Vec<_>, _>>()?,
                 };

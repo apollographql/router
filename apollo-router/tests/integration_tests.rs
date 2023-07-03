@@ -427,12 +427,6 @@ async fn automated_persisted_queries() {
 
     let expected_apq_miss_error = apollo_router::graphql::Error::builder()
         .message("PersistedQueryNotFound")
-        .extension(
-            "exception",
-            json!({
-                "stacktrace": ["PersistedQueryNotFoundError: PersistedQueryNotFound"]
-            }),
-        )
         .extension_code("PERSISTED_QUERY_NOT_FOUND")
         .build();
 

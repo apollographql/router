@@ -66,7 +66,7 @@ async-compression = { version = "0.3.15", features = [
 async-trait = "0.1.68"
 atty = "0.2.14"
 axum = { version = "0.6.18", features = ["headers", "json", "original-uri"] }
-backtrace = "0.3.67"
+backtrace = "0.3.68"
 base64 = "0.20.0"
 buildstructor = "0.5.3"
 bytes = "1.4.0"
@@ -109,7 +109,7 @@ lazy_static = "1.4.0"
 libc = "0.2.147"
 linkme = "0.3.10"
 lru = "0.8.1"
-mediatype = "0.19.14"
+mediatype = "0.19.15"
 mockall = "0.11.4"
 mime = "0.3.17"
 multer = "2.1.0"
@@ -156,7 +156,7 @@ opentelemetry-zipkin = { version = "0.16.0", default-features = false, features 
 ] }
 opentelemetry-prometheus = "0.11.0"
 paste = "1.0.12"
-pin-project-lite = "0.2.9"
+pin-project-lite = "0.2.10"
 prometheus = "0.13"
 prost = "0.11.9"
 prost-types = "0.11.9"
@@ -179,7 +179,7 @@ shellexpand = "3.1.0"
 sha2 = "0.10.7"
 serde = { version = "1.0.164", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.1", features = ["preserve_order"] }
-serde_json = { version = "1.0.99", features = ["preserve_order"] }
+serde_json = { version = "1.0.99", features = ["preserve_order", "float_roundtrip"] }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
