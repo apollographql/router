@@ -106,6 +106,13 @@ impl Expansion {
             )
             .override_config(
                 Override::builder()
+                    .config_path("telemetry.apollo.otlp_endpoint")
+                    .env_name("APOLLO_USAGE_REPORTING_OTLP_INGRESS_URL")
+                    .value_type(ValueType::String)
+                    .build(),
+            )
+            .override_config(
+                Override::builder()
                     .config_path("supergraph.listen")
                     .env_name("APOLLO_ROUTER_LISTEN_ADDRESS")
                     .value_type(ValueType::String)
