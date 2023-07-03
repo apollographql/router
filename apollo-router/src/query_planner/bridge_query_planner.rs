@@ -303,6 +303,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     )))
                 }
                 Ok((modified_query, added_labels)) => {
+                    // We’ve already checked the original query against the configured token limit
+                    // when first parsing it.
+                    // We’ve now serialized a modified query (with labels added) and are about
+                    // to re-parse it, but that’s an internal detail that should not affect
+                    // which original queries are rejected because of the token limit.
+                    compiler_guard.db.set_token_limit(None);
                     compiler_guard.update_executable(file_id, &modified_query);
                     added_labels
                 }
