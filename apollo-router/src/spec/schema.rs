@@ -35,7 +35,8 @@ pub(crate) struct Schema {
 #[cfg(test)]
 fn make_api_schema(schema: &str, configuration: &Configuration) -> Result<String, SchemaError> {
     use itertools::Itertools;
-    use router_bridge::api_schema::{api_schema, ApiSchemaOptions};
+    use router_bridge::api_schema::api_schema;
+    use router_bridge::api_schema::ApiSchemaOptions;
     let s = api_schema(
         schema,
         ApiSchemaOptions {
