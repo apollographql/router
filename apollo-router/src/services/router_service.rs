@@ -491,7 +491,7 @@ impl RouterCreator {
             apq_layer,
             query_analysis_layer,
             experimental_http_max_request_bytes: configuration
-                .preview_operation_limits
+                .limits
                 .experimental_http_max_request_bytes,
         }
     }
@@ -724,7 +724,7 @@ mod tests {
                     hyper::Body::from(json_bytes)
                 });
             let config = serde_json::json!({
-                "preview_operation_limits": {
+                "limits": {
                     "experimental_http_max_request_bytes": experimental_http_max_request_bytes
                 }
             });
