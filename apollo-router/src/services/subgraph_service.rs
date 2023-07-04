@@ -621,13 +621,13 @@ async fn call_http(
 
     // Perform the actual fetch. This
     context.enter_active_request();
-    let (parts, body) = perform_fetch(client, service_name, request)
+    let result = perform_fetch(client, service_name, request)
         .instrument(subgraph_req_span)
-        .await
-        .map(|r| {
-            context.leave_active_request();
-            r
-        })?;
+        .await;
+
+    // Always leave active request
+    context.leave_active_request();
+    let (parts, body) = result?;
 
     // Print out debug for the response
     if display_headers {
