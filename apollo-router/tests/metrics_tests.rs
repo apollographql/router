@@ -19,9 +19,9 @@ async fn test_metrics_reloading() -> Result<(), BoxError> {
     router.assert_started().await;
 
     for _ in 0..2 {
-        router.run_query().await;
-        router.run_query().await;
-        router.run_query().await;
+        router.execute_default_query().await;
+        router.execute_default_query().await;
+        router.execute_default_query().await;
 
         // Get Prometheus metrics.
         let metrics_response = router.get_metrics_response().await.unwrap();

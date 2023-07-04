@@ -145,7 +145,9 @@ impl PropagatingMakeSpan {
                 "http.route" = %request.uri(),
                 "http.flavor" = ?request.version(),
                 "otel.kind" = "SERVER",
-
+                "graphql.operation.name" = ::tracing::field::Empty,
+                "graphql.operation.type" = ::tracing::field::Empty,
+                "otel.name" = ::tracing::field::Empty,
             )
         }
     }
