@@ -157,7 +157,7 @@ pub struct Configuration {
 
     /// Set the GraphQL validation implementation to use.
     #[serde(default)]
-    pub(crate) experimental_graphql_validation_mode: GraphQLValidation,
+    pub(crate) experimental_graphql_validation_mode: GraphQLValidationMode,
 
     /// Plugin configuration
     #[serde(default)]
@@ -176,7 +176,7 @@ pub struct Configuration {
 #[derive(Clone, PartialEq, Eq, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum GraphQLValidation {
+pub(crate) enum GraphQLValidationMode {
     /// Use the new Rust-based implementation.
     New,
     /// Use the old JavaScript-based implementation.
@@ -186,9 +186,9 @@ pub(crate) enum GraphQLValidation {
     Both,
 }
 
-impl Default for GraphQLValidation {
+impl Default for GraphQLValidationMode {
     fn default() -> Self {
-        GraphQLValidation::Legacy
+        GraphQLValidationMode::Legacy
     }
 }
 
@@ -214,7 +214,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apq: Apq,
             preview_operation_limits: OperationLimits,
             experimental_chaos: Chaos,
-            experimental_graphql_validation_mode: GraphQLValidation,
+            experimental_graphql_validation_mode: GraphQLValidationMode,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -264,7 +264,7 @@ impl Configuration {
         apq: Option<Apq>,
         operation_limits: Option<OperationLimits>,
         chaos: Option<Chaos>,
-        graphql_validation_mode: Option<GraphQLValidation>,
+        graphql_validation_mode: Option<GraphQLValidationMode>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -332,7 +332,7 @@ impl Configuration {
         apq: Option<Apq>,
         operation_limits: Option<OperationLimits>,
         chaos: Option<Chaos>,
-        graphql_validation_mode: Option<GraphQLValidation>,
+        graphql_validation_mode: Option<GraphQLValidationMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),

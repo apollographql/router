@@ -13,7 +13,7 @@ use http::Uri;
 use sha2::Digest;
 use sha2::Sha256;
 
-use crate::configuration::GraphQLValidation;
+use crate::configuration::GraphQLValidationMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
 use crate::error::ValidationErrors;
@@ -42,7 +42,7 @@ fn make_api_schema(schema: &str, configuration: &Configuration) -> Result<String
         ApiSchemaOptions {
             graphql_validation: matches!(
                 configuration.experimental_graphql_validation_mode,
-                GraphQLValidation::Legacy | GraphQLValidation::Both
+                GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
             ),
         },
     )
@@ -75,16 +75,17 @@ impl Schema {
             return Err(SchemaError::Parse(ParseErrors { errors }));
         }
 
-        let diagnostics =
-            if configuration.experimental_graphql_validation_mode == GraphQLValidation::Legacy {
-                vec![]
-            } else {
-                compiler
-                    .validate()
-                    .into_iter()
-                    .filter(|err| err.data.is_error())
-                    .collect::<Vec<_>>()
-            };
+        let diagnostics = if configuration.experimental_graphql_validation_mode
+            == GraphQLValidationMode::Legacy
+        {
+            vec![]
+        } else {
+            compiler
+                .validate()
+                .into_iter()
+                .filter(|err| err.data.is_error())
+                .collect::<Vec<_>>()
+        };
 
         if !diagnostics.is_empty() {
             let errors = ValidationErrors {
@@ -94,7 +95,7 @@ impl Schema {
 
             // Only error out if new validation is used: with `Both`, we take the legacy
             // validation as authoritative and only use the new result for comparison
-            if configuration.experimental_graphql_validation_mode == GraphQLValidation::New {
+            if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::New {
                 return Err(SchemaError::Validate(errors));
             }
         }
