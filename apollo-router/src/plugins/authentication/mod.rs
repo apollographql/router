@@ -40,6 +40,8 @@ use crate::services::router;
 use crate::Context;
 
 mod jwks;
+mod subgraph_auth;
+
 #[cfg(test)]
 mod tests;
 
