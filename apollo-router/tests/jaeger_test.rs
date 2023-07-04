@@ -17,7 +17,7 @@ use crate::common::Telemetry;
 use crate::common::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_jaeger_tracing() -> Result<(), BoxError> {
+async fn test_reload() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Jaeger)
         .config(include_str!("fixtures/jaeger.router.yaml"))
@@ -44,7 +44,30 @@ async fn test_jaeger_tracing() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_jaeger_tracing_anonymous_operation() -> Result<(), BoxError> {
+async fn test_default_operation() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Jaeger)
+        .config(include_str!("fixtures/jaeger.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    let query = json!({"query":"query ExampleQuery1 {topProducts{name}}","variables":{}});
+
+    let (id, result) = router.execute_query(&query).await;
+    assert!(!result
+        .headers()
+        .get("apollo-custom-trace-id")
+        .unwrap()
+        .is_empty());
+    validate_trace(id, &query, Some("ExampleQuery1")).await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_anonymous_operation() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Jaeger)
         .config(include_str!("fixtures/jaeger.router.yaml"))
@@ -68,7 +91,7 @@ async fn test_jaeger_tracing_anonymous_operation() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_jaeger_tracing_selected_operation() -> Result<(), BoxError> {
+async fn test_selected_operation() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Jaeger)
         .config(include_str!("fixtures/jaeger.router.yaml"))

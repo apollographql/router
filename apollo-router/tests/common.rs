@@ -341,8 +341,7 @@ impl IntegrationTest {
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
-        let default_query =
-            &json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+        let default_query = &json!({"query":"query {topProducts{name}}","variables":{}});
         let query = query.unwrap_or(default_query).clone();
         let id = Uuid::new_v4().to_string();
         let dispatch = self.subscriber.clone();
