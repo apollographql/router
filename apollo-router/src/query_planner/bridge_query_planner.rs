@@ -167,7 +167,6 @@ impl BridgeQueryPlanner {
         )?;
         Ok(Query {
             string: query,
-            compiler,
             fragments,
             operations,
             filtered_query: None,

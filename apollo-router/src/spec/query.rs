@@ -53,11 +53,6 @@ pub(crate) const QUERY_EXECUTABLE: &str = "query";
 #[derivative(PartialEq, Hash, Eq, Debug)]
 pub(crate) struct Query {
     pub(crate) string: String,
-    #[derivative(PartialEq = "ignore", Hash = "ignore", Debug = "ignore")]
-    #[serde(skip)]
-    // FIXME: find a way to have a correct compiler when deserializing
-    #[serde(default = "empty_compiler")]
-    pub(crate) compiler: Arc<Mutex<ApolloCompiler>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
@@ -94,7 +89,6 @@ impl Query {
     pub(crate) fn empty() -> Self {
         Self {
             string: String::new(),
-            compiler: empty_compiler(),
             fragments: Fragments {
                 map: HashMap::new(),
             },
@@ -289,7 +283,6 @@ impl Query {
 
         Ok(Query {
             string: query,
-            compiler: Arc::new(Mutex::new(compiler)),
             fragments,
             operations,
             subselections: HashMap::new(),
@@ -342,10 +335,6 @@ impl Query {
             .collect::<Result<Vec<_>, SpecError>>()?;
 
         Ok((fragments, operations, defer_stats))
-    }
-
-    pub(crate) async fn compiler(&self) -> MutexGuard<'_, ApolloCompiler> {
-        self.compiler.lock().await
     }
 
     /// Create a new compiler for this query, without caching it

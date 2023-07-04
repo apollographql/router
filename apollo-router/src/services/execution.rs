@@ -45,8 +45,8 @@ impl Request {
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
+        compiler: apollo_compiler::Snapshot,
     ) -> Request {
-        let compiler = query_plan.query.uncached_compiler(None).snapshot();
         Self {
             supergraph_request,
             query_plan,
@@ -61,8 +61,9 @@ impl Request {
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
+        compiler: apollo_compiler::Snapshot,
     ) -> Request {
-        let compiler = query_plan.query.compiler().await.snapshot();
+        //let compiler = query_plan.query.compiler().await.snapshot();
         Self {
             supergraph_request,
             query_plan,
@@ -81,11 +82,13 @@ impl Request {
         supergraph_request: Option<http::Request<graphql::Request>>,
         query_plan: Option<QueryPlan>,
         context: Option<Context>,
+        compiler: apollo_compiler::Snapshot,
     ) -> Request {
         Request::new(
             supergraph_request.unwrap_or_default(),
             Arc::new(query_plan.unwrap_or_else(|| QueryPlan::fake_builder().build())),
             context.unwrap_or_default(),
+            compiler,
         )
     }
 }

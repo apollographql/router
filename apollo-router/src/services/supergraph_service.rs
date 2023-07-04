@@ -131,6 +131,7 @@ async fn service_call(
     let context = req.context;
     let body = req.supergraph_request.body();
     let variables = body.variables.clone();
+    let compiler = req.compiler.as_ref().unwrap().lock().await.snapshot();
     let QueryPlannerResponse {
         content,
         context,
@@ -237,6 +238,7 @@ async fn service_call(
                             .supergraph_request(req.supergraph_request)
                             .query_plan(plan.clone())
                             .context(context)
+                            .compiler(compiler)
                             .build()
                             .await,
                     )
