@@ -232,6 +232,15 @@ async fn service_call(
                 *res.response.status_mut() = StatusCode::BAD_REQUEST;
                 Ok(res)
             } else {
+                // TODO spawn subscription task here
+                // let execution = self.execution_service_factory.create();
+
+                // Put something to say it's a subscription event in the task ?
+                // task is listening on a channel receiving
+                //  + sender to client
+                //  + stream to listen to data
+                // We will have to add initial_data to executionRequest
+
                 let execution_response = execution
                     .oneshot(
                         ExecutionRequest::internal_builder()
@@ -1141,10 +1150,7 @@ mod tests {
         let new_schema = format!("{SCHEMA}  ");
         // reload schema
         let schema = Schema::parse(&new_schema, &configuration, None).unwrap();
-        let _ = ROUTER_UPDATED
-            .0
-            .send((Arc::default(), Arc::new(schema)))
-            .unwrap();
+        ROUTER_UPDATED.broadcast_schema(Arc::new(schema));
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
     }
 

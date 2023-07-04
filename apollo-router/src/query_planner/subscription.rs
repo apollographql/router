@@ -15,7 +15,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::Value;
 use tokio::sync::broadcast;
-use tokio_stream::wrappers::BroadcastStream;
 use tower::ServiceExt;
 use tracing::field;
 use tracing::Span;
@@ -267,8 +266,8 @@ impl SubscriptionNode {
             .flatten()
             .unwrap_or_default();
         let display_body = parameters.context.contains_key(LOGGING_DISPLAY_BODY);
-        let mut router_updated_rx = BroadcastStream::new(ROUTER_UPDATED.0.subscribe());
-        let mut schema = None;
+        let mut configuration_updated_rx = ROUTER_UPDATED.subscribe_configuration();
+        let mut schema_updated_rx = ROUTER_UPDATED.subscribe_schema();
         let mut service_factory = None;
 
         loop {
@@ -293,10 +292,7 @@ impl SubscriptionNode {
                                     Some(sf) => sf,
                                     None => parameters.service_factory,
                                 },
-                                schema: match &schema {
-                                    Some(schema) => schema,
-                                    None => parameters.schema,
-                                },
+                                schema: parameters.schema,
                                 supergraph_request: parameters.supergraph_request,
                                 deferred_fetches: parameters.deferred_fetches,
                                 query: parameters.query,
@@ -325,7 +321,25 @@ impl SubscriptionNode {
                         None => break,
                     }
                 }
-                Some(Ok((new_configuration, new_schema))) = router_updated_rx.next() => {
+                Some(new_configuration) = configuration_updated_rx.next() => {
+                    let plugins = match create_plugins(&new_configuration, &parameters.schema, None).await {
+                        Ok(plugins) => plugins,
+                        Err(err) => {
+                            tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
+                            break;
+                        },
+                    };
+                    let subgraph_services = match create_subgraph_services(&plugins, &parameters.schema, &new_configuration).await {
+                        Ok(subgraph_services) => subgraph_services,
+                        Err(err) => {
+                            tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
+                            break;
+                        },
+                    };
+
+                    service_factory = Some(Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), Arc::new(IndexMap::from_iter(plugins)))));
+                }
+                Some(new_schema) = schema_updated_rx.next() => {
                     if new_schema.raw_sdl != parameters.schema.raw_sdl {
                         let _ = sender
                             .send(
@@ -338,24 +352,6 @@ impl SubscriptionNode {
 
                         break;
                     }
-
-                    let plugins = match create_plugins(&new_configuration, &new_schema, None).await {
-                        Ok(plugins) => plugins,
-                        Err(err) => {
-                            tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
-                            break;
-                        },
-                    };
-                    let subgraph_services = match create_subgraph_services(&plugins, &new_schema, &new_configuration).await {
-                        Ok(subgraph_services) => subgraph_services,
-                        Err(err) => {
-                            tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
-                            break;
-                        },
-                    };
-
-                    schema = Some(new_schema.clone());
-                    service_factory = Some(Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), Arc::new(IndexMap::from_iter(plugins)))));
                 }
             }
         }
