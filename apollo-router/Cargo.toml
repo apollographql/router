@@ -63,7 +63,7 @@ async-compression = { version = "0.3.15", features = [
     "gzip",
     "deflate",
 ] }
-async-trait = "0.1.68"
+async-trait = "0.1.69"
 atty = "0.2.14"
 axum = { version = "0.6.18", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.68"
@@ -76,7 +76,7 @@ clap = { version = "4.3.10", default-features = false, features = [
     "std",
     "help",
 ] }
-console-subscriber = { version = "0.1.9", optional = true }
+console-subscriber = { version = "0.1.10", optional = true }
 ci_info = {version="0.14.10", features=["serde-1"] }
 dashmap = { version = "5.4.0", features = ["serde"] }
 derivative = "2.2.0"
@@ -107,7 +107,7 @@ jsonschema = { version = "0.16.1", default-features = false }
 jsonwebtoken = "8.3.0"
 lazy_static = "1.4.0"
 libc = "0.2.147"
-linkme = "0.3.10"
+linkme = "0.3.11"
 lru = "0.8.1"
 mediatype = "0.19.15"
 mockall = "0.11.4"
@@ -155,7 +155,7 @@ opentelemetry-zipkin = { version = "0.16.0", default-features = false, features 
     "reqwest-rustls",
 ] }
 opentelemetry-prometheus = "0.11.0"
-paste = "1.0.12"
+paste = "1.0.13"
 pin-project-lite = "0.2.10"
 prometheus = "0.13"
 prost = "0.11.9"
@@ -171,13 +171,13 @@ reqwest = { version = "0.11.18", default-features = false, features = [
     "stream",
 ] }
 router-bridge = "0.2.8+v2.4.8"
-rust-embed="6.7.0"
+rust-embed="6.8.1"
 rustls = "0.20.8"
 rustls-pemfile = "1.0.3"
 schemars = { version = "0.8.12", features = ["url"] }
 shellexpand = "3.1.0"
 sha2 = "0.10.7"
-serde = { version = "1.0.164", features = ["derive", "rc"] }
+serde = { version = "1.0.166", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.1", features = ["preserve_order"] }
 serde_json = { version = "1.0.99", features = ["preserve_order", "float_roundtrip"] }
 serde_urlencoded = "0.7.1"
