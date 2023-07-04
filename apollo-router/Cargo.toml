@@ -76,7 +76,7 @@ clap = { version = "4.3.10", default-features = false, features = [
     "std",
     "help",
 ] }
-console-subscriber = { version = "0.1.9", optional = true }
+console-subscriber = { version = "0.1.10", optional = true }
 ci_info = {version="0.14.10", features=["serde-1"] }
 dashmap = { version = "5.4.0", features = ["serde"] }
 derivative = "2.2.0"
@@ -107,7 +107,7 @@ jsonschema = { version = "0.16.1", default-features = false }
 jsonwebtoken = "8.3.0"
 lazy_static = "1.4.0"
 libc = "0.2.147"
-linkme = "0.3.10"
+linkme = "0.3.11"
 lru = "0.8.1"
 mediatype = "0.19.15"
 mockall = "0.11.4"
