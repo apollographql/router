@@ -157,6 +157,7 @@ impl BridgeQueryPlanner {
             })?;
         let (fragments, operations, defer_stats) =
             Query::extract_query_information(&compiler_guard, file_id, &self.schema)?;
+
         drop(compiler_guard);
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,

@@ -174,7 +174,6 @@ impl Service<ExecutionRequest> for ExecutionService {
                             paths = filtered_query.format_response(
                                 &mut response,
                                 operation_name.as_deref(),
-                                is_deferred,
                                 variables.clone(),
                                 schema.api_schema(),
                                 variables_set
@@ -184,9 +183,9 @@ impl Service<ExecutionRequest> for ExecutionService {
                         paths.extend(query.format_response(
                             &mut response,
                             operation_name.as_deref(),
-                            is_deferred,
                             variables.clone(),
-                            schema.api_schema(), variables_set
+                            schema.api_schema(),
+                            variables_set
                         ).into_iter());
                         nullified_paths.extend(paths.into_iter());
                     });
