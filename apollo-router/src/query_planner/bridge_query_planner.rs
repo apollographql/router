@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ApolloCompiler;
-use apollo_compiler::HirDatabase;
 use apollo_compiler::InputDatabase;
 use futures::future::BoxFuture;
 use router_bridge::planner::IncrementalDeliverySupport;
@@ -148,7 +147,6 @@ impl BridgeQueryPlanner {
             &compiler_guard,
             operation_name.clone(),
         )?;
-
         let file_id = compiler_guard
             .db
             .source_file(QUERY_EXECUTABLE.into())
@@ -157,29 +155,16 @@ impl BridgeQueryPlanner {
                     "missing input file for query".to_string(),
                 ))
             })?;
-        let kind = compiler_guard
-            .db
-            .find_operation(file_id, operation_name.clone())
-            .ok_or_else(|| {
-                QueryPlannerError::SpecError(match operation_name {
-                    Some(op) => SpecError::UnknownOperation(op),
-                    _ => SpecError::MissingOperation,
-                })
-            })?
-            .operation_ty()
-            .into();
-        let (fragments, operations) =
+        let (fragments, operations, defer_stats) =
             Query::extract_query_information(&compiler_guard, file_id, &self.schema)?;
-        let (subselections, defer_variables_set) =
-            crate::spec::query::subselections::collect_subselections(
-                &self.configuration,
-                &self.schema,
-                &compiler_guard,
-                file_id,
-                kind,
-            )?;
-        drop(compiler_guard);
 
+        drop(compiler_guard);
+        let subselections = crate::spec::query::subselections::collect_subselections(
+            &self.configuration,
+            &operations,
+            &fragments.map,
+            &defer_stats,
+        )?;
         Ok(Query {
             string: query,
             compiler,
@@ -188,7 +173,7 @@ impl BridgeQueryPlanner {
             filtered_query: None,
             subselections,
             added_labels,
-            defer_variables_set,
+            defer_stats,
             is_original: true,
         })
     }
@@ -319,6 +304,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     )))
                 }
                 Ok((modified_query, added_labels)) => {
+                    // We’ve already checked the original query against the configured token limit
+                    // when first parsing it.
+                    // We’ve now serialized a modified query (with labels added) and are about
+                    // to re-parse it, but that’s an internal detail that should not affect
+                    // which original queries are rejected because of the token limit.
+                    compiler_guard.db.set_token_limit(None);
                     compiler_guard.update_executable(file_id, &modified_query);
                     added_labels
                 }
@@ -451,8 +442,8 @@ mod tests {
 
     use super::*;
     use crate::json_ext::Path;
-    use crate::spec::query::SubSelection;
-    use crate::spec::query::SubSelections;
+    use crate::spec::query::subselections::SubSelectionKey;
+    use crate::spec::query::subselections::SubSelectionValue;
 
     const EXAMPLE_SCHEMA: &str = include_str!("testdata/schema.graphql");
 
@@ -550,7 +541,7 @@ mod tests {
         let result = plan(EXAMPLE_SCHEMA, "", "", None).await;
 
         assert_eq!(
-            "spec error: missing operation",
+            "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",
             result.unwrap_err().to_string()
         );
     }
@@ -742,21 +733,17 @@ mod tests {
             node: &PlanNode,
             path: &Path,
             parent_label: Option<String>,
-            subselections: &SubSelections,
+            subselections: &HashMap<SubSelectionKey, SubSelectionValue>,
         ) {
             match node {
                 PlanNode::Defer { primary, deferred } => {
                     if let Some(subselection) = primary.subselection.clone() {
                         let path = path.join(primary.path.clone().unwrap_or_default());
-                        let key = SubSelection {
-                            label: parent_label,
-                            variables_set: 0,
-                        };
                         assert!(
-                            subselections.keys().any(|k| k.label == key.label),
+                            subselections.keys().any(|k| k.defer_label == parent_label),
                             "Missing key: '{}' '{:?}' '{}' in {:?}",
                             path,
-                            key.label,
+                            parent_label,
                             subselection,
                             subselections.keys().collect::<Vec<_>>()
                         );
@@ -764,15 +751,13 @@ mod tests {
                     for deferred in deferred {
                         if let Some(subselection) = deferred.subselection.clone() {
                             let path = deferred.query_path.clone();
-                            let key = SubSelection {
-                                label: deferred.label.clone(),
-                                variables_set: 0,
-                            };
                             assert!(
-                                subselections.keys().any(|k| k.label == key.label),
+                                subselections
+                                    .keys()
+                                    .any(|k| k.defer_label == deferred.label),
                                 "Missing key: '{}' '{:?}' '{}'",
                                 path,
-                                key.label,
+                                deferred.label,
                                 subselection
                             );
                         }
@@ -815,6 +800,49 @@ mod tests {
             }
         }
 
+        fn serialize_selection_set(selection_set: &[crate::spec::Selection], to: &mut String) {
+            if let Some((first, rest)) = selection_set.split_first() {
+                to.push_str("{ ");
+                serialize_selection(first, to);
+                for sel in rest {
+                    to.push(' ');
+                    serialize_selection(sel, to);
+                }
+                to.push_str(" }");
+            }
+        }
+
+        fn serialize_selection(selection: &crate::spec::Selection, to: &mut String) {
+            match selection {
+                crate::spec::Selection::Field {
+                    name,
+                    alias,
+                    selection_set,
+                    ..
+                } => {
+                    if let Some(alias) = alias {
+                        to.push_str(alias.as_str());
+                        to.push_str(": ");
+                    }
+                    to.push_str(name.as_str());
+                    if let Some(sel) = selection_set {
+                        to.push(' ');
+                        serialize_selection_set(sel, to)
+                    }
+                }
+                crate::spec::Selection::InlineFragment {
+                    type_condition,
+                    selection_set,
+                    ..
+                } => {
+                    to.push_str("... on ");
+                    to.push_str(type_condition);
+                    serialize_selection_set(selection_set, to)
+                }
+                crate::spec::Selection::FragmentSpread { .. } => unreachable!(),
+            }
+        }
+
         dbg!(query);
         let result = plan(EXAMPLE_SCHEMA, query, query, None).await.unwrap();
         if let QueryPlannerContent::Plan { plan, .. } = result {
@@ -822,9 +850,11 @@ mod tests {
 
             let mut keys: Vec<String> = Vec::new();
             for (key, value) in plan.query.subselections.iter() {
+                let mut serialized = String::from("query");
+                serialize_selection_set(&value.selection_set, &mut serialized);
                 keys.push(format!(
                     "{:?} {} {}",
-                    key.label, key.variables_set, value.string
+                    key.defer_label, key.defer_conditions.bits, serialized
                 ))
             }
             keys.sort();

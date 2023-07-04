@@ -218,7 +218,6 @@ impl ExecutionService {
                 paths = filtered_query.format_response(
                     &mut response,
                     operation_name,
-                    is_deferred,
                     variables.clone(),
                     schema.api_schema(),
                     variables_set,
@@ -230,7 +229,6 @@ impl ExecutionService {
                     .format_response(
                         &mut response,
                         operation_name,
-                        is_deferred,
                         variables.clone(),
                         schema.api_schema(),
                         variables_set,
