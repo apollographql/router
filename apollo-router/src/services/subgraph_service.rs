@@ -108,6 +108,7 @@ impl Display for Compression {
     }
 }
 
+#[cfg_attr(test, derive(Deserialize))]
 #[derive(Serialize, Clone, Debug)]
 struct SubscriptionExtension {
     subscription_id: String,
@@ -261,7 +262,9 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         )
                         .await;
                     }
-                    Some(SubscriptionMode::Callback(CallbackMode { public_url, .. })) => {
+                    Some(SubscriptionMode::Callback(CallbackMode {
+                        public_url, path, ..
+                    })) => {
                         // Hash the subgraph_request
                         let subscription_id = hashed_request;
 
@@ -294,8 +297,10 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
 
                         // If not then put the subscription_id in the extensions for callback mode and continue
                         // Do this if the topic doesn't already exist
-                        let callback_url =
-                            public_url.join(&format!("/callback/{subscription_id}"))?;
+                        let callback_url = public_url.join(&format!(
+                            "{}/{subscription_id}",
+                            path.as_deref().unwrap_or("/callback")
+                        ))?;
                         // Generate verifier
                         let verifier = create_verifier(&subscription_id).map_err(|err| {
                             FetchError::SubrequestHttpError {
@@ -888,6 +893,7 @@ mod tests {
     use serde_json_bytes::Value;
     use tower::service_fn;
     use tower::ServiceExt;
+    use url::Url;
     use SubgraphRequest;
 
     use super::*;
@@ -896,6 +902,7 @@ mod tests {
     use crate::graphql::Response;
     use crate::plugins::subscription::SubgraphPassthroughMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
+    use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
     use crate::protocols::websocket::ClientMessage;
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
@@ -1385,10 +1392,57 @@ mod tests {
         server.await.unwrap();
     }
 
+    async fn emulate_subgraph_with_callback_data(socket_addr: SocketAddr) {
+        async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            let (_, body) = request.into_parts();
+            let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
+                .await
+                .map_err(|_| ())
+                .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
+                .map_err(|_| "failed to parse the request body as JSON");
+            let graphql_request = graphql_request.unwrap();
+            assert!(graphql_request.extensions.contains_key("subscription"));
+            let subscription_extension: SubscriptionExtension = serde_json_bytes::from_value(
+                graphql_request
+                    .extensions
+                    .get("subscription")
+                    .unwrap()
+                    .clone(),
+            )
+            .unwrap();
+            assert_eq!(
+                subscription_extension.callback_url.to_string(),
+                format!(
+                    "http://localhost:4000/testcallback/{}",
+                    subscription_extension.subscription_id
+                )
+            );
+
+            Ok(http::Response::builder()
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .status(StatusCode::OK)
+                .body(
+                    serde_json::to_string(&Response::default())
+                        .expect("always valid")
+                        .into(),
+                )
+                .unwrap())
+        }
+
+        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+        let server = Server::bind(&socket_addr).serve(make_svc);
+        server.await.unwrap();
+    }
+
     fn subscription_config() -> SubscriptionConfig {
         SubscriptionConfig {
             mode: SubscriptionModeConfig {
-                callback: None,
+                callback: Some(CallbackMode {
+                    public_url: Url::parse("http://localhost:4000").unwrap(),
+                    listen: None,
+                    path: Some("/testcallback".to_string()),
+                    subgraphs: vec![String::from("testbis")].into_iter().collect(),
+                }),
                 passthrough: Some(SubgraphPassthroughMode {
                     all: None,
                     subgraphs: [(
@@ -1405,6 +1459,56 @@ mod tests {
             max_opened_subscriptions: None,
             queue_capacity: None,
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_callback() {
+        let _ = SUBSCRIPTION_CALLBACK_HMAC_KEY.set(String::from("TESTEST"));
+        let socket_addr = SocketAddr::from_str("127.0.0.1:2522").unwrap();
+        let spawned_task = tokio::task::spawn(emulate_subgraph_with_callback_data(socket_addr));
+        let subgraph_service = SubgraphService::new(
+            "testbis",
+            true,
+            None,
+            false,
+            subscription_config().into(),
+            Notify::builder().build(),
+        );
+        let (tx, _rx) = mpsc::channel(2);
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(
+                            Request::builder()
+                                .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                                .build(),
+                        )
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(
+                        Request::builder()
+                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Subscription,
+                context: Context::new(),
+                subscription_stream: Some(tx),
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+        assert!(response.response.body().errors.is_empty());
+        spawned_task.abort();
     }
 
     #[tokio::test(flavor = "multi_thread")]
