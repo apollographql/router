@@ -40,6 +40,7 @@ use crate::query_planner::subscription::SubscriptionHandle;
 use crate::services::execution;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
+use crate::spec::query::subselections::BooleanValues;
 use crate::spec::Query;
 use crate::spec::Schema;
 
@@ -320,7 +321,7 @@ impl ExecutionService {
         query: &Arc<Query>,
         operation_name: Option<&str>,
         has_next: bool,
-        variables_set: i32,
+        variables_set: BooleanValues,
         mut response: Response,
         sub_responses: Vec<(Path, Value)>,
     ) -> Option<Response> {
