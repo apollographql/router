@@ -5526,7 +5526,7 @@ fn filtered_defer_fragment() {
       }";
 
     let mut compiler = ApolloCompiler::new();
-    let file_id = compiler.add_executable(query, "query.graphql");
+    compiler.add_executable(query, "query.graphql");
     let (fragments, operations, defer_stats) =
         Query::extract_query_information(&compiler, &schema).unwrap();
 
@@ -5551,7 +5551,7 @@ fn filtered_defer_fragment() {
     };
 
     let mut compiler = ApolloCompiler::new();
-    let file_id = compiler.add_executable(filtered_query, "filtered_query.graphql");
+    compiler.add_executable(filtered_query, "filtered_query.graphql");
     let (fragments, operations, defer_stats) =
         Query::extract_query_information(&compiler, &schema).unwrap();
 
