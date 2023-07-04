@@ -84,6 +84,12 @@ flowchart LR;
 
 > [Walk through an example.](#example-execution)
 
+### Special considerations
+
+- Whenever your router updates its supergraph schema at runtime, **it terminates all active subscriptions.** Clients can detect this special-case termination via an error code and execute a new subscription.
+
+    See [Termination on schema update](#termination-on-schema-update).
+
 ## Prerequisites
 
 ⚠️ **Before you add `Subscription` fields to your subgraphs,** do _all_ of the following _in the order shown_ to prevent schema composition errors:
@@ -361,6 +367,36 @@ Disabling deduplication is useful if you _need_ to create a separate connection 
     - As a basic example, let's say a subscription should always fire events returning the integers `0` through `1000`, in order. If a new subscription reuses an existing subgraph connection, it starts by receiving whichever value is next for the original connection, which is almost definitely _not_ `0`.
 
 ## Advanced configuration
+
+### Termination on schema update
+
+Whenever your router's supergraph schema is updated, **the router terminates all active subscriptions.**
+
+<blockquote>
+
+Your router's supergraph schema is updated in the following cases:
+
+- Your router regularly polls GraphOS for its supergraph schema, and an updated schema becomes available.
+- Your router obtains its supergraph schema from a local file, which it watches for updates if the [`--hot-reload` option](../configuration/overview#--hr----hot-reload) is set.
+
+</blockquote>
+
+When the router terminates subscriptions this way, it sends the following as a final response payload to all active subscribing clients:
+
+```json
+{
+  "errors": [
+    {
+      "message": "subscription has been closed due to a schema reload",
+      "extensions": {
+        "code": "SUBSCRIPTION_SCHEMA_RELOAD"
+      }
+    }
+  ]
+}
+```
+
+A client that receives this `SUBSCRIPTION_SCHEMA_RELOAD` error code can reconnect by executing a new subscription operation.
 
 ### WebSocket auth support
 
