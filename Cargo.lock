@@ -1211,9 +1211,9 @@ dependencies = [
 
 [[package]]
 name = "console-subscriber"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57ab2224a0311582eb03adba4caaf18644f7b1f10a760803a803b9b605187fc7"
+checksum = "d4cf42660ac07fcebed809cfe561dd8730bcd35b075215e6479c516bcd0d11cb"
 dependencies = [
  "console-api",
  "crossbeam-channel",
@@ -3347,18 +3347,18 @@ dependencies = [
 
 [[package]]
 name = "linkme"
-version = "0.3.10"
+version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97f3302efc6ebb7b5f0810a1096dbbb44a536711a4576bc89264a8f9a1d634d8"
+checksum = "af70bd9dc21cbdc1feefbc9e5715129b9bfabc6fea06a02ef2a1b09d18dae216"
 dependencies = [
  "linkme-impl",
 ]
 
 [[package]]
 name = "linkme-impl"
-version = "0.3.10"
+version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "279a77bf40c85a08513aca203635b96610ebf0e37a92cb0cee76e04da100a426"
+checksum = "42262113d514677f32b99c74693d2d40bd821fe7080c0770371398c8db240de1"
 dependencies = [
  "proc-macro2",
  "quote",
