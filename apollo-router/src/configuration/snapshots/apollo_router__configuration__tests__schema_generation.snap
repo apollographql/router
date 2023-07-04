@@ -1257,8 +1257,10 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "all": {
+          "description": "todo[igni]: document before merging.",
           "oneOf": [
             {
+              "description": "todo[igni]: document before merging.",
               "type": "object",
               "required": [
                 "aws_sig_v4"
@@ -1274,15 +1276,19 @@ expression: "&schema"
                   ],
                   "properties": {
                     "access_key_id": {
+                      "description": "todo[igni]: document before merging.",
                       "type": "string"
                     },
                     "region": {
+                      "description": "todo[igni]: document before merging.",
                       "type": "string"
                     },
                     "secret_access_key": {
+                      "description": "todo[igni]: document before merging.",
                       "type": "string"
                     },
                     "service": {
+                      "description": "todo[igni]: document before merging.",
                       "type": "string"
                     }
                   },
@@ -1295,10 +1301,12 @@ expression: "&schema"
           "nullable": true
         },
         "subgraphs": {
+          "description": "todo[igni]: document before merging.",
           "type": "object",
           "additionalProperties": {
             "oneOf": [
               {
+                "description": "todo[igni]: document before merging.",
                 "type": "object",
                 "required": [
                   "aws_sig_v4"
@@ -1314,15 +1322,19 @@ expression: "&schema"
                     ],
                     "properties": {
                       "access_key_id": {
+                        "description": "todo[igni]: document before merging.",
                         "type": "string"
                       },
                       "region": {
+                        "description": "todo[igni]: document before merging.",
                         "type": "string"
                       },
                       "secret_access_key": {
+                        "description": "todo[igni]: document before merging.",
                         "type": "string"
                       },
                       "service": {
+                        "description": "todo[igni]: document before merging.",
                         "type": "string"
                       }
                     },
