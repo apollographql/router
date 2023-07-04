@@ -29,9 +29,13 @@ register_plugin!("apollo", "subgraph_authentication", SubgraphAuth);
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct AWSSigV4Config {
+    /// todo[igni]: document before merging.
     access_key_id: String,
+    /// todo[igni]: document before merging.
     secret_access_key: String,
+    /// todo[igni]: document before merging.
     region: String,
+    /// todo[igni]: document before merging.
     service: String,
 }
 
@@ -39,15 +43,18 @@ struct AWSSigV4Config {
 #[serde(deny_unknown_fields)]
 enum AuthConfig {
     #[serde(rename = "aws_sig_v4")]
+    /// todo[igni]: document before merging.
     AWSSigV4(AWSSigV4Config),
 }
 
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Config {
+    /// todo[igni]: document before merging.
     #[serde(default)]
     all: Option<AuthConfig>,
     #[serde(default)]
+    /// todo[igni]: document before merging.
     subgraphs: HashMap<String, AuthConfig>,
 }
 
