@@ -120,7 +120,6 @@ impl Query {
         &self,
         response: &mut Response,
         operation_name: Option<&str>,
-        is_deferred: bool,
         variables: Object,
         schema: &Schema,
         defer_conditions: BooleanValues,
@@ -130,7 +129,7 @@ impl Query {
         let original_operation = self.operation(operation_name);
         match data {
             Some(Value::Object(mut input)) => {
-                if is_deferred {
+                if self.is_deferred(defer_conditions) {
                     // Get subselection from hashmap
                     match self.subselections.get(&SubSelectionKey {
                         defer_label: response.label.clone(),
@@ -269,8 +268,8 @@ impl Query {
         configuration: &Configuration,
     ) -> (ApolloCompiler, FileId) {
         let mut compiler = ApolloCompiler::new()
-            .recursion_limit(configuration.preview_operation_limits.parser_max_recursion)
-            .token_limit(configuration.preview_operation_limits.parser_max_tokens);
+            .recursion_limit(configuration.limits.parser_max_recursion)
+            .token_limit(configuration.limits.parser_max_tokens);
         compiler.set_type_system_hir(schema.type_system.clone());
         let id = compiler.add_executable(query, QUERY_EXECUTABLE);
         (compiler, id)
@@ -1078,6 +1077,10 @@ impl Query {
         }
 
         BooleanValues { bits }
+    }
+
+    pub(crate) fn is_deferred(&self, defer_conditions: BooleanValues) -> bool {
+        self.defer_stats.has_unconditional_defer || defer_conditions.bits != 0
     }
 }
 

@@ -1,3 +1,4 @@
+use insta::assert_json_snapshot;
 use serde_json_bytes::json;
 use test_log::test;
 
@@ -29,7 +30,6 @@ struct FormatTest {
     expected_errors: Option<serde_json_bytes::Value>,
     expected_extensions: Option<serde_json_bytes::Value>,
     federation_version: FederationVersion,
-    is_deferred: bool,
 }
 
 #[derive(Default)]
@@ -89,12 +89,6 @@ impl FormatTest {
         self
     }
 
-    #[allow(unused)]
-    fn deferred(mut self) -> Self {
-        self.is_deferred = true;
-        self
-    }
-
     #[track_caller]
     fn test(self) {
         let schema = self.schema.expect("missing schema");
@@ -118,7 +112,6 @@ impl FormatTest {
         query.format_response(
             &mut response,
             self.operation,
-            self.is_deferred,
             self.variables
                 .unwrap_or_else(|| Value::Object(Object::default()))
                 .as_object()
@@ -4819,7 +4812,6 @@ fn fragment_on_interface_on_query() {
     query.format_response(
         &mut response,
         None,
-        false,
         Default::default(),
         api_schema,
         BooleanValues { bits: 0 },
@@ -5467,4 +5459,130 @@ fn test_query_not_named_query() {
         ),
         "unexpected selection {selection:?}"
     );
+}
+
+#[test]
+fn filtered_defer_fragment() {
+    let config = Configuration::default();
+    let schema = Schema::parse_test(
+        r#"
+        schema
+            @core(feature: "https://specs.apollo.dev/core/v0.1")
+            @core(feature: "https://specs.apollo.dev/join/v0.1")
+            @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+            {
+                query: Query
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        type Query {
+            a: A
+        }
+
+        type A {
+            b: String
+            c: String!
+        }
+        "#,
+        &config,
+    )
+    .unwrap();
+    let query = r#"{
+        a {
+          b
+          ... @defer(label: "A") {
+            c
+          }
+        }
+      }"#;
+
+    let filtered_query = "{
+        a {
+          b
+        }
+      }";
+
+    let mut compiler = ApolloCompiler::new();
+    let file_id = compiler.add_executable(query, "query.graphql");
+    let (fragments, operations, defer_stats) =
+        Query::extract_query_information(&compiler, file_id, &schema).unwrap();
+
+    let subselections = crate::spec::query::subselections::collect_subselections(
+        &config,
+        &operations,
+        &fragments.map,
+        &defer_stats,
+    )
+    .unwrap();
+    let mut query = Query {
+        string: query.to_string(),
+        compiler: Arc::new(Mutex::new(compiler)),
+        fragments,
+        operations,
+        filtered_query: None,
+        subselections,
+        added_labels: HashSet::new(),
+        defer_stats,
+        is_original: true,
+    };
+
+    let mut compiler = ApolloCompiler::new();
+    let file_id = compiler.add_executable(filtered_query, "filtered_query.graphql");
+    let (fragments, operations, defer_stats) =
+        Query::extract_query_information(&compiler, file_id, &schema).unwrap();
+
+    let subselections = crate::spec::query::subselections::collect_subselections(
+        &config,
+        &operations,
+        &fragments.map,
+        &defer_stats,
+    )
+    .unwrap();
+
+    let filtered = Query {
+        string: filtered_query.to_string(),
+        compiler: Arc::new(Mutex::new(compiler)),
+        fragments,
+        operations,
+        filtered_query: None,
+        subselections,
+        added_labels: HashSet::new(),
+        defer_stats,
+        is_original: false,
+    };
+
+    query.filtered_query = Some(Arc::new(filtered));
+
+    let mut response = crate::graphql::Response::builder()
+        .data(json! {{
+            "a": {
+                "b": "b",
+              }
+        }})
+        .build();
+
+    query.filtered_query.as_ref().unwrap().format_response(
+        &mut response,
+        None,
+        Object::new(),
+        &schema,
+        BooleanValues { bits: 0 },
+    );
+
+    assert_json_snapshot!(response);
+
+    query.format_response(
+        &mut response,
+        None,
+        Object::new(),
+        &schema,
+        BooleanValues { bits: 0 },
+    );
+
+    assert_json_snapshot!(response);
 }
