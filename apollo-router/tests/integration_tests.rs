@@ -112,6 +112,10 @@ async fn api_schema_hides_field() {
         .message
         .as_str()
         .contains(r#"Cannot query field "inStock" on type "Product""#));
+    assert_eq!(
+        actual.errors[0].extensions["code"].as_str(),
+        Some("GRAPHQL_VALIDATION_FAILED"),
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -140,6 +144,10 @@ async fn api_schema_hides_field_rust_validation() {
         .message
         .as_str()
         .contains("cannot query field `inStock` on type `Product`"));
+    assert_eq!(
+        actual.errors[0].extensions["code"].as_str(),
+        Some("GRAPHQL_VALIDATION_FAILED"),
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
