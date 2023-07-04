@@ -537,8 +537,12 @@ mod tests {
         .unwrap_err();
 
         match err {
-            QueryPlannerError::SpecError(spec_error) => {
-                insta::assert_debug_snapshot!("plan_invalid_query_errors", spec_error);
+            // XXX(@goto-bus-stop): will be a SpecError in the Rust-based validation implementation
+            QueryPlannerError::PlanningErrors(plan_errors) => {
+                insta::with_settings!({sort_maps => true}, {
+                    insta::assert_json_snapshot!("plan_invalid_query_usage_reporting", plan_errors.usage_reporting);
+                });
+                insta::assert_debug_snapshot!("plan_invalid_query_errors", plan_errors.errors);
             }
             _ => {
                 panic!("invalid query planning should have failed");
