@@ -41,7 +41,7 @@ fn make_api_schema(schema: &str, configuration: &Configuration) -> Result<String
         schema,
         ApiSchemaOptions {
             graphql_validation: matches!(
-                configuration.experimental_graphql_validation,
+                configuration.experimental_graphql_validation_mode,
                 GraphQLValidation::Legacy | GraphQLValidation::Both
             ),
         },
@@ -76,7 +76,7 @@ impl Schema {
         }
 
         let diagnostics =
-            if configuration.experimental_graphql_validation == GraphQLValidation::Legacy {
+            if configuration.experimental_graphql_validation_mode == GraphQLValidation::Legacy {
                 vec![]
             } else {
                 compiler
@@ -94,7 +94,7 @@ impl Schema {
 
             // Only error out if new validation is used: with `Both`, we take the legacy
             // validation as authoritative and only use the new result for comparison
-            if configuration.experimental_graphql_validation == GraphQLValidation::New {
+            if configuration.experimental_graphql_validation_mode == GraphQLValidation::New {
                 return Err(SchemaError::Validate(errors));
             }
         }

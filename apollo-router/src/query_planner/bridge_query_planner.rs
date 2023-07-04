@@ -62,7 +62,7 @@ impl BridgeQueryPlanner {
                     enable_defer: Some(configuration.supergraph.defer_support),
                 }),
                 graphql_validation: matches!(
-                    configuration.experimental_graphql_validation,
+                    configuration.experimental_graphql_validation_mode,
                     GraphQLValidation::Legacy | GraphQLValidation::Both
                 ),
             },
@@ -72,7 +72,7 @@ impl BridgeQueryPlanner {
         let planner = match planner {
             Ok(planner) => planner,
             Err(err) => {
-                if configuration.experimental_graphql_validation == GraphQLValidation::Both {
+                if configuration.experimental_graphql_validation_mode == GraphQLValidation::Both {
                     let has_validation_errors = err.iter().any(|err| err.is_validation_error());
 
                     if has_validation_errors && !schema.has_errors() {
@@ -87,7 +87,7 @@ impl BridgeQueryPlanner {
             }
         };
 
-        if configuration.experimental_graphql_validation == GraphQLValidation::Both
+        if configuration.experimental_graphql_validation_mode == GraphQLValidation::Both
             && schema.has_errors()
         {
             tracing::warn!(
@@ -128,7 +128,7 @@ impl BridgeQueryPlanner {
                             enable_defer: Some(configuration.supergraph.defer_support),
                         }),
                         graphql_validation: matches!(
-                            configuration.experimental_graphql_validation,
+                            configuration.experimental_graphql_validation_mode,
                             GraphQLValidation::Legacy | GraphQLValidation::Both
                         ),
                     },
@@ -187,7 +187,7 @@ impl BridgeQueryPlanner {
             })?;
 
         Query::check_errors(&compiler_guard, file_id)?;
-        let validation_error = match self.configuration.experimental_graphql_validation {
+        let validation_error = match self.configuration.experimental_graphql_validation_mode {
             GraphQLValidation::Legacy => None,
             GraphQLValidation::New => {
                 Query::validate_query(&compiler_guard, file_id)?;
@@ -926,7 +926,7 @@ mod tests {
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let mut configuration: Configuration = Default::default();
         configuration.supergraph.introspection = true;
-        configuration.experimental_graphql_validation = GraphQLValidation::Both;
+        configuration.experimental_graphql_validation_mode = GraphQLValidation::Both;
         let configuration = Arc::new(configuration);
 
         let planner = BridgeQueryPlanner::new(schema.to_string(), configuration.clone())
