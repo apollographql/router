@@ -739,17 +739,14 @@ async fn perform_fetch(
     service_name: &str,
     request: Request<Body>,
 ) -> Result<(Parts, Result<Bytes, FetchError>), FetchError> {
-    let response = match client.call(request).await {
-        Err(err) => {
-            tracing::error!(fetch_error = format!("{err:?}").as_str());
-            return Err(FetchError::SubrequestHttpError {
-                status_code: None,
-                service: service_name.to_string(),
-                reason: err.to_string(),
-            });
+    let response = client.call(request).await.map_err(|err| {
+        tracing::error!(fetch_error = format!("{err:?}").as_str());
+        FetchError::SubrequestHttpError {
+            status_code: None,
+            service: service_name.to_string(),
+            reason: err.to_string(),
         }
-        Ok(response) => response,
-    };
+    })?;
     // Keep our parts, we'll need them later
     let (parts, body) = response.into_parts();
 
@@ -774,20 +771,16 @@ async fn perform_fetch(
         }
 
         _ => {
-            match hyper::body::to_bytes(body)
+            hyper::body::to_bytes(body)
                 .instrument(tracing::debug_span!("aggregate_response_data"))
-                .await
-            {
-                Err(err) => {
+                .await.map_err(|err| {
                     tracing::error!(fetch_error = format!("{err:?}").as_str());
-                    Err(FetchError::SubrequestHttpError {
+                    FetchError::SubrequestHttpError {
                         status_code: None,
                         service: service_name.to_string(),
                         reason: err.to_string(),
-                    })
-                }
-                Ok(body) => Ok(body),
-            }
+                    }
+                })
         }
     };
 
