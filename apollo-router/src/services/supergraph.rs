@@ -1,8 +1,5 @@
 #![allow(missing_docs)] // FIXME
 
-use std::sync::Arc;
-
-use apollo_compiler::ApolloCompiler;
 use futures::future::ready;
 use futures::stream::once;
 use futures::stream::StreamExt;
@@ -17,7 +14,6 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
-use tokio::sync::Mutex;
 use tower::BoxError;
 
 use crate::error::Error;
@@ -26,10 +22,7 @@ use crate::http_ext::header_map;
 use crate::http_ext::TryIntoHeaderName;
 use crate::http_ext::TryIntoHeaderValue;
 use crate::json_ext::Path;
-use crate::spec::query::QUERY_EXECUTABLE;
 use crate::Context;
-
-use super::layers::query_analysis::Compiler;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
@@ -124,21 +117,6 @@ impl Request {
             .entry(http::header::CONTENT_TYPE.into())
             .or_insert(HeaderValue::from_static(APPLICATION_JSON.essence_str()).into());
         let context = context.unwrap_or_default();
-
-        let entries = context.private_entries.lock();
-        if !entries.contains_key::<Compiler>() {
-            let mut compiler = ApolloCompiler::new();
-            if let Some(q) = query.as_ref() {
-                compiler.add_executable(&q, QUERY_EXECUTABLE);
-            }
-
-            context
-                .private_entries
-                .lock()
-                .insert(Compiler(Arc::new(Mutex::new(compiler))));
-        }
-
-        drop(entries);
 
         Request::new(
             query,

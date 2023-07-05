@@ -9,6 +9,7 @@ use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
 use router_bridge::planner::Planner;
+use tokio::sync::Mutex;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -17,6 +18,7 @@ use tracing_futures::Instrument;
 
 use super::execution;
 use super::layers::content_negociation;
+use super::layers::query_analysis::Compiler;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
 use super::router::ClientRequestAccepts;
@@ -41,6 +43,7 @@ use crate::services::ExecutionResponse;
 use crate::services::QueryPlannerResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
@@ -138,6 +141,7 @@ async fn service_call(
         planning,
         body.operation_name.clone(),
         context.clone(),
+        schema.clone(),
         req.supergraph_request
             .body()
             .query
@@ -258,8 +262,24 @@ async fn plan_query(
     mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
     operation_name: Option<String>,
     context: Context,
+    schema: Arc<Schema>,
     query_str: String,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
+    // FIXME: we have about 80 tests creating a supergraph service and crafting a supergraph request for it
+    // none of those tests create a compiler to put it in the context, and the compiler cannot be created
+    // from inside the supergraph r'equest fake builder, because it needs a schema matching the query.
+    // So while we are updating the tests to create a compiler manually, this here will make sure current
+    // tests will pass
+    {
+        let mut entries = context.private_entries.lock();
+        if !entries.contains_key::<Compiler>() {
+            let (compiler, _) =
+                Query::make_compiler(&query_str, &schema, &Configuration::default());
+            entries.insert(Compiler(Arc::new(Mutex::new(compiler))));
+        }
+        drop(entries);
+    }
+
     planning
         .call(
             query_planner::CachingRequest::builder()
