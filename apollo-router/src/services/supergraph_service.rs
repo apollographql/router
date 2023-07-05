@@ -131,6 +131,7 @@ async fn service_call(
     let context = req.context;
     let body = req.supergraph_request.body();
     let variables = body.variables.clone();
+
     let QueryPlannerResponse {
         content,
         context,
@@ -140,7 +141,6 @@ async fn service_call(
         req.compiler,
         body.operation_name.clone(),
         context.clone(),
-        schema.clone(),
         req.supergraph_request
             .body()
             .query
@@ -262,29 +262,14 @@ async fn plan_query(
     compiler: Option<Arc<Mutex<ApolloCompiler>>>,
     operation_name: Option<String>,
     context: Context,
-    schema: Arc<Schema>,
     query_str: String,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
-    let compiler = match compiler {
-        None =>
-        // TODO[igni]: no
-        {
-            Arc::new(Mutex::new(
-                QueryAnalysisLayer::new(schema, Default::default())
-                    .await
-                    .make_compiler(&query_str)
-                    .0,
-            ))
-        }
-        Some(c) => c,
-    };
-
     planning
         .call(
             query_planner::CachingRequest::builder()
                 .query(query_str)
                 .and_operation_name(operation_name)
-                .compiler(compiler)
+                .and_compiler(compiler)
                 .context(context)
                 .build(),
         )

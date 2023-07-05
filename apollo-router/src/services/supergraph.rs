@@ -44,7 +44,6 @@ pub struct Request {
     /// Context for extension
     pub context: Context,
 
-    #[allow(dead_code)]
     pub(crate) compiler: Option<Arc<Mutex<ApolloCompiler>>>,
 }
 

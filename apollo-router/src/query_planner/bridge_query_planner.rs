@@ -289,7 +289,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         let fut = async move {
             let start = Instant::now();
 
-            let mut compiler_guard = compiler.lock().await;
+            let mut compiler_guard = compiler.as_ref().expect("HAS A COMPILER").lock().await;
             let file_id = compiler_guard
                 .db
                 .source_file(QUERY_EXECUTABLE.into())
@@ -324,7 +324,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     filtered_query.to_string(),
                     operation_name.to_owned(),
                     added_labels,
-                    compiler,
+                    compiler.expect("HAS A COMPILER"),
                 )
                 .await;
             let duration = start.elapsed().as_secs_f64();

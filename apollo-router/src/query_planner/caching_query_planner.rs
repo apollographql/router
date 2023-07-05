@@ -132,7 +132,7 @@ where
                 let request = QueryPlannerRequest {
                     query,
                     operation_name: operation,
-                    compiler: Arc::new(Mutex::new(compiler)),
+                    compiler: Some(Arc::new(Mutex::new(compiler))),
                     context: context.clone(),
                 };
 
@@ -185,9 +185,10 @@ where
         task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: query_planner::CachingRequest) -> Self::Future {
+    fn call(&mut self, mut request: query_planner::CachingRequest) -> Self::Future {
         let mut qp = self.clone();
         let schema_id = self.schema.schema_id.clone();
+        let schema = self.schema.clone();
         Box::pin(async move {
             let caching_key = CachingQueryKey {
                 schema_id,
@@ -198,6 +199,16 @@ where
             let context = request.context.clone();
             let entry = qp.cache.get(&caching_key).await;
             if entry.is_first() {
+                // May not have a compiler, so build one. Only do it for the "first" entry
+                let file_id_opt = if request.compiler.is_none() {
+                    let (compiler, file_id) = QueryAnalysisLayer::new(schema, Default::default())
+                        .await
+                        .make_compiler(&request.query);
+                    request.compiler = Some(Arc::new(Mutex::new(compiler)));
+                    Some(file_id)
+                } else {
+                    None
+                };
                 let query_planner::CachingRequest {
                     mut query,
                     operation_name,
@@ -205,14 +216,18 @@ where
                     compiler,
                 } = request;
 
-                let compiler_guard = compiler.lock().await;
-                let file_id = compiler_guard
-                    .db
-                    .source_file(QUERY_EXECUTABLE.into())
-                    .ok_or(QueryPlannerError::SpecError(SpecError::ParsingError(
-                        "missing input file for query".to_string(),
-                    )))
-                    .map_err(|e| CacheResolverError::RetrievalError(Arc::new(e)))?;
+                let compiler_guard = compiler.as_ref().expect("HAS A COMPILER").lock().await;
+
+                let file_id = match file_id_opt {
+                    Some(file_id) => file_id,
+                    None => compiler_guard
+                        .db
+                        .source_file(QUERY_EXECUTABLE.into())
+                        .ok_or(QueryPlannerError::SpecError(SpecError::ParsingError(
+                            "missing input file for query".to_string(),
+                        )))
+                        .map_err(|e| CacheResolverError::RetrievalError(Arc::new(e)))?,
+                };
 
                 if let Ok((modified_query, _)) = add_defer_labels(file_id, &compiler_guard) {
                     query = modified_query;
@@ -223,7 +238,7 @@ where
                     .query(query)
                     .and_operation_name(operation_name)
                     .context(context)
-                    .compiler(compiler)
+                    .and_compiler(compiler)
                     .build();
 
                 // some clients might timeout and cancel the request before query planning is finished,
@@ -235,7 +250,12 @@ where
                         // we need to isolate the compiler guard here, otherwise rustc might believe we still hold it
                         // when inserting the error in the entry
                         let err_res = {
-                            let compiler_guard = request.compiler.lock().await;
+                            let compiler_guard = request
+                                .compiler
+                                .as_ref()
+                                .expect("HAS A COMPILER")
+                                .lock()
+                                .await;
                             Query::check_errors(&compiler_guard, file_id)
                         };
 
@@ -466,7 +486,7 @@ mod tests {
                 .call(query_planner::CachingRequest::new(
                     "query Me { me { username } }".to_string(),
                     Some("".into()),
-                    compiler1.clone(),
+                    Some(compiler1.clone()),
                     Context::new()
                 ))
                 .await
@@ -485,7 +505,7 @@ mod tests {
             .call(query_planner::CachingRequest::new(
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
-                compiler2,
+                Some(compiler2),
                 Context::new()
             ))
             .await
@@ -547,7 +567,7 @@ mod tests {
                 .call(query_planner::CachingRequest::new(
                     "query Me { me { username } }".to_string(),
                     Some("".into()),
-                    compiler.clone(),
+                    Some(compiler.clone()),
                     Context::new()
                 ))
                 .await

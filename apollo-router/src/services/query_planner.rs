@@ -23,7 +23,7 @@ pub(crate) struct Request {
     pub(crate) query: String,
     pub(crate) operation_name: Option<String>,
     #[derivative(Debug = "ignore")]
-    pub(crate) compiler: Arc<Mutex<ApolloCompiler>>,
+    pub(crate) compiler: Option<Arc<Mutex<ApolloCompiler>>>,
     pub(crate) context: Context,
 }
 
@@ -37,7 +37,7 @@ impl Request {
         query: String,
         operation_name: Option<String>,
         context: Context,
-        compiler: Arc<Mutex<ApolloCompiler>>,
+        compiler: Option<Arc<Mutex<ApolloCompiler>>>,
     ) -> Request {
         Self {
             query,
@@ -56,7 +56,7 @@ pub(crate) struct CachingRequest {
     pub(crate) operation_name: Option<String>,
     pub(crate) context: Context,
     #[derivative(Debug = "ignore")]
-    pub(crate) compiler: Arc<Mutex<ApolloCompiler>>,
+    pub(crate) compiler: Option<Arc<Mutex<ApolloCompiler>>>,
 }
 
 #[buildstructor::buildstructor]
@@ -68,7 +68,7 @@ impl CachingRequest {
     pub(crate) fn new(
         query: String,
         operation_name: Option<String>,
-        compiler: Arc<Mutex<ApolloCompiler>>,
+        compiler: Option<Arc<Mutex<ApolloCompiler>>>,
         context: Context,
     ) -> CachingRequest {
         Self {
