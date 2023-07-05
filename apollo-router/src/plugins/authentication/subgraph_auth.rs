@@ -26,6 +26,7 @@ use crate::services::SubgraphRequest;
 
 register_plugin!("apollo", "subgraph_authentication", SubgraphAuth);
 
+/// todo[igni]: document before merging.
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct AWSSigV4Config {
@@ -47,6 +48,7 @@ enum AuthConfig {
     AWSSigV4(AWSSigV4Config),
 }
 
+/// todo[igni]: document before merging.
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Config {
