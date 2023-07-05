@@ -111,7 +111,6 @@ linkme = "0.3.12"
 lru = "0.8.1"
 mediatype = "0.19.15"
 mockall = "0.11.4"
-miette = { version = "5.9.0", features = ["fancy"] }
 mime = "0.3.17"
 multer = "2.1.0"
 multimap = "0.8.3"
@@ -171,7 +170,7 @@ reqwest = { version = "0.11.18", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = "0.2.8+v2.4.8"
+router-bridge = "0.2.9+v2.4.8"
 rust-embed="6.8.1"
 rustls = "0.20.8"
 rustls-pemfile = "1.0.3"

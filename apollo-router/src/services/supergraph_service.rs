@@ -744,7 +744,7 @@ mod tests {
                     ]
                     }}
             ).build()),
-    ].into_iter().collect());
+        ].into_iter().collect());
 
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))

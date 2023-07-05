@@ -111,7 +111,43 @@ async fn api_schema_hides_field() {
     assert!(actual.errors[0]
         .message
         .as_str()
-        .contains("Cannot query field \"inStock\" on type \"Product\"."));
+        .contains(r#"Cannot query field "inStock" on type "Product""#));
+    assert_eq!(
+        actual.errors[0].extensions["code"].as_str(),
+        Some("GRAPHQL_VALIDATION_FAILED"),
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn api_schema_hides_field_rust_validation() {
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ topProducts { name inStock } }"#)
+        .variable("topProductsFirst", 2_i32)
+        .variable("reviewsForAuthorAuthorId", 1_i32)
+        .build()
+        .expect("expecting valid request");
+
+    let (actual, _) = query_rust_with_config(
+        request,
+        serde_json::json!({
+            "telemetry":{
+              "apollo": {
+                    "field_level_instrumentation_sampler": "always_off"
+                }
+            },
+            "experimental_graphql_validation_mode": "new",
+        }),
+    )
+    .await;
+
+    assert!(actual.errors[0]
+        .message
+        .as_str()
+        .contains("cannot query field `inStock` on type `Product`"));
+    assert_eq!(
+        actual.errors[0].extensions["code"].as_str(),
+        Some("GRAPHQL_VALIDATION_FAILED"),
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -659,7 +695,8 @@ async fn defer_path_with_disabled_config() {
             "apollo.include_subgraph_errors": {
                 "all": true
             }
-        }
+        },
+        "experimental_graphql_validation_mode": "both",
     });
     let request = supergraph::Request::fake_builder()
         .query(
@@ -927,7 +964,8 @@ async fn query_rust(
               "apollo": {
                     "field_level_instrumentation_sampler": "always_off"
                 }
-            }
+            },
+            "experimental_graphql_validation_mode": "both",
         }),
     )
     .await
