@@ -51,7 +51,7 @@ where
                     }
 
                     match req.compiler.as_ref() {
-                        None => return Ok(ControlFlow::Continue(req)),
+                        None => Ok(ControlFlow::Continue(req)),
                         Some(compiler) => {
                             let c = compiler.lock().await.snapshot();
                             let file_id = c
@@ -74,7 +74,7 @@ where
                                         .context(req.context)
                                         .build()?;
 
-                                    return Ok(ControlFlow::Break(res));
+                                    Ok(ControlFlow::Break(res))
                                 }
                                 Some(op) => {
                                     if op.operation_ty() == OperationType::Mutation {
@@ -230,7 +230,7 @@ mod forbid_http_get_mutations_tests {
         let mut mock_service = MockSupergraphService::new();
         mock_service
             .expect_clone()
-            .returning(move || MockSupergraphService::new());
+            .returning(MockSupergraphService::new);
         let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
 
         let forbidden_requests = [
