@@ -29,7 +29,7 @@ register_plugin!("apollo", "subgraph_authentication", SubgraphAuth);
 /// todo[igni]: document before merging.
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct AWSSigV4Config {
+struct AWSSigV4HardcodedConfig {
     /// todo[igni]: document before merging.
     access_key_id: String,
     /// todo[igni]: document before merging.
@@ -38,6 +38,18 @@ struct AWSSigV4Config {
     region: String,
     /// todo[igni]: document before merging.
     service: String,
+}
+
+/// todo[igni]: document before merging.
+#[derive(Clone, JsonSchema, Deserialize)]
+struct AWSSigV4DefaultCredentialsChainConfig {}
+
+/// todo[igni]: document before merging.
+#[derive(Clone, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AWSSigV4Config {
+    Hardcoded(AWSSigV4HardcodedConfig),
+    DefaultCredentialsChain(AWSSigV4DefaultCredentialsChainConfig),
 }
 
 #[derive(Clone, JsonSchema, Deserialize)]
@@ -128,7 +140,7 @@ where
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
         match &self.auth {
-            AuthConfig::AWSSigV4(config) => {
+            AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(config)) => {
                 let credentials = Credentials::new(
                     config.access_key_id.clone(),
                     config.secret_access_key.clone(),
@@ -177,6 +189,7 @@ where
 
                 self.inner.call(req)
             }
+            _ => todo!(),
         }
     }
 }
@@ -204,10 +217,11 @@ mod test {
             r#"
         all:
           aws_sig_v4:
-            access_key_id: "test"
-            secret_access_key: "test"
-            region: "us-east-1"
-            service: "lambda"
+            hardcoded:
+              access_key_id: "test"
+              secret_access_key: "test"
+              region: "us-east-1"
+              service: "lambda"
         "#,
         )
         .unwrap();
@@ -220,10 +234,11 @@ mod test {
         subgraphs:
           products:
             aws_sig_v4:
-              access_key_id: "test"
-              secret_access_key: "test"
-              region: "us-east-1"
-              service: "lambda"
+              hardcoded:
+                access_key_id: "test"
+                secret_access_key: "test"
+                region: "us-east-1"
+                service: "lambda"
         "#,
         )
         .unwrap();
@@ -257,12 +272,14 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = AuthLayer::new(AuthConfig::AWSSigV4(AWSSigV4Config {
-            access_key_id: "id".to_string(),
-            secret_access_key: "secret".to_string(),
-            region: "us-east-1".to_string(),
-            service: "lambda".to_string(),
-        }))
+        let mut service = AuthLayer::new(AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(
+            AWSSigV4HardcodedConfig {
+                access_key_id: "id".to_string(),
+                secret_access_key: "secret".to_string(),
+                region: "us-east-1".to_string(),
+                service: "lambda".to_string(),
+            },
+        )))
         .layer(mock);
 
         service.ready().await?.call(subgraph_request).await?;
