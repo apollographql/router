@@ -451,12 +451,7 @@ mod tests {
 
         let configuration = Arc::new(crate::Configuration::default());
         let schema = Arc::new(
-            Schema::parse(
-                include_str!("testdata/schema.graphql"),
-                &configuration,
-                None,
-            )
-            .unwrap(),
+            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap(),
         );
 
         let mut planner =
@@ -464,12 +459,8 @@ mod tests {
 
         let configuration = Configuration::default();
 
-        let schema = Schema::parse(
-            include_str!("testdata/schema.graphql"),
-            &configuration,
-            None,
-        )
-        .unwrap();
+        let schema =
+            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
 
         let compiler1 = Arc::new(Mutex::new(
             Query::make_compiler("query Me { me { username } }", &schema, &configuration).0,
@@ -545,12 +536,8 @@ mod tests {
 
         let configuration = Configuration::default();
 
-        let schema = Schema::parse(
-            include_str!("testdata/schema.graphql"),
-            &configuration,
-            None,
-        )
-        .unwrap();
+        let schema =
+            Schema::parse(include_str!("testdata/schema.graphql"), &configuration).unwrap();
 
         let compiler = Arc::new(Mutex::new(
             Query::make_compiler("query Me { me { username } }", &schema, &configuration).0,

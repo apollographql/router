@@ -7,7 +7,6 @@ use serde::Serialize;
 
 use crate::spec::query::DeferStats;
 use crate::spec::FieldType;
-use crate::spec::IncludeSkip;
 use crate::spec::Schema;
 use crate::spec::Selection;
 use crate::spec::SpecError;
@@ -30,7 +29,6 @@ impl Fragments {
             .map(|(name, fragment)| {
                 let type_condition = fragment.type_condition().to_owned();
                 let current_type = FieldType::new_named(type_condition.clone());
-                let include_skip = IncludeSkip::parse(fragment.directives());
                 let fragment = Fragment {
                     type_condition,
                     selection_set: fragment
@@ -42,7 +40,6 @@ impl Fragments {
                                 .transpose()
                         })
                         .collect::<Result<Vec<_>, _>>()?,
-                    include_skip,
                 };
                 Ok((name.clone(), fragment))
             })
@@ -61,5 +58,4 @@ impl Fragments {
 pub(crate) struct Fragment {
     pub(crate) type_condition: String,
     pub(crate) selection_set: Vec<Selection>,
-    pub(crate) include_skip: IncludeSkip,
 }
