@@ -36,7 +36,7 @@ async fn test_otlp_tracing() -> Result<(), BoxError> {
         .await;
     router.start().await;
     router.assert_started().await;
-    router.run_query().await;
+    router.execute_default_query().await;
     Ok(())
 }
 
@@ -51,7 +51,7 @@ async fn test_datadog_tracing() -> Result<(), BoxError> {
 
     router.start().await;
     router.assert_started().await;
-    router.run_query().await;
+    router.execute_default_query().await;
     Ok(())
 }
 
@@ -66,7 +66,7 @@ async fn test_tracing() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let (_, response) = router.run_query().await;
+    let (_, response) = router.execute_default_query().await;
     assert!(response.headers().get("apollo-trace-id").is_none());
 
     Ok(())
