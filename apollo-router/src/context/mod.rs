@@ -21,6 +21,9 @@ use crate::json_ext::Value;
 
 pub(crate) mod extensions;
 
+/// The key of the resolved operation name. This is subject to change and should not be relied on.
+pub(crate) const OPERATION_NAME: &str = "operation_name";
+
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
 

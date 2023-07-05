@@ -19,9 +19,9 @@ async fn test_metrics_reloading() -> Result<(), BoxError> {
     router.assert_started().await;
 
     for _ in 0..2 {
-        router.run_query().await;
-        router.run_query().await;
-        router.run_query().await;
+        router.execute_default_query().await;
+        router.execute_default_query().await;
+        router.execute_default_query().await;
 
         // Get Prometheus metrics.
         let metrics_response = router.get_metrics_response().await.unwrap();
@@ -60,8 +60,8 @@ async fn test_metrics_reloading() -> Result<(), BoxError> {
         .await;
 
     if std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok() {
-        router.assert_metrics_contains(r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",service_name="apollo-router",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router",otel_scope_version=""}"#, Some(Duration::from_secs(120))).await;
-        router.assert_metrics_contains(r#"apollo_router_uplink_fetch_count_total{query="License",service_name="apollo-router",status="success",otel_scope_name="apollo/router",otel_scope_version=""}"#, Some(Duration::from_secs(1))).await;
+        router.assert_metrics_contains(r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",service_name="apollo-router",url="https://uplink.api.apollographql.com/"}"#, Some(Duration::from_secs(120))).await;
+        router.assert_metrics_contains(r#"apollo_router_uplink_fetch_count_total{query="License",service_name="apollo-router",status="success"}"#, Some(Duration::from_secs(1))).await;
     }
 
     Ok(())

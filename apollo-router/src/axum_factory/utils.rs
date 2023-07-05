@@ -135,8 +135,12 @@ impl PropagatingMakeSpan {
                 "http.route" = %request.uri(),
                 "http.flavor" = ?request.version(),
                 "http.status" = 500, // This prevents setting later
+                "otel.name" = ::tracing::field::Empty,
                 "otel.kind" = "SERVER",
-                "apollo_router.license" = LICENSE_EXPIRED_SHORT_MESSAGE
+                "graphql.operation.name" = ::tracing::field::Empty,
+                "graphql.operation.type" = ::tracing::field::Empty,
+                "apollo_router.license" = LICENSE_EXPIRED_SHORT_MESSAGE,
+                "apollo_private.request" = true,
             )
         } else {
             tracing::info_span!(
@@ -144,8 +148,11 @@ impl PropagatingMakeSpan {
                 "http.method" = %request.method(),
                 "http.route" = %request.uri(),
                 "http.flavor" = ?request.version(),
+                "otel.name" = ::tracing::field::Empty,
                 "otel.kind" = "SERVER",
-
+                "graphql.operation.name" = ::tracing::field::Empty,
+                "graphql.operation.type" = ::tracing::field::Empty,
+                "apollo_private.request" = true,
             )
         }
     }
