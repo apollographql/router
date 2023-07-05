@@ -1254,6 +1254,7 @@ expression: "&schema"
       "additionalProperties": false
     },
     "subgraph_authentication": {
+      "description": "todo[igni]: document before merging.",
       "type": "object",
       "properties": {
         "all": {
@@ -1267,6 +1268,7 @@ expression: "&schema"
               ],
               "properties": {
                 "aws_sig_v4": {
+                  "description": "todo[igni]: document before merging.",
                   "type": "object",
                   "required": [
                     "access_key_id",
@@ -1313,6 +1315,7 @@ expression: "&schema"
                 ],
                 "properties": {
                   "aws_sig_v4": {
+                    "description": "todo[igni]: document before merging.",
                     "type": "object",
                     "required": [
                       "access_key_id",
