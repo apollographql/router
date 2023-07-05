@@ -36,6 +36,18 @@ expression: get_spans()
           [
             "otel.kind",
             "SERVER"
+          ],
+          [
+            "apollo_private.request",
+            true
+          ],
+          [
+            "graphql.operation.type",
+            "query"
+          ],
+          [
+            "otel.name",
+            "query"
           ]
         ],
         "metadata": {
@@ -48,7 +60,11 @@ expression: get_spans()
               "http.method",
               "http.route",
               "http.flavor",
-              "otel.kind"
+              "otel.name",
+              "otel.kind",
+              "graphql.operation.name",
+              "graphql.operation.type",
+              "apollo_private.request"
             ]
           }
         }
@@ -168,10 +184,6 @@ expression: get_spans()
                   [
                     "graphql.document",
                     "{ topProducts { name name2:name } }"
-                  ],
-                  [
-                    "graphql.operation.name",
-                    ""
                   ],
                   [
                     "otel.kind",

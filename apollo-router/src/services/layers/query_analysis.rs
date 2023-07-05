@@ -7,6 +7,7 @@ use http::StatusCode;
 use lru::LruCache;
 use tokio::sync::Mutex;
 
+use crate::context::OPERATION_NAME;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
@@ -107,7 +108,7 @@ impl QueryAnalysisLayer {
                     .find_operation(file_id, op_name.clone())
                     .and_then(|operation| operation.name().map(|s| s.to_owned()));
 
-                context.insert("operation_name", operation_name).unwrap();
+                context.insert(OPERATION_NAME, operation_name).unwrap();
 
                 (*self.cache.lock().await).put(
                     QueryAnalysisKey {
