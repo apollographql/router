@@ -19,6 +19,7 @@ use tracing_futures::Instrument;
 
 use super::execution;
 use super::layers::content_negociation;
+use super::layers::query_analysis::Compiler;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
 use super::router::ClientRequestAccepts;
@@ -131,14 +132,19 @@ async fn service_call(
     let context = req.context;
     let body = req.supergraph_request.body();
     let variables = body.variables.clone();
-    let compiler = req.compiler.as_ref().unwrap().lock().await.snapshot();
+    let compiler = context
+        .private_entries
+        .lock()
+        .get::<Compiler>()
+        .map(|c| c.0.clone());
+
     let QueryPlannerResponse {
         content,
         context,
         errors,
     } = match plan_query(
         planning,
-        req.compiler,
+        compiler,
         body.operation_name.clone(),
         context.clone(),
         schema.clone(),
@@ -238,7 +244,6 @@ async fn service_call(
                             .supergraph_request(req.supergraph_request)
                             .query_plan(plan.clone())
                             .context(context)
-                            .compiler(compiler)
                             .build()
                             .await,
                     )

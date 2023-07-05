@@ -17,8 +17,6 @@ use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
-use tokio::sync::Mutex;
-use tokio::sync::MutexGuard;
 use tracing::level_filters::LevelFilter;
 
 use self::subselections::BooleanValues;
@@ -67,10 +65,6 @@ pub(crate) struct Query {
     pub(crate) defer_stats: DeferStats,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) is_original: bool,
-}
-
-fn empty_compiler() -> Arc<Mutex<ApolloCompiler>> {
-    Arc::new(Mutex::new(ApolloCompiler::new()))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -335,19 +329,6 @@ impl Query {
             .collect::<Result<Vec<_>, SpecError>>()?;
 
         Ok((fragments, operations, defer_stats))
-    }
-
-    /// Create a new compiler for this query, without caching it
-    pub(crate) fn uncached_compiler(&self, schema: Option<&Schema>) -> ApolloCompiler {
-        let mut compiler = ApolloCompiler::new();
-        if let Some(schema) = schema {
-            compiler.set_type_system_hir(schema.type_system.clone());
-        }
-        // As long as this is the only executable document in this compiler
-        // we can use compiler’s `all_operations` and `all_fragments`.
-        // If that changes, we’ll need to carry around this ID somehow.
-        let _id = compiler.add_executable(&self.string, QUERY_EXECUTABLE);
-        compiler
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -23,14 +23,6 @@ pub struct Request {
 
     pub query_plan: Arc<QueryPlan>,
 
-    /// An apollo-compiler context that contains `self.query_plan.query`.
-    ///
-    /// It normally also contains type information from the schema,
-    /// but might not if this `Request` was created in tests
-    /// with `fake_builder()` without providing a `schema` parameter.
-    #[allow(unused)] // TODO: find some uses
-    pub(crate) compiler: apollo_compiler::Snapshot,
-
     pub context: Context,
 }
 
@@ -45,12 +37,10 @@ impl Request {
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
-        compiler: apollo_compiler::Snapshot,
     ) -> Request {
         Self {
             supergraph_request,
             query_plan,
-            compiler,
             context,
         }
     }
@@ -61,13 +51,11 @@ impl Request {
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
-        compiler: apollo_compiler::Snapshot,
     ) -> Request {
         //let compiler = query_plan.query.compiler().await.snapshot();
         Self {
             supergraph_request,
             query_plan,
-            compiler,
             context,
         }
     }
@@ -82,13 +70,11 @@ impl Request {
         supergraph_request: Option<http::Request<graphql::Request>>,
         query_plan: Option<QueryPlan>,
         context: Option<Context>,
-        compiler: apollo_compiler::Snapshot,
     ) -> Request {
         Request::new(
             supergraph_request.unwrap_or_default(),
             Arc::new(query_plan.unwrap_or_else(|| QueryPlan::fake_builder().build())),
             context.unwrap_or_default(),
-            compiler,
         )
     }
 }
