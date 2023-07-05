@@ -399,12 +399,6 @@ async fn automated_persisted_queries() {
 
     let expected_apq_miss_error = apollo_router::graphql::Error::builder()
         .message("PersistedQueryNotFound")
-        .extension(
-            "exception",
-            json!({
-                "stacktrace": ["PersistedQueryNotFoundError: PersistedQueryNotFound"]
-            }),
-        )
         .extension_code("PERSISTED_QUERY_NOT_FOUND")
         .build();
 
@@ -519,13 +513,20 @@ async fn missing_variables() {
     assert_eq!(response.errors, expected);
 }
 
+const PARSER_LIMITS_TEST_QUERY: &str =
+    r#"{ me { reviews { author { reviews { author { name } } } } } }"#;
+const PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT: usize = 35;
+const PARSER_LIMITS_TEST_QUERY_RECURSION: usize = 6;
+
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_under_recursion_limit() {
     let config = serde_json::json!({
-        "preview_operation_limits": {"parser_max_recursion": 12_usize}
+        "limits": {
+            "parser_max_recursion": PARSER_LIMITS_TEST_QUERY_RECURSION
+        }
     });
     let request = supergraph::Request::fake_builder()
-        .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
+        .query(PARSER_LIMITS_TEST_QUERY)
         .build()
         .expect("expecting valid request");
 
@@ -543,10 +544,12 @@ async fn query_just_under_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_at_recursion_limit() {
     let config = serde_json::json!({
-        "preview_operation_limits": {"parser_max_recursion": 5_usize}
+        "limits": {
+            "parser_max_recursion": PARSER_LIMITS_TEST_QUERY_RECURSION - 1
+        }
     });
     let request = supergraph::Request::fake_builder()
-        .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
+        .query(PARSER_LIMITS_TEST_QUERY)
         .build()
         .expect("expecting valid request");
 
@@ -572,10 +575,12 @@ async fn query_just_at_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_under_token_limit() {
     let config = serde_json::json!({
-        "preview_operation_limits": {"parser_max_tokens": 36_usize}
+        "limits": {
+            "parser_max_tokens": PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT,
+        }
     });
     let request = supergraph::Request::fake_builder()
-        .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
+        .query(PARSER_LIMITS_TEST_QUERY)
         .build()
         .expect("expecting valid request");
 
@@ -586,17 +591,19 @@ async fn query_just_under_token_limit() {
 
     let (actual, registry) = query_rust_with_config(request, config).await;
 
-    assert_eq!(0, actual.errors.len());
+    assert_eq!(actual.errors, []);
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_at_token_limit() {
     let config = serde_json::json!({
-        "preview_operation_limits": {"parser_max_tokens": 34_usize}
+        "limits": {
+            "parser_max_tokens": PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT - 1,
+        }
     });
     let request = supergraph::Request::fake_builder()
-        .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
+        .query(PARSER_LIMITS_TEST_QUERY)
         .build()
         .expect("expecting valid request");
 

@@ -322,14 +322,14 @@ impl SubscriptionNode {
                     }
                 }
                 Some(new_configuration) = configuration_updated_rx.next() => {
-                    let plugins = match create_plugins(&new_configuration, &parameters.schema, None).await {
+                    let plugins = match create_plugins(&new_configuration, parameters.schema, None).await {
                         Ok(plugins) => plugins,
                         Err(err) => {
                             tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
                             break;
                         },
                     };
-                    let subgraph_services = match create_subgraph_services(&plugins, &parameters.schema, &new_configuration).await {
+                    let subgraph_services = match create_subgraph_services(&plugins, parameters.schema, &new_configuration).await {
                         Ok(subgraph_services) => subgraph_services,
                         Err(err) => {
                             tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
@@ -378,7 +378,7 @@ impl SubscriptionNode {
         match rest {
             Some(rest) => {
                 let created_at = val.created_at.take();
-                let (value, subselection, mut errors) = rest
+                let (value, mut errors) = rest
                     .execute_recursively(
                         parameters,
                         current_dir,
@@ -395,7 +395,6 @@ impl SubscriptionNode {
                         Response::builder()
                             .data(value)
                             .and_subscribed(val.subscribed)
-                            .and_subselection(subselection)
                             .errors(errors)
                             .extensions(val.extensions)
                             .and_path(val.path)
