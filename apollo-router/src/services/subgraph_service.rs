@@ -30,6 +30,8 @@ use hyper::Body;
 use hyper::Client;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
+use mediatype::names::{APPLICATION, JSON};
+use mediatype::MediaType;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use rustls::RootCertStore;
@@ -81,6 +83,9 @@ const PERSISTED_QUERY_KEY: &str = "persistedQuery";
 const HASH_VERSION_KEY: &str = "version";
 const HASH_VERSION_VALUE: i32 = 1;
 const HASH_KEY: &str = "sha256Hash";
+const GRAPHQL_RESPONSE_JSON: mediatype::Name =
+    mediatype::Name::new_unchecked("graphql-response+json");
+
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
 const ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
@@ -621,7 +626,15 @@ async fn call_http(
 
     // Perform the actual fetch. This
     context.enter_active_request();
-    let result = perform_fetch(client, service_name, request)
+    let response = client.call(request).await.map_err(|err| {
+        tracing::error!(fetch_error = format!("{err:?}").as_str());
+        FetchError::SubrequestHttpError {
+            status_code: None,
+            service: service_name.to_string(),
+            reason: err.to_string(),
+        }
+    });
+    let result = decompose(client, service_name)
         .instrument(subgraph_req_span)
         .await;
 
@@ -734,57 +747,48 @@ async fn call_http(
     Ok(SubgraphResponse::new_from_response(resp, context))
 }
 
-async fn perform_fetch(
+async fn decompose(
     mut client: Decompression<Client<HttpsConnector<HttpConnector>>>,
     service_name: &str,
     request: Request<Body>,
-) -> Result<(Parts, Result<Bytes, FetchError>), FetchError> {
-    let response = client.call(request).await.map_err(|err| {
-        tracing::error!(fetch_error = format!("{err:?}").as_str());
-        FetchError::SubrequestHttpError {
-            status_code: None,
-            service: service_name.to_string(),
-            reason: err.to_string(),
-        }
-    })?;
+) -> Result<(Parts, Bytes, MediaType), FetchError> {
     // Keep our parts, we'll need them later
     let (parts, body) = response.into_parts();
 
     // Only try to get the body bytes if the content type was one of the accepted types
-    let body_bytes = match parts.headers.get(header::CONTENT_TYPE).map(|v| v.to_str()) {
-        Some(Ok(content_type))
-            if !content_type.contains(APPLICATION_JSON.essence_str())
-                && !content_type.contains(GRAPHQL_JSON_RESPONSE_HEADER_VALUE) =>
-        {
-            Err(FetchError::SubrequestHttpError {
-                status_code: Some(parts.status.as_u16()),
-                service: service_name.to_string(),
-                reason: format!("subgraph didn't return JSON (expected content-type: {} or content-type: {GRAPHQL_JSON_RESPONSE_HEADER_VALUE}; found content-type: {content_type:?})", APPLICATION_JSON.essence_str()),
-            })
-        }
-        None | Some(Err(_)) => {
-            Err(FetchError::SubrequestHttpError {
-                status_code: Some(parts.status.as_u16()),
-                service: service_name.to_string(),
-                reason: format!("subgraph didn't return JSON (expected content-type: {} or content-type: {GRAPHQL_JSON_RESPONSE_HEADER_VALUE})", APPLICATION_JSON.essence_str()),
-            })
-        }
-
-        _ => {
-            hyper::body::to_bytes(body)
-                .instrument(tracing::debug_span!("aggregate_response_data"))
-                .await.map_err(|err| {
+    let (body_bytes, contect_type) = match parts.headers.get(header::CONTENT_TYPE).map(|v| v.to_str().map(MediaType::parse)) {
+        Some(Ok(Ok(content_type)))
+        if (content_type.ty == APPLICATION && (content_type.subty == JSON || content_type.subty == GRAPHQL_RESPONSE_JSON)) =>
+            {
+                (hyper::body::to_bytes(body)
+                    .instrument(tracing::debug_span!("aggregate_response_data"))
+                    .await.map_err(|err| {
                     tracing::error!(fetch_error = format!("{err:?}").as_str());
                     FetchError::SubrequestHttpError {
                         status_code: None,
                         service: service_name.to_string(),
                         reason: err.to_string(),
                     }
-                })
+                }), content_type)
+            }
+        Some(Ok(Ok(content_type))) =>
+        {
+            (Err(FetchError::SubrequestHttpError {
+                status_code: Some(parts.status.as_u16()),
+                service: service_name.to_string(),
+                reason: format!("subgraph didn't return JSON (expected content-type: {} or content-type: {GRAPHQL_JSON_RESPONSE_HEADER_VALUE}; found content-type: {content_type:?})", APPLICATION_JSON.essence_str()),
+            }), Some(content_type))
+        }
+        None | Some(_) => {
+            (Err(FetchError::SubrequestHttpError {
+                status_code: Some(parts.status.as_u16()),
+                service: service_name.to_string(),
+                reason: format!("subgraph didn't return JSON (expected content-type: {} or content-type: {GRAPHQL_JSON_RESPONSE_HEADER_VALUE})", APPLICATION_JSON.essence_str()),
+            }), None)
         }
     };
 
-    Ok((parts, body_bytes))
+    Ok((parts, body_bytes, contect_type))
 }
 
 fn get_websocket_request(
