@@ -27,6 +27,7 @@ use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::introspection::Introspection;
 use crate::query_planner::labeler::add_defer_labels;
+use crate::services::layers::query_analysis::Compiler;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -281,13 +282,20 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
             query: original_query,
             operation_name,
             context,
-            compiler,
         } = req;
 
         let this = self.clone();
         let fut = async move {
             let start = Instant::now();
 
+            let compiler = match context.private_entries.lock().get::<Compiler>() {
+                None => {
+                    return Err(QueryPlannerError::SpecError(SpecError::ParsingError(
+                        "missing compiler".to_string(),
+                    )))
+                }
+                Some(c) => c.0.clone(),
+            };
             let mut compiler_guard = compiler.lock().await;
             let file_id = compiler_guard
                 .db

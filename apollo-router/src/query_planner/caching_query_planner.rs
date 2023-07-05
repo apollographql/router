@@ -23,6 +23,7 @@ use crate::error::QueryPlannerError;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::services::layers::query_analysis::Compiler;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::query_planner;
 use crate::services::QueryPlannerContent;
@@ -129,10 +130,14 @@ where
                     query = modified_query;
                 }
 
+                context
+                    .private_entries
+                    .lock()
+                    .insert(Compiler(Arc::new(Mutex::new(compiler))));
+
                 let request = QueryPlannerRequest {
                     query,
                     operation_name: operation,
-                    compiler: Arc::new(Mutex::new(compiler)),
                     context: context.clone(),
                 };
 
@@ -202,8 +207,18 @@ where
                     mut query,
                     operation_name,
                     context,
-                    compiler,
                 } = request;
+
+                let compiler = match context.private_entries.lock().get::<Compiler>() {
+                    None => {
+                        return Err(CacheResolverError::RetrievalError(Arc::new(
+                            QueryPlannerError::SpecError(SpecError::ParsingError(
+                                "missing compiler".to_string(),
+                            )),
+                        )))
+                    }
+                    Some(c) => c.0.clone(),
+                };
 
                 let compiler_guard = compiler.lock().await;
                 let file_id = compiler_guard
@@ -223,7 +238,6 @@ where
                     .query(query)
                     .and_operation_name(operation_name)
                     .context(context)
-                    .compiler(compiler)
                     .build();
 
                 // some clients might timeout and cancel the request before query planning is finished,
@@ -235,7 +249,7 @@ where
                         // we need to isolate the compiler guard here, otherwise rustc might believe we still hold it
                         // when inserting the error in the entry
                         let err_res = {
-                            let compiler_guard = request.compiler.lock().await;
+                            let compiler_guard = compiler.lock().await;
                             Query::check_errors(&compiler_guard, file_id)
                         };
 
@@ -461,13 +475,15 @@ mod tests {
             Query::make_compiler("query Me { me { username } }", &schema, &configuration).0,
         ));
 
+        let context = Context::new();
+        context.private_entries.lock().insert(Compiler(compiler1));
+
         for _ in 0..5 {
             assert!(planner
                 .call(query_planner::CachingRequest::new(
                     "query Me { me { username } }".to_string(),
                     Some("".into()),
-                    compiler1.clone(),
-                    Context::new()
+                    context.clone()
                 ))
                 .await
                 .is_err());
@@ -481,12 +497,14 @@ mod tests {
             .0,
         ));
 
+        let context = Context::new();
+        context.private_entries.lock().insert(Compiler(compiler2));
+
         assert!(planner
             .call(query_planner::CachingRequest::new(
                 "query Me { me { name { first } } }".to_string(),
                 Some("".into()),
-                compiler2,
-                Context::new()
+                context.clone()
             ))
             .await
             .is_err());
@@ -542,13 +560,15 @@ mod tests {
             CachingQueryPlanner::new(delegate, Arc::new(schema), &configuration, IndexMap::new())
                 .await;
 
+        let context = Context::new();
+        context.private_entries.lock().insert(Compiler(compiler));
+
         for _ in 0..5 {
             assert!(planner
                 .call(query_planner::CachingRequest::new(
                     "query Me { me { username } }".to_string(),
                     Some("".into()),
-                    compiler.clone(),
-                    Context::new()
+                    context.clone(),
                 ))
                 .await
                 .unwrap()

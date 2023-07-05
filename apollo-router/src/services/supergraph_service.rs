@@ -3,14 +3,12 @@
 use std::sync::Arc;
 use std::task::Poll;
 
-use apollo_compiler::ApolloCompiler;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
 use router_bridge::planner::Planner;
-use tokio::sync::Mutex;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -19,7 +17,6 @@ use tracing_futures::Instrument;
 
 use super::execution;
 use super::layers::content_negociation;
-use super::layers::query_analysis::Compiler;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
 use super::router::ClientRequestAccepts;
@@ -132,11 +129,6 @@ async fn service_call(
     let context = req.context;
     let body = req.supergraph_request.body();
     let variables = body.variables.clone();
-    let compiler = context
-        .private_entries
-        .lock()
-        .get::<Compiler>()
-        .map(|c| c.0.clone());
 
     let QueryPlannerResponse {
         content,
@@ -144,10 +136,8 @@ async fn service_call(
         errors,
     } = match plan_query(
         planning,
-        compiler,
         body.operation_name.clone(),
         context.clone(),
-        schema.clone(),
         req.supergraph_request
             .body()
             .query
@@ -266,32 +256,15 @@ async fn service_call(
 
 async fn plan_query(
     mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    compiler: Option<Arc<Mutex<ApolloCompiler>>>,
     operation_name: Option<String>,
     context: Context,
-    schema: Arc<Schema>,
     query_str: String,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
-    let compiler = match compiler {
-        None =>
-        // TODO[igni]: no
-        {
-            Arc::new(Mutex::new(
-                QueryAnalysisLayer::new(schema, Default::default())
-                    .await
-                    .make_compiler(&query_str)
-                    .0,
-            ))
-        }
-        Some(c) => c,
-    };
-
     planning
         .call(
             query_planner::CachingRequest::builder()
                 .query(query_str)
                 .and_operation_name(operation_name)
-                .compiler(compiler)
                 .context(context)
                 .build(),
         )

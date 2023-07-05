@@ -52,7 +52,6 @@ impl Request {
         query_plan: Arc<QueryPlan>,
         context: Context,
     ) -> Request {
-        //let compiler = query_plan.query.compiler().await.snapshot();
         Self {
             supergraph_request,
             query_plan,
