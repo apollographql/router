@@ -173,23 +173,18 @@ pub struct Configuration {
 }
 
 /// GraphQL validation modes.
-#[derive(Clone, PartialEq, Eq, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
 #[derivative(Debug)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum GraphQLValidationMode {
     /// Use the new Rust-based implementation.
     New,
     /// Use the old JavaScript-based implementation.
+    #[default]
     Legacy,
     /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
     /// implementations disagree.
     Both,
-}
-
-impl Default for GraphQLValidationMode {
-    fn default() -> Self {
-        GraphQLValidationMode::Legacy
-    }
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {

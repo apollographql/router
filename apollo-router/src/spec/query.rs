@@ -346,7 +346,7 @@ impl Query {
         let errors = ValidationErrors { errors };
         errors.print();
 
-        return Err(SpecError::ValidationError(errors.to_string()));
+        Err(SpecError::ValidationError(errors.to_string()))
     }
 
     /// Extract serializable data structures from the apollo-compiler HIR.
