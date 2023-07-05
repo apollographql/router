@@ -37,7 +37,7 @@ async fn test_happy() -> Result<(), BoxError> {
         .await;
     router.start().await;
     router.assert_started().await;
-    router.run_query().await;
+    router.execute_default_query().await;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -62,10 +62,10 @@ async fn test_reload_config_valid() -> Result<(), BoxError> {
         .await;
     router.start().await;
     router.assert_started().await;
-    router.run_query().await;
+    router.execute_default_query().await;
     router.touch_config().await;
     router.assert_reloaded().await;
-    router.run_query().await;
+    router.execute_default_query().await;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -78,10 +78,10 @@ async fn test_reload_config_with_broken_plugin() -> Result<(), BoxError> {
         .await;
     router.start().await;
     router.assert_started().await;
-    router.run_query().await;
+    router.execute_default_query().await;
     router.update_config(BROKEN_PLUGIN_CONFIG).await;
     router.assert_not_reloaded().await;
-    router.run_query().await;
+    router.execute_default_query().await;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -96,13 +96,13 @@ async fn test_reload_config_with_broken_plugin_recovery() -> Result<(), BoxError
         println!("iteration {i}");
         router.start().await;
         router.assert_started().await;
-        router.run_query().await;
+        router.execute_default_query().await;
         router.update_config(BROKEN_PLUGIN_CONFIG).await;
         router.assert_not_reloaded().await;
-        router.run_query().await;
+        router.execute_default_query().await;
         router.update_config(HAPPY_CONFIG).await;
         router.assert_reloaded().await;
-        router.run_query().await;
+        router.execute_default_query().await;
         router.graceful_shutdown().await;
     }
     Ok(())
@@ -123,9 +123,10 @@ async fn test_graceful_shutdown() -> Result<(), BoxError> {
     router.assert_started().await;
 
     // Send a request in another thread, it'll take 2 seconds to respond, so we can shut down the router while it is in flight.
-    let client_handle = tokio::task::spawn(router.run_query().then(|(_, response)| async {
-        serde_json::from_slice::<graphql::Response>(&response.bytes().await.unwrap()).unwrap()
-    }));
+    let client_handle =
+        tokio::task::spawn(router.execute_default_query().then(|(_, response)| async {
+            serde_json::from_slice::<graphql::Response>(&response.bytes().await.unwrap()).unwrap()
+        }));
 
     // Pause to ensure that the request is in flight.
     tokio::time::sleep(Duration::from_millis(1000)).await;

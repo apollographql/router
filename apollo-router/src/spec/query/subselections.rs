@@ -1,28 +1,40 @@
 use std::collections::HashMap;
-use std::fmt;
 
-use apollo_compiler::hir;
-use apollo_compiler::ApolloCompiler;
-use apollo_compiler::FileId;
-use apollo_compiler::HirDatabase;
-use indexmap::IndexSet;
-use tower::BoxError;
+use serde::Deserialize;
+use serde::Serialize;
+use serde_json_bytes::ByteString;
 
-use super::transform;
-use super::traverse;
-use super::Query;
-use super::SubSelection;
-use super::SubSelections;
-use crate::json_ext::Path;
-use crate::json_ext::PathElement;
-use crate::query_planner::reconstruct_full_query;
-use crate::query_planner::OperationKind;
-use crate::spec::Schema;
+use super::DeferStats;
+use super::Operation;
+use crate::spec::selection::Selection;
+use crate::spec::Condition;
+use crate::spec::FieldType;
+use crate::spec::Fragment;
+use crate::spec::IncludeSkip;
 use crate::spec::SpecError;
 use crate::Configuration;
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Hash, Eq)]
+pub(crate) struct SubSelectionKey {
+    pub(crate) defer_label: Option<String>,
+    pub(crate) defer_conditions: BooleanValues,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct SubSelectionValue {
+    pub(crate) selection_set: Vec<Selection>,
+    pub(crate) type_name: String,
+}
+
+/// The values of boolean variables used for conditional `@defer`, packed least-significant-bit
+/// first in iteration order of `DeferStats::conditional_defer_variable_names`.
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Hash, Eq)]
+#[serde(transparent)]
+pub(crate) struct BooleanValues {
+    pub(crate) bits: u32,
+}
+
 pub(crate) const DEFER_DIRECTIVE_NAME: &str = "defer";
-const IF_ARGUMENT_NAME: &str = "if";
 
 /// We generate subselections for all 2^N possible combinations of these boolean variables.
 /// Refuse to do so for a number of combinatinons we deem unreasonable.
@@ -30,257 +42,57 @@ const MAX_DEFER_VARIABLES: usize = 4;
 
 pub(crate) fn collect_subselections(
     configuration: &Configuration,
-    schema: &Schema,
-    compiler: &ApolloCompiler,
-    file_id: FileId,
-    kind: OperationKind,
-) -> Result<(SubSelections, IndexSet<String>), SpecError> {
-    if !configuration.supergraph.defer_support {
-        return Ok((SubSelections::new(), IndexSet::new()));
+    operations: &[Operation],
+    fragments: &HashMap<String, Fragment>,
+    defer_stats: &DeferStats,
+) -> Result<HashMap<SubSelectionKey, SubSelectionValue>, SpecError> {
+    if !configuration.supergraph.defer_support || !defer_stats.has_defer {
+        return Ok(HashMap::new());
     }
-    let (keys, defer_variables_set) = subselection_keys(configuration, schema, compiler, file_id)
-        .map_err(|e| SpecError::ParsingError(e.to_string()))?;
-    keys.into_iter()
-        .map(|(key, path, subselection)| {
-            let reconstructed = reconstruct_full_query(&path, &kind, &subselection);
-            let value = Query::parse(reconstructed, schema, &Default::default())?;
-            Ok((key, value))
-        })
-        .collect::<Result<SubSelections, SpecError>>()
-        .map(|keys| (keys, defer_variables_set))
-}
-
-/// Generate the keys of the eventual `Query::subselections` hashmap.
-///
-/// They should be identical to paths and `subselection` strings found in
-/// `.primary` and `.deferred[i]` of `Defer` nodes of the query plan.
-#[allow(clippy::type_complexity)]
-fn subselection_keys(
-    configuration: &Configuration,
-    schema: &Schema,
-    compiler: &ApolloCompiler,
-    file_id: FileId,
-) -> Result<(Vec<(SubSelection, Path, String)>, IndexSet<String>), BoxError> {
-    let HasDefer {
-        has_defer,
-        has_unconditional_defer,
-    } = has_defer(compiler, file_id)?;
-    if !has_defer {
-        return Ok((Vec::new(), IndexSet::new()));
+    if defer_stats.conditional_defer_variable_names.len() > MAX_DEFER_VARIABLES {
+        // TODO: dedicated error variant?
+        return Err(SpecError::ParsingError(
+            "@defer conditional on too many different variables".into(),
+        ));
     }
-    let inlined = transform_fragment_spreads_to_inline_fragments(compiler, file_id)?.to_string();
-    let (compiler, file_id) = Query::make_compiler(&inlined, schema, configuration);
-    let variables = conditional_defer_variable_names(&compiler, file_id)?;
-    if variables.len() > MAX_DEFER_VARIABLES {
-        return Err("@defer conditional on too many different variables".into());
-    }
-    let mut keys = Vec::new();
-    for combination in variable_combinations(&variables, has_unconditional_defer) {
-        collect_subselections_keys(&compiler, file_id, combination, &mut keys)?
-    }
-    Ok((keys, variables))
-}
-
-struct HasDefer {
-    /// Whether @defer is used at all
-    has_defer: bool,
-    /// Whether @defer is used at least once without an `if` argument (or with `if: true`)
-    has_unconditional_defer: bool,
-}
-
-fn has_defer(compiler: &ApolloCompiler, file_id: FileId) -> Result<HasDefer, BoxError> {
-    struct Visitor<'a> {
-        compiler: &'a ApolloCompiler,
-        results: HasDefer,
-    }
-
-    impl traverse::Visitor for Visitor<'_> {
-        fn compiler(&self) -> &apollo_compiler::ApolloCompiler {
-            self.compiler
-        }
-
-        fn fragment_spread(&mut self, hir: &hir::FragmentSpread) -> Result<(), BoxError> {
-            self.check(hir.directive_by_name(DEFER_DIRECTIVE_NAME))?;
-            traverse::fragment_spread(self, hir)
-        }
-
-        fn inline_fragment(
-            &mut self,
-            parent_type: &str,
-            hir: &hir::InlineFragment,
-        ) -> Result<(), BoxError> {
-            self.check(hir.directive_by_name(DEFER_DIRECTIVE_NAME))?;
-            traverse::inline_fragment(self, parent_type, hir)
-        }
-    }
-
-    impl Visitor<'_> {
-        fn check(&mut self, directive: Option<&hir::Directive>) -> Result<(), BoxError> {
-            if let Some(directive) = directive {
-                match directive.argument_by_name(IF_ARGUMENT_NAME) {
-                    None => {
-                        // TODO: No need to keep traversing. Visitor with early exit?
-                        self.results.has_unconditional_defer = true;
-                        self.results.has_defer = true;
-                    }
-                    Some(hir::Value::Boolean { value, .. }) if *value => {
-                        // TODO: No need to keep traversing. Visitor with early exit?
-                        self.results.has_unconditional_defer = true;
-                        self.results.has_defer = true;
-                    }
-                    Some(hir::Value::Boolean { .. }) => {}
-                    Some(hir::Value::Variable(_)) => self.results.has_defer = true,
-                    Some(_) => return Err("non-boolean `if` argument for `@defer`".into()),
-                }
-            }
-            Ok(())
-        }
-    }
-
-    let mut visitor = Visitor {
-        compiler,
-        results: HasDefer {
-            has_defer: false,
-            has_unconditional_defer: false,
-        },
+    let mut shared = Shared {
+        defer_stats,
+        fragments,
+        defer_conditions: BooleanValues { bits: 0 }, // overwritten
+        path: Vec::new(),
+        subselections: HashMap::new(),
     };
-    traverse::document(&mut visitor, file_id)?;
-    Ok(visitor.results)
-}
-
-fn transform_fragment_spreads_to_inline_fragments(
-    compiler: &ApolloCompiler,
-    file_id: FileId,
-) -> Result<apollo_encoder::Document, BoxError> {
-    struct Visitor<'a> {
-        compiler: &'a ApolloCompiler,
-        cache: HashMap<String, Result<Option<apollo_encoder::Selection>, String>>,
-    }
-
-    impl<'a> transform::Visitor for Visitor<'a> {
-        fn compiler(&self) -> &apollo_compiler::ApolloCompiler {
-            self.compiler
-        }
-
-        fn fragment_definition(
-            &mut self,
-            _hir: &hir::FragmentDefinition,
-        ) -> Result<Option<apollo_encoder::FragmentDefinition>, BoxError> {
-            Ok(None)
-        }
-
-        fn selection(
-            &mut self,
-            hir: &hir::Selection,
-            parent_type: &str,
-        ) -> Result<Option<apollo_encoder::Selection>, BoxError> {
-            match hir {
-                hir::Selection::FragmentSpread(fragment_spread) => {
-                    let name = fragment_spread.name();
-                    if let Some(result) = self.cache.get(name) {
-                        return Ok(result.clone()?);
-                    }
-                    let result = convert(self, fragment_spread);
-                    self.cache.insert(name.into(), result.clone());
-                    Ok(result?)
-                }
-                _ => transform::selection(self, hir, parent_type),
+    for defer_conditions in variable_combinations(defer_stats) {
+        shared.defer_conditions = defer_conditions;
+        for operation in operations {
+            let type_name = operation.type_name.clone();
+            let primary = collect_from_selection_set(
+                &mut shared,
+                &FieldType::new_named(&type_name),
+                &operation.selection_set,
+            )
+            .map_err(|err| SpecError::ParsingError(err.to_owned()))?;
+            debug_assert!(shared.path.is_empty());
+            if !primary.is_empty() {
+                shared.subselections.insert(
+                    SubSelectionKey {
+                        defer_label: None,
+                        defer_conditions,
+                    },
+                    SubSelectionValue {
+                        selection_set: primary,
+                        type_name,
+                    },
+                );
             }
         }
     }
-
-    fn convert(
-        visitor: &mut Visitor<'_>,
-        fragment_spread: &hir::FragmentSpread,
-    ) -> Result<Option<apollo_encoder::Selection>, String> {
-        let fragment_def = fragment_spread
-            .fragment(&visitor.compiler.db)
-            .ok_or("Missing fragment definition")?;
-
-        let parent_type = fragment_def.type_condition();
-        let result = transform::selection_set(visitor, fragment_def.selection_set(), parent_type);
-        let Some(selection_set) = result.map_err(|e| e.to_string())?
-        else { return Ok(None) };
-
-        let mut encoder_node = apollo_encoder::InlineFragment::new(selection_set);
-
-        encoder_node.type_condition(Some(apollo_encoder::TypeCondition::new(
-            fragment_def.type_condition().into(),
-        )));
-
-        for hir in fragment_spread.directives() {
-            if let Some(d) = transform::directive(hir).map_err(|e| e.to_string())? {
-                encoder_node.directive(d)
-            }
-        }
-        Ok(Some(apollo_encoder::Selection::InlineFragment(
-            encoder_node,
-        )))
-    }
-
-    let mut visitor = Visitor {
-        compiler,
-        cache: HashMap::new(),
-    };
-    transform::document(&mut visitor, file_id)
-}
-
-/// Return the names of boolean variables used in conditional defer like `@defer(if=$example)`
-fn conditional_defer_variable_names(
-    compiler: &ApolloCompiler,
-    file_id: FileId,
-) -> Result<IndexSet<String>, BoxError> {
-    struct Visitor<'a> {
-        compiler: &'a ApolloCompiler,
-        variable_names: IndexSet<String>,
-    }
-
-    impl traverse::Visitor for Visitor<'_> {
-        fn compiler(&self) -> &apollo_compiler::ApolloCompiler {
-            self.compiler
-        }
-
-        fn fragment_spread(&mut self, hir: &hir::FragmentSpread) -> Result<(), BoxError> {
-            self.collect(hir.directive_by_name(DEFER_DIRECTIVE_NAME));
-            traverse::fragment_spread(self, hir)
-        }
-
-        fn inline_fragment(
-            &mut self,
-            parent_type: &str,
-            hir: &hir::InlineFragment,
-        ) -> Result<(), BoxError> {
-            self.collect(hir.directive_by_name(DEFER_DIRECTIVE_NAME));
-            traverse::inline_fragment(self, parent_type, hir)
-        }
-    }
-
-    impl Visitor<'_> {
-        fn collect(&mut self, directive: Option<&hir::Directive>) {
-            if let Some(directive) = directive {
-                if let Some(hir::Value::Variable(variable)) =
-                    directive.argument_by_name(IF_ARGUMENT_NAME)
-                {
-                    self.variable_names.insert(variable.name().into());
-                }
-            }
-        }
-    }
-
-    let mut visitor = Visitor {
-        compiler,
-        variable_names: IndexSet::new(),
-    };
-    traverse::document(&mut visitor, file_id)?;
-    Ok(visitor.variable_names)
+    Ok(shared.subselections)
 }
 
 /// Returns an iterator of functions, one per combination of boolean values of the given variables.
 /// The function return whether a given variable (by its name) is true in that combination.
-fn variable_combinations(
-    variables: &IndexSet<String>,
-    has_unconditional_defer: bool,
-) -> impl Iterator<Item = Combination> {
+fn variable_combinations(defer_stats: &DeferStats) -> impl Iterator<Item = BooleanValues> {
     // `N = variables.len()` boolean values have a total of 2^N combinations.
     // If we enumerate them by counting from 0 to 2^N - 1,
     // interpreting the N bits of the binary representation of the counter
@@ -288,8 +100,8 @@ fn variable_combinations(
     // Indices within the `IndexSet` are integers from 0 to N-1,
     // and so can be used as bit offset within the counter.
 
-    let combinations_count = 1 << variables.len();
-    let initial = if has_unconditional_defer {
+    let combinations_count = 1 << defer_stats.conditional_defer_variable_names.len();
+    let initial = if defer_stats.has_unconditional_defer {
         // Include the `bits == 0` case where all boolean variables are false.
         // We’ll still generate subselections for remaining (unconditional) @defer
         0
@@ -298,306 +110,187 @@ fn variable_combinations(
         1
     };
     let combinations = initial..combinations_count;
-    combinations.map(move |bits| Combination { variables, bits })
+    combinations.map(|bits| BooleanValues { bits })
 }
 
-struct Combination<'a> {
-    variables: &'a IndexSet<String>,
-    bits: i32,
-}
-
-impl<'a> Combination<'a> {
-    fn is_present(&self, variable: &str) -> bool {
-        let index = match self.variables.get_index_of(variable) {
+impl BooleanValues {
+    fn eval(&self, variable_name: &str, defer_stats: &DeferStats) -> bool {
+        let index = match defer_stats
+            .conditional_defer_variable_names
+            .get_index_of(variable_name)
+        {
             Some(index) => index,
             None => return false,
         };
         (self.bits & (1 << index)) != 0
     }
-
-    fn bitset(&self) -> i32 {
-        self.bits
-    }
 }
 
-fn collect_subselections_keys(
-    compiler: &ApolloCompiler,
-    file_id: FileId,
-    combination: Combination,
-    subselection_keys: &mut Vec<(SubSelection, Path, String)>,
-) -> Result<(), BoxError> {
-    struct Visitor<'a> {
-        combination: Combination<'a>,
-        current_path: Path,
-        subselection_keys: &'a mut Vec<(SubSelection, Path, String)>,
-    }
+/// Common arguments to multiple function calls
+struct Shared<'a> {
+    defer_stats: &'a DeferStats,
+    fragments: &'a HashMap<String, Fragment>,
+    defer_conditions: BooleanValues,
+    path: Vec<(&'a ByteString, &'a FieldType)>,
+    subselections: HashMap<SubSelectionKey, SubSelectionValue>,
+}
 
-    fn add_key(visitor: &mut Visitor<'_>, label: Option<String>, subselection: SelectionSet) {
-        visitor.subselection_keys.push((
-            SubSelection {
-                label,
-                variables_set: visitor.combination.bitset(),
-            },
-            visitor.current_path.clone(),
-            subselection.to_string(),
-        ))
-    }
-
-    fn selection_set(
-        visitor: &mut Visitor<'_>,
-        label: Option<String>,
-        hir: &hir::SelectionSet,
-    ) -> Result<Option<SelectionSet>, BoxError> {
-        let mut subselection = Vec::new();
-        for selection in hir.selection() {
-            match selection {
-                hir::Selection::Field(hir) => {
-                    let nested = if hir.selection_set().selection().is_empty() {
-                        // Leaf field
-                        SelectionSet(Vec::new())
-                    } else {
-                        let path_element = if let Some(alias) = hir.alias() {
-                            alias.name()
-                        } else {
-                            hir.name()
-                        };
-                        visitor
-                            .current_path
-                            .push(PathElement::Key(path_element.into()));
-                        let result = selection_set(visitor, label.clone(), hir.selection_set());
-                        visitor.current_path.pop();
-                        if let Some(nested) = result? {
-                            nested
-                        } else {
-                            // Every nested selection was pruned, so skip this field entirely
-                            continue;
-                        }
-                    };
-                    subselection.push(Selection::Field {
-                        alias: hir.alias().map(|a| a.name().to_owned()),
-                        name: hir.name().to_owned(),
-                        arguments: Arguments(arguments(hir.arguments())?),
-                        directives: directives(hir.directives())?,
-                        selection_set: nested,
-                    });
-                }
-
-                hir::Selection::InlineFragment(hir) => {
-                    let is_deferred =
-                        if let Some(directive) = hir.directive_by_name(DEFER_DIRECTIVE_NAME) {
-                            match directive.argument_by_name(IF_ARGUMENT_NAME) {
-                                None => true,
-                                Some(hir::Value::Boolean { value, .. }) => *value,
-                                Some(hir::Value::Variable(variable)) => {
-                                    visitor.combination.is_present(variable.name())
-                                }
-                                _ => return Err("non-boolean `if` argument for `@defer`".into()),
-                            }
-                        } else {
-                            // No @defer
-                            false
-                        };
-                    let deferred_label =
-                        if let Some(directive) = hir.directive_by_name(DEFER_DIRECTIVE_NAME) {
-                            match directive.argument_by_name("label") {
-                                None => None,
-                                Some(hir::Value::String { value, .. }) => Some(value.clone()),
-                                //FIXME: label could be a variable. I see no good reason to do it though, so for now this is not allowed
-                                _ => return Err("non-string `label` argument for `@defer`".into()),
-                            }
-                        } else {
-                            // No @defer
-                            None
-                        };
-
-                    let type_condition = hir.type_condition();
-                    if let Some(type_condition) = type_condition {
-                        visitor
-                            .current_path
-                            .push(PathElement::Fragment(type_condition.to_string()));
-                    }
-
-                    // visitor
-                    // .current_path
-                    // .push(PathElement::Key(path_element.into()));
-                    if is_deferred {
-                        // Omit this inline fragment from `subselection`,
-                        // make it a separate key instead.
-                        if let Some(mut deferred) =
-                            selection_set(visitor, deferred_label.clone(), hir.selection_set())?
-                        {
-                            if let Some(name) = hir.type_condition() {
-                                deferred = SelectionSet(vec![Selection::InlineFragment {
-                                    type_condition: Some(name.to_owned()),
-                                    directives: Vec::new(),
-                                    selection_set: deferred,
-                                }]);
-                            }
-                            add_key(visitor, deferred_label, deferred)
-                        }
-                    } else if let Some(SelectionSet(mut selection_set)) =
-                        selection_set(visitor, label.clone(), hir.selection_set())?
-                    {
-                        if let Some(name) = hir.type_condition() {
-                            selection_set = vec![Selection::InlineFragment {
-                                type_condition: Some(name.to_owned()),
-                                directives: Vec::new(),
-                                selection_set: SelectionSet(selection_set),
-                            }];
-                        }
-                        // Non-deferred fragments appear to be flattened away
-                        // in the string serialization of subselection from the query planner.
-                        subselection.extend(selection_set);
-                    }
-
-                    if type_condition.is_some() {
-                        visitor.current_path.pop();
-                    }
-                }
-
-                // Was transformed to inline fragment earlier
-                hir::Selection::FragmentSpread(_) => unreachable!(),
-            }
-        }
-        let non_empty = !subselection.is_empty();
-        Ok(if non_empty {
-            Some(SelectionSet(subselection))
-        } else {
-            None
-        })
-    }
-
-    fn arguments(hir: &[hir::Argument]) -> Result<Vec<apollo_encoder::Argument>, BoxError> {
-        hir.iter()
-            .map(|arg| {
-                Ok(apollo_encoder::Argument::new(
-                    arg.name().into(),
-                    transform::value(arg.value())?,
-                ))
-            })
-            .collect()
-    }
-
-    fn directives(hir: &[hir::Directive]) -> Result<Vec<Directive>, BoxError> {
-        hir.iter()
-            .map(|directive| {
-                Ok(Directive {
-                    name: directive.name().to_owned(),
-                    arguments: Arguments(arguments(directive.arguments())?),
-                })
-            })
-            .collect()
-    }
-
-    let mut visitor = Visitor {
-        combination,
-        current_path: Path::empty(),
-        subselection_keys,
-    };
-    for hir in compiler.db.operations(file_id).iter() {
-        if let Some(primary) = selection_set(&mut visitor, None, hir.selection_set())? {
-            add_key(&mut visitor, None, primary)
+impl Shared<'_> {
+    fn eval_condition(&self, condition: &Condition) -> bool {
+        match condition {
+            Condition::Yes => true,
+            Condition::No => false,
+            Condition::Variable(name) => self.defer_conditions.eval(name, self.defer_stats),
         }
     }
-    Ok(())
-}
 
-/// Similar to `apollo_encoder::SelectionSet` but with serialization matching
-/// <https://github.com/apollographql/federation/blob/3299d5269/internals-js/src/operations.ts#L1823-L1851>
-struct SelectionSet(Vec<Selection>);
-
-enum Selection {
-    Field {
-        alias: Option<String>,
-        name: String,
-        arguments: Arguments,
-        directives: Vec<Directive>,
-        selection_set: SelectionSet,
-    },
-    InlineFragment {
-        type_condition: Option<String>,
-        directives: Vec<Directive>,
-        selection_set: SelectionSet,
-    },
-    // FragmentSpread omitted as they’ve been transformed to inline fragments earlier
-}
-
-struct Arguments(Vec<apollo_encoder::Argument>);
-
-struct Directive {
-    name: String,
-    arguments: Arguments,
-}
-
-impl fmt::Display for SelectionSet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some((first, rest)) = self.0.split_first() {
-            write!(f, "{{ {first}")?;
-            for arg in rest {
-                write!(f, " {arg}")?;
-            }
-            write!(f, " }}")?
+    /// Take a selection set at `self.path` and reconstruct a selection set that belong
+    /// at the root.
+    fn reconstruct_up_to_root(&self, mut selection_set: Vec<Selection>) -> Vec<Selection> {
+        for &(path_name, path_type) in self.path.iter().rev() {
+            selection_set = vec![Selection::Field {
+                name: path_name.clone(),
+                alias: None,
+                selection_set: Some(selection_set),
+                field_type: path_type.clone(),
+                include_skip: IncludeSkip::parse(&[]),
+            }];
         }
-        Ok(())
+        selection_set
     }
 }
 
-impl fmt::Display for Selection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+/// Insert deferred subselections in `subselections` and return non-defered parts.
+fn collect_from_selection_set<'a>(
+    shared: &mut Shared<'a>,
+    parent_type: &FieldType,
+    selection_set: &'a [Selection],
+) -> Result<Vec<Selection>, &'static str> {
+    let mut primary = Vec::new();
+    for selection in selection_set {
+        match selection {
             Selection::Field {
-                alias,
                 name,
-                arguments,
-                directives,
-                selection_set,
+                alias,
+                selection_set: nested,
+                field_type,
+                include_skip,
             } => {
-                if let Some(alias) = alias {
-                    write!(f, "{alias}: ")?;
-                }
-                write!(f, "{name}{arguments}")?;
-                for directive in directives {
-                    write!(f, " {directive}")?;
-                }
-                if !selection_set.0.is_empty() {
-                    write!(f, " {selection_set}")?;
-                }
+                let primary_nested = if let Some(nested) = nested {
+                    let path_name = alias.as_ref().unwrap_or(name);
+                    shared.path.push((path_name, field_type));
+                    let collected = collect_from_selection_set(shared, field_type, nested)?;
+                    shared.path.pop();
+                    if !collected.is_empty() {
+                        Some(collected)
+                    } else {
+                        // Every nested selection of this field is deferred,
+                        // so skip this field entirely in the primary subselection.
+                        continue;
+                    }
+                } else {
+                    None
+                };
+                primary.push(Selection::Field {
+                    selection_set: primary_nested,
+                    name: name.clone(),
+                    alias: alias.clone(),
+                    field_type: field_type.clone(),
+                    include_skip: include_skip.clone(),
+                })
             }
             Selection::InlineFragment {
                 type_condition,
-                directives,
-                selection_set,
+                include_skip,
+                defer,
+                defer_label,
+                known_type,
+                selection_set: nested,
             } => {
-                if let Some(name) = type_condition {
-                    write!(f, "... on {name}")?;
+                let new;
+                let fragment_type = match known_type {
+                    Some(name) => {
+                        new = FieldType::new_named(name);
+                        &new
+                    }
+                    None => parent_type,
+                };
+                let nested = collect_from_selection_set(shared, fragment_type, nested)?;
+                if nested.is_empty() {
+                    // Every selection inside this inline fragment was deferred,
+                    // so skip the inline fragment entirely from outer subselections.
+                    continue;
+                }
+                let is_deferred = shared.eval_condition(defer);
+                if is_deferred {
+                    shared.subselections.insert(
+                        SubSelectionKey {
+                            defer_label: defer_label.clone(),
+                            defer_conditions: shared.defer_conditions,
+                        },
+                        SubSelectionValue {
+                            selection_set: shared.reconstruct_up_to_root(nested),
+                            type_name: fragment_type.0.name(),
+                        },
+                    );
                 } else {
-                    write!(f, "...")?;
+                    primary.push(Selection::InlineFragment {
+                        type_condition: type_condition.clone(),
+                        include_skip: include_skip.clone(),
+                        defer: defer.clone(),
+                        defer_label: defer_label.clone(),
+                        known_type: known_type.clone(),
+                        selection_set: nested,
+                    })
                 }
-                for directive in directives {
-                    write!(f, " {directive}")?;
+            }
+            Selection::FragmentSpread {
+                name,
+                known_type,
+                include_skip,
+                defer,
+                defer_label,
+            } => {
+                let fragment_definition = shared
+                    .fragments
+                    .get(name)
+                    .ok_or("Missing fragment definition")?;
+                let nested = collect_from_selection_set(
+                    shared,
+                    &FieldType::new_named(&fragment_definition.type_condition),
+                    &fragment_definition.selection_set,
+                )?;
+                if nested.is_empty() {
+                    // Every selection inside this fragment was deferred,
+                    // so skip the fragment spread entirely from outer subselections.
+                    continue;
                 }
-                write!(f, " {selection_set}")?;
+                let is_deferred = shared.eval_condition(defer);
+                if is_deferred {
+                    shared.subselections.insert(
+                        SubSelectionKey {
+                            defer_label: defer_label.clone(),
+                            defer_conditions: shared.defer_conditions,
+                        },
+                        SubSelectionValue {
+                            selection_set: shared.reconstruct_up_to_root(nested),
+                            type_name: fragment_definition.type_condition.clone(),
+                        },
+                    );
+                } else {
+                    // Convert the fragment spread to an inline fragment
+                    // so that subselections are self-contained
+                    primary.push(Selection::InlineFragment {
+                        type_condition: fragment_definition.type_condition.clone(),
+                        include_skip: include_skip.clone(),
+                        defer: defer.clone(),
+                        defer_label: defer_label.clone(),
+                        known_type: known_type.clone(),
+                        selection_set: nested,
+                    })
+                }
             }
         }
-        Ok(())
     }
-}
-
-impl fmt::Display for Arguments {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some((first, rest)) = self.0.split_first() {
-            write!(f, "({first}")?;
-            for arg in rest {
-                write!(f, ", {arg}")?;
-            }
-            write!(f, ")")?
-        }
-        Ok(())
-    }
-}
-
-impl fmt::Display for Directive {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "@{}{}", self.name, self.arguments)
-    }
+    Ok(primary)
 }

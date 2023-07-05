@@ -1,11 +1,13 @@
 ---
-title: GraphQL subscriptions in the Apollo Router
+title: GraphQL subscriptions with a self-hosted router
 description: Real-time data with GraphOS Enterprise
 ---
 
-> ⚠️ **This is an [Enterprise feature](../enterprise-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
+> ⚠️ **For self-hosted routers, subscription support is an [Enterprise feature](../enterprise-features/).**
+>
+> Subscription support is _also_ available for cloud routers with a GraphOS Serverless plan. [See the docs.](/graphos/operations/subscriptions)
 
-With [GraphOS Enterprise](/graphos/enterprise/), the Apollo Router provides support for GraphQL subscription operations:
+With [GraphOS Enterprise](/graphos/enterprise/), self-hosted instances of the Apollo Router provide support for GraphQL subscription operations:
 
 ```graphql
 subscription OnStockPricesChanged {
@@ -24,7 +26,7 @@ type Subscription {
 }
 ```
 
-> ⚠️ **Important:** To use subscriptions with the Apollo Router, you must first complete certain [prerequisites](#prerequisites).
+> ⚠️ **Important:** To use subscriptions with your self-hosted router, you must first complete certain [prerequisites](#prerequisites).
 
 ## What are subscriptions for?
 
@@ -59,7 +61,7 @@ flowchart LR;
   class client secondary;
 ```
 
-1. A client executes a GraphQL subscription operation against your router _over HTTP:_
+1. A client executes a GraphQL subscription operation against your self-hosted router _over HTTP:_
 
     ```graphql title="Example subscription"
     subscription OnStockPricesChanged {

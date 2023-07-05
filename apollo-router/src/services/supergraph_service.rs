@@ -734,7 +734,7 @@ mod tests {
                     ]
                     }}
             ).build()),
-    ].into_iter().collect());
+        ].into_iter().collect());
 
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -1446,7 +1446,7 @@ mod tests {
         )
         .with_json(
             serde_json::json!{{
-                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on User{activeOrganization{__typename id}}}}",
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on User{org:activeOrganization{__typename id}}}}",
                 "variables": {
                     "representations":[{"__typename": "User", "id":"1"}]
                 }
@@ -1455,7 +1455,7 @@ mod tests {
                 "data": {
                     "_entities": [
                         {
-                            "activeOrganization": {
+                            "org": {
                                 "__typename": "Organization", "id": "2"
                             }
                         }
@@ -1531,7 +1531,7 @@ mod tests {
                 currentUser {
                     name
                     ... @defer {
-                        activeOrganization {
+                        org: activeOrganization {
                             id
                             nonNullId
                             ... @defer {
