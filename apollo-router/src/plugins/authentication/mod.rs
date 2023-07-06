@@ -1,5 +1,7 @@
 //! Authentication plugin
 
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::time::Duration;
@@ -22,6 +24,7 @@ use once_cell::sync::Lazy;
 use reqwest::Client;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json::Value;
 use thiserror::Error;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -33,12 +36,14 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::authentication::claims::check_claims;
 use crate::plugins::authentication::jwks::JwkSetInfo;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::register_plugin;
 use crate::services::router;
 use crate::Context;
 
+mod claims;
 mod jwks;
 #[cfg(test)]
 mod tests;
@@ -81,6 +86,9 @@ enum AuthenticationError<'a> {
 
     /// Invalid issuer: the token's `iss` was '{token}', but signed with a key from '{expected}'
     InvalidIssuer { expected: String, token: String },
+
+    /// Claims check errors: {errors:#?}
+    Claims { errors: Vec<claims::Error> },
 }
 
 const DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT: Duration = Duration::from_secs(15);
@@ -109,6 +117,9 @@ struct JWTConf {
     /// Header value prefix
     #[serde(default = "default_header_value_prefix")]
     header_value_prefix: String,
+    /// Claims requirements configuration
+    #[serde(default)]
+    claims: BTreeMap<String, ClaimConf>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -129,8 +140,26 @@ impl Default for JWTConf {
             jwks: Default::default(),
             header_name: default_header_name(),
             header_value_prefix: default_header_value_prefix(),
+            claims: Default::default(),
         }
     }
+}
+
+/*#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub(crate) struct ClaimConf {
+    present: Option<bool>,
+    is: Option<Value>,
+    #[serde(rename = "in")]
+    one_of: Option<Vec<String>>,
+}*/
+
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+pub(crate) enum ClaimConf {
+    #[default]
+    Present,
+    Is(Value),
+    #[serde(rename = "in")]
+    OneOf(BTreeSet<String>),
 }
 
 // We may support additional authentication mechanisms in future, so all
@@ -535,6 +564,14 @@ fn authenticate(
                     );
                 }
             }
+        }
+
+        if let Err(errors) = check_claims(&config.claims, &token_data.claims) {
+            return failure_message(
+                request.context,
+                AuthenticationError::Claims { errors },
+                StatusCode::UNAUTHORIZED,
+            );
         }
 
         if let Err(e) = request
