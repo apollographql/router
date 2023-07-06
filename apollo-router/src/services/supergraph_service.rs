@@ -267,7 +267,7 @@ async fn plan_query(
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
     // FIXME: we have about 80 tests creating a supergraph service and crafting a supergraph request for it
     // none of those tests create a compiler to put it in the context, and the compiler cannot be created
-    // from inside the supergraph r'equest fake builder, because it needs a schema matching the query.
+    // from inside the supergraph request fake builder, because it needs a schema matching the query.
     // So while we are updating the tests to create a compiler manually, this here will make sure current
     // tests will pass
     {
