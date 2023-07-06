@@ -88,7 +88,10 @@ impl Selection {
                             .ok_or_else(|| {
                                 SpecError::InvalidField(
                                     field_name.to_owned(),
-                                    current_type.to_string(),
+                                    current_type
+                                        .inner_type_name()
+                                        .map(ToString::to_string)
+                                        .unwrap_or_else(|| current_type.to_string()),
                                 )
                             })?
                             .ty()

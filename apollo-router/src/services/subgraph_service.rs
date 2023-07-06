@@ -605,13 +605,12 @@ async fn call_http(
     let cloned_service_name = service_name.clone();
     let cloned_context = context.clone();
     let (parts, body) = async move {
-        cloned_context.enter_active_request();
+        let _active_request_guard = cloned_context.enter_active_request();
         let response = match client
             .call(request)
             .await {
                 Err(err) => {
                     tracing::error!(fetch_error = format!("{err:?}").as_str());
-                    cloned_context.leave_active_request();
 
                     return Err(FetchError::SubrequestHttpError {
                         status_code: None,
@@ -635,7 +634,6 @@ async fn call_http(
                 if !content_type_str.contains(APPLICATION_JSON.essence_str())
                     && !content_type_str.contains(GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
                 {
-                    cloned_context.leave_active_request();
 
                     return if !parts.status.is_success() {
 
@@ -663,7 +661,6 @@ async fn call_http(
             .instrument(tracing::debug_span!("aggregate_response_data"))
             .await {
                 Err(err) => {
-                    cloned_context.leave_active_request();
 
                     tracing::error!(fetch_error = format!("{err:?}").as_str());
 
@@ -676,7 +673,6 @@ async fn call_http(
                 }, Ok(body) => body,
             };
 
-            cloned_context.leave_active_request();
 
         Ok((parts, body))
     }.instrument(subgraph_req_span).await?;
