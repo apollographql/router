@@ -23,14 +23,6 @@ pub struct Request {
 
     pub query_plan: Arc<QueryPlan>,
 
-    /// An apollo-compiler context that contains `self.query_plan.query`.
-    ///
-    /// It normally also contains type information from the schema,
-    /// but might not if this `Request` was created in tests
-    /// with `fake_builder()` without providing a `schema` parameter.
-    #[allow(unused)] // TODO: find some uses
-    pub(crate) compiler: apollo_compiler::Snapshot,
-
     pub context: Context,
 }
 
@@ -46,11 +38,9 @@ impl Request {
         query_plan: Arc<QueryPlan>,
         context: Context,
     ) -> Request {
-        let compiler = query_plan.query.uncached_compiler(None).snapshot();
         Self {
             supergraph_request,
             query_plan,
-            compiler,
             context,
         }
     }
@@ -62,11 +52,9 @@ impl Request {
         query_plan: Arc<QueryPlan>,
         context: Context,
     ) -> Request {
-        let compiler = query_plan.query.compiler().await.snapshot();
         Self {
             supergraph_request,
             query_plan,
-            compiler,
             context,
         }
     }
