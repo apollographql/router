@@ -126,7 +126,7 @@ where
                     continue;
                 }
 
-                if let Ok((modified_query, _)) = add_defer_labels(file_id, &compiler) {
+                if let Ok(modified_query) = add_defer_labels(file_id, &compiler) {
                     query = modified_query;
                 }
 
@@ -229,7 +229,7 @@ where
                     )))
                     .map_err(|e| CacheResolverError::RetrievalError(Arc::new(e)))?;
 
-                if let Ok((modified_query, _)) = add_defer_labels(file_id, &compiler_guard) {
+                if let Ok(modified_query) = add_defer_labels(file_id, &compiler_guard) {
                     query = modified_query;
                 }
                 drop(compiler_guard);

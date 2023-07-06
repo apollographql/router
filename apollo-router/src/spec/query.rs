@@ -62,8 +62,6 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) filtered_query: Option<Arc<Query>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) added_labels: HashSet<String>,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) defer_stats: DeferStats,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) is_original: bool,
@@ -96,7 +94,6 @@ impl Query {
             operations: Vec::new(),
             subselections: HashMap::new(),
             filtered_query: None,
-            added_labels: HashSet::new(),
             defer_stats: DeferStats {
                 has_defer: false,
                 has_unconditional_defer: false,
@@ -290,7 +287,6 @@ impl Query {
             operations,
             subselections: HashMap::new(),
             filtered_query: None,
-            added_labels: HashSet::new(),
             defer_stats,
             is_original: true,
             validation_error: None,
