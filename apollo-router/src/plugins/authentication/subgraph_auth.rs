@@ -1,8 +1,11 @@
 use std::collections::HashMap;
+use std::ops::ControlFlow;
+use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 use std::time::SystemTime;
 
+use aws_credential_types::provider::ProvideCredentials;
 use aws_credential_types::Credentials;
 use aws_sigv4::http_request::sign;
 use aws_sigv4::http_request::PayloadChecksumKind;
@@ -10,6 +13,9 @@ use aws_sigv4::http_request::SignableBody;
 use aws_sigv4::http_request::SignableRequest;
 use aws_sigv4::http_request::SigningParams;
 use aws_sigv4::http_request::SigningSettings;
+use aws_types::region::Region;
+
+use futures::future::BoxFuture;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -18,6 +24,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
@@ -27,7 +34,7 @@ use crate::services::SubgraphRequest;
 register_plugin!("apollo", "subgraph_authentication", SubgraphAuth);
 
 /// todo[igni]: document before merging.
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct AWSSigV4HardcodedConfig {
     /// todo[igni]: document before merging.
@@ -41,15 +48,32 @@ struct AWSSigV4HardcodedConfig {
 }
 
 /// todo[igni]: document before merging.
-#[derive(Clone, JsonSchema, Deserialize)]
-struct AWSSigV4DefaultCredentialsChainConfig {}
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
+struct DefaultChainConfig {
+    /// todo[igni]: document before merging.
+    region: String,
+    /// todo[igni]: document before merging.
+    profile_name: Option<String>,
+}
 
 /// todo[igni]: document before merging.
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
+struct AssumeRoleProvider {
+    /// todo[igni]: document before merging.
+    role: String,
+    /// todo[igni]: document before merging.
+    session: String,
+    /// todo[igni]: document before merging.
+    region: String,
+}
+
+/// todo[igni]: document before merging.
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 enum AWSSigV4Config {
     Hardcoded(AWSSigV4HardcodedConfig),
-    DefaultCredentialsChain(AWSSigV4DefaultCredentialsChainConfig),
+    DefaultChain(DefaultChainConfig),
+    AssumeRoleProvider(AssumeRoleProvider),
 }
 
 #[derive(Clone, JsonSchema, Deserialize)]
@@ -73,14 +97,63 @@ struct Config {
 }
 
 struct SubgraphAuth {
+    credentials_provider: Option<Arc<dyn ProvideCredentials>>,
     config: Config,
+}
+
+#[derive(Clone)]
+struct SigningParamsConfig {
+    credentials_provider: Option<Arc<dyn ProvideCredentials>>,
+    region: Region,
+    service_name: String,
 }
 
 #[async_trait::async_trait]
 impl Plugin for SubgraphAuth {
     type Config = Config;
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        // TODO: 1 for subgraphs as well i guess.
+        // TODO: CACHED PLZ
+        let credentials_provider = {
+            let default_chain =
+                if let Some(AuthConfig::AWSSigV4(AWSSigV4Config::DefaultChain(config))) =
+                    &init.config.all
+                {
+                    aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
+                        .region(aws_types::region::Region::new(config.region.clone()))
+                        .profile_name(
+                            config
+                                .profile_name
+                                .as_ref()
+                                .map(|s| s.clone())
+                                .unwrap_or_default()
+                                .as_str(),
+                        )
+                        .build()
+                        .await
+                } else {
+                    aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
+                        .build()
+                        .await
+                };
+            init.config.all.clone().map(|all| match all {
+                AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(config)) => {
+                    todo!()
+                }
+                AuthConfig::AWSSigV4(AWSSigV4Config::DefaultChain(config)) => {
+                    Arc::new(default_chain) as Arc<dyn ProvideCredentials>
+                }
+                AuthConfig::AWSSigV4(AWSSigV4Config::AssumeRoleProvider(config)) => {
+                    let rp = aws_config::sts::AssumeRoleProvider::builder(config.role.clone())
+                        .session_name(config.session.clone())
+                        .region(aws_types::region::Region::new(config.region.clone()))
+                        .build(default_chain);
+                    Arc::new(rp) as Arc<dyn ProvideCredentials>
+                }
+            })
+        };
         Ok(SubgraphAuth {
+            credentials_provider,
             config: init.config,
         })
     }
@@ -90,108 +163,127 @@ impl Plugin for SubgraphAuth {
         if let Some(subgraph) = self.config.subgraphs.get(name) {
             auth = Some(subgraph);
         }
-        match auth {
-            Some(auth) => ServiceBuilder::new()
-                .layer(AuthLayer::new(auth.to_owned()))
-                .service(service)
-                .boxed(),
-            None => service,
+        if let Some(signing_params) = self.params_for_service(name) {
+            ServiceBuilder::new()
+            .checkpoint_async( |req: SubgraphRequest| async move {
+                if let Some(credentials_provider) = &signing_params.credentials_provider {
+                    let credentials = credentials_provider.provide_credentials().await.unwrap();
+                    let settings = get_signing_settings(&signing_params);
+                    let mut builder = SigningParams::builder()
+                        .access_key(credentials.access_key_id())
+                        .secret_key(credentials.secret_access_key())
+                        .region(signing_params.region.as_ref())
+                        .service_name(signing_params.service_name.as_ref())
+                        .time(SystemTime::now())
+                        .settings(settings);
+                    builder.set_security_token(credentials.session_token());
+                    let body_bytes = match serde_json::to_vec(&req.subgraph_request.body()) {
+                        Ok(b) => b,
+                        Err(err) => {
+                            tracing::warn!(
+                            "Failed to serialize GraphQL body for AWS SigV4 signing, skipping signing. Error: {}",
+                            err
+                        );
+                            return Ok(ControlFlow::Continue(req));
+                        }
+                    };
+                    // UnsignedPayload only applies to lattice
+                    let signable_request = SignableRequest::new(
+                        req.subgraph_request.method(),
+                        req.subgraph_request.uri(),
+                        req.subgraph_request.headers(),
+                        match signing_params.service_name.as_str() {
+                            "vpc-lattice-svcs" => SignableBody::UnsignedPayload,
+                            _ => SignableBody::Bytes(&body_bytes),
+                        },
+                    );
+
+                    let signing_params = builder.build().expect("all required fields set");
+
+                    let (signing_instructions, _signature) = match sign(signable_request, &signing_params) {
+                        Ok(output) => output,
+                        Err(err) => {
+                            tracing::warn!("Failed to sign GraphQL request for AWS SigV4, skipping signing. Error: {}", err);
+                            return ControlFlow::Continue(req);
+                        }
+                    }.into_parts();
+                    signing_instructions.apply_to_request(&mut req.subgraph_request);
+                     Ok(ControlFlow::Continue(req))
+                } else {
+                    Ok(ControlFlow::Continue(req))
+                }
+            }).service(service)
+                .boxed()
+        } else {
+            service
         }
     }
 }
 
-struct AuthLayer {
-    auth: AuthConfig,
-}
-
-impl AuthLayer {
-    fn new(auth: AuthConfig) -> Self {
-        Self { auth }
+impl SubgraphAuth {
+    fn params_for_service(&self, service_name: &str) -> Option<SigningParamsConfig> {
+        todo!()
     }
 }
 
-impl<S> Layer<S> for AuthLayer {
-    type Service = AuthLayerService<S>;
+// struct AuthLayer {
+//     signing_params_config: SigningParamsConfig,
+// }
 
-    fn layer(&self, inner: S) -> Self::Service {
-        AuthLayerService {
-            inner,
-            auth: self.auth.clone(),
-        }
-    }
-}
+// impl AuthLayer {
+//     fn new(signing_params_config: SigningParamsConfig) -> Self {
+//         Self {
+//             signing_params_config,
+//         }
+//     }
+// }
 
-struct AuthLayerService<S> {
-    inner: S,
-    auth: AuthConfig,
-}
+// impl<S> Layer<S> for AuthLayer {
+//     type Service = AuthLayerService<S>;
 
-impl<S> Service<SubgraphRequest> for AuthLayerService<S>
-where
-    S: Service<SubgraphRequest>,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
+//     fn layer(&self, inner: S) -> Self::Service {
+//         AuthLayerService {
+//             inner,
+//             signing_params_config: self.signing_params_config.clone(),
+//         }
+//     }
+// }
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
+// struct AuthLayerService<S> {
+//     inner: S,
+//     signing_params_config: SigningParamsConfig,
+// }
 
-    fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
-        match &self.auth {
-            AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(config)) => {
-                let credentials = Credentials::new(
-                    config.access_key_id.clone(),
-                    config.secret_access_key.clone(),
-                    None,
-                    None,
-                    "config",
-                );
+// impl<S> Service<SubgraphRequest> for AuthLayerService<S>
+// where
+//     S: Service<SubgraphRequest> + Clone + Send + 'static,
+//     S::Future: Send + 'static,
+// {
+//     type Response = S::Response;
+//     type Error = S::Error;
+//     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-                let mut settings = SigningSettings::default();
-                settings.payload_checksum_kind = PayloadChecksumKind::XAmzSha256;
+//     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+//         self.inner.poll_ready(cx)
+//     }
 
-                let mut builder = SigningParams::builder()
-                    .access_key(credentials.access_key_id())
-                    .secret_key(credentials.secret_access_key())
-                    .region(config.region.as_ref())
-                    .service_name(config.service.as_ref())
-                    .time(SystemTime::now())
-                    .settings(settings);
+//     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
+//         let signing_params = self.signing_params_config.clone();
+//         Box::pin(async move {
 
-                builder.set_security_token(credentials.session_token());
-                let signing_params = builder.build().expect("all required fields set");
+//         })
+//     }
+// }
 
-                let body_bytes = match serde_json::to_string(&req.subgraph_request.body()) {
-                    Ok(body_str) => body_str.as_bytes().to_owned(),
-                    Err(err) => {
-                        tracing::error!("Failed to serialize GraphQL body for AWS SigV4 signing, skipping signing. Error: {}", err);
-                        return self.inner.call(req);
-                    }
-                };
-
-                let signable_request = SignableRequest::new(
-                    req.subgraph_request.method(),
-                    req.subgraph_request.uri(),
-                    req.subgraph_request.headers(),
-                    SignableBody::Bytes(&body_bytes),
-                );
-                let (signing_instructions, _signature) = match sign(signable_request, &signing_params) {
-                    Ok(output) => output,
-                    Err(err) => {
-                        tracing::error!("Failed to sign GraphQL request for AWS SigV4, skipping signing. Error: {}", err);
-                        return self.inner.call(req);
-                    }
-                }.into_parts();
-
-                signing_instructions.apply_to_request(&mut req.subgraph_request);
-
-                self.inner.call(req)
-            }
-            _ => todo!(),
-        }
-    }
+/// There are three possible cases
+/// https://github.com/awslabs/aws-sdk-rust/blob/9c3168dafa4fd8885ce4e1fd41cec55ce982a33c/sdk/aws-sigv4/src/http_request/sign.rs#L264C1-L271C6
+fn get_signing_settings(signing_params: &SigningParamsConfig) -> SigningSettings {
+    let mut settings = SigningSettings::default();
+    settings.payload_checksum_kind = match signing_params.service_name.as_str() {
+        "s3" | "vpc-lattice-svcs" => PayloadChecksumKind::XAmzSha256,
+        _ => PayloadChecksumKind::NoHeader,
+    };
+    settings
 }
 
 #[cfg(test)]
