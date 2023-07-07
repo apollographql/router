@@ -16,7 +16,7 @@ directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENU
 directive @requiresScopes(scopes: [String!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
 
-To use them, you need either to configure [JWT authentication](./authn-jwt) or to add a [router service coprocessor](../customizations/coprocessor). THe JWT plugin will validate the token, extract its claims and set them in the request context at the key `apollo_authentication::JWT::claims`. To participate in the authorization process, a coprocessor would need to set that key in the context.
+To use them, you need either to configure [JWT authentication](./authn-jwt) or to add a [router service coprocessor](../customizations/coprocessor). The JWT plugin will validate the token, extract its claims and set them in the request context at the key `apollo_authentication::JWT::claims`. To participate in the authorization process, a coprocessor would need to set that key in the context.
 
 ## `@authenticated`
 
@@ -190,7 +190,7 @@ The authorization directives are defined by the subgraph author, and will be car
 
 ### Authorization and `@key`
 
-When the authorization directives are set on fields used in `@key`, they will be usable by the router to join between subgraphs, but cannot be queried directly by the client. This behavior is similar to [Contracts](/graphos/delivery/contracts/).
+When the authorization directives are set on fields used in `@key`, they will be usable by the router to join between subgraphs, but cannot be queried directly by the client. This behavior is similar to [Contracts](/graphos/delivery/contracts/) and the [`@inaccessible` directive](https://www.apollographql.com/docs/federation/federated-types/federated-directives/#inaccessible).
 
 As an example, assuming we have these subgraphs definition:
 
