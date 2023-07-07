@@ -17,6 +17,8 @@ use crate::services::SupergraphResponse;
 use crate::Configuration;
 use crate::UplinkConfig;
 
+const SANDBOX_INTROSPECTION_QUERY_WO_DEPRECATED_ARGS: &str = "\n    query IntrospectionQuery {\n      __schema {\n        \n        queryType { name }\n        mutationType { name }\n        subscriptionType { name }\n        types {\n          ...FullType\n        }\n        directives {\n          name\n          description\n          \n          locations\n          args {\n            ...InputValue\n          }\n        }\n      }\n    }\n\n    fragment FullType on __Type {\n      kind\n      name\n      description\n      \n      fields(includeDeprecated: true) {\n        name\n        description\n        args {\n          ...InputValue\n        }\n        type {\n          ...TypeRef\n        }\n        isDeprecated\n        deprecationReason\n      }\n      inputFields {\n        ...InputValue\n      }\n      interfaces {\n        ...TypeRef\n      }\n      enumValues(includeDeprecated: true) {\n        name\n        description\n        isDeprecated\n        deprecationReason\n      }\n      possibleTypes {\n        ...TypeRef\n      }\n    }\n\n    fragment InputValue on __InputValue {\n      name\n      description\n      type { ...TypeRef }\n      defaultValue\n      \n      \n    }\n\n    fragment TypeRef on __Type {\n      kind\n      name\n      ofType {\n        kind\n        name\n        ofType {\n          kind\n          name\n          ofType {\n            kind\n            name\n            ofType {\n              kind\n              name\n              ofType {\n                kind\n                name\n                ofType {\n                  kind\n                  name\n                  ofType {\n                    kind\n                    name\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  ";
+const SANDBOX_INTROSPECTION_QUERY_W_DEPRECATED_ARGS: &str = "\n    query IntrospectionQuery {\n      __schema {\n        \n        queryType { name }\n        mutationType { name }\n        subscriptionType { name }\n        types {\n          ...FullType\n        }\n        directives {\n          name\n          description\n          \n          locations\n          args(includeDeprecated: true) {\n            ...InputValue\n          }\n        }\n      }\n    }\n\n    fragment FullType on __Type {\n      kind\n      name\n      description\n      \n      fields(includeDeprecated: true) {\n        name\n        description\n        args(includeDeprecated: true) {\n          ...InputValue\n        }\n        type {\n          ...TypeRef\n        }\n        isDeprecated\n        deprecationReason\n      }\n      inputFields(includeDeprecated: true) {\n        ...InputValue\n      }\n      interfaces {\n        ...TypeRef\n      }\n      enumValues(includeDeprecated: true) {\n        name\n        description\n        isDeprecated\n        deprecationReason\n      }\n      possibleTypes {\n        ...TypeRef\n      }\n    }\n\n    fragment InputValue on __InputValue {\n      name\n      description\n      type { ...TypeRef }\n      defaultValue\n      isDeprecated\n      deprecationReason\n    }\n\n    fragment TypeRef on __Type {\n      kind\n      name\n      ofType {\n        kind\n        name\n        ofType {\n          kind\n          name\n          ofType {\n            kind\n            name\n            ofType {\n              kind\n              name\n              ofType {\n                kind\n                name\n                ofType {\n                  kind\n                  name\n                  ofType {\n                    kind\n                    name\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  ";
 const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
 
 #[derive(Debug)]
@@ -30,6 +32,11 @@ pub(crate) struct PersistedQueryLayer {
     /// instead passing on execution to the APQ layer, which will return an error
     /// if it can _also_ not find the operation.
     apq_enabled: bool,
+
+    /// Tracks whether Sandbox is also enabled.
+    /// If it is, this layer won't reject introspection operations.
+    /// TODO: remove this in favor of proper introspection parsing.
+    sandbox_enabled: bool,
 
     /// Tracks whether to log incoming queries that are not in the persisted query list.
     log_unknown: bool,
@@ -46,22 +53,16 @@ impl PersistedQueryLayer {
         previous_manifest_poller: Option<Arc<PersistedQueryManifestPoller>>,
     ) -> Result<Self, BoxError> {
         if configuration.preview_persisted_queries.enabled {
-            if configuration.uplink.is_none() {
-                return Err(anyhow!("persisted queries requires Apollo GraphOS. ensure that you have set APOLLO_KEY and APOLLO_GRAPH_REF environment variables").into());
+            if let Some(uplink_config) = configuration.uplink.as_ref() {
+                if configuration.apq.enabled
+                    && configuration.preview_persisted_queries.safelist.enabled
+                {
+                    return Err(anyhow!("invalid configuration: preview_persisted_queries.safelist.enabled = true, which is incompatible with apq.enabled = true. you must disable apq in your configuration to enable persisted queries with safelisting").into());
+                }
+                Self::new_enabled(configuration, uplink_config, previous_manifest_poller).await
+            } else {
+                Err(anyhow!("persisted queries requires Apollo GraphOS. ensure that you have set APOLLO_KEY and APOLLO_GRAPH_REF environment variables").into())
             }
-            if configuration.apq.enabled && configuration.preview_persisted_queries.safelist.enabled
-            {
-                return Err(anyhow!("invalid configuration: preview_persisted_queries.safelist.enabled = true, which is incompatible with apq.enabled = true. you must disable apq in your configuration to enable persisted queries with safelisting").into());
-            }
-            Self::new_enabled(
-                configuration,
-                configuration
-                    .uplink
-                    .as_ref()
-                    .expect("uplink config was checked above, qed"),
-                previous_manifest_poller,
-            )
-            .await
         } else {
             Self::new_disabled(configuration, previous_manifest_poller).await
         }
@@ -109,6 +110,7 @@ impl PersistedQueryLayer {
         Ok(Self {
             manifest_poller,
             apq_enabled: configuration.apq.enabled,
+            sandbox_enabled: configuration.sandbox.enabled,
             safelist_config: configuration.preview_persisted_queries.safelist.clone(),
             log_unknown: configuration.preview_persisted_queries.log_unknown,
         })
@@ -189,6 +191,16 @@ impl PersistedQueryLayer {
         manifest_poller: Arc<PersistedQueryManifestPoller>,
     ) -> Result<SupergraphRequest, SupergraphResponse> {
         if let Some(operation_body) = request.supergraph_request.body().query.as_ref() {
+            // TODO: replace this with proper introspection parsing
+            if self.sandbox_enabled
+                && (operation_body == SANDBOX_INTROSPECTION_QUERY_WO_DEPRECATED_ARGS
+                    || operation_body == SANDBOX_INTROSPECTION_QUERY_W_DEPRECATED_ARGS)
+            {
+                // if sandbox is enabled and the incoming operation is the introspection query sent by sandbox,
+                // allow the request to continue on.
+                return Ok(request);
+            }
+
             let mut is_persisted = None;
 
             if self.log_unknown

@@ -2,7 +2,7 @@
 pub(crate) mod cors;
 pub(crate) mod expansion;
 mod experimental;
-mod persisted_query;
+mod persisted_queries;
 mod schema;
 pub(crate) mod subgraph;
 #[cfg(test)]
@@ -26,8 +26,8 @@ use derivative::Derivative;
 use displaydoc::Display;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
-pub(crate) use persisted_query::PersistedQueries;
-pub(crate) use persisted_query::PersistedQueriesSafelist;
+pub(crate) use persisted_queries::PersistedQueries;
+pub(crate) use persisted_queries::PersistedQueriesSafelist;
 use regex::Regex;
 use rustls::Certificate;
 use rustls::PrivateKey;
