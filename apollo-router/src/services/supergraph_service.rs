@@ -1,22 +1,28 @@
 //! Implements the router phase of the request lifecycle.
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::Poll;
+use std::time::Instant;
 
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
+use futures::SinkExt;
 use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
 use router_bridge::planner::Planner;
+use router_bridge::planner::UsageReporting;
+use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
+use tracing::field;
 use tracing_futures::Instrument;
 
-use super::execution;
+use super::execution::QueryPlan;
 use super::layers::content_negociation;
 use super::layers::query_analysis::Compiler;
 use super::layers::query_analysis::QueryAnalysisLayer;
@@ -26,13 +32,21 @@ use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
+use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
+use crate::graphql::Response;
+use crate::notification::HandleStream;
 use crate::plugin::DynPlugin;
+use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::Telemetry;
+use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
+use crate::query_planner::subscription::SubscriptionHandle;
+use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
+use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanResult;
@@ -93,31 +107,35 @@ impl Service<SupergraphRequest> for SupergraphService {
         let clone = self.query_planner_service.clone();
 
         let planning = std::mem::replace(&mut self.query_planner_service, clone);
-        let execution = self.execution_service_factory.create();
 
         let schema = self.schema.clone();
 
         let context_cloned = req.context.clone();
-        let fut =
-            service_call(planning, execution, schema, req).or_else(|error: BoxError| async move {
-                let errors = vec![crate::error::Error {
-                    message: error.to_string(),
-                    extensions: serde_json_bytes::json!({
-                        "code": "INTERNAL_SERVER_ERROR",
-                    })
-                    .as_object()
-                    .unwrap()
-                    .to_owned(),
-                    ..Default::default()
-                }];
+        let fut = service_call(
+            planning,
+            self.execution_service_factory.clone(),
+            schema,
+            req,
+        )
+        .or_else(|error: BoxError| async move {
+            let errors = vec![crate::error::Error {
+                message: error.to_string(),
+                extensions: serde_json_bytes::json!({
+                    "code": "INTERNAL_SERVER_ERROR",
+                })
+                .as_object()
+                .unwrap()
+                .to_owned(),
+                ..Default::default()
+            }];
 
-                Ok(SupergraphResponse::builder()
-                    .errors(errors)
-                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
-                    .context(context_cloned)
-                    .build()
-                    .expect("building a response like this should not fail"))
-            });
+            Ok(SupergraphResponse::builder()
+                .errors(errors)
+                .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                .context(context_cloned)
+                .build()
+                .expect("building a response like this should not fail"))
+        });
 
         Box::pin(fut)
     }
@@ -125,7 +143,7 @@ impl Service<SupergraphRequest> for SupergraphService {
 
 async fn service_call(
     planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    execution: execution::BoxService,
+    execution_service_factory: ExecutionServiceFactory,
     schema: Arc<Schema>,
     req: SupergraphRequest,
 ) -> Result<SupergraphResponse, BoxError> {
@@ -206,7 +224,7 @@ async fn service_call(
                 .get()
                 .cloned()
                 .unwrap_or_default();
-
+            let mut subscription_tx = None;
             if (is_deferred || is_subscription)
                 && !accepts_multipart_defer
                 && !accepts_multipart_subscription
@@ -232,12 +250,66 @@ async fn service_call(
                 *res.response.status_mut() = StatusCode::BAD_REQUEST;
                 Ok(res)
             } else {
-                let execution_response = execution
+                if is_subscription {
+                    let query_plan = match plan.root.clone() {
+                        crate::query_planner::PlanNode::Subscription { rest, .. } => {
+                            rest.map(|r| QueryPlan {
+                                usage_reporting: plan.usage_reporting.clone(),
+                                root: *r,
+                                formatted_query_plan: plan.formatted_query_plan.clone(),
+                                query: plan.query.clone(),
+                            })
+                        }
+                        _ => {
+                            return Err(
+                                "cannot acces to the subscription node in query plan".into()
+                            );
+                        }
+                    };
+                    let ctx = context.clone();
+                    // let mut supergraph_request_builder = SupergraphRequest::builder()
+                    //     .uri(req.supergraph_request.uri().clone())
+                    //     // .headers(req.supergraph_request.headers().clone())
+                    //     .method(req.supergraph_request.method().clone())
+                    //     .and_query(body.query.clone())
+                    //     .and_operation_name(body.operation_name.clone())
+                    //     .context(ctx.clone())
+                    //     .extensions(body.extensions.clone())
+                    //     .variables(body.variables.clone());
+                    // for (header_name, header_value) in req.supergraph_request.headers() {
+                    //     supergraph_request_builder = supergraph_request_builder
+                    //         .header(header_name.clone(), header_value.clone());
+                    // }
+                    // let supergraph_request = supergraph_request_builder.build()?;
+                    let (subs_tx, subs_rx) = mpsc::channel(1);
+                    let execution_service_factory_cloned = execution_service_factory.clone();
+                    // Spawn task for subscription
+                    tokio::spawn(async move {
+                        let req = match query_plan {
+                            Some(query_plan) => Some(
+                                ExecutionRequest::internal_builder()
+                                    .supergraph_request(http::Request::default())
+                                    .query_plan(Arc::new(query_plan))
+                                    .context(ctx.clone())
+                                    .build()
+                                    .await,
+                            ),
+                            None => None,
+                        };
+                        subscription_task(execution_service_factory_cloned, ctx, req, subs_rx)
+                            .await;
+                    });
+                    subscription_tx = subs_tx.into();
+                }
+
+                let execution_response = execution_service_factory
+                    .create()
                     .oneshot(
                         ExecutionRequest::internal_builder()
                             .supergraph_request(req.supergraph_request)
                             .query_plan(plan.clone())
                             .context(context)
+                            .and_subscription_tx(subscription_tx)
                             .build()
                             .await,
                     )
@@ -255,6 +327,141 @@ async fn service_call(
         }
         // This should never happen because if we have an empty query plan we should have error in errors vec
         None => Err(BoxError::from("cannot compute a query plan")),
+    }
+}
+
+pub struct SubscriptionTaskParams {
+    pub(crate) client_sender: futures::channel::mpsc::Sender<Response>,
+    pub(crate) subscription_handle: SubscriptionHandle,
+    pub(crate) subscription_config: SubscriptionConfig,
+    pub(crate) stream_rx: futures::channel::mpsc::Receiver<HandleStream<String, graphql::Response>>,
+}
+
+// mut client_sender: futures::channel::mpsc::Sender<Response>,
+// subscription_handle: SubscriptionHandle,
+// subscription_config: SubscriptionConfig,
+// mpsc::Receiver<HandleStream<String, graphql::Response>>
+async fn subscription_task(
+    execution_service_factory: ExecutionServiceFactory,
+    context: Context,
+    req: Option<ExecutionRequest>,
+    mut rx: mpsc::Receiver<SubscriptionTaskParams>,
+) {
+    let sub_params = match rx.recv().await {
+        Some(sub_params) => sub_params,
+        None => {
+            return;
+        }
+    };
+    let subscription_config = sub_params.subscription_config;
+    let subscription_handle = sub_params.subscription_handle;
+    let mut receiver = sub_params.stream_rx;
+    let mut sender = sub_params.client_sender;
+
+    let limit_is_set = subscription_config.max_opened_subscriptions.is_some();
+
+    let mut subscription_handle = subscription_handle.clone();
+
+    let operation_signature =
+        if let Some(usage_reporting) = context.private_entries.lock().get::<UsageReporting>() {
+            usage_reporting.stats_report_key.clone()
+        } else {
+            String::new()
+        };
+
+    let operation_name = context
+        .get::<_, String>(OPERATION_NAME)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
+
+    let mut receiver = match receiver.next().await {
+        Some(receiver) => receiver,
+        None => {
+            tracing::trace!("receiver channel closed");
+            return;
+        }
+    };
+
+    if limit_is_set {
+        OPENED_SUBSCRIPTIONS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    loop {
+        tokio::select! {
+            _ = subscription_handle.closed_signal.recv() => {
+                break;
+            }
+            message = receiver.next() => {
+                match message {
+                    Some(mut val) => {
+                        if display_body {
+                            // TODO get the service_name
+                            // tracing::info!(http.request.body = ?val, apollo.subgraph.name = %service_name, "Subscription event body from subgraph {service_name:?}");
+                        }
+                        val.created_at = Some(Instant::now());
+                        let res = match &req {
+                            Some(execution_request) => {
+                                let graphql_document =  &execution_request.query_plan.query.string;
+                                let execution_request = ExecutionRequest::internal_builder()
+                                    .supergraph_request(http::Request::default())
+                                    .query_plan(execution_request.query_plan.clone())
+                                    .context(execution_request.context.clone())
+                                    .initial_data(val.data.take().unwrap_or_default())
+                                    .build()
+                                    .await;
+
+                                let execution_service = execution_service_factory.create();
+                                let execution_response = execution_service.oneshot(execution_request).instrument(tracing::info_span!(SUBSCRIPTION_EVENT_SPAN_NAME,
+                                        graphql.document = graphql_document,
+                                        graphql.operation.name = %operation_name,
+                                        otel.kind = "INTERNAL",
+                                        apollo_private.operation_signature = %operation_signature,
+                                        apollo_private.duration_ns = field::Empty,)
+                                    )
+                                    .await;
+                                let next_response = match execution_response {
+                                    Ok(mut execution_response) => execution_response.next_response().await,
+                                    Err(err) => {
+                                        tracing::error!("cannot execute the subscription event: {err:?}");
+                                        let _ = sender.send(graphql::Response::builder().error(graphql::Error::builder().message("cannot execute the subscription event").extension_code("SUBSCRIPTION_EXECUTION_ERROR").build()).build()).await;
+                                        break;
+                                    },
+                                };
+
+                                if let Some(mut next_response) = next_response {
+                                    next_response.created_at = val.created_at;
+                                    next_response.subscribed = val.subscribed;
+                                    val.errors.append(&mut next_response.errors);
+                                    next_response.errors = val.errors;
+
+                                    sender.send(next_response).await
+                                } else {
+                                    Ok(())
+                                }
+                            },
+                            None => sender.send(val).await,
+                        };
+                        if let Err(err) = res {
+                             if !err.is_disconnected() {
+                                tracing::error!("cannot send the subscription to the client: {err:?}");
+                            }
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+    if let Err(err) = sender.close().await {
+        tracing::trace!("cannot close the sender {err:?}");
+    }
+
+    tracing::trace!("Leaving the task for subscription");
+    if limit_is_set {
+        OPENED_SUBSCRIPTIONS.fetch_sub(1, Ordering::Relaxed);
     }
 }
 

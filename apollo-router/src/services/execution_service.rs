@@ -95,7 +95,6 @@ impl Service<ExecutionRequest> for ExecutionService {
 
     fn call(&mut self, req: ExecutionRequest) -> Self::Future {
         let clone = self.clone();
-
         let mut this = std::mem::replace(self, clone);
 
         let fut = async move { this.call_inner(req).await }.in_current_span();
@@ -107,10 +106,10 @@ impl ExecutionService {
     async fn call_inner(&mut self, req: ExecutionRequest) -> Result<ExecutionResponse, BoxError> {
         let context = req.context;
         let ctx = context.clone();
-        let (sender, receiver) = mpsc::channel(10);
         let variables = req.supergraph_request.body().variables.clone();
         let operation_name = req.supergraph_request.body().operation_name.clone();
 
+        let (sender, receiver) = mpsc::channel(10);
         let is_deferred = req
             .query_plan
             .is_deferred(operation_name.as_deref(), &variables);
@@ -119,12 +118,16 @@ impl ExecutionService {
             let (tx_close_signal, rx_close_signal) = broadcast::channel(1);
             (
                 Some(tx_close_signal),
-                Some(SubscriptionHandle::new(rx_close_signal)),
+                Some(SubscriptionHandle::new(
+                    rx_close_signal,
+                    req.subscription_tx,
+                )),
             )
         } else {
             (None, None)
         };
 
+        let had_initial_data = req.initial_data.is_some();
         let mut first = req
             .query_plan
             .execute(
@@ -135,10 +138,11 @@ impl ExecutionService {
                 sender,
                 subscription_handle.clone(),
                 &self.subscription_config,
+                req.initial_data,
             )
             .await;
         let query = req.query_plan.query.clone();
-        let stream = if is_deferred || is_subscription {
+        let stream = if (is_deferred || is_subscription) && !had_initial_data {
             let stream_mode = if is_deferred {
                 StreamMode::Defer
             } else {
@@ -149,9 +153,22 @@ impl ExecutionService {
             let stream = filter_stream(first, receiver, stream_mode);
             StreamWrapper(stream, tx_close_signal).boxed()
         } else {
-            once(ready(first)).chain(receiver).boxed()
+            // TODO: Si initial data je pense qu'on peut juste faire du once(ready(first))
+            if had_initial_data {
+                once(ready(first)).boxed()
+            } else {
+                once(ready(first)).chain(receiver).boxed()
+            }
         };
 
+        if had_initial_data {
+            return Ok(ExecutionResponse::new_from_response(
+                http::Response::new(stream as _),
+                ctx,
+            ));
+        }
+
+        // TODO: Ca on fait pas si y a initial_data
         let schema = self.schema.clone();
         let mut nullified_paths: Vec<Path> = vec![];
 

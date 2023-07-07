@@ -416,6 +416,11 @@ async fn call_websocket(
         subscription_stream,
         ..
     } = request;
+    let operation_name = subgraph_request
+        .body()
+        .operation_name
+        .clone()
+        .unwrap_or_default();
     let mut subscription_stream_tx =
         subscription_stream.ok_or_else(|| FetchError::SubrequestWsError {
             service: service_name.clone(),
@@ -464,9 +469,38 @@ async fn call_websocket(
         tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Websocket request body to subgraph {service_name:?}");
     }
 
+    let uri = request.uri();
+    let path = uri.path();
+    let host = uri.host().unwrap_or_default();
+    let port = uri.port_u16().unwrap_or_else(|| {
+        let scheme = uri.scheme_str();
+        if scheme == Some("wss") {
+            443
+        } else if scheme == Some("ws") {
+            80
+        } else {
+            0
+        }
+    });
+
+    let subgraph_req_span = tracing::info_span!("subgraph_request",
+        "otel.kind" = "CLIENT",
+        "net.peer.name" = %host,
+        "net.peer.port" = %port,
+        "http.route" = %path,
+        "http.url" = %uri,
+        "net.transport" = "ip_tcp",
+        "apollo.subgraph.name" = %service_name,
+        "graphql.operation.name" = %operation_name,
+    );
+
     let (ws_stream, mut resp) = match request.uri().scheme_str() {
-        Some("wss") => connect_async_tls_with_config(request, None, None).await,
-        _ => connect_async(request).await,
+        Some("wss") => {
+            connect_async_tls_with_config(request, None, None)
+                .instrument(subgraph_req_span)
+                .await
+        }
+        _ => connect_async(request).instrument(subgraph_req_span).await,
     }
     .map_err(|err| FetchError::SubrequestWsError {
         service: service_name.clone(),
@@ -625,8 +659,8 @@ async fn call_http(
         let (parts, body) = response.into_parts();
         if display_headers {
             tracing::info!(
-                        http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
-                    );
+                http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
+            );
         }
         if let Some(content_type) = parts.headers.get(header::CONTENT_TYPE) {
             if let Ok(content_type_str) = content_type.to_str() {

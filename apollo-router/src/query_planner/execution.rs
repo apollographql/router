@@ -48,6 +48,7 @@ impl QueryPlan {
         sender: futures::channel::mpsc::Sender<Response>,
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
+        initial_value: Option<Value>,
     ) -> Response {
         let root = Path::empty();
 
@@ -69,7 +70,7 @@ impl QueryPlan {
                     subscription_config,
                 },
                 &root,
-                &Value::default(),
+                &initial_value.unwrap_or_default(),
                 sender,
             )
             .await;
@@ -182,16 +183,10 @@ impl PlanNode {
                     value = v;
                     errors = err;
                 }
-                PlanNode::Subscription { primary, rest } => {
+                PlanNode::Subscription { primary, .. } => {
                     if parameters.subscription_handle.is_some() {
                         errors = primary
-                            .execute_recursively(
-                                parameters,
-                                current_dir,
-                                parent_value,
-                                sender,
-                                rest,
-                            )
+                            .execute_recursively(parameters, current_dir, parent_value, sender)
                             .await;
                     } else {
                         tracing::error!("No subscription handle provided for a subscription");
