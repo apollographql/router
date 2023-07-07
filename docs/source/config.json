@@ -42,6 +42,13 @@
             "enterprise"
           ]
         ],
+        "Authorization": [
+          "/configuration/authorization",
+          [
+            "enterprise",
+            "experimental"
+          ]
+        ],
         "Operation limits": [
           "/configuration/operation-limits",
           [

@@ -15,7 +15,13 @@ use crate::spec::Query;
 /// A planner key.
 ///
 /// This type consists of a query string and an optional operation string
-pub(crate) type QueryKey = (String, Option<String>);
+#[derive(Clone)]
+pub(crate) struct QueryKey {
+    pub(crate) filtered_query: String,
+    pub(crate) original_query: String,
+    pub(crate) operation_name: Option<String>,
+    pub(crate) metadata: Object,
+}
 
 /// A plan for a given GraphQL query
 #[derive(Debug, Serialize, Deserialize)]

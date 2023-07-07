@@ -1,0 +1,19 @@
+---
+source: apollo-router/src/plugins/authorization/authenticated.rs
+expression: paths
+---
+[
+    Path(
+        [
+            Key(
+                "topProducts",
+            ),
+            Fragment(
+                "",
+            ),
+            Key(
+                "nonNullId",
+            ),
+        ],
+    ),
+]

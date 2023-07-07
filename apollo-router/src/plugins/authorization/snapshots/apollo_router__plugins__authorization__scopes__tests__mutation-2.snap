@@ -1,0 +1,13 @@
+---
+source: apollo-router/src/plugins/authorization/scopes.rs
+expression: paths
+---
+[
+    Path(
+        [
+            Key(
+                "ping",
+            ),
+        ],
+    ),
+]

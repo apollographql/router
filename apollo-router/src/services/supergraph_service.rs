@@ -36,6 +36,7 @@ use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::query_planner::WarmUpCachingQueryKey;
 use crate::services::query_planner;
 use crate::services::supergraph;
 use crate::services::ExecutionRequest;
@@ -460,7 +461,7 @@ impl SupergraphCreator {
             )
     }
 
-    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<WarmUpCachingQueryKey> {
         self.query_planner_service.cache_keys(count).await
     }
 
@@ -471,7 +472,7 @@ impl SupergraphCreator {
     pub(crate) async fn warm_up_query_planner(
         &mut self,
         query_parser: &QueryAnalysisLayer,
-        cache_keys: Vec<(String, Option<String>)>,
+        cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
         self.query_planner_service
             .warm_up(query_parser, cache_keys)

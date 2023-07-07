@@ -1,31 +1,287 @@
 //! Authorization plugin
 
+use std::collections::HashSet;
 use std::ops::ControlFlow;
+use std::sync::Arc;
 
+use apollo_compiler::ApolloCompiler;
+use apollo_compiler::InputDatabase;
 use http::StatusCode;
+use router_bridge::planner::UsageReporting;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tokio::sync::Mutex;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use self::authenticated::AuthenticatedVisitor;
+use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
+use self::scopes::ScopeExtractionVisitor;
+use self::scopes::ScopeFilteringVisitor;
+use self::scopes::REQUIRES_SCOPES_DIRECTIVE_NAME;
+use crate::error::PlanErrors;
+use crate::error::QueryPlannerError;
+use crate::error::SchemaError;
+use crate::error::ServiceBuildError;
 use crate::graphql;
+use crate::json_ext::Object;
+use crate::json_ext::Path;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::query_planner::FilteredQuery;
+use crate::query_planner::QueryKey;
+use crate::query_planner::QUERY_PLANNER_CACHE_KEY_METADATA;
 use crate::register_plugin;
 use crate::services::supergraph;
+use crate::spec::query::transform;
+use crate::spec::query::traverse;
+use crate::spec::Query;
+use crate::spec::Schema;
+use crate::spec::SpecError;
+use crate::spec::GRAPHQL_VALIDATION_FAILURE_ERROR_KEY;
+use crate::Configuration;
+use crate::Context;
+
+pub(crate) mod authenticated;
+pub(crate) mod scopes;
+
+const REQUIRED_SCOPES_KEY: &str = "apollo_authorization::scopes::required";
 
 /// Authorization plugin
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
-struct Conf {
+#[allow(dead_code)]
+pub(crate) struct Conf {
     /// Reject unauthenticated requests
+    #[serde(default)]
     require_authentication: bool,
+    /// enables the `@authenticated` and `@hasScopes` directives
+    #[serde(default)]
+    experimental_enable_authorization_directives: bool,
 }
 
-struct AuthorizationPlugin {
-    enabled: bool,
+pub(crate) struct AuthorizationPlugin {
+    require_authentication: bool,
+    enable_authorization_directives: bool,
+}
+
+impl AuthorizationPlugin {
+    pub(crate) fn enable_directives(
+        configuration: &Configuration,
+        schema: &Schema,
+    ) -> Result<bool, ServiceBuildError> {
+        let has_config = configuration
+            .apollo_plugins
+            .plugins
+            .iter()
+            .find(|(s, _)| s.as_str() == "authorization")
+            .and_then(|(_, v)| {
+                v.get("experimental_enable_authorization_directives")
+                    .and_then(|v| v.as_bool())
+            });
+        let has_authorization_directives = schema
+            .type_system
+            .definitions
+            .directives
+            .contains_key(AUTHENTICATED_DIRECTIVE_NAME)
+            || schema
+                .type_system
+                .definitions
+                .directives
+                .contains_key(REQUIRES_SCOPES_DIRECTIVE_NAME);
+
+        match has_config {
+            Some(b) => Ok(b),
+            None => {
+                if has_authorization_directives {
+                    Err(ServiceBuildError::Schema(SchemaError::Api("cannot start the router on a schema with authorization directives without configuring the authorization plugin".to_string())))
+                } else {
+                    Ok(false)
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn query_analysis(
+        query: &str,
+        schema: &Schema,
+        configuration: &Configuration,
+        context: &Context,
+    ) {
+        let (compiler, file_id) = Query::make_compiler(query, schema, configuration);
+
+        let mut visitor = ScopeExtractionVisitor::new(&compiler);
+
+        // if this fails, the query is invalid and will fail at the query planning phase.
+        // We do not return validation errors here for now because that would imply a huge
+        // refactoring of telemetry and tests
+        if traverse::document(&mut visitor, file_id).is_ok() {
+            let scopes: Vec<String> = visitor.extracted_scopes.into_iter().collect();
+
+            context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
+        }
+    }
+
+    pub(crate) fn filter_query(
+        key: &QueryKey,
+        schema: &Schema,
+    ) -> Result<Option<FilteredQuery>, QueryPlannerError> {
+        // we create a compiler to filter the query. The filtered query will then be used
+        // to generate selections for response formatting, to execute introspection and
+        // generating a query plan
+        let mut compiler = ApolloCompiler::new();
+        compiler.set_type_system_hir(schema.type_system.clone());
+        let _id = compiler.add_executable(&key.filtered_query, "query");
+
+        let is_authenticated = key
+            .metadata
+            .get("is_authenticated")
+            .and_then(|v| v.as_bool())
+            .unwrap_or_default();
+        let scopes = key
+            .metadata
+            .get("scopes")
+            .and_then(|v| v.as_array())
+            .map(|v| {
+                v.iter()
+                    .filter_map(|el| el.as_str().map(|s| s.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let filter_res = Self::authenticated_filter_query(&compiler, is_authenticated)?;
+
+        let filter_res = match filter_res {
+            None => Self::scopes_filter_query(&compiler, &scopes).map(|opt| {
+                opt.map(|(query, paths)| (query, paths, Arc::new(Mutex::new(compiler))))
+            }),
+            Some((query, mut paths)) => {
+                if query.is_empty() {
+                    return Err(QueryPlannerError::PlanningErrors(PlanErrors {
+                        errors: Arc::new(vec![router_bridge::planner::PlanError {
+                            message: Some("Unauthorized query".to_string()),
+                            extensions: None,
+                            validation_error: false,
+                        }]),
+                        usage_reporting: UsageReporting {
+                            stats_report_key: GRAPHQL_VALIDATION_FAILURE_ERROR_KEY.to_string(),
+                            referenced_fields_by_type: Default::default(),
+                        },
+                    }));
+                }
+                let mut compiler = ApolloCompiler::new();
+                compiler.set_type_system_hir(schema.type_system.clone());
+                let _id = compiler.add_executable(&query, "query");
+
+                match Self::scopes_filter_query(&compiler, &scopes)? {
+                    None => Ok(Some((query, paths, Arc::new(Mutex::new(compiler))))),
+                    Some((new_query, new_paths)) => {
+                        let mut compiler = ApolloCompiler::new();
+                        compiler.set_type_system_hir(schema.type_system.clone());
+                        let _id = compiler.add_executable(&new_query, "query");
+                        paths.extend(new_paths.into_iter());
+                        Ok(Some((new_query, paths, Arc::new(Mutex::new(compiler)))))
+                    }
+                }
+            }
+        }?;
+
+        match filter_res {
+            None => Ok(None),
+            Some((filtered_query, paths, _)) => {
+                if filtered_query.is_empty() {
+                    Err(QueryPlannerError::PlanningErrors(PlanErrors {
+                        errors: Arc::new(vec![router_bridge::planner::PlanError {
+                            message: Some("Unauthorized query".to_string()),
+                            extensions: None,
+                            validation_error: false,
+                        }]),
+                        usage_reporting: UsageReporting {
+                            stats_report_key: GRAPHQL_VALIDATION_FAILURE_ERROR_KEY.to_string(),
+                            referenced_fields_by_type: Default::default(),
+                        },
+                    }))
+                } else {
+                    let mut compiler = ApolloCompiler::new();
+                    compiler.set_type_system_hir(schema.type_system.clone());
+                    let _id = compiler.add_executable(&filtered_query, "query");
+                    Ok(Some((
+                        filtered_query,
+                        paths,
+                        Arc::new(Mutex::new(compiler)),
+                    )))
+                }
+            }
+        }
+    }
+
+    fn authenticated_filter_query(
+        compiler: &ApolloCompiler,
+        is_authenticated: bool,
+    ) -> Result<Option<(String, Vec<Path>)>, QueryPlannerError> {
+        let id = compiler
+            .db
+            .executable_definition_files()
+            .pop()
+            .expect("the query was added to the compiler earlier");
+
+        let mut visitor = AuthenticatedVisitor::new(compiler, id);
+        let modified_query = transform::document(&mut visitor, id)
+            .map_err(|e| SpecError::ParsingError(e.to_string()))?
+            .to_string();
+
+        if visitor.query_requires_authentication {
+            if is_authenticated {
+                tracing::debug!("the query contains @authenticated, the request is authenticated, keeping the query");
+                Ok(None)
+            } else {
+                tracing::debug!("the query contains @authenticated, modified query:\n{modified_query}\nunauthorized paths: {:?}", visitor
+                .unauthorized_paths
+                .iter()
+                .map(|path| path.to_string())
+                .collect::<Vec<_>>());
+
+                Ok(Some((modified_query, visitor.unauthorized_paths)))
+            }
+        } else {
+            tracing::debug!("the query does not contain @authenticated");
+            Ok(None)
+        }
+    }
+
+    fn scopes_filter_query(
+        compiler: &ApolloCompiler,
+        scopes: &[String],
+    ) -> Result<Option<(String, Vec<Path>)>, QueryPlannerError> {
+        let id = compiler
+            .db
+            .executable_definition_files()
+            .pop()
+            .expect("the query was added to the compiler earlier");
+
+        let mut visitor =
+            ScopeFilteringVisitor::new(compiler, id, scopes.iter().cloned().collect());
+
+        let modified_query = transform::document(&mut visitor, id)
+            .map_err(|e| SpecError::ParsingError(e.to_string()))?
+            .to_string();
+
+        if visitor.query_requires_scopes {
+            tracing::debug!("the query required scopes, the requests present scopes: {scopes:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
+                visitor
+                    .unauthorized_paths
+                    .iter()
+                    .map(|path| path.to_string())
+                    .collect::<Vec<_>>()
+            );
+            Ok(Some((modified_query, visitor.unauthorized_paths)))
+        } else {
+            tracing::debug!("the query does not require scopes");
+            Ok(None)
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -34,12 +290,15 @@ impl Plugin for AuthorizationPlugin {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(AuthorizationPlugin {
-            enabled: init.config.require_authentication,
+            require_authentication: init.config.require_authentication,
+            enable_authorization_directives: init
+                .config
+                .experimental_enable_authorization_directives,
         })
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        if self.enabled {
+        let service = if self.require_authentication {
             ServiceBuilder::new()
                 .checkpoint(move |request: supergraph::Request| {
                     if request
@@ -70,6 +329,60 @@ impl Plugin for AuthorizationPlugin {
                 .boxed()
         } else {
             service
+        };
+
+        if self.enable_authorization_directives {
+            ServiceBuilder::new()
+                .map_request(move |request: supergraph::Request| {
+                    let is_authenticated = request
+                        .context
+                        .contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS);
+
+                    let request_scopes = request
+                        .context
+                        .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+                        .and_then(|value| {
+                            value.as_object().and_then(|object| {
+                                object.get("scope").and_then(|v| {
+                                    v.as_str().map(|s| {
+                                        s.split(' ').map(|s| s.to_string()).collect::<HashSet<_>>()
+                                    })
+                                })
+                            })
+                        });
+                    let query_scopes = request
+                        .context
+                        .get_json_value(REQUIRED_SCOPES_KEY)
+                        .and_then(|v| {
+                            v.as_array().map(|v| {
+                                v.iter()
+                                    .filter_map(|s| s.as_str().map(|s| s.to_string()))
+                                    .collect::<HashSet<_>>()
+                            })
+                        });
+
+                    let mut scopes = match (request_scopes, query_scopes) {
+                        (None, _) => vec![],
+                        (_, None) => vec![],
+                        (Some(req), Some(query)) => req.intersection(&query).cloned().collect(),
+                    };
+                    scopes.sort();
+
+                    request
+                        .context
+                        .upsert(QUERY_PLANNER_CACHE_KEY_METADATA, |mut o: Object| {
+                            o.insert("is_authenticated", is_authenticated.into());
+                            o.insert("scopes", scopes.into());
+                            o
+                        })
+                        .unwrap();
+
+                    request
+                })
+                .service(service)
+                .boxed()
+        } else {
+            service
         }
     }
 }
@@ -82,195 +395,4 @@ impl Plugin for AuthorizationPlugin {
 register_plugin!("apollo", "authorization", AuthorizationPlugin);
 
 #[cfg(test)]
-mod tests {
-    use serde_json_bytes::json;
-    use tower::ServiceExt;
-
-    use crate::plugin::test::MockSubgraph;
-    use crate::services::supergraph;
-    use crate::Context;
-    use crate::MockedSubgraphs;
-    use crate::TestHarness;
-
-    const SCHEMA: &str = r#"schema
-        @core(feature: "https://specs.apollo.dev/core/v0.1")
-        @core(feature: "https://specs.apollo.dev/join/v0.1")
-        @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
-         {
-        query: Query
-   }
-   directive @core(feature: String!) repeatable on SCHEMA
-   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-   directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-   directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
-   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-   directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
-   scalar join__FieldSet
-   enum join__Graph {
-       USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
-       ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
-   }
-   type Query {
-       currentUser: User @join__field(graph: USER)
-       orga(id: ID): Organization @join__field(graph: ORGA)
-   }
-   type User
-   @join__owner(graph: USER)
-   @join__type(graph: ORGA, key: "id")
-   @join__type(graph: USER, key: "id"){
-       id: ID!
-       name: String
-       phone: String
-       activeOrganization: Organization
-   }
-   type Organization
-   @join__owner(graph: ORGA)
-   @join__type(graph: ORGA, key: "id")
-   @join__type(graph: USER, key: "id") {
-       id: ID
-       creatorUser: User
-       name: String
-       nonNullId: ID!
-       suborga: [Organization]
-   }"#;
-
-    #[tokio::test]
-    async fn authenticated_request() {
-        let subgraphs = MockedSubgraphs([
-        ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{
-                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name phone}}}",
-                    "variables": {
-                        "representations": [
-                            { "__typename": "User", "id":0 }
-                        ],
-                    }
-                }},
-                serde_json::json! {{
-                    "data": {
-                        "_entities":[
-                            {
-                                "name":"Ada",
-                                "phone": "1234"
-                            }
-                        ]
-                    }
-                }},
-            ).build()),
-        ("orga", MockSubgraph::builder().with_json(
-            serde_json::json!{{"query":"{orga(id:1){id creatorUser{__typename id}}}"}},
-            serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": { "__typename": "User", "id": 0 } }}}}
-        ).build())
-    ].into_iter().collect());
-
-        let service = TestHarness::builder()
-            .configuration_json(serde_json::json!({
-            "include_subgraph_errors": {
-                "all": true
-            },
-            "authorization": {
-                "require_authentication": true
-            }}))
-            .unwrap()
-            .schema(SCHEMA)
-            .extra_plugin(subgraphs)
-            .build_supergraph()
-            .await
-            .unwrap();
-
-        let context = Context::new();
-        context
-            .insert(
-                "apollo_authentication::JWT::claims",
-                "placeholder".to_string(),
-            )
-            .unwrap();
-        let request = supergraph::Request::fake_builder()
-            .query("query { orga(id: 1) { id creatorUser { id name phone } } }")
-            .variables(
-                json! {{ "isAuthenticated": true }}
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            )
-            .context(context)
-            .build()
-            .unwrap();
-        let response = service
-            .oneshot(request)
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap();
-
-        insta::assert_json_snapshot!(response);
-    }
-
-    #[tokio::test]
-    async fn unauthenticated_request() {
-        let subgraphs = MockedSubgraphs([
-        ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{
-                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
-                    "variables": {
-                        "representations": [
-                            { "__typename": "User", "id":0 }
-                        ],
-                    }
-                }},
-                serde_json::json! {{
-                    "data": {
-                        "_entities":[
-                            {
-                                "name":"Ada"
-                            }
-                        ]
-                    }
-                }},
-            ).build()),
-        ("orga", MockSubgraph::builder().with_json(
-            serde_json::json!{{"query":"{orga(id:1){id creatorUser{__typename id}}}"}},
-            serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": { "__typename": "User", "id": 0 } }}}}
-        ).build())
-    ].into_iter().collect());
-
-        let service = TestHarness::builder()
-            .configuration_json(serde_json::json!({
-            "include_subgraph_errors": {
-                "all": true
-            },
-            "authorization": {
-                "require_authentication": true
-            }}))
-            .unwrap()
-            .schema(SCHEMA)
-            .extra_plugin(subgraphs)
-            .build_supergraph()
-            .await
-            .unwrap();
-
-        let context = Context::new();
-        let request = supergraph::Request::fake_builder()
-            .query("query { orga(id: 1) { id creatorUser { id name phone } } }")
-            .variables(
-                json! {{ "isAuthenticated": false }}
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            )
-            .context(context)
-            // Request building here
-            .build()
-            .unwrap();
-        let response = service
-            .oneshot(request)
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap();
-
-        insta::assert_json_snapshot!(response);
-    }
-}
+mod tests;

@@ -17,7 +17,9 @@ use tower::ServiceExt;
 
 use crate::graphql::Request;
 use crate::http_ext;
+use crate::json_ext::Object;
 use crate::query_planner::fetch::OperationKind;
+use crate::query_planner::QUERY_PLANNER_CACHE_KEY_METADATA;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
@@ -35,8 +37,9 @@ where
     }
 }
 
-type WaitMap =
-    Arc<Mutex<HashMap<http_ext::Request<Request>, Sender<Result<CloneSubgraphResponse, String>>>>>;
+type CacheKey = (http_ext::Request<Request>, Object);
+
+type WaitMap = Arc<Mutex<HashMap<CacheKey, Sender<Result<CloneSubgraphResponse, String>>>>>;
 
 struct CloneSubgraphResponse(SubgraphResponse);
 
@@ -73,7 +76,16 @@ where
     ) -> Result<SubgraphResponse, BoxError> {
         loop {
             let mut locked_wait_map = wait_map.lock().await;
-            match locked_wait_map.get_mut(&(&request.subgraph_request).into()) {
+            let cache_key = (
+                (&request.subgraph_request).into(),
+                request
+                    .context
+                    .get::<_, Object>(QUERY_PLANNER_CACHE_KEY_METADATA)
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
+            );
+
+            match locked_wait_map.get_mut(&cache_key) {
                 Some(waiter) => {
                     // Register interest in key
                     let mut receiver = waiter.subscribe();
@@ -97,11 +109,18 @@ where
                 None => {
                     let (tx, _rx) = broadcast::channel(1);
 
-                    locked_wait_map.insert((&request.subgraph_request).into(), tx.clone());
+                    locked_wait_map.insert(cache_key, tx.clone());
                     drop(locked_wait_map);
 
                     let context = request.context.clone();
-                    let http_request = (&request.subgraph_request).into();
+                    let cache_key = (
+                        (&request.subgraph_request).into(),
+                        request
+                            .context
+                            .get::<_, Object>(QUERY_PLANNER_CACHE_KEY_METADATA)
+                            .unwrap_or_default()
+                            .unwrap_or_default(),
+                    );
                     let res = {
                         // when _drop_signal is dropped, either by getting out of the block, returning
                         // the error from ready_oneshot or by cancellation, the drop_sentinel future will
@@ -110,7 +129,7 @@ where
                         tokio::task::spawn(async move {
                             let _ = drop_sentinel.await;
                             let mut locked_wait_map = wait_map.lock().await;
-                            locked_wait_map.remove(&http_request);
+                            locked_wait_map.remove(&cache_key);
                         });
 
                         service

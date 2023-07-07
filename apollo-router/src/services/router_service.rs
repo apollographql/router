@@ -50,6 +50,7 @@ use crate::plugin::test::MockSupergraphService;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::QueryPlanResult;
+use crate::query_planner::WarmUpCachingQueryKey;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::RouterRequest;
@@ -521,7 +522,7 @@ impl RouterCreator {
 }
 
 impl RouterCreator {
-    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<WarmUpCachingQueryKey> {
         self.supergraph_creator.cache_keys(count).await
     }
 

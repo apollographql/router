@@ -209,12 +209,15 @@ expression: "&schema"
     "authorization": {
       "description": "Authorization plugin",
       "type": "object",
-      "required": [
-        "require_authentication"
-      ],
       "properties": {
+        "experimental_enable_authorization_directives": {
+          "description": "enables the `@authenticated` and `@hasScopes` directives",
+          "default": false,
+          "type": "boolean"
+        },
         "require_authentication": {
           "description": "Reject unauthenticated requests",
+          "default": false,
           "type": "boolean"
         }
       }
