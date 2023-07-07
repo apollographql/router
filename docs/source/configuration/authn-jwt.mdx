@@ -10,6 +10,8 @@ The Apollo Router supports request authentication and key rotation via the [JSON
 
 By enabling JWT authentication, you can block malicious traffic at the edge of your graph instead of relying on [header forwarding](./header-propagation/) to propagate tokens to your subgraphs.
 
+> ⚠️ Under all circumstances, your subgraphs should be accessible _only_ via the router—not directly by clients. This is especially true if you're relying on JWT authentication in the router. Make sure to [secure your subgraphs](/federation/building-supergraphs/subgraphs-overview/#securing-your-subgraphs).
+
 **To use this feature:**
 
 - You must have an identity provider (**IdP**) or similar service that issues JWTs to authenticated clients using one of the signature algorithms supported by the [jsonwebtoken Rust library](https://crates.io/crates/jsonwebtoken) (most popular signing algorithms are supported).
@@ -154,7 +156,7 @@ Because claims are added to the context, you can define custom logic for handlin
 
 Below are 2 example [Rhai script](../customizations/rhai/) customizations that demonstrate actions the router can perform based on a request's claims.
 
-### Example: Forwarding claims to subgraphs
+### Example: Forwarding claims to subgraphs as headers
 
 Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
@@ -170,10 +172,38 @@ fn process_request(request) {
         status: 401
       };
     }
-    // Add each claim key-value pair as a separate HTTP header
-    for key in claims.keys() {
-      request.subgraph.headers[key] = claims[key].to_string();
+    // Add each claim key-value pair as a separate HTTP header.
+    // Note that that claims that are not present in the JWT will be added as empty strings.
+    let claim_names = ["claim_1", "claim_2", "claim_3"];
+    for claim_name in claim_names {
+      let claim = claims[claim_name];
+      claim = if claim == () {""} else {claim};
+      request.subgraph.headers[claim_name] = claim;
     }
+}
+```
+
+</ExpansionPanel>
+
+> ⚠️ Explicitly listing claims and _always_ setting headers for them is strongly recommended to avoid possible security issues when [forwarding headers](./header-propagation/) to subgraphs.
+
+### Example: Forwarding claims to subgraphs as GraphQL extensions
+
+Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via GraphQL extension. This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
+
+> This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+
+<ExpansionPanel title="Click to expand">
+
+```rhai title="claims_forwarding.rhai"
+fn process_request(request) {
+    let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
+    if claims ==() {
+      throw #{
+        status: 401
+      };
+    }
+    request.subgraph.extensions["claims"] = claims;
 }
 ```
 

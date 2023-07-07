@@ -1,6 +1,6 @@
 //! Logic for loading configuration in to an object model
 pub(crate) mod cors;
-mod expansion;
+pub(crate) mod expansion;
 mod experimental;
 mod schema;
 pub(crate) mod subgraph;
@@ -144,20 +144,22 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) apq: Apq,
 
-    // NOTE: when renaming this to move out of preview, also update paths
-    // in `configuration/expansion.rs` and `uplink/license.rs`.
-    /// Operation limits
+    /// Configuration for operation limits, parser limits, HTTP limits, etc.
     #[serde(default)]
-    pub(crate) preview_operation_limits: OperationLimits,
+    pub(crate) limits: Limits,
 
     /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
     /// You probably don’t want this in production!
     #[serde(default)]
     pub(crate) experimental_chaos: Chaos,
 
+    /// Set the GraphQL validation implementation to use.
+    #[serde(default)]
+    pub(crate) experimental_graphql_validation_mode: GraphQLValidationMode,
+
     /// Plugin configuration
     #[serde(default)]
-    plugins: UserPlugins,
+    pub(crate) plugins: UserPlugins,
 
     /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
     #[serde(default)]
@@ -166,6 +168,21 @@ pub struct Configuration {
 
     #[serde(default, skip_serializing, skip_deserializing)]
     pub(crate) notify: Notify<String, graphql::Response>,
+}
+
+/// GraphQL validation modes.
+#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derivative(Debug)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum GraphQLValidationMode {
+    /// Use the new Rust-based implementation.
+    New,
+    /// Use the old JavaScript-based implementation.
+    #[default]
+    Legacy,
+    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
+    /// implementations disagree.
+    Both,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
@@ -188,8 +205,9 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apollo_plugins: ApolloPlugins,
             tls: Tls,
             apq: Apq,
-            preview_operation_limits: OperationLimits,
+            limits: Limits,
             experimental_chaos: Chaos,
+            experimental_graphql_validation_mode: GraphQLValidationMode,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -203,14 +221,15 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .apollo_plugins(ad_hoc.apollo_plugins.plugins)
             .tls(ad_hoc.tls)
             .apq(ad_hoc.apq)
-            .operation_limits(ad_hoc.preview_operation_limits)
+            .operation_limits(ad_hoc.limits)
             .chaos(ad_hoc.experimental_chaos)
+            .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
 }
 
-const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
+pub(crate) const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
 
 fn default_graphql_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
@@ -236,8 +255,9 @@ impl Configuration {
         tls: Option<Tls>,
         notify: Option<Notify<String, graphql::Response>>,
         apq: Option<Apq>,
-        operation_limits: Option<OperationLimits>,
+        operation_limits: Option<Limits>,
         chaos: Option<Chaos>,
+        graphql_validation_mode: Option<GraphQLValidationMode>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -260,8 +280,9 @@ impl Configuration {
             homepage: homepage.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
-            preview_operation_limits: operation_limits.unwrap_or_default(),
+            limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
+            experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -277,29 +298,6 @@ impl Configuration {
         };
 
         conf.validate()
-    }
-
-    pub(crate) fn plugins(&self) -> Vec<(String, Value)> {
-        let mut plugins = vec![];
-
-        // Add all the apollo plugins
-        for (plugin, config) in &self.apollo_plugins.plugins {
-            let plugin_full_name = format!("{APOLLO_PLUGIN_PREFIX}{plugin}");
-            tracing::debug!(
-                "adding plugin {} with user provided configuration",
-                plugin_full_name.as_str()
-            );
-            plugins.push((plugin_full_name, config.clone()));
-        }
-
-        // Add all the user plugins
-        if let Some(config_map) = self.plugins.plugins.as_ref() {
-            for (plugin, config) in config_map {
-                plugins.push((plugin.clone(), config.clone()));
-            }
-        }
-
-        plugins
     }
 }
 
@@ -325,8 +323,9 @@ impl Configuration {
         tls: Option<Tls>,
         notify: Option<Notify<String, graphql::Response>>,
         apq: Option<Apq>,
-        operation_limits: Option<OperationLimits>,
+        operation_limits: Option<Limits>,
         chaos: Option<Chaos>,
+        graphql_validation_mode: Option<GraphQLValidationMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -335,8 +334,9 @@ impl Configuration {
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
             homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
-            preview_operation_limits: operation_limits.unwrap_or_default(),
+            limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
+            experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -582,11 +582,11 @@ impl Supergraph {
     }
 }
 
-/// Configuration for operation limits
+/// Configuration for operation limits, parser limits, HTTP limits, etc.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
-pub(crate) struct OperationLimits {
+pub(crate) struct Limits {
     /// If set, requests with operations deeper than this maximum
     /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
     /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
@@ -663,7 +663,7 @@ pub(crate) struct OperationLimits {
     pub(crate) experimental_http_max_request_bytes: usize,
 }
 
-impl Default for OperationLimits {
+impl Default for Limits {
     fn default() -> Self {
         Self {
             // These limits are opt-in
@@ -1106,6 +1106,24 @@ impl ListenAddr {
 impl From<SocketAddr> for ListenAddr {
     fn from(addr: SocketAddr) -> Self {
         Self::SocketAddr(addr)
+    }
+}
+
+#[allow(clippy::from_over_into)]
+impl Into<serde_json::Value> for ListenAddr {
+    fn into(self) -> serde_json::Value {
+        match self {
+            // It avoids to prefix with `http://` when serializing and relying on the Display impl.
+            // Otherwise, it's converted to a `UnixSocket` in any case.
+            Self::SocketAddr(addr) => serde_json::Value::String(addr.to_string()),
+            #[cfg(unix)]
+            Self::UnixSocket(path) => serde_json::Value::String(
+                path.as_os_str()
+                    .to_str()
+                    .expect("unsupported non-UTF-8 path")
+                    .to_string(),
+            ),
+        }
     }
 }
 

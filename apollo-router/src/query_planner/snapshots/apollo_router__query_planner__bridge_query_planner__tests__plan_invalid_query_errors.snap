@@ -13,5 +13,6 @@ expression: plan_errors.errors
                 exception: None,
             },
         ),
+        validation_error: true,
     },
 ]

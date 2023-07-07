@@ -144,16 +144,16 @@ pub(crate) struct CallbackMode {
     // `skip_serializing` We don't need it in the context
     /// Listen address on which the callback must listen (default: 127.0.0.1:4000)
     #[serde(skip_serializing)]
-    listen: Option<ListenAddr>,
+    pub(crate) listen: Option<ListenAddr>,
     // `skip_serializing` We don't need it in the context
     /// Specify on which path you want to listen for callbacks (default: /callback)
     #[serde(skip_serializing)]
-    path: Option<String>,
+    pub(crate) path: Option<String>,
 
     /// Specify on which subgraph we enable the callback mode for subscription
     /// If empty it applies to all subgraphs (passthrough mode takes precedence)
     #[serde(default)]
-    subgraphs: HashSet<String>,
+    pub(crate) subgraphs: HashSet<String>,
 }
 
 /// Using websocket to directly connect to subgraph
