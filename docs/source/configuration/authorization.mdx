@@ -257,21 +257,16 @@ implements I
 }
 ```
 
-If we send this query with a fragment and a type condition on `User`:
+If we send this query with an inline fragment and a type condition on `User`:
 
 ```graphql
 query {
-    topProducts {
-        type
-    }
     itf {
         id
-        ...F
+        ... on User {
+          name
+        }
     }
-}
-
-fragment F on User {
-    name
 }
 ```
 
@@ -279,9 +274,6 @@ The query would be filtered as follows:
 
 ```graphql
 query {
-  topProducts {
-    type
-  }
   itf {
     id
   }
