@@ -31,6 +31,7 @@ use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
+use crate::query_planner::SUBSCRIBE_SPAN_NAME;
 use crate::services::SubgraphServiceFactory;
 use crate::spec::Query;
 use crate::spec::Schema;
@@ -185,8 +186,16 @@ impl PlanNode {
                 }
                 PlanNode::Subscription { primary, .. } => {
                     if parameters.subscription_handle.is_some() {
+                        let fetch_time_offset =
+                            parameters.context.created_at.elapsed().as_nanos() as i64;
                         errors = primary
                             .execute_recursively(parameters, current_dir, parent_value, sender)
+                            .instrument(tracing::info_span!(
+                                SUBSCRIBE_SPAN_NAME,
+                                "otel.kind" = "INTERNAL",
+                                "apollo.subgraph.name" = primary.service_name.as_str(),
+                                "apollo_private.sent_time_offset" = fetch_time_offset
+                            ))
                             .await;
                     } else {
                         tracing::error!("No subscription handle provided for a subscription");

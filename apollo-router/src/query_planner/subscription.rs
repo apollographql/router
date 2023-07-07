@@ -22,7 +22,6 @@ use crate::graphql::Response;
 use crate::http_ext;
 use crate::json_ext::Path;
 use crate::notification::HandleStream;
-use crate::query_planner::SUBSCRIBE_SPAN_NAME;
 use crate::services::SubgraphRequest;
 use crate::services::SubscriptionTaskParams;
 
@@ -169,16 +168,8 @@ impl SubscriptionNode {
                             .build()];
                     }
 
-                    let fetch_time_offset =
-                        parameters.context.created_at.elapsed().as_nanos() as i64;
                     match self
                         .subgraph_call(parameters, current_dir, parent_value, tx_handle)
-                        .instrument(tracing::info_span!(
-                            SUBSCRIBE_SPAN_NAME,
-                            "otel.kind" = "INTERNAL",
-                            "apollo.subgraph.name" = self.service_name.as_str(),
-                            "apollo_private.sent_time_offset" = fetch_time_offset
-                        ))
                         .await
                     {
                         Ok(e) => e,
