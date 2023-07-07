@@ -393,8 +393,6 @@ impl IntegrationTest {
         let id = Uuid::new_v4().to_string();
         let dispatch = self.subscriber.clone();
 
-        println!("returning id {}", id);
-
         async move {
             let client = reqwest::Client::new();
 
