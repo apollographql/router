@@ -15,6 +15,7 @@ use crate::graphql::Error as GraphQLError;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::Configuration;
+use crate::UplinkConfig;
 
 const SANDBOX_INTROSPECTION_QUERY_WO_DEPRECATED_ARGS: &str = "\n    query IntrospectionQuery {\n      __schema {\n        \n        queryType { name }\n        mutationType { name }\n        subscriptionType { name }\n        types {\n          ...FullType\n        }\n        directives {\n          name\n          description\n          \n          locations\n          args {\n            ...InputValue\n          }\n        }\n      }\n    }\n\n    fragment FullType on __Type {\n      kind\n      name\n      description\n      \n      fields(includeDeprecated: true) {\n        name\n        description\n        args {\n          ...InputValue\n        }\n        type {\n          ...TypeRef\n        }\n        isDeprecated\n        deprecationReason\n      }\n      inputFields {\n        ...InputValue\n      }\n      interfaces {\n        ...TypeRef\n      }\n      enumValues(includeDeprecated: true) {\n        name\n        description\n        isDeprecated\n        deprecationReason\n      }\n      possibleTypes {\n        ...TypeRef\n      }\n    }\n\n    fragment InputValue on __InputValue {\n      name\n      description\n      type { ...TypeRef }\n      defaultValue\n      \n      \n    }\n\n    fragment TypeRef on __Type {\n      kind\n      name\n      ofType {\n        kind\n        name\n        ofType {\n          kind\n          name\n          ofType {\n            kind\n            name\n            ofType {\n              kind\n              name\n              ofType {\n                kind\n                name\n                ofType {\n                  kind\n                  name\n                  ofType {\n                    kind\n                    name\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  ";
 const SANDBOX_INTROSPECTION_QUERY_W_DEPRECATED_ARGS: &str = "\n    query IntrospectionQuery {\n      __schema {\n        \n        queryType { name }\n        mutationType { name }\n        subscriptionType { name }\n        types {\n          ...FullType\n        }\n        directives {\n          name\n          description\n          \n          locations\n          args(includeDeprecated: true) {\n            ...InputValue\n          }\n        }\n      }\n    }\n\n    fragment FullType on __Type {\n      kind\n      name\n      description\n      \n      fields(includeDeprecated: true) {\n        name\n        description\n        args(includeDeprecated: true) {\n          ...InputValue\n        }\n        type {\n          ...TypeRef\n        }\n        isDeprecated\n        deprecationReason\n      }\n      inputFields(includeDeprecated: true) {\n        ...InputValue\n      }\n      interfaces {\n        ...TypeRef\n      }\n      enumValues(includeDeprecated: true) {\n        name\n        description\n        isDeprecated\n        deprecationReason\n      }\n      possibleTypes {\n        ...TypeRef\n      }\n    }\n\n    fragment InputValue on __InputValue {\n      name\n      description\n      type { ...TypeRef }\n      defaultValue\n      isDeprecated\n      deprecationReason\n    }\n\n    fragment TypeRef on __Type {\n      kind\n      name\n      ofType {\n        kind\n        name\n        ofType {\n          kind\n          name\n          ofType {\n            kind\n            name\n            ofType {\n              kind\n              name\n              ofType {\n                kind\n                name\n                ofType {\n                  kind\n                  name\n                  ofType {\n                    kind\n                    name\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  ";
@@ -52,14 +53,16 @@ impl PersistedQueryLayer {
         previous_manifest_poller: Option<Arc<PersistedQueryManifestPoller>>,
     ) -> Result<Self, BoxError> {
         if configuration.preview_persisted_queries.enabled {
-            if configuration.uplink.is_none() {
-                return Err(anyhow!("persisted queries requires Apollo GraphOS. ensure that you have set APOLLO_KEY and APOLLO_GRAPH_REF environment variables").into());
+            if let Some(uplink_config) = configuration.uplink.as_ref() {
+                if configuration.apq.enabled
+                    && configuration.preview_persisted_queries.safelist.enabled
+                {
+                    return Err(anyhow!("invalid configuration: preview_persisted_queries.safelist.enabled = true, which is incompatible with apq.enabled = true. you must disable apq in your configuration to enable persisted queries with safelisting").into());
+                }
+                Self::new_enabled(configuration, uplink_config, previous_manifest_poller).await
+            } else {
+                Err(anyhow!("persisted queries requires Apollo GraphOS. ensure that you have set APOLLO_KEY and APOLLO_GRAPH_REF environment variables").into())
             }
-            if configuration.apq.enabled && configuration.preview_persisted_queries.safelist.enabled
-            {
-                return Err(anyhow!("invalid configuration: preview_persisted_queries.safelist.enabled = true, which is incompatible with apq.enabled = true. you must disable apq in your configuration to enable persisted queries with safelisting").into());
-            }
-            Self::new_enabled(configuration, previous_manifest_poller).await
         } else {
             Self::new_disabled(configuration, previous_manifest_poller).await
         }
@@ -70,6 +73,7 @@ impl PersistedQueryLayer {
     /// or starting a new poller from CLI options and YAML configuration.
     async fn new_enabled(
         configuration: &Configuration,
+        uplink_config: &UplinkConfig,
         preexisting_manifest_poller: Option<Arc<PersistedQueryManifestPoller>>,
     ) -> Result<Self, BoxError> {
         Self::new_with_manifest_poller(
@@ -81,15 +85,7 @@ impl PersistedQueryLayer {
                 if let Some(previous_manifest_poller) = preexisting_manifest_poller.clone() {
                     previous_manifest_poller
                 } else {
-                    Arc::new(
-                        PersistedQueryManifestPoller::new(
-                            configuration
-                                .uplink
-                                .as_ref()
-                                .expect("uplink config was checked above, qed"),
-                        )
-                        .await?,
-                    )
+                    Arc::new(PersistedQueryManifestPoller::new(uplink_config).await?)
                 },
             ),
         )
