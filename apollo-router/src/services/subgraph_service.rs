@@ -1097,7 +1097,7 @@ mod tests {
             Ok(http::Response::builder()
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .status(StatusCode::OK)
-                .body(r#"{}"#.into())
+                .body(r#"{"data": null}"#.into())
                 .unwrap())
         }
 
@@ -1112,7 +1112,7 @@ mod tests {
             Ok(http::Response::builder()
                 .header(CONTENT_TYPE, GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
                 .status(StatusCode::OK)
-                .body(r#"{}"#.into())
+                .body(r#"{"data": null}"#.into())
                 .unwrap())
         }
 
