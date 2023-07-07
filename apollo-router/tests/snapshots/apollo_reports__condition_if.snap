@@ -200,7 +200,7 @@ traces_per_query:
                       - depends:
                           - id: "0"
                             defer_label: ""
-                        label: zujxzBql3QHx
+                        label: "0"
                         path:
                           - id:
                               FieldName: topProducts
