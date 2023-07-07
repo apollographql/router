@@ -31,7 +31,8 @@ use hyper::Body;
 use hyper::Client;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
-use mediatype::names::{APPLICATION, JSON};
+use mediatype::names::APPLICATION;
+use mediatype::names::JSON;
 use mediatype::MediaType;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
@@ -644,13 +645,7 @@ async fn call_http(
                 // Application graphql json expects valid graphql response
                 graphql::Response::from_bytes(service_name, body).unwrap_or_else(|error| {
                     graphql::Response::builder()
-                        .error(
-                            FetchError::SubrequestMalformedResponse {
-                                service: service_name.to_string(),
-                                reason: error.to_string(),
-                            }
-                            .to_graphql_error(None),
-                        )
+                        .error(error.to_graphql_error(None))
                         .build()
                 })
             })
@@ -660,7 +655,10 @@ async fn call_http(
             // If parse fails then attach the entire payload as an error
             tracing::debug_span!("parse_subgraph_response").in_scope(|| {
                 // Application graphql json expects valid graphql response
-                let original_response = String::from_utf8_lossy(&body).to_string();
+                let mut original_response = String::from_utf8_lossy(&body).to_string();
+                if original_response.is_empty() {
+                    original_response = "<empty response body>".into()
+                }
                 graphql::Response::from_bytes(service_name, body).unwrap_or_else(|_error| {
                     graphql::Response::builder()
                         .error(
@@ -788,7 +786,7 @@ async fn do_fetch(
         if let Ok(body) = &body {
             if display_body {
                 tracing::info!(
-                    http.response.body = %String::from_utf8_lossy(&body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+                    http.response.body = %String::from_utf8_lossy(body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
                 );
             }
         }
@@ -1686,7 +1684,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "service 'test' response was malformed: service 'test' response was malformed: expected value at line 1 column 1"
+            "service 'test' response was malformed: expected value at line 1 column 1"
         );
     }
 
@@ -1764,12 +1762,13 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(response.response.body().errors[0].message,
-        "service 'test' response was malformed: service 'test' response was malformed: expected value at line 1 column 1"
+        assert_eq!(
+            response.response.body().errors[0].message,
+            "HTTP fetch failed from 'test': 401: Unauthorized"
         );
         assert_eq!(
             response.response.body().errors[1].message,
-            "HTTP fetch failed from 'test': 401: Unauthorized"
+            "service 'test' response was malformed: expected value at line 1 column 1"
         );
     }
 
@@ -1915,6 +1914,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
+            "HTTP fetch failed from 'test': 400: Bad Request"
+        );
+        assert_eq!(
+            response.response.body().errors[1].message,
             "This went wrong"
         );
     }
@@ -2027,7 +2030,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            response.response.body().errors[1].message,
+            response.response.body().errors[0].message,
             "HTTP fetch failed from 'test': 401: Unauthorized"
         );
     }
