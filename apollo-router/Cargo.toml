@@ -177,7 +177,7 @@ rustls-pemfile = "1.0.3"
 schemars = { version = "0.8.12", features = ["url"] }
 shellexpand = "3.1.0"
 sha2 = "0.10.7"
-serde = { version = "1.0.166", features = ["derive", "rc"] }
+serde = { version = "1.0.167", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.1", features = ["preserve_order"] }
 serde_json = { version = "1.0.100", features = ["preserve_order", "float_roundtrip"] }
 serde_urlencoded = "0.7.1"
@@ -185,7 +185,7 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum_macros = "0.24.3"
 sys-info = "0.9.1"
-thiserror = "1.0.41"
+thiserror = "1.0.43"
 tokio = { version = "1.29.1", features = ["full"] }
 tokio-stream = { version = "0.1.14", features = ["sync", "net"] }
 tokio-util = { version = "0.7.8", features = ["net", "codec", "time"] }
