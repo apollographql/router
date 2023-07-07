@@ -612,7 +612,7 @@ async fn call_http(
     // Rules:
     // 1. If the content type of the response is not `application/json` or `application/graphql-response+json` then we won't try to parse.
     // 2. If an HTTP status is not 2xx it will always be attached as a graphql error.
-    // 3. If the response type is `application/json` and status is not 2xx and the body is not valid grapqhql then parse errors will be suppressed.
+    // 3. If the response type is `application/json` and status is not 2xx and the body the entire body will be output if the response is not valid graphql.
 
     let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
