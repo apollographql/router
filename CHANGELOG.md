@@ -134,7 +134,6 @@ This example Rhai script illustrates how to use it:
     }
 ```
 
-fixes: #1744
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3240
 
