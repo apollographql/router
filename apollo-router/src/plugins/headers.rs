@@ -391,7 +391,7 @@ mod test {
     use tower::BoxError;
 
     use super::*;
-    use crate::graphql::Request;
+    use crate::graphql::{SingleRequest, Request};
     use crate::plugin::test::MockSubgraphService;
     use crate::plugins::headers::Config;
     use crate::plugins::headers::HeadersLayer;
@@ -744,10 +744,10 @@ mod test {
                     .header(CONTENT_LENGTH, "2")
                     .header(CONTENT_TYPE, "graphql")
                     .body(
-                        Request::builder()
+                        Request::SingleRequest(SingleRequest::builder()
                             .query("query")
                             .operation_name("my_operation_name")
-                            .build(),
+                            .build()),
                     )
                     .expect("expecting valid request"),
             ),
@@ -758,7 +758,7 @@ mod test {
                 .header(HOST, "rhost")
                 .header(CONTENT_LENGTH, "22")
                 .header(CONTENT_TYPE, "graphql")
-                .body(Request::builder().query("query").build())
+                .body(Request::SingleRequest(SingleRequest::builder().query("query").build()))
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,
             context: ctx,

@@ -90,7 +90,7 @@ where
         if !request
             .subgraph_request
             .body_mut()
-            .variables
+            .variables()
             .contains_key("representations")
         {
             return service.oneshot(request).boxed();
@@ -120,7 +120,7 @@ where
     let query_hash = hash_request(body);
 
     let representations = body
-        .variables
+        .variables_mut()
         .get_mut("representations")
         .and_then(|value| value.as_array_mut())
         .expect("we already checked that representations exist");
@@ -136,7 +136,7 @@ where
         filter_representations(representations, keys, cache_result)?;
 
     if !new_representations.is_empty() {
-        body.variables
+        body.variables_mut()
             .insert("representations", new_representations.into());
 
         let mut response = service.oneshot(request).await?;
@@ -185,11 +185,11 @@ where
 
 fn hash_request(body: &graphql::Request) -> String {
     let mut digest = Sha256::new();
-    digest.update(body.query.as_deref().unwrap_or("-").as_bytes());
+    digest.update(body.query().as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);
-    digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
+    digest.update(body.operation_name().as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);
-    digest.update(&serde_json::to_vec(&body.variables).unwrap());
+    digest.update(&serde_json::to_vec(&body.variables()).unwrap());
 
     hex::encode(digest.finalize().as_slice())
 }

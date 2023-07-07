@@ -922,7 +922,7 @@ mod tests {
     }
 
     async fn assert_federated_response(listen_addr: &ListenAddr, request: &str) {
-        let request = Request::builder().query(request).build();
+        let request = Request::SingleRequest(graphql::SingleRequest::builder().query(request).build());
         let expected = query(listen_addr, &request).await.unwrap();
 
         let response = to_string_pretty(&expected).unwrap();

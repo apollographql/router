@@ -24,7 +24,7 @@ use super::RhaiExecutionResponse;
 use super::RhaiSupergraphDeferredResponse;
 use super::RhaiSupergraphResponse;
 use crate::graphql::Error;
-use crate::graphql::Request;
+use crate::graphql::{Request,SingleRequest};
 use crate::http_ext;
 use crate::plugin::test::MockExecutionService;
 use crate::plugin::test::MockSupergraphService;
@@ -111,7 +111,7 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
     let mut router_service = dyn_plugin.execution_service(BoxService::new(mock_service));
     let fake_req = http_ext::Request::fake_builder()
         .header("x-custom-header", "CUSTOM_VALUE")
-        .body(Request::builder().query(String::new()).build())
+        .body(Request::SingleRequest(SingleRequest::builder().query(String::new()).build()))
         .build()?;
     let context = Context::new();
     context.insert("test", 5i64).unwrap();

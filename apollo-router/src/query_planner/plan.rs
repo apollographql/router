@@ -8,6 +8,7 @@ use serde::Serialize;
 
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
+use super::subgraph_fetch;
 use crate::error::QueryPlannerError;
 use crate::json_ext;
 use crate::json_ext::Object;
@@ -77,6 +78,9 @@ pub(crate) enum PlanNode {
 
     /// Fetch some data from a subgraph.
     Fetch(fetch::FetchNode),
+    
+    /// Fetch data from a subgraph via a finder call.
+    SubgraphFetch(subgraph_fetch::SubgraphFetchNode),
 
     /// Merge the current resultset with the response.
     Flatten(FlattenNode),
@@ -100,6 +104,7 @@ impl PlanNode {
             Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Fetch(fetch_node) => fetch_node.operation_kind() == &OperationKind::Mutation,
+            Self::SubgraphFetch(fetch_node) => fetch_node.operation_kind() == &OperationKind::Mutation,
             Self::Defer { primary, .. } => primary
                 .node
                 .as_ref()
@@ -141,6 +146,7 @@ impl PlanNode {
                 .any(|n| n.is_deferred(operation, variables, query)),
             Self::Flatten(node) => node.node.is_deferred(operation, variables, query),
             Self::Fetch(..) => false,
+            Self::SubgraphFetch(..) => false,
             Self::Defer { .. } => true,
             Self::Condition {
                 if_clause,
@@ -264,6 +270,7 @@ impl PlanNode {
                 Ok(())
             }
             Self::Fetch(..) => Ok(()),
+            Self::SubgraphFetch(..) => Ok(()),
             Self::Condition {
                 if_clause,
                 else_clause,
@@ -290,6 +297,7 @@ impl PlanNode {
                 Box::new(nodes.iter().flat_map(|x| x.service_usage()))
             }
             Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
+            Self::SubgraphFetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
             Self::Flatten(flatten) => flatten.node.service_usage(),
             Self::Defer { primary, deferred } => primary
                 .node

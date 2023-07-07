@@ -29,6 +29,7 @@ use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
+use crate::query_planner::SUBGRAPH_FETCH_SPAN_NAME;
 use crate::services::SubgraphServiceFactory;
 use crate::spec::Query;
 use crate::spec::Schema;
@@ -198,6 +199,30 @@ impl PlanNode {
                         }
                     }
                 }
+                PlanNode::SubgraphFetch(fetch_node) => {
+                    let fetch_time_offset =
+                        parameters.context.created_at.elapsed().as_nanos() as i64;
+                    match fetch_node
+                        .fetch_node(parameters, parent_value, current_dir)
+                        .instrument(tracing::info_span!(
+                            SUBGRAPH_FETCH_SPAN_NAME,
+                            "otel.kind" = "INTERNAL",
+                            "apollo.subgraph.name" = fetch_node.service_name.as_str(),
+                            "apollo_private.sent_time_offset" = fetch_time_offset
+                        ))
+                        .await
+                    {
+                        Ok((v, e)) => {
+                            value = v;
+                            errors = e;
+                        }
+                        Err(err) => {
+                            failfast_error!("Fetch error: {}", err);
+                            errors = vec![err.to_graphql_error(Some(current_dir.to_owned()))];
+                            value = Value::default();
+                        }
+                    }
+                }
                 PlanNode::Defer {
                     primary:
                         Primary {
@@ -280,16 +305,17 @@ impl PlanNode {
                     errors = Vec::new();
 
                     async {
+                        let variables = parameters.supergraph_request.body().variables();
                         let v = parameters
                             .query
                             .variable_value(
                                 parameters
                                     .supergraph_request
                                     .body()
-                                    .operation_name
+                                    .operation_name()
                                     .as_deref(),
                                 condition.as_str(),
-                                &parameters.supergraph_request.body().variables,
+                                &variables,
                             )
                             .unwrap_or(&Value::Bool(true)); // the defer if clause is mandatory, and defaults to true
 

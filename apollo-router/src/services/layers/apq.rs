@@ -16,6 +16,7 @@ use sha2::Sha256;
 use crate::cache::DeduplicatingCache;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::graphql;
 
 const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
 
@@ -62,7 +63,7 @@ async fn apq_request(
     let maybe_query_hash: Option<(String, Vec<u8>)> = request
         .supergraph_request
         .body()
-        .extensions
+        .extensions()
         .get("persistedQuery")
         .and_then(|value| serde_json_bytes::from_value::<PersistedQuery>(value.clone()).ok())
         .and_then(|persisted_query| {
@@ -71,7 +72,7 @@ async fn apq_request(
                 .map(|decoded| (persisted_query.sha256hash, decoded))
         });
 
-    let body_query = request.supergraph_request.body().query.clone();
+    let body_query = request.supergraph_request.body().query().clone();
 
     match (maybe_query_hash, body_query) {
         (Some((query_hash, query_hash_bytes)), Some(query)) => {
@@ -88,7 +89,13 @@ async fn apq_request(
             if let Ok(cached_query) = cache.get(&redis_key(&apq_hash)).await.get().await {
                 let _ = request.context.insert("persisted_query_hit", true);
                 tracing::trace!("apq: cache hit");
-                request.supergraph_request.body_mut().query = Some(cached_query);
+                match request.supergraph_request.body_mut() {
+                    graphql::Request::SingleRequest(single_request) => {
+                        single_request.query = Some(cached_query);
+                    }
+                    graphql::Request::BatchRequest(vec) => unreachable!()
+                }
+                                    
                 Ok(request)
             } else {
                 let _ = request.context.insert("persisted_query_hit", false);
@@ -150,7 +157,7 @@ async fn disabled_apq_request(
     if request
         .supergraph_request
         .body()
-        .extensions
+        .extensions()
         .contains_key("persistedQuery")
     {
         let errors = vec![crate::error::Error {
@@ -220,19 +227,19 @@ mod apq_tests {
 
         let mut router_service = from_supergraph_mock_callback(move |req| {
             let body = req.supergraph_request.body();
-            let as_json = body.extensions.get("persistedQuery").unwrap();
+            let as_json = body.extensions().get("persistedQuery").unwrap();
 
             let persisted_query: PersistedQuery =
                 serde_json_bytes::from_value(as_json.clone()).unwrap();
 
             assert_eq!(persisted_query.sha256hash, hash2);
 
-            assert!(body.query.is_some());
+            assert!(body.query().is_some());
 
             let hash = hex::decode(hash2.as_bytes()).unwrap();
 
             assert!(query_matches_hash(
-                body.query.clone().unwrap().as_str(),
+                body.query().clone().unwrap().as_str(),
                 hash.as_slice()
             ));
 
@@ -331,14 +338,14 @@ mod apq_tests {
 
         let mut router_service = from_supergraph_mock_callback(move |req| {
             let body = req.supergraph_request.body();
-            let as_json = body.extensions.get("persistedQuery").unwrap();
+            let as_json = body.extensions().get("persistedQuery").unwrap();
 
             let persisted_query: PersistedQuery =
                 serde_json_bytes::from_value(as_json.clone()).unwrap();
 
             assert_eq!(persisted_query.sha256hash, hash2);
 
-            assert!(body.query.is_some());
+            assert!(body.query().is_some());
 
             Ok(SupergraphResponse::fake_builder()
                 .context(req.context)

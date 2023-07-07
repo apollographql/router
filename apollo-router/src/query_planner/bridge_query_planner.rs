@@ -164,6 +164,7 @@ impl BridgeQueryPlanner {
         operation: Option<String>,
         mut selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
+        // println!("about to call planner");
         let planner_result = self
             .planner
             .plan(query, operation)

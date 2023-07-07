@@ -139,7 +139,7 @@ async fn fetch_includes_operation_name() {
             .expect_call()
             .times(1)
             .withf(move |request| {
-                let matches = request.subgraph_request.body().operation_name
+                let matches = *request.subgraph_request.body().operation_name()
                     == Some("topProducts_product_0".into());
                 inner_succeeded.store(matches, Ordering::SeqCst);
                 matches
@@ -445,9 +445,9 @@ async fn defer_if_condition() {
             &Arc::new(
                 http::Request::builder()
                     .body(
-                        request::Request::fake_builder()
+                        request::Request::SingleRequest(request::SingleRequest::fake_builder()
                             .variables(json!({ "shouldDefer": true }).as_object().unwrap().clone())
-                            .build(),
+                            .build()),
                     )
                     .unwrap(),
             ),
@@ -487,9 +487,9 @@ async fn defer_if_condition() {
             &Arc::new(
                 http::Request::builder()
                     .body(
-                        request::Request::fake_builder()
+                        request::Request::SingleRequest(request::SingleRequest::fake_builder()
                             .variables(json!({ "shouldDefer": false }).as_object().unwrap().clone())
-                            .build(),
+                            .build()),
                     )
                     .unwrap(),
             ),

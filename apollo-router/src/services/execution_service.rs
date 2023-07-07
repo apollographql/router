@@ -67,8 +67,8 @@ impl Service<ExecutionRequest> for ExecutionService {
             let context = req.context;
             let ctx = context.clone();
             let (sender, receiver) = futures::channel::mpsc::channel(10);
-            let variables = req.supergraph_request.body().variables.clone();
-            let operation_name = req.supergraph_request.body().operation_name.clone();
+            let variables = req.supergraph_request.body().variables().clone();
+            let operation_name = req.supergraph_request.body().operation_name().clone();
 
             let is_deferred = req
                 .query_plan

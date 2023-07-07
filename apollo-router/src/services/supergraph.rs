@@ -79,12 +79,12 @@ impl Request {
         uri: Uri,
         method: Method,
     ) -> Result<Request, BoxError> {
-        let gql_request = graphql::Request::builder()
+        let gql_request = graphql::Request::SingleRequest(graphql::SingleRequest::builder()
             .and_query(query)
             .and_operation_name(operation_name)
             .variables(variables)
             .extensions(extensions)
-            .build();
+            .build());
         let mut supergraph_request = http::Request::builder()
             .uri(uri)
             .method(method)
@@ -388,11 +388,11 @@ mod test {
             &Uri::from_static("http://example.com")
         );
         assert_eq!(
-            request.supergraph_request.body().extensions.get("foo"),
+            request.supergraph_request.body().extensions().get("foo"),
             Some(&json!({}).into())
         );
         assert_eq!(
-            request.supergraph_request.body().variables.get("bar"),
+            request.supergraph_request.body().variables().get("bar"),
             Some(&json!({}).into())
         );
         assert_eq!(request.supergraph_request.method(), Method::POST);
@@ -408,12 +408,12 @@ mod test {
             .clone();
         assert_eq!(
             request.supergraph_request.body(),
-            &graphql::Request::builder()
+            &graphql::Request::SingleRequest(graphql::SingleRequest::builder()
                 .variables(variables)
                 .extensions(extensions)
                 .operation_name("Default")
                 .query("query { topProducts }")
-                .build()
+                .build())
         );
     }
 

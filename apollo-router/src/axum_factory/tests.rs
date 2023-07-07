@@ -65,6 +65,7 @@ use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner::BridgeQueryPlanner;
+use crate::request::assert_single_request;
 use crate::router_factory::create_plugins;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
@@ -523,7 +524,7 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
     let example_response = expected_response.clone();
     let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
-        assert_eq!(req.supergraph_request.into_body().query.unwrap(), "query");
+        assert_eq!(assert_single_request(req.supergraph_request.into_body()).query.unwrap(), "query");
         Ok(SupergraphResponse::new_from_graphql_response(
             example_response,
             req.context,

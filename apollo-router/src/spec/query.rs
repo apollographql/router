@@ -872,7 +872,7 @@ impl Query {
         request: &Request,
         schema: &Schema,
     ) -> Result<(), Response> {
-        let operation_name = request.operation_name.as_deref();
+        let operation_name = request.operation_name().as_deref();
         let operation_variable_types =
             self.operations
                 .iter()
@@ -885,8 +885,8 @@ impl Query {
 
         if LevelFilter::current() >= LevelFilter::DEBUG {
             let known_variables = operation_variable_types.keys().cloned().collect();
-            let provided_variables = request
-                .variables
+            let variables = request.variables();
+            let provided_variables = variables
                 .keys()
                 .map(|k| k.as_str())
                 .collect::<HashSet<_>>();
@@ -911,8 +911,8 @@ impl Query {
                         default_value,
                     },
                 )| {
-                    let value = request
-                        .variables
+                    let variables = request.variables();
+                    let value = variables
                         .get(*name)
                         .or(default_value.as_ref())
                         .unwrap_or(&Value::Null);

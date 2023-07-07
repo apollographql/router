@@ -8,12 +8,168 @@ use serde_json_bytes::Value;
 
 use crate::json_ext::Object;
 
+#[derive(Clone, Derivative, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[derivative(Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Request {
+    BatchRequest(Vec<SingleRequest>),
+    SingleRequest(SingleRequest),
+}
+
+impl Request {
+    pub fn query(&self) -> &Option<String> {
+        match self {
+            Request::BatchRequest(vec) => {
+                if let Some(first) = vec.first() {
+                    &first.query
+                } else {
+                    &None
+                }
+            }
+            Request::SingleRequest(single_request) => &single_request.query,
+        }
+    }
+    
+    pub fn operation_name(&self) -> &Option<String> {
+        match self {
+            Request::BatchRequest(vec) => {
+                if let Some(first) = vec.first() {
+                    &first.operation_name
+                } else {
+                    &None
+                }
+            }
+            Request::SingleRequest(single_request) => &single_request.operation_name,
+        }
+    }
+
+    pub fn variables(&self) -> &Object {
+        match self {
+            Request::BatchRequest(vec) => {
+                if let Some(first) = vec.first() {
+                    &first.variables
+                } else {
+                    unreachable!()
+                }
+            }
+            Request::SingleRequest(single_request) => &single_request.variables,
+        }
+    }
+    
+    pub fn variables_mut(&mut self) -> &mut Object {
+        match self {
+            Request::BatchRequest(vec) => {
+                if let Some(first) = vec.first_mut() {
+                    &mut first.variables
+                } else {
+                    unreachable!()
+                }
+            }
+            Request::SingleRequest(single_request) => &mut single_request.variables,
+        }
+    }
+    
+    pub fn extensions(&self) -> &Object {
+        match self {
+            Request::BatchRequest(vec) => {
+                if let Some(first) = vec.first() {
+                    &first.extensions
+                } else {
+                    unreachable!()
+                }
+            }
+            Request::SingleRequest(single_request) => &single_request.extensions,
+        }
+    }
+
+    pub fn from_batch(batch_request: Vec<SingleRequest>) -> Self {
+        Request::BatchRequest(batch_request)
+    }
+    
+    pub fn from_single(single: SingleRequest) -> Self {
+        Request::SingleRequest(single)
+    }
+    
+    
+    /// Convert encoded URL query string parameters (also known as "search
+    /// params") into a GraphQL [`Request`].
+    ///
+    /// An error will be produced in the event that the query string parameters
+    /// cannot be turned into a valid GraphQL `Request`.
+    pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
+        let urldecoded: serde_json::Value =
+            serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
+                .map_err(serde_json::Error::custom)?;
+
+        let operation_name = if let Some(serde_json::Value::String(operation_name)) =
+            urldecoded.get("operationName")
+        {
+            Some(operation_name.clone())
+        } else {
+            None
+        };
+
+        let query = if let Some(serde_json::Value::String(query)) = urldecoded.get("query") {
+            Some(query.as_str())
+        } else {
+            None
+        };
+        let variables: Object = get_from_urldecoded(&urldecoded, "variables")?.unwrap_or_default();
+        let extensions: Object =
+            get_from_urldecoded(&urldecoded, "extensions")?.unwrap_or_default();
+
+        let request_builder = SingleRequest::builder()
+            .variables(variables)
+            .and_operation_name(operation_name)
+            .extensions(extensions);
+
+        let request = if let Some(query_str) = query {
+            request_builder.query(query_str).build()
+        } else {
+            request_builder.build()
+        };
+
+        Ok(Request::SingleRequest(request))
+    }
+}
+
+#[derive(Clone, Derivative, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+#[derivative(Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct BatchRequest {
+    /// Vector of requests
+    #[serde(default)]
+    requests: Vec<SingleRequest>,
+}
+
+impl BatchRequest {
+    pub fn new(requests: Vec<SingleRequest>) -> Self {
+        Self {
+            requests,
+        }
+    }
+}
+
+impl Default for Request {
+    fn default() -> Self {
+        Request::SingleRequest(SingleRequest::default())
+    }
+}
+
+impl From<SingleRequest> for Request {
+    fn from(single_request: SingleRequest) -> Self {
+        Request::SingleRequest(single_request)
+    }
+}
+
 /// A GraphQL `Request` used to represent both supergraph and subgraph requests.
 #[derive(Clone, Derivative, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 #[derivative(Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub struct Request {
+pub struct SingleRequest {
     /// The GraphQL operation (e.g., query, mutation) string.
     ///
     /// For historical purposes, the term "query" is commonly used to refer to
@@ -79,7 +235,7 @@ where
 }
 
 #[buildstructor::buildstructor]
-impl Request {
+impl SingleRequest {
     #[builder(visibility = "pub")]
     /// This is the constructor (or builder) to use when constructing a GraphQL
     /// `Request`.
@@ -128,47 +284,6 @@ impl Request {
             extensions,
         }
     }
-
-    /// Convert encoded URL query string parameters (also known as "search
-    /// params") into a GraphQL [`Request`].
-    ///
-    /// An error will be produced in the event that the query string parameters
-    /// cannot be turned into a valid GraphQL `Request`.
-    pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
-        let urldecoded: serde_json::Value =
-            serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
-                .map_err(serde_json::Error::custom)?;
-
-        let operation_name = if let Some(serde_json::Value::String(operation_name)) =
-            urldecoded.get("operationName")
-        {
-            Some(operation_name.clone())
-        } else {
-            None
-        };
-
-        let query = if let Some(serde_json::Value::String(query)) = urldecoded.get("query") {
-            Some(query.as_str())
-        } else {
-            None
-        };
-        let variables: Object = get_from_urldecoded(&urldecoded, "variables")?.unwrap_or_default();
-        let extensions: Object =
-            get_from_urldecoded(&urldecoded, "extensions")?.unwrap_or_default();
-
-        let request_builder = Self::builder()
-            .variables(variables)
-            .and_operation_name(operation_name)
-            .extensions(extensions);
-
-        let request = if let Some(query_str) = query {
-            request_builder.query(query_str).build()
-        } else {
-            request_builder.build()
-        };
-
-        Ok(request)
-    }
 }
 
 fn get_from_urldecoded<'a, T: Deserialize<'a>>(
@@ -180,6 +295,13 @@ fn get_from_urldecoded<'a, T: Deserialize<'a>>(
     } else {
         Ok(None)
     }
+}
+
+pub fn assert_single_request(req: Request) -> SingleRequest {
+    if let Request::SingleRequest(req) = req {
+        return req;
+    }
+    panic!("should not get here");
 }
 
 #[cfg(test)]
@@ -200,12 +322,12 @@ mod tests {
           "extensions": {"extension": 1}
         })
         .to_string();
-        println!("data: {data}");
-        let result = serde_json::from_str::<Request>(data.as_str());
-        println!("result: {result:?}");
+        // println!("data: {data}");
+        let result = serde_json::from_str::<SingleRequest>(data.as_str());
+        // println!("result: {result:?}");
         assert_eq!(
             result.unwrap(),
-            Request::builder()
+            SingleRequest::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
                 .operation_name("aTest")
                 .variables(bjson!({ "arg1": "me" }).as_object().unwrap().clone())
@@ -216,7 +338,7 @@ mod tests {
 
     #[test]
     fn test_no_variables() {
-        let result = serde_json::from_str::<Request>(
+        let result = serde_json::from_str::<SingleRequest>(
             json!(
             {
               "query": "query aTest($arg1: String!) { test(who: $arg1) }",
@@ -228,7 +350,7 @@ mod tests {
         );
         assert_eq!(
             result.unwrap(),
-            Request::builder()
+            SingleRequest::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }".to_owned())
                 .operation_name("aTest")
                 .extensions(bjson!({"extension": 1}).as_object().cloned().unwrap())
@@ -240,7 +362,7 @@ mod tests {
     // rover sends { "variables": null } when running the introspection query,
     // and possibly running other queries as well.
     fn test_variables_is_null() {
-        let result = serde_json::from_str::<Request>(
+        let result = serde_json::from_str::<SingleRequest>(
             json!(
             {
               "query": "query aTest($arg1: String!) { test(who: $arg1) }",
@@ -253,7 +375,7 @@ mod tests {
         );
         assert_eq!(
             result.unwrap(),
-            Request::builder()
+            SingleRequest::builder()
                 .query("query aTest($arg1: String!) { test(who: $arg1) }")
                 .operation_name("aTest")
                 .extensions(bjson!({"extension": 1}).as_object().cloned().unwrap())
@@ -265,7 +387,7 @@ mod tests {
     fn from_urlencoded_query_works() {
         let query_string = "query=%7B+topProducts+%7B+upc+name+reviews+%7B+id+product+%7B+name+%7D+author+%7B+id+name+%7D+%7D+%7D+%7D&extensions=%7B+%22persistedQuery%22+%3A+%7B+%22version%22+%3A+1%2C+%22sha256Hash%22+%3A+%2220a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f%22+%7D+%7D".to_string();
 
-        let expected_result = serde_json::from_str::<Request>(
+        let expected_result: Request = Request::SingleRequest(serde_json::from_str::<SingleRequest>(
             json!(
             {
               "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
@@ -278,7 +400,7 @@ mod tests {
             })
             .to_string()
             .as_str(),
-        ).unwrap();
+        ).unwrap());
 
         let req = Request::from_urlencoded_query(query_string).unwrap();
 
@@ -289,7 +411,7 @@ mod tests {
     fn from_urlencoded_query_with_variables_works() {
         let query_string = "query=%7B+topProducts+%7B+upc+name+reviews+%7B+id+product+%7B+name+%7D+author+%7B+id+name+%7D+%7D+%7D+%7D&variables=%7B%22date%22%3A%222022-01-01T00%3A00%3A00%2B00%3A00%22%7D&extensions=%7B+%22persistedQuery%22+%3A+%7B+%22version%22+%3A+1%2C+%22sha256Hash%22+%3A+%2220a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f%22+%7D+%7D".to_string();
 
-        let expected_result = serde_json::from_str::<Request>(
+        let expected_result: Request = Request::SingleRequest(serde_json::from_str::<SingleRequest>(
             json!(
             {
               "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
@@ -303,7 +425,7 @@ mod tests {
             })
             .to_string()
             .as_str(),
-        ).unwrap();
+        ).unwrap());
 
         let req = Request::from_urlencoded_query(query_string).unwrap();
 

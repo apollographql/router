@@ -138,7 +138,7 @@ where
 {
     let context = req.context;
     let body = req.supergraph_request.body();
-    let variables = body.variables.clone();
+    let variables = body.variables().clone();
     let QueryPlannerResponse {
         content,
         context,
@@ -186,7 +186,7 @@ where
         }
 
         Some(QueryPlannerContent::Plan { plan }) => {
-            let operation_name = body.operation_name.clone();
+            let operation_name = body.operation_name().clone();
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
 
             let accepts_multipart: bool = context
@@ -244,11 +244,11 @@ async fn plan_query(
         .call(
             QueryPlannerRequest::builder()
                 .query(
-                    body.query
+                    body.query()
                         .clone()
                         .expect("the query presence was already checked by a plugin"),
                 )
-                .and_operation_name(body.operation_name.clone())
+                .and_operation_name(body.operation_name().clone())
                 .context(context)
                 .build(),
         )

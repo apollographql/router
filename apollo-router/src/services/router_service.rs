@@ -229,7 +229,7 @@ where
 
                     let SupergraphResponse { response, context } =
                         match request_res.and_then(|request| {
-                            let query = request.supergraph_request.body().query.as_ref();
+                            let query = request.supergraph_request.body().query().as_ref();
 
                             if query.is_none() || query.unwrap().trim().is_empty() {
                                 let errors = vec![crate::error::Error::builder()
@@ -589,13 +589,13 @@ mod tests {
             let example_response = expected_response.clone();
 
             assert_eq!(
-                req.supergraph_request.body().query.as_deref().unwrap(),
+                req.supergraph_request.body().query().as_deref().unwrap(),
                 expected_query
             );
             assert_eq!(
                 req.supergraph_request
                     .body()
-                    .operation_name
+                    .operation_name()
                     .as_deref()
                     .unwrap(),
                 expected_operation_name

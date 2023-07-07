@@ -56,8 +56,9 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use crate::error::Error;
-use crate::graphql::Request;
+use crate::graphql::SingleRequest as Request;
 use crate::graphql::Response;
+use crate::graphql;
 use crate::http_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
@@ -143,14 +144,14 @@ mod router_plugin {
     #[rhai_fn(get = "subgraph", pure, return_raw)]
     pub(crate) fn get_subgraph(
         obj: &mut SharedMut<subgraph::Request>,
-    ) -> Result<http_ext::Request<Request>, Box<EvalAltResult>> {
+    ) -> Result<http_ext::Request<graphql::Request>, Box<EvalAltResult>> {
         Ok(obj.with_mut(|request| (&request.subgraph_request).into()))
     }
 
     #[rhai_fn(set = "subgraph", return_raw)]
     pub(crate) fn set_subgraph(
         obj: &mut SharedMut<subgraph::Request>,
-        sub: http_ext::Request<Request>,
+        sub: http_ext::Request<graphql::Request>,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|request| {
             request.subgraph_request = sub.inner;
@@ -1023,7 +1024,7 @@ macro_rules! register_rhai_interface {
 
             $engine.register_get(
                 "body",
-                |obj: &mut SharedMut<$base::Request>| -> Result<Request, Box<EvalAltResult>> {
+                |obj: &mut SharedMut<$base::Request>| -> Result<graphql::Request, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|request| request.supergraph_request.body().clone()))
                 }
             );
@@ -1036,7 +1037,7 @@ macro_rules! register_rhai_interface {
                             let _unused = (obj, body);
                             Err("cannot mutate originating request on a subgraph".into())
                         } else {
-                            obj.with_mut(|request| *request.supergraph_request.body_mut() = body);
+                            obj.with_mut(|request| *request.supergraph_request.body_mut() = graphql::Request::SingleRequest(body));
                             Ok(())
                         }
                     }

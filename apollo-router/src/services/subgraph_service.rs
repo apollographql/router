@@ -181,62 +181,70 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
         let make_calls = async move {
             // If APQ is not enabled, simply make the graphql call
             // with the same request body.
-            let apq_enabled = arc_apq_enabled.as_ref();
-            if !apq_enabled.load(Relaxed) {
-                return call_http(request, body, context, client, service_name).await;
-            }
+            match body {
+                graphql::Request::SingleRequest(single_request) => {
+                    let apq_enabled = arc_apq_enabled.as_ref();
+                    if !apq_enabled.load(Relaxed) {
+                        return call_http(request, graphql::Request::SingleRequest(single_request), context, client, service_name).await;
+                    }
+    
+                    // Else, if APQ is enabled,
+                    // Calculate the query hash and try the request with
+                    // a persistedQuery instead of the whole query.
 
-            // Else, if APQ is enabled,
-            // Calculate the query hash and try the request with
-            // a persistedQuery instead of the whole query.
-            let graphql::Request {
-                query,
-                operation_name,
-                variables,
-                extensions,
-            } = body.clone();
-
-            let hash_value = apq::calculate_hash_for_query(query.as_deref().unwrap_or_default());
-
-            let persisted_query = serde_json_bytes::json!({
-                HASH_VERSION_KEY: HASH_VERSION_VALUE,
-                HASH_KEY: hash_value
-            });
-
-            let mut extensions_with_apq = extensions.clone();
-            extensions_with_apq.insert(PERSISTED_QUERY_KEY, persisted_query);
-
-            let mut apq_body = graphql::Request {
-                query: None,
-                operation_name,
-                variables,
-                extensions: extensions_with_apq,
-            };
-
-            let response = call_http(
-                request.clone(),
-                apq_body.clone(),
-                context.clone(),
-                client.clone(),
-                service_name.clone(),
-            )
-            .await?;
-
-            // Check the error for the request with only persistedQuery.
-            // If PersistedQueryNotSupported, disable APQ for this subgraph
-            // If PersistedQueryNotFound, add the original query to the request and retry.
-            // Else, return the response like before.
-            let gql_response = response.response.body();
-            match get_apq_error(gql_response) {
-                APQError::PersistedQueryNotSupported => {
-                    apq_enabled.store(false, Relaxed);
-                    call_http(request, body, context, client, service_name).await
+                    let graphql::SingleRequest {
+                        query,
+                        operation_name,
+                        variables,
+                        extensions,
+                    } = single_request.clone();
+        
+                    let hash_value = apq::calculate_hash_for_query(query.as_deref().unwrap_or_default());
+        
+                    let persisted_query = serde_json_bytes::json!({
+                        HASH_VERSION_KEY: HASH_VERSION_VALUE,
+                        HASH_KEY: hash_value
+                    });
+        
+                    let mut extensions_with_apq = extensions.clone();
+                    extensions_with_apq.insert(PERSISTED_QUERY_KEY, persisted_query);
+        
+                    let mut apq_body = graphql::SingleRequest {
+                        query: None,
+                        operation_name,
+                        variables,
+                        extensions: extensions_with_apq,
+                    };
+        
+                    let response = call_http(
+                        request.clone(),
+                        graphql::Request::SingleRequest(apq_body.clone()),
+                        context.clone(),
+                        client.clone(),
+                        service_name.clone(),
+                    )
+                    .await?;
+        
+                    // Check the error for the request with only persistedQuery.
+                    // If PersistedQueryNotSupported, disable APQ for this subgraph
+                    // If PersistedQueryNotFound, add the original query to the request and retry.
+                    // Else, return the response like before.
+                    let gql_response = response.response.body();
+                    match get_apq_error(gql_response) {
+                        APQError::PersistedQueryNotSupported => {
+                            apq_enabled.store(false, Relaxed);
+                            call_http(request, graphql::Request::SingleRequest(single_request), context, client, service_name).await
+                        }
+                        APQError::PersistedQueryNotFound => {
+                            apq_body.query = query;
+                            call_http(request, graphql::Request::SingleRequest(apq_body), context, client, service_name).await
+                        }
+                        _ => Ok(response),
+                    }
                 }
-                APQError::PersistedQueryNotFound => {
-                    apq_body.query = query;
-                    call_http(request, apq_body, context, client, service_name).await
+                graphql::Request::BatchRequest(cloned) => {
+                    return call_http(request, graphql::Request::BatchRequest(cloned), context, client, service_name).await;
                 }
-                _ => Ok(response),
             }
         };
 
@@ -256,11 +264,19 @@ async fn call_http(
         subgraph_request, ..
     } = request;
 
-    let operation_name = subgraph_request
-        .body()
-        .operation_name
-        .clone()
-        .unwrap_or_default();
+    let operation_name: String = match subgraph_request.body() {
+        graphql::Request::SingleRequest(req) => {
+            req.operation_name.clone().unwrap_or_default()
+        }
+        graphql::Request::BatchRequest(requests) => {
+            let mut op_name: String = "defaultBatchOperationName".to_string();
+            if let Some(first) = requests.first() {
+                op_name = first.operation_name.clone().unwrap_or_default();
+            }
+            op_name
+        }
+    };
+
     let (parts, _) = subgraph_request.into_parts();
 
     let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
@@ -627,7 +643,7 @@ mod tests {
             let mut encoder = GzipEncoder::new(Vec::new());
             encoder
                 .write_all(
-                    &serde_json::to_vec(&Request::builder().query("query".to_string()).build())
+                    &serde_json::to_vec(&graphql::SingleRequest::builder().query("query".to_string()).build())
                         .unwrap(),
                 )
                 .await
@@ -678,7 +694,7 @@ mod tests {
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
                 .map_err(|_| "failed to parse the request body as JSON");
             match graphql_request {
-                Ok(request) => {
+                Ok(graphql::Request::SingleRequest(request)) => {
                     if request.extensions.contains_key(PERSISTED_QUERY_KEY) {
                         return Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
@@ -711,6 +727,9 @@ mod tests {
                         )
                         .unwrap());
                 }
+                Ok(graphql::Request::BatchRequest(request)) => {
+                    panic!("invalid graphql request recieved")
+                }
                 Err(_) => {
                     panic!("invalid graphql request recieved")
                 }
@@ -733,7 +752,7 @@ mod tests {
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
                 .map_err(|_| "failed to parse the request body as JSON");
             match graphql_request {
-                Ok(request) => {
+                Ok(graphql::Request::SingleRequest(request)) => {
                     if request.extensions.contains_key(PERSISTED_QUERY_KEY) {
                         return Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
@@ -791,7 +810,7 @@ mod tests {
                 .map_err(|_| "failed to parse the request body as JSON");
 
             match graphql_request {
-                Ok(request) => {
+                Ok(graphql::Request::SingleRequest(request)) => {
                     if !request.extensions.contains_key(PERSISTED_QUERY_KEY) {
                         panic!("Recieved request without persisted query in persisted_query_not_found test.")
                     }
@@ -852,11 +871,11 @@ mod tests {
 
             match graphql_request {
                 Ok(request) => {
-                    if !request.extensions.contains_key(PERSISTED_QUERY_KEY) {
+                    if !request.extensions().contains_key(PERSISTED_QUERY_KEY) {
                         panic!("Recieved request without persisted query in persisted_query_not_found test.")
                     }
 
-                    if request.query.is_none() {
+                    if request.query().is_none() {
                         return Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
@@ -912,7 +931,7 @@ mod tests {
 
             match graphql_request {
                 Ok(request) => {
-                    if !request.extensions.contains_key(PERSISTED_QUERY_KEY) {
+                    if !request.extensions().contains_key(PERSISTED_QUERY_KEY) {
                         panic!("persistedQuery expected when configuration has apq_enabled=true")
                     }
 
@@ -953,7 +972,7 @@ mod tests {
 
             match graphql_request {
                 Ok(request) => {
-                    if request.extensions.contains_key(PERSISTED_QUERY_KEY) {
+                    if request.extensions().contains_key(PERSISTED_QUERY_KEY) {
                         panic!(
                             "persistedQuery not expected when configuration has apq_enabled=false"
                         )
@@ -996,14 +1015,14 @@ mod tests {
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
+                        .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                         .expect("expecting valid request"),
                 ),
                 subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                     .uri(url)
-                    .body(Request::builder().query("query").build())
+                    .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
@@ -1030,14 +1049,14 @@ mod tests {
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
+                        .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                         .expect("expecting valid request"),
                 ),
                 subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                     .uri(url)
-                    .body(Request::builder().query("query").build())
+                    .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
@@ -1063,7 +1082,7 @@ mod tests {
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query".to_string()).build())
+                        .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query".to_string()).build()))
                         .expect("expecting valid request"),
                 ),
                 subgraph_request: http::Request::builder()
@@ -1071,7 +1090,7 @@ mod tests {
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                     .header(CONTENT_ENCODING, "gzip")
                     .uri(url)
-                    .body(Request::builder().query("query".to_string()).build())
+                    .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query".to_string()).build()))
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
@@ -1100,14 +1119,14 @@ mod tests {
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
+                        .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                         .expect("expecting valid request"),
                 ),
                 subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                     .uri(url)
-                    .body(Request::builder().query("query").build())
+                    .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
@@ -1136,14 +1155,14 @@ mod tests {
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
+                        .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                         .expect("expecting valid request"),
                 ),
                 subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                     .uri(url)
-                    .body(Request::builder().query("query").build())
+                    .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
@@ -1178,14 +1197,14 @@ mod tests {
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
+                        .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                         .expect("expecting valid request"),
                 ),
                 subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                     .uri(url)
-                    .body(Request::builder().query("query").build())
+                    .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
@@ -1216,14 +1235,14 @@ mod tests {
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
+                        .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                         .expect("expecting valid request"),
                 ),
                 subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                     .uri(url)
-                    .body(Request::builder().query("query").build())
+                    .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
@@ -1255,14 +1274,14 @@ mod tests {
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
+                        .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                         .expect("expecting valid request"),
                 ),
                 subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                     .uri(url)
-                    .body(Request::builder().query("query").build())
+                    .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
@@ -1292,14 +1311,14 @@ mod tests {
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
+                        .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                         .expect("expecting valid request"),
                 ),
                 subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                     .uri(url)
-                    .body(Request::builder().query("query").build())
+                    .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
@@ -1329,14 +1348,14 @@ mod tests {
                     http::Request::builder()
                         .header(HOST, "host")
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
+                        .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                         .expect("expecting valid request"),
                 ),
                 subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                     .uri(url)
-                    .body(Request::builder().query("query").build())
+                    .body(graphql::Request::SingleRequest(graphql::SingleRequest::builder().query("query").build()))
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),

@@ -3,6 +3,7 @@ use test_log::test;
 
 use super::*;
 use crate::json_ext::ValueExt;
+use crate::graphql::SingleRequest;
 
 macro_rules! assert_eq_and_ordered {
     ($a:expr, $b:expr $(,)?) => {
@@ -1172,13 +1173,13 @@ macro_rules! run_validation {
         };
         let schema =
             Schema::parse_test(&$schema, &Default::default()).expect("could not parse schema");
-        let request = Request::builder()
+        let request = Request::SingleRequest(SingleRequest::builder()
             .variables(variables)
             .query($query.to_string())
-            .build();
+            .build());
         let query = Query::parse(
             request
-                .query
+                .query()
                 .as_ref()
                 .expect("query has been added right above; qed"),
             &schema,

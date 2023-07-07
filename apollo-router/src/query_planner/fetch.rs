@@ -17,6 +17,7 @@ use crate::error::Error;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::graphql::Request;
+use crate::graphql::SingleRequest;
 use crate::http_ext;
 use crate::json_ext;
 use crate::json_ext::Object;
@@ -109,12 +110,11 @@ impl Variables {
         schema: &Schema,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
-        let body = request.body();
         if !requires.is_empty() {
             let mut variables = Object::with_capacity(1 + variable_usages.len());
 
             variables.extend(variable_usages.iter().filter_map(|key| {
-                body.variables
+                request.body().variables()
                     .get_key_value(key.as_str())
                     .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
             }));
@@ -167,7 +167,7 @@ impl Variables {
                 variables: variable_usages
                     .iter()
                     .filter_map(|key| {
-                        body.variables
+                        request.body().variables()
                             .get_key_value(key.as_str())
                             .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                     })
@@ -230,11 +230,11 @@ impl FetchNode {
                             .clone(),
                     )
                     .body(
-                        Request::builder()
+                        Request::SingleRequest(SingleRequest::builder()
                             .query(operation)
                             .and_operation_name(operation_name.clone())
                             .variables(variables.clone())
-                            .build(),
+                            .build()),
                     )
                     .build()
                     .expect("it won't fail because the url is correct and already checked; qed"),

@@ -9,7 +9,9 @@ use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
+use apollo_compiler::hir::OperationType;
 use http::Uri;
+use mockall::Any;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -18,6 +20,7 @@ use crate::error::SchemaError;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::query_planner::OperationKind;
+use crate::query_planner::finder::{Finder, make_finder_index};
 use crate::spec::query::parse_hir_value;
 use crate::spec::FieldType;
 use crate::Configuration;
@@ -35,6 +38,7 @@ pub(crate) struct Schema {
     pub(crate) enums: HashMap<String, HashSet<String>>,
     api_schema: Option<Box<Schema>>,
     pub(crate) schema_id: Option<String>,
+    finder_map: HashMap<String, Finder>,
     root_operations: HashMap<OperationKind, String>,
 }
 
@@ -74,6 +78,31 @@ impl Schema {
         let id = compiler.add_type_system(schema, "schema.graphql");
 
         let ast = compiler.db.ast(id);
+        let mut finder_map = HashMap::new();
+
+        for query in compiler.db.all_operations().iter().filter(|op| op.operation_ty() == OperationType::Query) {
+            if let Some(directive) = query.directive_by_name("join__field") {
+                if let Some(is_finder) = directive.argument_by_name("isFinder").and_then(as_boolean).map(|b| *b) {
+                    if is_finder {
+                        let subgraph = directive
+                            .argument_by_name("graph")
+                            .and_then(as_string)
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        if let Some(variable_def) = query.variables().get(0) {
+                            let param_name = variable_def.name().to_string();
+                            let param_type = variable_def.ty().name().to_string();
+                            if let Some(finder_name) = query.name() {
+                                let finder_for = query.operation_ty().type_name();
+                                let finder = Finder::new(&finder_name, &param_name, &param_type);
+                                let finder_idx = make_finder_index(&subgraph, finder_for);
+                                finder_map.insert(finder_idx, finder);
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Trace log recursion limit data
         let recursion_limit = ast.recursion_limit();
@@ -93,6 +122,14 @@ impl Schema {
         fn as_string(value: &hir::Value) -> Option<&String> {
             if let hir::Value::String(string) = value {
                 Some(string)
+            } else {
+                None
+            }
+        }
+        
+        fn as_boolean(value: &hir::Value) -> Option<&bool> {
+            if let hir::Value::Boolean(boolean) = value {
+                Some(boolean)
             } else {
                 None
             }
@@ -200,6 +237,7 @@ impl Schema {
             enums,
             api_schema: None,
             schema_id,
+            finder_map,
             root_operations,
         })
     }

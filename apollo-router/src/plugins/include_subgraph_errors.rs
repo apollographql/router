@@ -50,6 +50,7 @@ impl Plugin for IncludeSubgraphErrors {
             return service
                 .map_response(move |mut response: SubgraphResponse| {
                     if !response.response.body().errors.is_empty() {
+                        println!("response body is {:?}", response.response.body());
                         tracing::info!("redacted subgraph({sub_name_response}) errors");
                         for error in response.response.body_mut().errors.iter_mut() {
                             error.message = REDACTED_ERROR_MESSAGE.to_string();

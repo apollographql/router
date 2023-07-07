@@ -10,13 +10,16 @@ pub(crate) use self::fetch::OperationKind;
 mod bridge_query_planner;
 mod caching_query_planner;
 mod execution;
+pub(crate) mod finder;
 pub(crate) mod fetch;
+pub(crate) mod subgraph_fetch;
 mod plan;
 pub(crate) mod rewrites;
 mod selection;
 pub use plan::*;
 
 pub(crate) const FETCH_SPAN_NAME: &str = "fetch";
+pub(crate) const SUBGRAPH_FETCH_SPAN_NAME: &str = "subgraph_fetch";
 pub(crate) const FLATTEN_SPAN_NAME: &str = "flatten";
 pub(crate) const SEQUENCE_SPAN_NAME: &str = "sequence";
 pub(crate) const PARALLEL_SPAN_NAME: &str = "parallel";

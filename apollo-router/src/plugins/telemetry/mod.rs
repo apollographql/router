@@ -402,13 +402,13 @@ impl Plugin for Telemetry {
                 let query = req
                     .subgraph_request
                     .body()
-                    .query
+                    .query()
                     .as_deref()
                     .unwrap_or_default();
                 let operation_name = req
-                    .subgraph_request
+                    .supergraph_request
                     .body()
-                    .operation_name
+                    .operation_name()
                     .as_deref()
                     .unwrap_or_default();
 
@@ -642,10 +642,10 @@ impl Telemetry {
     ) -> impl Fn(&SupergraphRequest) -> Span + Clone {
         move |request: &SupergraphRequest| {
             let http_request = &request.supergraph_request;
-            let query = http_request.body().query.as_deref().unwrap_or_default();
+            let query = http_request.body().query().as_deref().unwrap_or_default();
             let operation_name = http_request
                 .body()
-                .operation_name
+                .operation_name()
                 .as_deref()
                 .unwrap_or_default();
 
@@ -659,7 +659,7 @@ impl Telemetry {
                     field_level_instrumentation_ratio,
                 apollo_private.operation_signature = field::Empty,
                 apollo_private.graphql.variables = Self::filter_variables_values(
-                    &request.supergraph_request.body().variables,
+                    &http_request.body().variables(),
                     &config.send_variable_values,
                 ),
             );
@@ -832,7 +832,7 @@ impl Telemetry {
         if let Some(metrics_conf) = &config.metrics {
             // List of custom attributes for metrics
             let mut attributes: HashMap<String, AttributeValue> = HashMap::new();
-            if let Some(operation_name) = &req.supergraph_request.body().operation_name {
+            if let Some(operation_name) = &req.supergraph_request.body().operation_name() {
                 attributes.insert(
                     "operation_name".to_string(),
                     AttributeValue::String(operation_name.clone()),
@@ -1510,6 +1510,7 @@ mod tests {
     use crate::error::FetchError;
     use crate::graphql::Error;
     use crate::graphql::Request;
+    use crate::graphql::SingleRequest;
     use crate::http_ext;
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraphService;
@@ -1883,9 +1884,9 @@ mod tests {
                 http_ext::Request::fake_builder()
                     .header("test", "my_value_set")
                     .body(
-                        Request::fake_builder()
+                        Request::SingleRequest(SingleRequest::fake_builder()
                             .query(String::from("query { test }"))
-                            .build(),
+                            .build()),
                     )
                     .build()
                     .unwrap(),
@@ -1908,9 +1909,9 @@ mod tests {
                 http_ext::Request::fake_builder()
                     .header("test", "my_value_set")
                     .body(
-                        Request::fake_builder()
+                        Request::SingleRequest(SingleRequest::fake_builder()
                             .query(String::from("query { test }"))
-                            .build(),
+                            .build()),
                     )
                     .build()
                     .unwrap(),

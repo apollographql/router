@@ -21,6 +21,7 @@ mod tests {
     use crate::plugin::test::MockHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
+    use crate::request::assert_single_request;
     use crate::services::external::Externalizable;
     use crate::services::external::PipelineStep;
     use crate::services::external::EXTERNALIZABLE_VERSION;
@@ -371,7 +372,7 @@ mod tests {
                 // The query should have changed
                 assert_eq!(
                     "query Long {\n  me {\n  name\n}\n}",
-                    req.subgraph_request.into_body().query.unwrap()
+                    assert_single_request(req.subgraph_request.into_body()).query.unwrap()
                 );
 
                 Ok(subgraph::Response::builder()
@@ -668,7 +669,7 @@ mod tests {
             // The query should have changed
             assert_eq!(
                 "query Long {\n  me {\n  name\n}\n}",
-                req.supergraph_request.into_body().query.unwrap()
+                assert_single_request(req.supergraph_request.into_body()).query.unwrap()
             );
 
             Ok(supergraph::Response::builder()
@@ -791,7 +792,7 @@ mod tests {
             // The query should have changed
             assert_eq!(
                 "query Long {\n  me {\n  name\n}\n}",
-                req.supergraph_request.into_body().query.unwrap()
+                assert_single_request(req.supergraph_request.into_body()).query.unwrap()
             );
 
             Ok(supergraph::Response::builder()
