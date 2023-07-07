@@ -25,7 +25,7 @@ By [@ptondereau](https://github.com/ptondereau) and [@BrynCooke](https://github.
 
 For more information about launch stages, please see the documentation here: https://www.apollographql.com/docs/resources/product-launch-stages/
 
-In addition to removing the `preview_` prefix, the configuration section has been renamed to just `limits` to encapsulate operation, parser and request limits. ([The request size limit](https://www.apollographql.com/docs/router/configuration/overview/#request-limits) is still [experimental](https://github.com/apollographql/router/discussions/3220).) Existing configuration files will keep working as before, only with a warning. To fix that warning, rename the configuration section like so:
+In addition to removing the `preview_` prefix, the configuration section has been renamed to just `limits` to encapsulate operation, parser and request limits. ([The request size limit](https://www.apollographql.com/docs/router/configuration/overview/#request-limits) is still [experimental](https://github.com/apollographql/router/discussions/3220).) Existing configuration files will keep working as before, but with a warning output to the logs. To fix that warning, rename the configuration section like so:
 
 
 ```diff
