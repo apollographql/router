@@ -1,25 +1,18 @@
 //! Query Transformer implementation adding labels to @defer directives to identify deferred responses
 //!
 
-use std::collections::HashSet;
-
-use apollo_compiler::hir::Value;
+use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::FileId;
-use apollo_encoder::Argument;
-use rand::distributions::Alphanumeric;
-use rand::rngs::StdRng;
-use rand::Rng;
-use rand_core::SeedableRng;
+use tower::BoxError;
 
 use crate::spec::query::subselections::DEFER_DIRECTIVE_NAME;
-use crate::spec::query::transform::directive;
+use crate::spec::query::transform;
 use crate::spec::query::transform::document;
 use crate::spec::query::transform::selection_set;
 use crate::spec::query::transform::Visitor;
 
 const LABEL_NAME: &str = "label";
-const LABEL_COLLISION_ERROR: &str = "label collision";
 
 /// go through the query and adds labels to defer fragments that do not have any
 ///
@@ -27,69 +20,24 @@ const LABEL_COLLISION_ERROR: &str = "label collision";
 pub(crate) fn add_defer_labels(
     file_id: FileId,
     compiler: &ApolloCompiler,
-) -> Result<(String, HashSet<String>), tower::BoxError> {
-    let mut reserved_labels = HashSet::new();
-    let mut seed = 0u64;
-    loop {
-        let mut visitor = Labeler::new(reserved_labels, compiler, seed);
-        match document(&mut visitor, file_id) {
-            Ok(modified_query) => {
-                let (_, added_labels) = visitor.unpack();
-                let modified_query = modified_query.to_string();
-                return Ok((modified_query, added_labels));
-            }
-            Err(e) => {
-                // this can happen if one of the added labels is already used somewhere in the query
-                if e.to_string() == LABEL_COLLISION_ERROR {
-                    let (new_reserved_labels, _) = visitor.unpack();
-                    reserved_labels = new_reserved_labels;
-
-                    seed += 1;
-                    continue;
-                } else {
-                    return Err(e);
-                }
-            }
-        }
-    }
+) -> Result<String, BoxError> {
+    let mut visitor = Labeler {
+        compiler,
+        next_label: 0,
+    };
+    let encoder_document = document(&mut visitor, file_id)?;
+    Ok(encoder_document.to_string())
 }
 pub(crate) struct Labeler<'a> {
-    reserved_labels: HashSet<String>,
-    added_labels: HashSet<String>,
     compiler: &'a ApolloCompiler,
-    rng: StdRng,
+    next_label: u32,
 }
 
 impl<'a> Labeler<'a> {
-    fn new(reserved_labels: HashSet<String>, compiler: &'a ApolloCompiler, seed: u64) -> Self {
-        let rng = StdRng::seed_from_u64(seed);
-        Self {
-            reserved_labels,
-            added_labels: HashSet::new(),
-            compiler,
-            rng,
-        }
-    }
-
-    fn unpack(self) -> (HashSet<String>, HashSet<String>) {
-        (self.reserved_labels, self.added_labels)
-    }
-
     fn generate_label(&mut self) -> String {
-        loop {
-            let new_label: String = (&mut self.rng)
-                .sample_iter(Alphanumeric)
-                .take(12)
-                .map(char::from)
-                .collect();
-
-            if self.reserved_labels.contains(&new_label) {
-                continue;
-            }
-
-            self.added_labels.insert(new_label.clone());
-            return new_label;
-        }
+        let label = self.next_label.to_string();
+        self.next_label += 1;
+        label
     }
 }
 
@@ -100,34 +48,12 @@ impl<'a> Visitor for Labeler<'a> {
 
     fn fragment_spread(
         &mut self,
-        hir: &apollo_compiler::hir::FragmentSpread,
-    ) -> Result<Option<apollo_encoder::FragmentSpread>, tower::BoxError> {
+        hir: &hir::FragmentSpread,
+    ) -> Result<Option<apollo_encoder::FragmentSpread>, BoxError> {
         let name = hir.name();
         let mut encoder_node = apollo_encoder::FragmentSpread::new(name.into());
         for hir in hir.directives() {
-            let is_defer = hir.name() == DEFER_DIRECTIVE_NAME;
-            let has_label = hir.argument_by_name(LABEL_NAME).and_then(|v| match v {
-                Value::String { value, .. } => Some(value),
-                _ => None,
-            });
-            if let Some(mut d) = directive(hir)? {
-                if is_defer {
-                    match has_label {
-                        Some(label) => {
-                            if self.added_labels.contains(label) {
-                                return Err(LABEL_COLLISION_ERROR.into());
-                            }
-                            self.reserved_labels.insert(label.clone());
-                        }
-                        None => {
-                            let label = self.generate_label();
-
-                            d.arg(Argument::new(LABEL_NAME.to_string(), label.into()));
-                        }
-                    }
-                }
-                encoder_node.directive(d)
-            }
+            encoder_node.directive(directive(self, hir)?);
         }
         Ok(Some(encoder_node))
     }
@@ -135,8 +61,8 @@ impl<'a> Visitor for Labeler<'a> {
     fn inline_fragment(
         &mut self,
         parent_type: &str,
-        hir: &apollo_compiler::hir::InlineFragment,
-    ) -> Result<Option<apollo_encoder::InlineFragment>, tower::BoxError> {
+        hir: &hir::InlineFragment,
+    ) -> Result<Option<apollo_encoder::InlineFragment>, BoxError> {
         let parent_type = hir.type_condition().unwrap_or(parent_type);
 
         let Some(selection_set) = selection_set(self, hir.selection_set(), parent_type)?
@@ -150,30 +76,42 @@ impl<'a> Visitor for Labeler<'a> {
         );
 
         for hir in hir.directives() {
-            let is_defer = hir.name() == DEFER_DIRECTIVE_NAME;
-            let has_label = hir.argument_by_name(LABEL_NAME).and_then(|v| match v {
-                Value::String { value, .. } => Some(value),
-                _ => None,
-            });
-            if let Some(mut d) = directive(hir)? {
-                if is_defer {
-                    match has_label {
-                        Some(label) => {
-                            if self.added_labels.contains(label) {
-                                return Err(LABEL_COLLISION_ERROR.into());
-                            }
-                            self.reserved_labels.insert(label.clone());
-                        }
-                        None => {
-                            let label = self.generate_label();
-
-                            d.arg(Argument::new(LABEL_NAME.to_string(), label.into()));
-                        }
-                    }
-                }
-                encoder_node.directive(d)
-            }
+            encoder_node.directive(directive(self, hir)?);
         }
         Ok(Some(encoder_node))
     }
+}
+
+pub(crate) fn directive(
+    visitor: &mut Labeler<'_>,
+    hir: &hir::Directive,
+) -> Result<apollo_encoder::Directive, BoxError> {
+    let name = hir.name().into();
+    let is_defer = name == DEFER_DIRECTIVE_NAME;
+    let mut encoder_directive = apollo_encoder::Directive::new(name);
+
+    let mut has_label = false;
+    for arg in hir.arguments() {
+        // Add a prefix to existing labels
+        let value = if is_defer && arg.name() == LABEL_NAME {
+            has_label = true;
+            if let Some(label) = arg.value().as_str() {
+                apollo_encoder::Value::String(format!("_{label}"))
+            } else {
+                return Err("@defer with a non-string label".into());
+            }
+        } else {
+            transform::value(arg.value())?
+        };
+        encoder_directive.arg(apollo_encoder::Argument::new(arg.name().into(), value));
+    }
+    // Add a generated label if there wasn’t one already
+    if !has_label {
+        encoder_directive.arg(apollo_encoder::Argument::new(
+            LABEL_NAME.into(),
+            apollo_encoder::Value::String(visitor.generate_label()),
+        ));
+    }
+
+    Ok(encoder_directive)
 }

@@ -3,7 +3,6 @@
 use std::sync::Arc;
 use std::task::Poll;
 
-use apollo_compiler::ApolloCompiler;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
@@ -19,6 +18,7 @@ use tracing_futures::Instrument;
 
 use super::execution;
 use super::layers::content_negociation;
+use super::layers::query_analysis::Compiler;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
 use super::router::ClientRequestAccepts;
@@ -43,6 +43,7 @@ use crate::services::ExecutionResponse;
 use crate::services::QueryPlannerResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
@@ -131,13 +132,13 @@ async fn service_call(
     let context = req.context;
     let body = req.supergraph_request.body();
     let variables = body.variables.clone();
+
     let QueryPlannerResponse {
         content,
         context,
         errors,
     } = match plan_query(
         planning,
-        req.compiler,
         body.operation_name.clone(),
         context.clone(),
         schema.clone(),
@@ -259,32 +260,31 @@ async fn service_call(
 
 async fn plan_query(
     mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    compiler: Option<Arc<Mutex<ApolloCompiler>>>,
     operation_name: Option<String>,
     context: Context,
     schema: Arc<Schema>,
     query_str: String,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
-    let compiler = match compiler {
-        None =>
-        // TODO[igni]: no
-        {
-            Arc::new(Mutex::new(
-                QueryAnalysisLayer::new(schema, Default::default())
-                    .await
-                    .make_compiler(&query_str)
-                    .0,
-            ))
+    // FIXME: we have about 80 tests creating a supergraph service and crafting a supergraph request for it
+    // none of those tests create a compiler to put it in the context, and the compiler cannot be created
+    // from inside the supergraph request fake builder, because it needs a schema matching the query.
+    // So while we are updating the tests to create a compiler manually, this here will make sure current
+    // tests will pass
+    {
+        let mut entries = context.private_entries.lock();
+        if !entries.contains_key::<Compiler>() {
+            let (compiler, _) =
+                Query::make_compiler(&query_str, &schema, &Configuration::default());
+            entries.insert(Compiler(Arc::new(Mutex::new(compiler))));
         }
-        Some(c) => c,
-    };
+        drop(entries);
+    }
 
     planning
         .call(
             query_planner::CachingRequest::builder()
                 .query(query_str)
                 .and_operation_name(operation_name)
-                .compiler(compiler)
                 .context(context)
                 .build(),
         )
@@ -734,7 +734,7 @@ mod tests {
                     ]
                     }}
             ).build()),
-    ].into_iter().collect());
+        ].into_iter().collect());
 
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))

@@ -357,7 +357,6 @@ fn typename_with_alias() {
 fn inline_fragment_on_top_level_operation() {
     let schema = "type Query {
         get: Test
-        getStuff: Stuff
       }
 
       type Stuff {
@@ -376,12 +375,12 @@ fn inline_fragment_on_top_level_operation() {
     // to know the type in advance
     FormatTest::builder()
         .schema(schema)
-        .query("{ getStuff { ... on Stuff { stuff{bar}} ... on Thing { id }} }")
+        .query("{ get { ... on Stuff { stuff{bar}} ... on Thing { id }} }")
         .response(json! {
-            {"getStuff": { "stuff": {"bar": "2"}}}
+            {"get": { "__typename": "Stuff", "stuff": {"bar": "2"}}}
         })
         .expected(json! {{
-             "getStuff": {
+             "get": {
                 "stuff": {"bar": "2"},
             }
         }})
@@ -1226,126 +1225,257 @@ macro_rules! assert_validation_error {
 
 #[test]
 fn variable_validation() {
-    let schema = "type Query { x: String }";
+    let schema = r#"
+        type Query {
+            int(a: Int): String
+            float(a: Float): String
+            str(a: String): String
+            bool(a: Boolean): String
+            id(a: ID): String
+            intList(a: [Int]): String
+            intListList(a: [[Int]]): String
+            strList(a: [String]): String
+        }
+    "#;
     // https://spec.graphql.org/June2018/#sec-Int
-    assert_validation!(schema, "query($foo:Int){x}", json!({}));
-    assert_validation_error!(schema, "query($foo:Int!){x}", json!({}));
-    assert_validation!(schema, "query($foo:Int=1){x}", json!({}));
-    assert_validation!(schema, "query($foo:Int!=1){x}", json!({}));
+    assert_validation!(schema, "query($foo:Int){int(a:$foo)}", json!({}));
+    assert_validation_error!(schema, "query($foo:Int!){int(a:$foo)}", json!({}));
+    assert_validation!(schema, "query($foo:Int=1){int(a:$foo)}", json!({}));
+    assert_validation!(schema, "query($foo:Int!=1){int(a:$foo)}", json!({}));
     // When expected as an input type, only integer input values are accepted.
-    assert_validation!(schema, "query($foo:Int){x}", json!({"foo":2}));
-    assert_validation!(schema, "query($foo:Int){x}", json!({ "foo": i32::MAX }));
-    assert_validation!(schema, "query($foo:Int){x}", json!({ "foo": i32::MIN }));
+    assert_validation!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":2}));
+    assert_validation!(
+        schema,
+        "query($foo:Int){int(a:$foo)}",
+        json!({ "foo": i32::MAX })
+    );
+    assert_validation!(
+        schema,
+        "query($foo:Int){int(a:$foo)}",
+        json!({ "foo": i32::MIN })
+    );
     // All other input values, including strings with numeric content, must raise a query error indicating an incorrect type.
-    assert_validation_error!(schema, "query($foo:Int){x}", json!({"foo":"2"}));
-    assert_validation_error!(schema, "query($foo:Int){x}", json!({"foo":2.0}));
-    assert_validation_error!(schema, "query($foo:Int){x}", json!({"foo":"str"}));
-    assert_validation_error!(schema, "query($foo:Int){x}", json!({"foo":true}));
-    assert_validation_error!(schema, "query($foo:Int){x}", json!({"foo":{}}));
+    assert_validation_error!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":"2"}));
+    assert_validation_error!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":2.0}));
+    assert_validation_error!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":"str"}));
+    assert_validation_error!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":true}));
+    assert_validation_error!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":{}}));
     //  If the integer input value represents a value less than -231 or greater than or equal to 231, a query error should be raised.
     assert_validation_error!(
         schema,
-        "query($foo:Int){x}",
+        "query($foo:Int){int(a:$foo)}",
         json!({ "foo": i32::MAX as i64 + 1 })
     );
     assert_validation_error!(
         schema,
-        "query($foo:Int){x}",
+        "query($foo:Int){int(a:$foo)}",
         json!({ "foo": i32::MIN as i64 - 1 })
     );
 
     // https://spec.graphql.org/draft/#sec-Float.Input-Coercion
-    assert_validation!(schema, "query($foo:Float){x}", json!({}));
-    assert_validation_error!(schema, "query($foo:Float!){x}", json!({}));
+    assert_validation!(schema, "query($foo:Float){float(a:$foo)}", json!({}));
+    assert_validation_error!(schema, "query($foo:Float!){float(a:$foo)}", json!({}));
 
     // When expected as an input type, both integer and float input values are accepted.
-    assert_validation!(schema, "query($foo:Float){x}", json!({"foo":2}));
-    assert_validation!(schema, "query($foo:Float){x}", json!({"foo":2.0}));
+    assert_validation!(schema, "query($foo:Float){float(a:$foo)}", json!({"foo":2}));
+    assert_validation!(
+        schema,
+        "query($foo:Float){float(a:$foo)}",
+        json!({"foo":2.0})
+    );
     // double precision floats are valid
     assert_validation!(
         schema,
-        "query($foo:Float){x}",
+        "query($foo:Float){float(a:$foo)}",
         json!({"foo":1600341978193i64})
     );
     assert_validation!(
         schema,
-        "query($foo:Float){x}",
+        "query($foo:Float){float(a:$foo)}",
         json!({"foo":1600341978193f64})
     );
     // All other input values, including strings with numeric content,
     // must raise a request error indicating an incorrect type.
-    assert_validation_error!(schema, "query($foo:Float){x}", json!({"foo":"2.0"}));
-    assert_validation_error!(schema, "query($foo:Float){x}", json!({"foo":"2"}));
+    assert_validation_error!(
+        schema,
+        "query($foo:Float){float(a:$foo)}",
+        json!({"foo":"2.0"})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:Float){float(a:$foo)}",
+        json!({"foo":"2"})
+    );
 
     // https://spec.graphql.org/June2018/#sec-String
-    assert_validation!(schema, "query($foo:String){x}", json!({}));
-    assert_validation_error!(schema, "query($foo:String!){x}", json!({}));
+    assert_validation!(schema, "query($foo:String){str(a:$foo)}", json!({}));
+    assert_validation_error!(schema, "query($foo:String!){str(a:$foo)}", json!({}));
 
     // When expected as an input type, only valid UTF‐8 string input values are accepted.
-    assert_validation!(schema, "query($foo:String){x}", json!({"foo": "str"}));
+    assert_validation!(
+        schema,
+        "query($foo:String){str(a:$foo)}",
+        json!({"foo": "str"})
+    );
 
     // All other input values must raise a query error indicating an incorrect type.
-    assert_validation_error!(schema, "query($foo:String){x}", json!({"foo":true}));
-    assert_validation_error!(schema, "query($foo:String){x}", json!({"foo": 0}));
-    assert_validation_error!(schema, "query($foo:String){x}", json!({"foo": 42.0}));
-    assert_validation_error!(schema, "query($foo:String){x}", json!({"foo": {}}));
+    assert_validation_error!(
+        schema,
+        "query($foo:String){str(a:$foo)}",
+        json!({"foo":true})
+    );
+    assert_validation_error!(schema, "query($foo:String){str(a:$foo)}", json!({"foo": 0}));
+    assert_validation_error!(
+        schema,
+        "query($foo:String){str(a:$foo)}",
+        json!({"foo": 42.0})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:String){str(a:$foo)}",
+        json!({"foo": {}})
+    );
 
     // https://spec.graphql.org/June2018/#sec-Boolean
-    assert_validation!(schema, "query($foo:Boolean){x}", json!({}));
-    assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({}));
+    assert_validation!(schema, "query($foo:Boolean){bool(a:$foo)}", json!({}));
+    assert_validation_error!(schema, "query($foo:Boolean!){bool(a:$foo)}", json!({}));
     // When expected as an input type, only boolean input values are accepted.
     // All other input values must raise a query error indicating an incorrect type.
-    assert_validation!(schema, "query($foo:Boolean!){x}", json!({"foo":true}));
-    assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo":"true"}));
-    assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo": 0}));
-    assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo": "no"}));
+    assert_validation!(
+        schema,
+        "query($foo:Boolean!){bool(a:$foo)}",
+        json!({"foo":true})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:Boolean!){bool(a:$foo)}",
+        json!({"foo":"true"})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:Boolean!){bool(a:$foo)}",
+        json!({"foo": 0})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:Boolean!){bool(a:$foo)}",
+        json!({"foo": "no"})
+    );
 
-    assert_validation!(schema, "query($foo:Boolean=true){x}", json!({}));
-    assert_validation!(schema, "query($foo:Boolean!=true){x}", json!({}));
+    assert_validation!(schema, "query($foo:Boolean=true){bool(a:$foo)}", json!({}));
+    assert_validation!(schema, "query($foo:Boolean!=true){bool(a:$foo)}", json!({}));
 
     // https://spec.graphql.org/June2018/#sec-ID
-    assert_validation!(schema, "query($foo:ID){x}", json!({}));
-    assert_validation_error!(schema, "query($foo:ID!){x}", json!({}));
+    assert_validation!(schema, "query($foo:ID){id(a:$foo)}", json!({}));
+    assert_validation_error!(schema, "query($foo:ID!){id(a:$foo)}", json!({}));
     // When expected as an input type, any string (such as "4") or integer (such as 4)
     // input value should be coerced to ID as appropriate for the ID formats a given GraphQL server expects.
-    assert_validation!(schema, "query($foo:ID){x}", json!({"foo": 4}));
-    assert_validation!(schema, "query($foo:ID){x}", json!({"foo": "4"}));
-    assert_validation!(schema, "query($foo:String){x}", json!({"foo": "str"}));
-    assert_validation!(schema, "query($foo:String){x}", json!({"foo": "4.0"}));
+    assert_validation!(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": 4}));
+    assert_validation!(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": "4"}));
+    assert_validation!(
+        schema,
+        "query($foo:String){str(a:$foo)}",
+        json!({"foo": "str"})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:String){str(a:$foo)}",
+        json!({"foo": "4.0"})
+    );
     // Any other input value, including float input values (such as 4.0), must raise a query error indicating an incorrect type.
-    assert_validation_error!(schema, "query($foo:ID){x}", json!({"foo": 4.0}));
-    assert_validation_error!(schema, "query($foo:ID){x}", json!({"foo": true}));
-    assert_validation_error!(schema, "query($foo:ID){x}", json!({"foo": {}}));
+    assert_validation_error!(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": 4.0}));
+    assert_validation_error!(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": true}));
+    assert_validation_error!(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": {}}));
 
     // https://spec.graphql.org/June2018/#sec-Type-System.List
-    assert_validation!(schema, "query($foo:[Int]){x}", json!({}));
-    assert_validation!(schema, "query($foo:[Int!]){x}", json!({}));
-    assert_validation!(schema, "query($foo:[Int!]){x}", json!({ "foo": null }));
-    assert_validation!(schema, "query($foo:[Int]){x}", json!({"foo":1}));
-    assert_validation!(schema, "query($foo:[String]){x}", json!({"foo":"bar"}));
-    assert_validation!(schema, "query($foo:[[Int]]){x}", json!({"foo":1}));
+    assert_validation!(schema, "query($foo:[Int]){intList(a:$foo)}", json!({}));
+    assert_validation!(schema, "query($foo:[Int!]){intList(a:$foo)}", json!({}));
     assert_validation!(
         schema,
-        "query($foo:[[Int]]){x}",
+        "query($foo:[Int!]){intList(a:$foo)}",
+        json!({ "foo": null })
+    );
+    assert_validation!(
+        schema,
+        "query($foo:[Int]){intList(a:$foo)}",
+        json!({"foo":1})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:[String]){strList(a:$foo)}",
+        json!({"foo":"bar"})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:[[Int]]){intListList(a:$foo)}",
+        json!({"foo":1})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:[[Int]]){intListList(a:$foo)}",
         json!({"foo":[[1], [2, 3]]})
     );
-    assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":"str"}));
-    assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":{}}));
-    assert_validation_error!(schema, "query($foo:[Int]!){x}", json!({}));
-    assert_validation_error!(schema, "query($foo:[Int!]){x}", json!({"foo":[1, null]}));
-    assert_validation!(schema, "query($foo:[Int]!){x}", json!({"foo":[]}));
-    assert_validation!(schema, "query($foo:[Int]){x}", json!({"foo":[1,2,3]}));
-    assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":["f","o","o"]}));
-    assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":["1","2","3"]}));
+    assert_validation_error!(
+        schema,
+        "query($foo:[Int]){intList(a:$foo)}",
+        json!({"foo":"str"})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:[Int]){intList(a:$foo)}",
+        json!({"foo":{}})
+    );
+    assert_validation_error!(schema, "query($foo:[Int]!){intList(a:$foo)}", json!({}));
+    assert_validation_error!(
+        schema,
+        "query($foo:[Int!]){intList(a:$foo)}",
+        json!({"foo":[1, null]})
+    );
     assert_validation!(
         schema,
-        "query($foo:[String]){x}",
+        "query($foo:[Int]!){intList(a:$foo)}",
+        json!({"foo":[]})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:[Int]){intList(a:$foo)}",
+        json!({"foo":[1,2,3]})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:[Int]){intList(a:$foo)}",
+        json!({"foo":["f","o","o"]})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:[Int]){intList(a:$foo)}",
         json!({"foo":["1","2","3"]})
     );
-    assert_validation_error!(schema, "query($foo:[String]){x}", json!({"foo":[1,2,3]}));
-    assert_validation!(schema, "query($foo:[Int!]){x}", json!({"foo":[1,2,3]}));
-    assert_validation_error!(schema, "query($foo:[Int!]){x}", json!({"foo":[1,null,3]}));
-    assert_validation!(schema, "query($foo:[Int]){x}", json!({"foo":[1,null,3]}));
+    assert_validation!(
+        schema,
+        "query($foo:[String]){strList(a:$foo)}",
+        json!({"foo":["1","2","3"]})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:[String]){strList(a:$foo)}",
+        json!({"foo":[1,2,3]})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:[Int!]){intList(a:$foo)}",
+        json!({"foo":[1,2,3]})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:[Int!]){intList(a:$foo)}",
+        json!({"foo":[1,null,3]})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:[Int]){intList(a:$foo)}",
+        json!({"foo":[1,null,3]})
+    );
 
     // https://spec.graphql.org/June2018/#sec-Input-Objects
     assert_validation!(
@@ -3121,7 +3251,9 @@ fn it_statically_includes() {
     let query = Query::parse(
         "query  {
             name @include(if: false)
-            review @include(if: false)
+            review @include(if: false) {
+                body
+            }
             product @include(if: true) {
                 name
             }
@@ -3141,7 +3273,9 @@ fn it_statically_includes() {
     let query = Query::parse(
         "query  {
             name @include(if: false)
-            review
+            review {
+                body
+            }
             product @include(if: true) {
                 name
             }
@@ -3168,7 +3302,9 @@ fn it_statically_includes() {
         "query  {
             name @include(if: false)
             ... @include(if: false) {
-                review
+                review {
+                    body
+                }
             }
             product @include(if: true) {
                 name
@@ -3202,7 +3338,9 @@ fn it_statically_includes() {
         }
         query  {
             name @include(if: false)
-            review
+            review {
+                body
+            }
             product @include(if: true) {
                 ...ProductName @include(if: false)
             }
@@ -3258,7 +3396,9 @@ fn it_statically_skips() {
     let query = Query::parse(
         "query  {
             name @skip(if: true)
-            review @skip(if: true)
+            review @skip(if: true) {
+                body
+            }
             product @skip(if: false) {
                 name
             }
@@ -3278,7 +3418,9 @@ fn it_statically_skips() {
     let query = Query::parse(
         "query  {
             name @skip(if: true)
-            review
+            review {
+                body
+            }
             product @skip(if: false) {
                 name
             }
@@ -3305,7 +3447,9 @@ fn it_statically_skips() {
         "query  {
             name @skip(if: true)
             ... @skip(if: true) {
-                review
+                review {
+                    body
+                }
             }
             product @skip(if: false) {
                 name
@@ -3339,7 +3483,9 @@ fn it_statically_skips() {
         }
         query  {
             name @skip(if: true)
-            review
+            review {
+                body
+            }
             product @skip(if: false) {
                 ...ProductName @skip(if: true)
             }
@@ -3564,66 +3710,6 @@ fn skip() {
             }
 
             fragment test on Product {
-                nom: name
-                name @skip(if: true)
-            }",
-        )
-        .response(json! {{
-            "get": {
-                "id": "a",
-                "nom": "Chaise",
-                "name": "Chair",
-            },
-        }})
-        .expected(json! {{
-            "get": {
-                "id": "a",
-            },
-        }})
-        .test();
-
-    // directive on fragment
-    FormatTest::builder()
-        .schema(schema)
-        .query(
-            "query  {
-            get {
-                id
-                ...test
-            }
-        }
-
-        fragment test on Product @skip(if: false) {
-            nom: name
-            name @skip(if: true)
-        }",
-        )
-        .response(json! {{
-            "get": {
-                "id": "a",
-                "nom": "Chaise",
-                "name": "Chair",
-            },
-        }})
-        .expected(json! {{
-            "get": {
-                "id": "a",
-                "nom": "Chaise",
-            },
-        }})
-        .test();
-
-    FormatTest::builder()
-        .schema(schema)
-        .query(
-            "query  {
-                get {
-                    id
-                    ...test
-                }
-            }
-
-            fragment test on Product @skip(if: true) {
                 nom: name
                 name @skip(if: true)
             }",
@@ -4139,66 +4225,6 @@ fn include() {
                 nom: name
                 name @include(if: false)
             }",
-        )
-        .response(json! {{
-            "get": {
-                "id": "a",
-                "nom": "Chaise",
-                "name": "Chair",
-            },
-        }})
-        .expected(json! {{
-            "get": {
-                "id": "a",
-            },
-        }})
-        .test();
-
-    // directive on fragment
-    FormatTest::builder()
-        .schema(schema)
-        .query(
-            "query  {
-                get {
-                    id
-                    ...test
-                }
-            }
-
-            fragment test on Product @include(if: true) {
-                nom: name
-                name @include(if: false)
-            }",
-        )
-        .response(json! {{
-            "get": {
-                "id": "a",
-                "nom": "Chaise",
-                "name": "Chair",
-            },
-        }})
-        .expected(json! {{
-            "get": {
-                "id": "a",
-                "nom": "Chaise",
-            },
-        }})
-        .test();
-
-    FormatTest::builder()
-        .schema(schema)
-        .query(
-            "query  {
-            get {
-                id
-                ...test
-            }
-        }
-
-        fragment test on Product @include(if: false) {
-            nom: name
-            name @include(if: false)
-        }",
         )
         .response(json! {{
             "get": {
@@ -4862,10 +4888,6 @@ fn fragment_on_interface() {
 
         fragment FragmentA on MyTypeA {
             something
-        }
-
-        fragment FragmentB on MyTypeB {
-            somethingElse
         }",
         )
         .response(json! {{
@@ -4956,10 +4978,6 @@ fn fragment_on_interface() {
                 foo
                 ...FragmentB
             }
-        }
-
-        fragment FragmentA on MyTypeA {
-            something
         }
 
         fragment FragmentB on MyTypeB {
@@ -5508,9 +5526,9 @@ fn filtered_defer_fragment() {
       }";
 
     let mut compiler = ApolloCompiler::new();
-    let file_id = compiler.add_executable(query, "query.graphql");
+    compiler.add_executable(query, "query.graphql");
     let (fragments, operations, defer_stats) =
-        Query::extract_query_information(&compiler, file_id, &schema).unwrap();
+        Query::extract_query_information(&compiler, &schema).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5521,20 +5539,19 @@ fn filtered_defer_fragment() {
     .unwrap();
     let mut query = Query {
         string: query.to_string(),
-        compiler: Arc::new(Mutex::new(compiler)),
         fragments,
         operations,
         filtered_query: None,
         subselections,
-        added_labels: HashSet::new(),
         defer_stats,
         is_original: true,
+        validation_error: None,
     };
 
     let mut compiler = ApolloCompiler::new();
-    let file_id = compiler.add_executable(filtered_query, "filtered_query.graphql");
+    compiler.add_executable(filtered_query, "filtered_query.graphql");
     let (fragments, operations, defer_stats) =
-        Query::extract_query_information(&compiler, file_id, &schema).unwrap();
+        Query::extract_query_information(&compiler, &schema).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5546,14 +5563,13 @@ fn filtered_defer_fragment() {
 
     let filtered = Query {
         string: filtered_query.to_string(),
-        compiler: Arc::new(Mutex::new(compiler)),
         fragments,
         operations,
         filtered_query: None,
         subselections,
-        added_labels: HashSet::new(),
         defer_stats,
         is_original: false,
+        validation_error: None,
     };
 
     query.filtered_query = Some(Arc::new(filtered));

@@ -24,6 +24,7 @@ use super::rewrites;
 use super::rewrites::DataRewrite;
 use super::OperationKind;
 use super::PlanNode;
+use crate::context::OPERATION_NAME;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::graphql::Error;
@@ -33,7 +34,6 @@ use crate::http_ext;
 use crate::json_ext::Path;
 use crate::notification::HandleStream;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
-use crate::plugins::telemetry::GRAPHQL_OPERATION_NAME_CONTEXT_KEY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
 use crate::services::SubgraphRequest;
@@ -254,7 +254,7 @@ impl SubscriptionNode {
 
         let operation_name = parameters
             .context
-            .get::<_, String>(GRAPHQL_OPERATION_NAME_CONTEXT_KEY)
+            .get::<_, String>(OPERATION_NAME)
             .ok()
             .flatten()
             .unwrap_or_default();

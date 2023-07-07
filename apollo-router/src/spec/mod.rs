@@ -60,7 +60,7 @@ impl ErrorExtension for SpecError {
             SpecError::InvalidType(_) => "INVALID_TYPE",
             SpecError::InvalidField(_, _) => "INVALID_FIELD",
             SpecError::ParsingError(_) => "PARSING_ERROR",
-            SpecError::ValidationError(_) => "VALIDATION_ERROR",
+            SpecError::ValidationError(_) => "GRAPHQL_VALIDATION_FAILED",
             SpecError::UnknownOperation(_) => "GRAPHQL_VALIDATION_FAILED",
             SpecError::SubscriptionNotSupported => "SUBSCRIPTION_NOT_SUPPORTED",
         }

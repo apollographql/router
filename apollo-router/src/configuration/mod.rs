@@ -153,6 +153,10 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_chaos: Chaos,
 
+    /// Set the GraphQL validation implementation to use.
+    #[serde(default)]
+    pub(crate) experimental_graphql_validation_mode: GraphQLValidationMode,
+
     /// Plugin configuration
     #[serde(default)]
     pub(crate) plugins: UserPlugins,
@@ -164,6 +168,21 @@ pub struct Configuration {
 
     #[serde(default, skip_serializing, skip_deserializing)]
     pub(crate) notify: Notify<String, graphql::Response>,
+}
+
+/// GraphQL validation modes.
+#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derivative(Debug)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum GraphQLValidationMode {
+    /// Use the new Rust-based implementation.
+    New,
+    /// Use the old JavaScript-based implementation.
+    #[default]
+    Legacy,
+    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
+    /// implementations disagree.
+    Both,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
@@ -188,6 +207,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apq: Apq,
             limits: Limits,
             experimental_chaos: Chaos,
+            experimental_graphql_validation_mode: GraphQLValidationMode,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -203,6 +223,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .apq(ad_hoc.apq)
             .operation_limits(ad_hoc.limits)
             .chaos(ad_hoc.experimental_chaos)
+            .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -236,6 +257,7 @@ impl Configuration {
         apq: Option<Apq>,
         operation_limits: Option<Limits>,
         chaos: Option<Chaos>,
+        graphql_validation_mode: Option<GraphQLValidationMode>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -260,6 +282,7 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
+            experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -302,6 +325,7 @@ impl Configuration {
         apq: Option<Apq>,
         operation_limits: Option<Limits>,
         chaos: Option<Chaos>,
+        graphql_validation_mode: Option<GraphQLValidationMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -312,6 +336,7 @@ impl Configuration {
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
+            experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
