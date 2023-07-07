@@ -15,6 +15,7 @@ use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::SinkExt;
 use futures::StreamExt;
+use futures::TryFutureExt;
 use global::get_text_map_propagator;
 use http::header::ACCEPT;
 use http::header::ACCEPT_ENCODING;
@@ -83,8 +84,7 @@ const PERSISTED_QUERY_KEY: &str = "persistedQuery";
 const HASH_VERSION_KEY: &str = "version";
 const HASH_VERSION_VALUE: i32 = 1;
 const HASH_KEY: &str = "sha256Hash";
-const GRAPHQL_RESPONSE_JSON: mediatype::Name =
-    mediatype::Name::new_unchecked("graphql-response+json");
+const GRAPHQL_RESPONSE: mediatype::Name = mediatype::Name::new_unchecked("graphql-response");
 
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
@@ -624,83 +624,25 @@ async fn call_http(
         tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
     }
 
-    // Perform the actual fetch. This
-    context.enter_active_request();
-    let response = client.call(request).await.map_err(|err| {
-        tracing::error!(fetch_error = format!("{err:?}").as_str());
-        FetchError::SubrequestHttpError {
-            status_code: None,
-            service: service_name.to_string(),
-            reason: err.to_string(),
-        }
-    });
-    let result = decompose(client, service_name)
-        .instrument(subgraph_req_span)
-        .await;
+    // Perform the actual fetch. I this fails then
+    let (parts, content_type, body) = do_fetch(
+        client,
+        &context,
+        service_name,
+        request,
+        display_headers,
+        display_body,
+    )
+    .await?;
 
-    // Always leave active request
-    context.leave_active_request();
-    let (parts, body) = result?;
-
-    // Print out debug for the response
-    if display_headers {
-        tracing::info!(
-            http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
-        );
-    }
-
-    if display_body {
-        if let Ok(body) = &body {
-            tracing::info!(
-                http.response.body = %String::from_utf8_lossy(body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
-            );
-        }
-    }
-
-    // Parse the response.
-    // https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#processing-the-response
-    // If the response uses a non-200 status code and the media type of the response payload is application/json then the client MUST NOT rely on the body to be a well-formed GraphQL response since the source of the response may not be the server but instead some intermediary such as API gateways, proxies, firewalls, etc.
-
-    enum ContentType {
-        ApplicationJson,
-        ApplicationGraphqlJson,
-        Other,
-    }
-    let content_type = parts
-        .headers
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(|value| {
-            if value.contains(APPLICATION_JSON.essence_str()) {
-                ContentType::ApplicationJson
-            } else if value.contains(GRAPHQL_JSON_RESPONSE_HEADER_VALUE) {
-                ContentType::ApplicationGraphqlJson
-            } else {
-                ContentType::Other
-            }
-        })
-        .unwrap_or(ContentType::Other);
-
-    enum HttpStatus {
-        Success,
-        Error,
-    }
-    let http_status = if parts.status.is_success() {
-        HttpStatus::Success
-    } else {
-        HttpStatus::Error
-    };
-
-    let mut graphql: graphql::Response = match (content_type, http_status, body) {
-        (ContentType::ApplicationJson, HttpStatus::Error, Ok(bytes)) => {
-            graphql::Response::from_bytes(service_name, bytes)
-                .unwrap_or_else(|_error| graphql::Response::builder().build())
-        }
-        (ContentType::ApplicationGraphqlJson, _, Ok(bytes))
-        | (ContentType::ApplicationJson, HttpStatus::Success, Ok(bytes)) => {
+    let mut graphql_response = match (content_type, body, parts.status.is_success()) {
+        (Ok(ContentType::ApplicationGraphqlResponseJson), Some(Ok(body)), _)
+        | (Ok(ContentType::ApplicationJson), Some(Ok(body)), true) => {
+            // Application graphql json expects valid graphql response
+            // Application json expects valid graphql response if 2xx
             tracing::debug_span!("parse_subgraph_response").in_scope(|| {
                 // Application graphql json expects valid graphql response
-                graphql::Response::from_bytes(service_name, bytes).unwrap_or_else(|error| {
+                graphql::Response::from_bytes(service_name, body).unwrap_or_else(|error| {
                     graphql::Response::builder()
                         .error(
                             FetchError::SubrequestMalformedResponse {
@@ -713,23 +655,43 @@ async fn call_http(
                 })
             })
         }
-        (ContentType::Other, _, Ok(_bytes)) => {
-            unreachable!(
-                "Should not have gotten here. We should not parse the body of a non json response"
-            )
+        (Ok(ContentType::ApplicationJson), Some(Ok(body)), false) => {
+            // Application json does not expect a valid graphql response if not 2xx.
+            // If parse fails then attach the entire payload as an error
+            tracing::debug_span!("parse_subgraph_response").in_scope(|| {
+                // Application graphql json expects valid graphql response
+                let original_response = String::from_utf8_lossy(&body).to_string();
+                graphql::Response::from_bytes(service_name, body).unwrap_or_else(|_error| {
+                    graphql::Response::builder()
+                        .error(
+                            FetchError::SubrequestMalformedResponse {
+                                service: service_name.to_string(),
+                                reason: original_response,
+                            }
+                            .to_graphql_error(None),
+                        )
+                        .build()
+                })
+            })
         }
-        (_, _, Err(err)) => {
-            // This will add any error that occurred during the fetch to the response including invalid content-type
-            graphql::Response::builder()
-                .error(err.to_graphql_error(None))
-                .build()
+        (content_type, body, _) => {
+            // Something went wrong, compose a response with errors if they are present
+            let mut graphql_response = graphql::Response::builder().build();
+            if let Err(err) = content_type {
+                graphql_response.errors.push(err.to_graphql_error(None));
+            }
+            if let Some(Err(err)) = body {
+                graphql_response.errors.push(err.to_graphql_error(None));
+            }
+            graphql_response
         }
     };
 
     // Add an error for response codes that are not 2xx
     if !parts.status.is_success() {
         let status = parts.status;
-        graphql.errors.push(
+        graphql_response.errors.insert(
+            0,
             FetchError::SubrequestHttpError {
                 service: service_name.to_string(),
                 status_code: Some(status.as_u16()),
@@ -743,52 +705,98 @@ async fn call_http(
         )
     }
 
-    let resp = http::Response::from_parts(parts, graphql);
+    let resp = http::Response::from_parts(parts, graphql_response);
     Ok(SubgraphResponse::new_from_response(resp, context))
 }
 
-async fn decompose(
-    mut client: Decompression<Client<HttpsConnector<HttpConnector>>>,
-    service_name: &str,
-    request: Request<Body>,
-) -> Result<(Parts, Bytes, MediaType), FetchError> {
-    // Keep our parts, we'll need them later
-    let (parts, body) = response.into_parts();
+enum ContentType {
+    ApplicationJson,
+    ApplicationGraphqlResponseJson,
+}
 
-    // Only try to get the body bytes if the content type was one of the accepted types
-    let (body_bytes, contect_type) = match parts.headers.get(header::CONTENT_TYPE).map(|v| v.to_str().map(MediaType::parse)) {
-        Some(Ok(Ok(content_type)))
-        if (content_type.ty == APPLICATION && (content_type.subty == JSON || content_type.subty == GRAPHQL_RESPONSE_JSON)) =>
-            {
-                (hyper::body::to_bytes(body)
-                    .instrument(tracing::debug_span!("aggregate_response_data"))
-                    .await.map_err(|err| {
-                    tracing::error!(fetch_error = format!("{err:?}").as_str());
-                    FetchError::SubrequestHttpError {
-                        status_code: None,
-                        service: service_name.to_string(),
-                        reason: err.to_string(),
-                    }
-                }), content_type)
-            }
+fn content_type(service_name: &str, parts: &Parts) -> Result<ContentType, FetchError> {
+    match parts.headers.get(header::CONTENT_TYPE).map(|v| v.to_str().map(MediaType::parse)) {
+        Some(Ok(Ok(content_type)))if (content_type.ty == APPLICATION && content_type.subty == JSON) => Ok(ContentType::ApplicationJson),
+        Some(Ok(Ok(content_type)))if (content_type.ty == APPLICATION && content_type.subty == GRAPHQL_RESPONSE && content_type.suffix == Some(JSON)) => Ok(ContentType::ApplicationGraphqlResponseJson),
         Some(Ok(Ok(content_type))) =>
-        {
-            (Err(FetchError::SubrequestHttpError {
-                status_code: Some(parts.status.as_u16()),
-                service: service_name.to_string(),
-                reason: format!("subgraph didn't return JSON (expected content-type: {} or content-type: {GRAPHQL_JSON_RESPONSE_HEADER_VALUE}; found content-type: {content_type:?})", APPLICATION_JSON.essence_str()),
-            }), Some(content_type))
-        }
+            {
+                Err(FetchError::SubrequestHttpError {
+                    status_code: Some(parts.status.as_u16()),
+                    service: service_name.to_string(),
+                    reason: format!("subgraph didn't return JSON (expected content-type: {} or content-type: {GRAPHQL_JSON_RESPONSE_HEADER_VALUE}; found content-type: {content_type})", APPLICATION_JSON.essence_str()),
+                })
+            }
         None | Some(_) => {
-            (Err(FetchError::SubrequestHttpError {
+            Err(FetchError::SubrequestHttpError {
                 status_code: Some(parts.status.as_u16()),
                 service: service_name.to_string(),
                 reason: format!("subgraph didn't return JSON (expected content-type: {} or content-type: {GRAPHQL_JSON_RESPONSE_HEADER_VALUE})", APPLICATION_JSON.essence_str()),
-            }), None)
+            })
         }
-    };
+    }
+}
 
-    Ok((parts, body_bytes, contect_type))
+async fn do_fetch(
+    mut client: Decompression<Client<HttpsConnector<HttpConnector>>>,
+    context: &Context,
+    service_name: &str,
+    request: Request<Body>,
+    display_headers: bool,
+    display_body: bool,
+) -> Result<
+    (
+        Parts,
+        Result<ContentType, FetchError>,
+        Option<Result<Bytes, FetchError>>,
+    ),
+    FetchError,
+> {
+    let _active_request_guard = context.enter_active_request();
+    let response = client
+        .call(request)
+        .map_err(|err| {
+            tracing::error!(fetch_error = format!("{err:?}").as_str());
+            FetchError::SubrequestHttpError {
+                status_code: None,
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            }
+        })
+        .await?;
+
+    let (parts, body) = response.into_parts();
+    // Print out debug for the response
+    if display_headers {
+        tracing::info!(
+            http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
+        );
+    }
+    let content_type = content_type(service_name, &parts);
+
+    let body = if content_type.is_ok() {
+        let body = hyper::body::to_bytes(body)
+            .instrument(tracing::debug_span!("aggregate_response_data"))
+            .await
+            .map_err(|err| {
+                tracing::error!(fetch_error = format!("{err:?}").as_str());
+                FetchError::SubrequestHttpError {
+                    status_code: Some(parts.status.as_u16()),
+                    service: service_name.to_string(),
+                    reason: err.to_string(),
+                }
+            });
+        if let Ok(body) = &body {
+            if display_body {
+                tracing::info!(
+                    http.response.body = %String::from_utf8_lossy(&body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+                );
+            }
+        }
+        Some(body)
+    } else {
+        None
+    };
+    Ok((parts, content_type, body))
 }
 
 fn get_websocket_request(
@@ -1718,6 +1726,10 @@ mod tests {
             response.response.body().errors[0].message,
             "HTTP fetch failed from 'test': 401: Unauthorized"
         );
+        assert_eq!(
+            response.response.body().errors[1].message,
+            "service 'test' response was malformed: invalid"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1940,7 +1952,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql-response+json; found content-type: \"text/html\")"
+            "HTTP fetch failed from 'test': subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql-response+json; found content-type: text/html)"
         );
     }
 
@@ -2015,7 +2027,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            response.response.body().errors[0].message,
+            response.response.body().errors[1].message,
             "HTTP fetch failed from 'test': 401: Unauthorized"
         );
     }

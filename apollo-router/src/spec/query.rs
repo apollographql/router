@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::hir;
+use apollo_compiler::validation::ValidationDatabase;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::FileId;
@@ -25,6 +26,7 @@ use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
 use crate::error::FetchError;
+use crate::error::ValidationErrors;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -72,6 +74,11 @@ pub(crate) struct Query {
     pub(crate) defer_stats: DeferStats,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) is_original: bool,
+    /// Validation errors, used for comparison with the JS implementation.
+    ///
+    /// XXX(@goto-bus-stop): Remove when only Rust validation is used
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) validation_error: Option<SpecError>,
 }
 
 fn empty_compiler() -> Arc<Mutex<ApolloCompiler>> {
@@ -108,6 +115,7 @@ impl Query {
                 conditional_defer_variable_names: IndexSet::new(),
             },
             is_original: true,
+            validation_error: None,
         }
     }
 
@@ -120,7 +128,6 @@ impl Query {
         &self,
         response: &mut Response,
         operation_name: Option<&str>,
-        is_deferred: bool,
         variables: Object,
         schema: &Schema,
         defer_conditions: BooleanValues,
@@ -130,7 +137,7 @@ impl Query {
         let original_operation = self.operation(operation_name);
         match data {
             Some(Value::Object(mut input)) => {
-                if is_deferred {
+                if self.is_deferred(defer_conditions) {
                     // Get subselection from hashmap
                     match self.subselections.get(&SubSelectionKey {
                         defer_label: response.label.clone(),
@@ -269,8 +276,8 @@ impl Query {
         configuration: &Configuration,
     ) -> (ApolloCompiler, FileId) {
         let mut compiler = ApolloCompiler::new()
-            .recursion_limit(configuration.preview_operation_limits.parser_max_recursion)
-            .token_limit(configuration.preview_operation_limits.parser_max_tokens);
+            .recursion_limit(configuration.limits.parser_max_recursion)
+            .token_limit(configuration.limits.parser_max_tokens);
         compiler.set_type_system_hir(schema.type_system.clone());
         let id = compiler.add_executable(query, QUERY_EXECUTABLE);
         (compiler, id)
@@ -285,8 +292,9 @@ impl Query {
         let query = query.into();
 
         let (compiler, id) = Self::make_compiler(&query, schema, configuration);
+        Self::check_errors(&compiler, id)?;
         let (fragments, operations, defer_stats) =
-            Self::extract_query_information(&compiler, id, schema)?;
+            Self::extract_query_information(&compiler, schema)?;
 
         Ok(Query {
             string: query,
@@ -298,37 +306,54 @@ impl Query {
             added_labels: HashSet::new(),
             defer_stats,
             is_original: true,
+            validation_error: None,
         })
     }
 
+    /// Check for parse errors in a query in the compiler.
     pub(crate) fn check_errors(compiler: &ApolloCompiler, id: FileId) -> Result<(), SpecError> {
         let ast = compiler.db.ast(id);
-
         // Trace log recursion limit data
         let recursion_limit = ast.recursion_limit();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let errors = ast
-            .errors()
-            .map(|err| format!("{err:?}"))
-            .collect::<Vec<_>>();
-
-        if !errors.is_empty() {
-            let errors = errors.join(", ");
-            failfast_debug!("parsing error(s): {}", errors);
-            return Err(SpecError::ParsingError(errors));
+        let mut parse_errors = ast.errors().peekable();
+        if parse_errors.peek().is_some() {
+            let text = parse_errors
+                .map(|err| err.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            failfast_debug!("parsing error(s): {}", text);
+            return Err(SpecError::ParsingError(text));
         }
 
         Ok(())
     }
 
+    /// Check for validation errors in a query in the compiler.
+    pub(crate) fn validate_query(compiler: &ApolloCompiler, id: FileId) -> Result<(), SpecError> {
+        // Bail out on validation errors, only if the input is expected to be valid
+        let diagnostics = compiler.db.validate_executable(id);
+        let errors = diagnostics
+            .into_iter()
+            .filter(|err| err.data.is_error())
+            .collect::<Vec<_>>();
+
+        if errors.is_empty() {
+            return Ok(());
+        }
+
+        let errors = ValidationErrors { errors };
+        errors.print();
+
+        Err(SpecError::ValidationError(errors.to_string()))
+    }
+
+    /// Extract serializable data structures from the apollo-compiler HIR.
     pub(crate) fn extract_query_information(
         compiler: &ApolloCompiler,
-        id: FileId,
         schema: &Schema,
     ) -> Result<(Fragments, Vec<Operation>, DeferStats), SpecError> {
-        Self::check_errors(compiler, id)?;
-
         let mut defer_stats = DeferStats {
             has_defer: false,
             has_unconditional_defer: false,
@@ -732,10 +757,6 @@ impl Query {
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        if fragment.include_skip.should_skip(parameters.variables) {
-                            continue;
-                        }
-
                         let is_apply = if let Some(input_type) =
                             input.get(TYPENAME).and_then(|val| val.as_str())
                         {
@@ -886,10 +907,6 @@ impl Query {
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        if fragment.include_skip.should_skip(parameters.variables) {
-                            continue;
-                        }
-
                         let is_apply = {
                             // check if the fragment matches the input type directly, and if not, check if the
                             // input type is a subtype of the fragment's type condition (interface, union)
@@ -1078,6 +1095,10 @@ impl Query {
         }
 
         BooleanValues { bits }
+    }
+
+    pub(crate) fn is_deferred(&self, defer_conditions: BooleanValues) -> bool {
+        self.defer_stats.has_unconditional_defer || defer_conditions.bits != 0
     }
 }
 
