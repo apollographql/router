@@ -41,56 +41,35 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 
 ### Add support for readiness/liveness checks ([Issue #3233](https://github.com/apollographql/router/issues/3233))
 
-The router is a complex beast and it's not entirely straightforward to determine if a router is live/ready.
+Kubernetes lifecycle interop has been improved by implementing liveliness and readiness checks.
 
-From a kubernetes point of view, a service is:
+Kubernetes considers a service is:
 
- - live [if it isn't deadlocked](https://www.linkedin.com/posts/llarsson_betterdevopsonkubernetes-devops-devsecops-activity-7018587202121076736-LRxE)
- - ready if it is able to start accepting traffic
+ - live - [if it isn't deadlocked](https://www.linkedin.com/posts/llarsson_betterdevopsonkubernetes-devops-devsecops-activity-7018587202121076736-LRxE)
+ - ready - if it is able to start accepting traffic
 
 (For more details: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
 
-Our current health check isn't actually doing either of these things. It's returning a payload which indicates if the router is "healthy" or not and it's always returning "UP" (hard-coded). As long as it is serving traffic it appears "healthy".
+The existing health check didn't surface this information. Instead, it returns a payload which indicates if the router is "healthy" or not and it's always returning "UP" (hard-coded).
 
-To address this we need:
-
-1. A mechanism within the router to define whether it is ready or live.
-2. A new interface whereby an interested party may determine if the router is ready or live.
-
-Both of these questions are significantly complicated by the fact that the router is architected to maintain connectivity in the face of changing configuration, schemas, etc... Multiple interested parties may be operating against the same router with different states (via different connections) and thus may, in theory, get different answers. However, I'm working on the assumption that, for k8s control purposes, a client, will only be interested in the current (latest) state of the router, so that's what we'll track.
-
----
-
-1. How do we know if the router is ready or live?
-
-Ready
-
- - Is in state Running
- - Is `Live`
-
-Live
+The router health check now exposes this information based in the following rules:
+* Live
  - Is not in state Errored
  - Health check enabled and responding
+* Ready
+ - Is running and accepting requests.
+ - Is `Live`
 
-2. Extending our existing health interface
-
-If we add support for query parameters named "ready" and "live" to our existing health endpoint, then we can provide a backwards compatible interface which leverages the existing "/health" endpoint. We support both POST and GET for maximum compatibility.
+To maintain backwards compatibility; query parameters named "ready" and "live" have been added to our existing health endpoint. Both POST and GET are supported.
 
 Sample queries:
 
-```
-curl -XPOST "http://localhost:8088/health?ready" OR curl  "http://localhost:8088/health?ready"
-
-curl -XPOST "http://localhost:8088/health?live" OR curl "http://localhost:8088/health?live"
-```
-
-To keep the implementation simple, you may only query for one at a time (which I think is fine).
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3276
 
 ### Include path to Rhai script in syntax error messages
 
-Syntax errors in the main Rhai script will now include the path to the script in the error message. This should make it more obvious where the error originates.
+Syntax errors in the main Rhai script will now include the path to the script in the error message.
 
 By [@dbanty](https://github.com/dbanty) in https://github.com/apollographql/router/pull/3254
 
@@ -110,38 +89,18 @@ Or use `both` to run the implementations side by side and log a warning if there
 experimental_graphql_validation_mode: both
 ```
 
-This is an experimental option while we are still finding edge cases in the new implementation, but it will become the default in the future.
+This is an experimental option while we are still finding edge cases in the new implementation, and will be removed once we have confidence that parity has been achieved.
 
 By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/3134
 
 ### Add environment variable access to rhai ([Issue #1744](https://github.com/apollographql/router/issues/1744))
 
-This introduces support for a new env module. There's no need to import it since it is already imported by the router Rhai engine. The `env` module contains one function:
-
-```
-fn get(key) -> value
-```
-
-`key` is expected to be a String and `value` is a String. The function may fail, so exceptions should be handled. Usage is fully documented in the router docs.
-
-This example Rhai script illustrates how to use it:
-
-```
-    try {
-        print(`LANG: `);
-    } catch(err) {
-        print(`exception: `);
-    }
-```
-
-
+This introduces support for accessing environment variable within Rhai. The new `env` module contains one function and is imported by default:
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3240
 
 ### Add support for getting request method in Rhai ([Issue #2467](https://github.com/apollographql/router/issues/2467))
 
-It may be useful to know the method of a request in your Rhai script.
-
-This adds support for getting the method and performing comparisons against String representations.
+This adds support for getting the HTTP method of requests in Rhai.
 
 ```
 fn process_request(request) {
@@ -150,8 +109,6 @@ fn process_request(request) {
     }
 }
 ```
-
-Note: You may not modify the method.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3355
 
@@ -175,13 +132,13 @@ Root span name has changed from `request` to `<graphql.operation.kind> <graphql.
 
 [Open Telemetry graphql semantic conventions](https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/) specify that the root span name must match the operation kind and name. 
 
-Many tracing providers don't have good support for filtering traces via attribute, so this change will bring significant usability enhancements to the tracing experience.
+Many tracing providers don't have good support for filtering traces via attribute, so changing this significantly enhances the tracing experience.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3364
 
 ### An APQ query with a mismatched hash will error as HTTP 400 ([Issue #2948](https://github.com/apollographql/router/issues/2948))
 
-We now model the both the behavior of the Gateway and the intended behavior of [the implementation](https://www.apollographql.com/docs/apollo-server/performance/apq/).  Even if our previous behavior was still acceptable, any other behavior is a misconfiguration of a client and should be prevented early.
+We now have the same behavior in the Gateway and [the Router implementation](https://www.apollographql.com/docs/apollo-server/performance/apq/).  Even if our previous behavior was still acceptable, any other behavior is a misconfiguration of a client and should be prevented early.
 
 Previously, if a client sent an operation with an APQ hash, we would merely log an error to the console, **not** register the operation (for the next request) but still execute the query.  We now return a GraphQL error and don't execute the query.  No clients should be impacted by this, though anyone who had hand-crafted a query **with** APQ information (for example, copied a previous APQ-registration query but only changed the operation without re-calculating the SHA-256) might now be forced to use the correct hash (or more practically, remove the hash).
 
@@ -195,39 +152,31 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Preserve all shutdown receivers across reloads ([Issue #3139](https://github.com/apollographql/router/issues/3139))
 
-Preserve a vec of all channels that we create and process all of them during shutdown. This will avoid scenarios such as:
+We keep a list of all active requests and process all of them during shutdown. This will avoid prematurely terminating connections down when:
 
 - some requests are in flight
 - the router reloads (new schema, etc)
 - the router gets a shutdown signal
-- since the shutdown channel for the older configuration is not kept, the router closes immediately without waiting for the initial connections to stop
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3311
 
 ### Enable serde_json float_roundtrip feature ([Issue #2951](https://github.com/apollographql/router/issues/2951))
 
-This feature is explicitly designed to:
+The Router now preserves JSON floating point numbers exactly as they are received by enabling the `serde_json` `float_roudtrip` feature:
 
 """
 Use sufficient precision when parsing fixed precision floats from JSON to ensure that they maintain accuracy when round-tripped through JSON. This comes at an approximately 2x performance cost for parsing floats compared to the default best-effort precision.
 """
 
-Despite the performance impact for floats, we need the fix in order to prevent float values losing precision when processed by the router.
-
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3338
 
-### Fix @defer inside an aliased field ([Issue #3263](https://github.com/apollographql/router/issues/3263))
+### Fix deferred response formatting when filtering queries ([PR #3298](https://github.com/apollographql/router/pull/3298), [Issue #3263](https://github.com/apollographql/router/issues/3263), [PR #3339](https://github.com/apollographql/router/pull/3339))
 
-This refactors [PR #3298](https://github.com/apollographql/router/pull/3298/) to prepare deferred subselections without serializing them to GraphQL syntax just to re-parse them. This removes code that did not correctly handle some interactions of `@defer` with aliases.
+Filtering queries requires two levels of response formatting, and its implementation shone light on issues with deferred responses. Response formatting needs to recognize which deferred fragment generated it, and that the deferred response shapes can change depending on request variables, due to the `@defer` directive's `if` argument.
 
-By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/3346
+For now, this is solved by generating the response shapes for primary and deferred responses, for each combination of the variables used in `@defer` applications, limited to 32 unique variables. There will be follow up work with another approach that removes this limitation.
 
-### Fix deferred response formatting when filtering queries ([PR #3298](https://github.com/apollographql/router/pull/3298), [PR #3339](https://github.com/apollographql/router/pull/3339))
-
-Filtering queries requires two levels of response formatting, and its implementation shone light on issues with deferred responses. The response formatting side needs to recognize which deferred fragment generated it, and the deferred response shapes can change depending on request variables, due to the `@defer` directive's `if` argument. So far the response formatting code was not handling those variables.
-For now, this is solved by generating the response shapes for primary and deferred responses, for each combination of the variables used in `@defer` applications, limited to 32 unique variables. There will be follow up work with another approach that removes this limitation, but it will require a lot of deep changes in response formatting, so it will have to land a bit later.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3298 and https://github.com/apollographql/router/pull/3339
+By [@Geal](https://github.com/Geal) and [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/3298, https://github.com/apollographql/router/issues/3263 and https://github.com/apollographql/router/pull/3339
 
 ### Otel Ensure that service name is correctly picked up from env and resources ([Issue #3215](https://github.com/apollographql/router/issues/3215))
 
@@ -237,9 +186,9 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ## 🛠 Maintenance
 
-### use a Drop guard to track active requests ([PR #3343](https://github.com/apollographql/router/pull/3343))
+### Use a Drop guard to track active requests ([PR #3343](https://github.com/apollographql/router/pull/3343))
 
-manually tracking active requests is error prone because we might return early without decrementing the active requests. To make sure this is done properly, `enter_active_request` now returns a guard struct, that will decrement the count on drop
+Manually tracking active requests is error prone because we might return early without decrementing the active requests. To make sure this is done properly, `enter_active_request` now returns a guard struct, that will decrement the count on drop
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3343
 
@@ -251,19 +200,19 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Always instanciate the traffic shaping plugin ([Issue #3327](https://github.com/apollographql/router/issues/3327))
 
-The traffic_shaping plugin is now always part of the plugins list and is always active, with default configuration.
+The `traffic_shaping` plugin is now always part of the plugins list and is always active, with default configuration.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3330
 
-### refactor ExecutionService ([PR #3344](https://github.com/apollographql/router/pull/3344))
+### Refactor ExecutionService ([PR #3344](https://github.com/apollographql/router/pull/3344))
 
-The ExecutionService implementation was too complex. This splits it into multiple methods for more readability
+Split `ExecutionService` implementation into multiple methods for readability.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3344
 
 ### Refactor router service ([PR #3326](https://github.com/apollographql/router/pull/3326))
 
-No semantic changes here, this moves code around for easier readability and maintainability
+Refactor code around for easier readability and maintainability.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3326
 
@@ -279,7 +228,7 @@ By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https:/
 
 ## 📚 Documentation
 
-### Add a few security-related warnings to JWT auth docs ([PR #3299](https://github.com/apollographql/router/pull/3299))
+### Add security-related warnings to JWT auth docs ([PR #3299](https://github.com/apollographql/router/pull/3299))
 
 There are a couple potential security pitfalls when leveraging the router for JWT authentication. These are now documented in [the relevant section of the docs](https://www.apollographql.com/docs/router/configuration/authn-jwt). If you are currently using JWT authentication in the router, be sure to [secure your subgraphs](https://www.apollographql.com/docs/federation/building-supergraphs/subgraphs-overview#securing-your-subgraphs) and [use care when propagating headers](https://www.apollographql.com/docs/router/configuration/authn-jwt#example-forwarding-claims-to-subgraphs). 
 
@@ -287,7 +236,7 @@ By [@dbanty](https://github.com/dbanty) in https://github.com/apollographql/rout
 
 ### Update example for claim forwarding ([Issue #3224](https://github.com/apollographql/router/issues/3224))
 
-The JWT claim example that we had in our docs was insecure as it iterated over the list of claims and set them as headers.
+The JWT claim example in our docs was insecure as it iterated over the list of claims and set them as headers.
 A malicious user could have provided a valid JWT that was missing claims and then set those claims as headers.
 This would only have affected users who had configured their routers to forward all headers from the client to subgraphs.
 
@@ -298,8 +247,7 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ### Document plugin ordering ([Issue #3207](https://github.com/apollographql/router/issues/3207))
 
-Requests go through user Rust plugins in the same order as those plugins are configured in
-the Router’s YAML configuration file, and responses in reverse order.
+Rust plugins are applied in the same order as they are configured in the Router’s YAML configuration file.
 This is now documented behavior that users can rely on, with new tests to help maintain it.
 
 Additionally, some Router features happen to use the plugin mechanism internally.
@@ -310,7 +258,7 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 
 ### Improve documentation for `Rhai` globals ([Issue #2671](https://github.com/apollographql/router/issues/2671))
 
-The router's `Rhai` interface can simulate closures: https://rhai.rs/book/language/fn-closure.html
+The Router's `Rhai` interface can simulate closures: https://rhai.rs/book/language/fn-closure.html
 
 However, and this is an important restriction:
 
@@ -319,7 +267,7 @@ The [anonymous function](https://rhai.rs/book/language/fn-anon.html) syntax, how
 
 Thus it's not possible for a `Rhai` closure to make reference to a global variable.
 
-This hasn't previously been an issue, but we've now added support for referencing global variables, one at the moment `Router`, and so this kind of thing might be attempted:
+This hasn't previously been an issue, but we've now added support for referencing global variables, one at the moment `Router`, for example:
 
 ```sh
 fn supergraph_service(service){
@@ -330,7 +278,7 @@ fn supergraph_service(service){
     service.map_request(f);
 }
 ```
-That won't work and you'll get an error something like: `service callback failed: Variable not found: Router (line 4, position 17)`
+This won't work and you'll get an error something like: `service callback failed: Variable not found: Router (line 4, position 17)`
 
 There are two workarounds. Either:
 
