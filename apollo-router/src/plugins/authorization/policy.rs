@@ -18,6 +18,7 @@ use crate::spec::query::traverse;
 
 pub(crate) struct PolicyExtractionVisitor<'a> {
     compiler: &'a ApolloCompiler,
+    file_id: FileId,
     pub(crate) extracted_policies: HashSet<String>,
 }
 
@@ -25,9 +26,10 @@ pub(crate) const POLICY_DIRECTIVE_NAME: &str = "policy";
 
 impl<'a> PolicyExtractionVisitor<'a> {
     #[allow(dead_code)]
-    pub(crate) fn new(compiler: &'a ApolloCompiler) -> Self {
+    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Self {
         Self {
             compiler,
+            file_id,
             extracted_policies: HashSet::new(),
         }
     }
@@ -37,9 +39,13 @@ impl<'a> PolicyExtractionVisitor<'a> {
             .extend(policies_argument(field.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned());
 
         if let Some(ty) = field.ty().type_def(&self.compiler.db) {
-            self.extracted_policies
-                .extend(policies_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned());
+            self.get_policies_from_type(&ty)
         }
+    }
+
+    fn get_policies_from_type(&mut self, ty: &TypeDefinition) {
+        self.extracted_policies
+            .extend(policies_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned());
     }
 }
 
@@ -71,6 +77,55 @@ impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
         }
 
         traverse::field(self, parent_type, node)
+    }
+
+    fn fragment_definition(&mut self, node: &hir::FragmentDefinition) -> Result<(), BoxError> {
+        if let Some(ty) = self
+            .compiler
+            .db
+            .types_definitions_by_name()
+            .get(node.type_condition())
+        {
+            self.get_policies_from_type(ty);
+        }
+        traverse::fragment_definition(self, node)
+    }
+
+    fn fragment_spread(&mut self, node: &hir::FragmentSpread) -> Result<(), BoxError> {
+        let fragments = self.compiler.db.fragments(self.file_id);
+        let type_condition = fragments
+            .get(node.name())
+            .ok_or("MissingFragmentDefinition")?
+            .type_condition();
+
+        if let Some(ty) = self
+            .compiler
+            .db
+            .types_definitions_by_name()
+            .get(type_condition)
+        {
+            self.get_policies_from_type(ty);
+        }
+        traverse::fragment_spread(self, node)
+    }
+
+    fn inline_fragment(
+        &mut self,
+        parent_type: &str,
+
+        node: &hir::InlineFragment,
+    ) -> Result<(), BoxError> {
+        if let Some(type_condition) = node.type_condition() {
+            if let Some(ty) = self
+                .compiler
+                .db
+                .types_definitions_by_name()
+                .get(type_condition)
+            {
+                self.get_policies_from_type(ty);
+            }
+        }
+        traverse::inline_fragment(self, parent_type, node)
     }
 }
 
@@ -331,7 +386,7 @@ mod tests {
         }
         assert!(diagnostics.is_empty());
 
-        let mut visitor = PolicyExtractionVisitor::new(&compiler);
+        let mut visitor = PolicyExtractionVisitor::new(&compiler, id);
         traverse::document(&mut visitor, id).unwrap();
 
         visitor.extracted_policies.into_iter().collect()

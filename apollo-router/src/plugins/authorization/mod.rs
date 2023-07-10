@@ -136,7 +136,7 @@ impl AuthorizationPlugin {
             context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
         }
 
-        let mut visitor = PolicyExtractionVisitor::new(&compiler);
+        let mut visitor = PolicyExtractionVisitor::new(&compiler, file_id);
 
         // if this fails, the query is invalid and will fail at the query planning phase.
         // We do not return validation errors here for now because that would imply a huge
