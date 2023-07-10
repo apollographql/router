@@ -43,7 +43,10 @@
         ],
         "Subgraph protocol: HTTP callback": [
           "/executing-operations/subscription-callback-protocol",
-          ["enterprise", "preview"]
+          [
+            "enterprise",
+            "preview"
+          ]
         ],
         "Client protocol: HTTP multipart": [
           "/executing-operations/subscription-multipart-protocol",

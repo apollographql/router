@@ -255,14 +255,7 @@ impl ExecutionService {
                     ),
                 });
 
-                if response
-                    .label
-                    .as_ref()
-                    .map(|label| query.added_labels.contains(label))
-                    .unwrap_or(false)
-                {
-                    response.label = None;
-                }
+                response.label = rewrite_defer_label(&response);
                 Some(response)
             }
             // if the deferred response specified a path, we must extract the
@@ -322,11 +315,12 @@ impl ExecutionService {
         operation_name: Option<&str>,
         has_next: bool,
         variables_set: BooleanValues,
-        mut response: Response,
+        response: Response,
         sub_responses: Vec<(Path, Value)>,
     ) -> Option<Response> {
         let query = query.clone();
 
+        let rewritten_label = rewrite_defer_label(&response);
         let incremental = sub_responses
             .into_iter()
             .filter_map(move |(path, data)| {
@@ -347,15 +341,6 @@ impl ExecutionService {
                     })
                     .cloned()
                     .collect::<Vec<_>>();
-
-                if response
-                    .label
-                    .as_ref()
-                    .map(|label| query.added_labels.contains(label))
-                    .unwrap_or(false)
-                {
-                    response.label = None;
-                }
 
                 let extensions: Object = response
                     .extensions
@@ -394,7 +379,7 @@ impl ExecutionService {
                 if !data.is_null() || !errors.is_empty() || !extensions.is_empty() {
                     Some(
                         IncrementalResponse::builder()
-                            .and_label(response.label.clone())
+                            .and_label(rewritten_label.clone())
                             .data(data)
                             .path(path)
                             .errors(errors)
@@ -413,6 +398,21 @@ impl ExecutionService {
                 .incremental(incremental)
                 .build(),
         )
+    }
+}
+
+fn rewrite_defer_label(response: &Response) -> Option<String> {
+    if let Some(label) = &response.label {
+        #[allow(clippy::manual_map)] // use an explicit `if` to comment each case
+        if let Some(rest) = label.strip_prefix('_') {
+            // Drop the prefix added in labeler.rs
+            Some(rest.to_owned())
+        } else {
+            // Remove the synthetic lable generated in labeler.rs
+            None
+        }
+    } else {
+        None
     }
 }
 

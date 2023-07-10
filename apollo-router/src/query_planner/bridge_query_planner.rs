@@ -1,7 +1,6 @@
 //! Calls out to nodejs query planner
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
@@ -28,6 +27,7 @@ use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::introspection::Introspection;
 use crate::query_planner::labeler::add_defer_labels;
+use crate::services::layers::query_analysis::Compiler;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -166,7 +166,6 @@ impl BridgeQueryPlanner {
     async fn parse_selections(
         &self,
         key: QueryKey,
-        added_labels: HashSet<String>,
         compiler: Arc<Mutex<ApolloCompiler>>,
     ) -> Result<Query, QueryPlannerError> {
         let (query, operation_name) = key;
@@ -210,12 +209,10 @@ impl BridgeQueryPlanner {
         )?;
         Ok(Query {
             string: query,
-            compiler,
             fragments,
             operations,
             filtered_query: None,
             subselections,
-            added_labels,
             defer_stats,
             is_original: true,
             validation_error,
@@ -346,13 +343,20 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
             query: original_query,
             operation_name,
             context,
-            compiler,
         } = req;
 
         let this = self.clone();
         let fut = async move {
             let start = Instant::now();
 
+            let compiler = match context.private_entries.lock().get::<Compiler>() {
+                None => {
+                    return Err(QueryPlannerError::SpecError(SpecError::ParsingError(
+                        "missing compiler".to_string(),
+                    )))
+                }
+                Some(c) => c.0.clone(),
+            };
             let mut compiler_guard = compiler.lock().await;
             let file_id = compiler_guard
                 .db
@@ -361,13 +365,13 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     "missing input file for query".to_string(),
                 )))?;
 
-            let added_labels = match add_defer_labels(file_id, &compiler_guard) {
+            match add_defer_labels(file_id, &compiler_guard) {
                 Err(e) => {
                     return Err(QueryPlannerError::SpecError(SpecError::ParsingError(
                         e.to_string(),
                     )))
                 }
-                Ok((modified_query, added_labels)) => {
+                Ok(modified_query) => {
                     // We’ve already checked the original query against the configured token limit
                     // when first parsing it.
                     // We’ve now serialized a modified query (with labels added) and are about
@@ -375,9 +379,8 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     // which original queries are rejected because of the token limit.
                     compiler_guard.db.set_token_limit(None);
                     compiler_guard.update_executable(file_id, &modified_query);
-                    added_labels
                 }
-            };
+            }
 
             let filtered_query = compiler_guard.db.source_code(file_id);
             drop(compiler_guard);
@@ -387,7 +390,6 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     original_query,
                     filtered_query.to_string(),
                     operation_name.to_owned(),
-                    added_labels,
                     compiler,
                 )
                 .await;
@@ -431,17 +433,14 @@ impl BridgeQueryPlanner {
         original_query: String,
         filtered_query: String,
         operation_name: Option<String>,
-        added_labels: HashSet<String>,
         compiler: Arc<Mutex<ApolloCompiler>>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let mut selections = self
             .parse_selections(
                 (original_query.clone(), operation_name.clone()),
-                added_labels.clone(),
                 compiler.clone(),
             )
             .await?;
-        selections.added_labels = added_labels.clone();
 
         if selections.contains_introspection() {
             // If we have only one operation containing only the root field `__typename`
@@ -468,11 +467,7 @@ impl BridgeQueryPlanner {
 
         if filtered_query != original_query {
             let mut filtered = self
-                .parse_selections(
-                    (filtered_query.clone(), operation_name.clone()),
-                    added_labels,
-                    compiler,
-                )
+                .parse_selections((filtered_query.clone(), operation_name.clone()), compiler)
                 .await?;
             filtered.is_original = false;
             selections.filtered_query = Some(Arc::new(filtered));
@@ -955,7 +950,6 @@ mod tests {
                 original_query.to_string(),
                 filtered_query.to_string(),
                 operation_name,
-                HashSet::new(),
                 Arc::new(Mutex::new(compiler)),
             )
             .await
