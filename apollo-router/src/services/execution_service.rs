@@ -127,7 +127,7 @@ impl ExecutionService {
             (None, None)
         };
 
-        let had_initial_data = req.initial_data.is_some();
+        let has_initial_data = req.initial_data.is_some();
         let mut first = req
             .query_plan
             .execute(
@@ -142,7 +142,7 @@ impl ExecutionService {
             )
             .await;
         let query = req.query_plan.query.clone();
-        let stream = if (is_deferred || is_subscription) && !had_initial_data {
+        let stream = if (is_deferred || is_subscription) && !has_initial_data {
             let stream_mode = if is_deferred {
                 StreamMode::Defer
             } else {
@@ -152,14 +152,14 @@ impl ExecutionService {
             };
             let stream = filter_stream(first, receiver, stream_mode);
             StreamWrapper(stream, tx_close_signal).boxed()
-        } else if had_initial_data {
+        } else if has_initial_data {
             // If it's a subscription event
             once(ready(first)).boxed()
         } else {
             once(ready(first)).chain(receiver).boxed()
         };
 
-        if had_initial_data {
+        if has_initial_data {
             return Ok(ExecutionResponse::new_from_response(
                 http::Response::new(stream as _),
                 ctx,
