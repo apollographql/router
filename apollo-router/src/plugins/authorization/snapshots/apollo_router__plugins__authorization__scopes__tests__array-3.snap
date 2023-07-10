@@ -6,11 +6,12 @@ expression: paths
     Path(
         [
             Key(
-                "me",
+                "topProducts",
             ),
             Key(
-                "name",
+                "publicReviews",
             ),
+            Flatten,
         ],
     ),
 ]

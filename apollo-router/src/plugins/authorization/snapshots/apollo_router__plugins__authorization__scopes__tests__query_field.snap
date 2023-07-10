@@ -2,9 +2,8 @@
 source: apollo-router/src/plugins/authorization/scopes.rs
 expression: doc
 ---
-query {
-  topProducts {
-    type
-  }
+{
+    "profile",
+    "read:user",
+    "read:username",
 }
-

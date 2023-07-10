@@ -6,10 +6,10 @@ expression: paths
     Path(
         [
             Key(
-                "me",
+                "topProducts",
             ),
             Key(
-                "name",
+                "internal",
             ),
         ],
     ),

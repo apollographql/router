@@ -6,10 +6,7 @@ expression: paths
     Path(
         [
             Key(
-                "me",
-            ),
-            Key(
-                "name",
+                "ping",
             ),
         ],
     ),

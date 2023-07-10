@@ -8,9 +8,6 @@ expression: paths
             Key(
                 "me",
             ),
-            Key(
-                "name",
-            ),
         ],
     ),
 ]

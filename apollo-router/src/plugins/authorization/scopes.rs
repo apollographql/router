@@ -399,6 +399,9 @@ mod tests {
         }
         "#;
 
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
+
         let (doc, paths) = filter(QUERY, HashSet::new());
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -450,6 +453,9 @@ mod tests {
         }
         "#;
 
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
+
         let (doc, paths) = filter(QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
@@ -470,6 +476,9 @@ mod tests {
         }
         "#;
 
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
+
         let (doc, paths) = filter(QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
@@ -486,6 +495,9 @@ mod tests {
             }
         }
         "#;
+
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
 
         let (doc, paths) = filter(QUERY, HashSet::new());
 
@@ -509,6 +521,9 @@ mod tests {
         }
         "#;
 
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
+
         let (doc, paths) = filter(QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
@@ -530,6 +545,9 @@ mod tests {
             }
         }
         "#;
+
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
 
         let (doc, paths) = filter(QUERY, HashSet::new());
 
@@ -554,6 +572,9 @@ mod tests {
             name
         }
         "#;
+
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
 
         let (doc, paths) = filter(QUERY, HashSet::new());
 
