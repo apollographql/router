@@ -205,7 +205,7 @@ async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
                 config
                     .profile_name
                     .as_ref()
-                    .map(|s| s.clone())
+                    .cloned()
                     .unwrap_or_default()
                     .as_str(),
             )
@@ -248,7 +248,8 @@ impl SubgraphAuth {
     fn params_for_service(&self, service_name: &str) -> Option<SigningParamsConfig> {
         self.signing_params
             .subgraphs
-            .get(service_name).map(|config| config.clone())
+            .get(service_name)
+            .cloned()
             .or_else(|| self.signing_params.all.clone())
     }
 }
