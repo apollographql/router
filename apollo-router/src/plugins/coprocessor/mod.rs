@@ -34,6 +34,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::services;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
@@ -45,6 +46,8 @@ use crate::tracer::TraceId;
 
 #[cfg(test)]
 mod test;
+
+mod supergraph;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 
@@ -81,6 +84,13 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         self.router_service(service)
+    }
+
+    fn supergraph_service(
+        &self,
+        service: services::supergraph::BoxService,
+    ) -> services::supergraph::BoxService {
+        self.supergraph_service(service)
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
@@ -139,6 +149,18 @@ where
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         self.configuration.router.as_service(
+            self.http_client.clone(),
+            service,
+            self.configuration.url.clone(),
+            self.sdl.clone(),
+        )
+    }
+
+    fn supergraph_service(
+        &self,
+        service: services::supergraph::BoxService,
+    ) -> services::supergraph::BoxService {
+        self.configuration.supergraph.as_service(
             self.http_client.clone(),
             service,
             self.configuration.url.clone(),
@@ -236,6 +258,9 @@ struct Conf {
     /// The router stage request/response configuration
     #[serde(default)]
     router: RouterStage,
+    /// The supergraph stage request/response configuration
+    #[serde(default)]
+    supergraph: supergraph::SupergraphStage,
     /// The subgraph stage request/response configuration
     #[serde(default)]
     subgraph: SubgraphStages,
@@ -1031,7 +1056,7 @@ fn validate_coprocessor_output<T>(
 }
 
 /// Convert a HeaderMap into a HashMap
-pub(super) fn externalize_header_map(
+pub(crate) fn externalize_header_map(
     input: &HeaderMap<HeaderValue>,
 ) -> Result<HashMap<String, Vec<String>>, BoxError> {
     let mut output = HashMap::new();
