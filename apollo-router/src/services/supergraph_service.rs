@@ -327,8 +327,8 @@ async fn subscription_task(
 
     let graphql_document = &query_plan.query.string;
     // Get the rest of the query_plan to execute for subscription events
-    let query_plan = match query_plan.root.clone() {
-        crate::query_planner::PlanNode::Subscription { rest, .. } => rest.map(|r| {
+    let query_plan = match &query_plan.root {
+        crate::query_planner::PlanNode::Subscription { rest, .. } => rest.clone().map(|r| {
             Arc::new(QueryPlan {
                 usage_reporting: query_plan.usage_reporting.clone(),
                 root: *r,
@@ -438,7 +438,7 @@ async fn dispatch_event(
                 .supergraph_request(http::Request::default())
                 .query_plan(query_plan.clone())
                 .context(context)
-                .initial_data(val.data.take().unwrap_or_default())
+                .source_stream_value(val.data.take().unwrap_or_default())
                 .build()
                 .await;
 

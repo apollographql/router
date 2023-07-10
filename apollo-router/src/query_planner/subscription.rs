@@ -113,8 +113,11 @@ impl SubscriptionNode {
             .subscription_handle
             .as_ref()
             .expect("checked above; qed");
-        let mode = match parameters.subscription_config.as_ref().map(|c| &c.mode) {
-            Some(mode) => mode.get_subgraph_config(&self.service_name),
+        let mode = match parameters.subscription_config.as_ref() {
+            Some(config) => config
+                .mode
+                .get_subgraph_config(&self.service_name)
+                .map(|mode| (config.clone(), mode)),
             None => {
                 return Box::pin(async {
                     vec![Error::builder()
@@ -127,22 +130,12 @@ impl SubscriptionNode {
 
         Box::pin(async move {
             let mut subscription_handle = subscription_handle.clone();
-            let subscription_config = parameters.subscription_config.clone();
 
             match mode {
-                Some(_) => {
+                Some((subscription_config, _mode)) => {
                     let (tx_handle, rx_handle) =
                         mpsc::channel::<HandleStream<String, graphql::Response>>(1);
 
-                    let subscription_config = match subscription_config {
-                        Some(sc) => sc,
-                        None => {
-                            return vec![Error::builder()
-                                .message("no subscription config provided for a subscription")
-                                .extension_code("NO_SUBSCRIPTION_CONFIG")
-                                .build()];
-                        }
-                    };
                     let subscription_conf_tx = match subscription_handle.subscription_conf_tx.take()
                     {
                         Some(sc) => sc,

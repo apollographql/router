@@ -127,7 +127,7 @@ impl ExecutionService {
             (None, None)
         };
 
-        let has_initial_data = req.initial_data.is_some();
+        let has_initial_data = req.source_stream_value.is_some();
         let mut first = req
             .query_plan
             .execute(
@@ -138,7 +138,7 @@ impl ExecutionService {
                 sender,
                 subscription_handle.clone(),
                 &self.subscription_config,
-                req.initial_data,
+                req.source_stream_value,
             )
             .await;
         let query = req.query_plan.query.clone();

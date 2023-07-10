@@ -28,7 +28,7 @@ pub struct Request {
 
     pub context: Context,
     /// Initial data coming from subscription event if it's a subscription
-    pub(crate) initial_data: Option<Value>,
+    pub(crate) source_stream_value: Option<Value>,
     /// Channel to send all parameters needed for the subscription
     pub(crate) subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
 }
@@ -44,14 +44,14 @@ impl Request {
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
-        initial_data: Option<Value>,
+        source_stream_value: Option<Value>,
         subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
     ) -> Request {
         Self {
             supergraph_request,
             query_plan,
             context,
-            initial_data,
+            source_stream_value,
             subscription_tx,
         }
     }
@@ -62,14 +62,14 @@ impl Request {
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
-        initial_data: Option<Value>,
+        source_stream_value: Option<Value>,
         subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
     ) -> Request {
         Self {
             supergraph_request,
             query_plan,
             context,
-            initial_data,
+            source_stream_value,
             subscription_tx,
         }
     }
@@ -84,14 +84,14 @@ impl Request {
         supergraph_request: Option<http::Request<graphql::Request>>,
         query_plan: Option<QueryPlan>,
         context: Option<Context>,
-        initial_data: Option<Value>,
+        source_stream_value: Option<Value>,
         subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
     ) -> Request {
         Request::new(
             supergraph_request.unwrap_or_default(),
             Arc::new(query_plan.unwrap_or_else(|| QueryPlan::fake_builder().build())),
             context.unwrap_or_default(),
-            initial_data,
+            source_stream_value,
             subscription_tx,
         )
     }
