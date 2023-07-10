@@ -112,7 +112,7 @@ impl AuthorizationPlugin {
     ) {
         let (compiler, file_id) = Query::make_compiler(query, schema, configuration);
 
-        let mut visitor = ScopeExtractionVisitor::new(&compiler);
+        let mut visitor = ScopeExtractionVisitor::new(&compiler, file_id);
 
         // if this fails, the query is invalid and will fail at the query planning phase.
         // We do not return validation errors here for now because that would imply a huge
