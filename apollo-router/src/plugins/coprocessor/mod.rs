@@ -43,6 +43,9 @@ use crate::services::router;
 use crate::services::subgraph;
 use crate::tracer::TraceId;
 
+#[cfg(test)]
+mod test;
+
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 
 type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
