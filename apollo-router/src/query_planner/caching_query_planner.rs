@@ -148,6 +148,13 @@ where
                     .lock()
                     .insert(Compiler(Arc::new(Mutex::new(compiler))));
 
+                context
+                    .insert(
+                        QUERY_PLANNER_CACHE_KEY_METADATA,
+                        caching_key.metadata.clone(),
+                    )
+                    .expect("should not fail");
+
                 let request = QueryPlannerRequest {
                     query,
                     operation_name: operation,
