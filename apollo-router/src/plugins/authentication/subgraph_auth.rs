@@ -1,28 +1,22 @@
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::sync::Arc;
-use std::task::Context;
-use std::task::Poll;
 use std::time::SystemTime;
 
 use aws_credential_types::provider::ProvideCredentials;
 use aws_credential_types::Credentials;
+use aws_sigv4::http_request;
 use aws_sigv4::http_request::sign;
 use aws_sigv4::http_request::PayloadChecksumKind;
 use aws_sigv4::http_request::SignableBody;
 use aws_sigv4::http_request::SignableRequest;
-use aws_sigv4::http_request::SigningParams;
 use aws_sigv4::http_request::SigningSettings;
 use aws_types::region::Region;
-
-use futures::future::BoxFuture;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
-use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower_service::Service;
 
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -54,6 +48,8 @@ struct DefaultChainConfig {
     region: String,
     /// todo[igni]: document before merging.
     profile_name: Option<String>,
+    /// todo[igni]: document before merging.
+    service: String,
 }
 
 /// todo[igni]: document before merging.
@@ -65,6 +61,8 @@ struct AssumeRoleProvider {
     session: String,
     /// todo[igni]: document before merging.
     region: String,
+    /// todo[igni]: document before merging.
+    service: String,
 }
 
 /// todo[igni]: document before merging.
@@ -97,8 +95,14 @@ struct Config {
 }
 
 struct SubgraphAuth {
-    credentials_provider: Option<Arc<dyn ProvideCredentials>>,
+    signing_params: SigningParams,
     config: Config,
+}
+
+#[derive(Clone, Default)]
+struct SigningParams {
+    all: Option<SigningParamsConfig>,
+    subgraphs: HashMap<String, SigningParamsConfig>,
 }
 
 #[derive(Clone)]
@@ -112,68 +116,38 @@ struct SigningParamsConfig {
 impl Plugin for SubgraphAuth {
     type Config = Config;
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        // TODO: 1 for subgraphs as well i guess.
-        // TODO: CACHED PLZ
-        let credentials_provider = {
-            let default_chain =
-                if let Some(AuthConfig::AWSSigV4(AWSSigV4Config::DefaultChain(config))) =
-                    &init.config.all
-                {
-                    aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
-                        .region(aws_types::region::Region::new(config.region.clone()))
-                        .profile_name(
-                            config
-                                .profile_name
-                                .as_ref()
-                                .map(|s| s.clone())
-                                .unwrap_or_default()
-                                .as_str(),
-                        )
-                        .build()
-                        .await
-                } else {
-                    aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
-                        .build()
-                        .await
-                };
-            init.config.all.clone().map(|all| match all {
-                AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(config)) => {
-                    todo!()
-                }
-                AuthConfig::AWSSigV4(AWSSigV4Config::DefaultChain(config)) => {
-                    Arc::new(default_chain) as Arc<dyn ProvideCredentials>
-                }
-                AuthConfig::AWSSigV4(AWSSigV4Config::AssumeRoleProvider(config)) => {
-                    let rp = aws_config::sts::AssumeRoleProvider::builder(config.role.clone())
-                        .session_name(config.session.clone())
-                        .region(aws_types::region::Region::new(config.region.clone()))
-                        .build(default_chain);
-                    Arc::new(rp) as Arc<dyn ProvideCredentials>
-                }
-            })
+        let all = if let Some(config) = &init.config.all {
+            Some(make_signing_params(config).await)
+        } else {
+            None
         };
+
+        let mut subgraphs: HashMap<String, SigningParamsConfig> = Default::default();
+        for (subgraph_name, config) in &init.config.subgraphs {
+            subgraphs.insert(subgraph_name.clone(), make_signing_params(config).await);
+        }
+
         Ok(SubgraphAuth {
-            credentials_provider,
+            signing_params: { SigningParams { all, subgraphs } },
             config: init.config,
         })
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        let mut auth = self.config.all.as_ref();
-        if let Some(subgraph) = self.config.subgraphs.get(name) {
-            auth = Some(subgraph);
-        }
         if let Some(signing_params) = self.params_for_service(name) {
             ServiceBuilder::new()
-            .checkpoint_async( |req: SubgraphRequest| async move {
+            .checkpoint_async(move |mut req: SubgraphRequest| {
+                let signing_params = signing_params.clone();
+                async move {
+                    let signing_params = signing_params.clone();
                 if let Some(credentials_provider) = &signing_params.credentials_provider {
                     let credentials = credentials_provider.provide_credentials().await.unwrap();
                     let settings = get_signing_settings(&signing_params);
-                    let mut builder = SigningParams::builder()
+                    let mut builder = http_request::SigningParams::builder()
                         .access_key(credentials.access_key_id())
                         .secret_key(credentials.secret_access_key())
                         .region(signing_params.region.as_ref())
-                        .service_name(signing_params.service_name.as_ref())
+                        .service_name(&signing_params.service_name)
                         .time(SystemTime::now())
                         .settings(settings);
                     builder.set_security_token(credentials.session_token());
@@ -204,7 +178,7 @@ impl Plugin for SubgraphAuth {
                         Ok(output) => output,
                         Err(err) => {
                             tracing::warn!("Failed to sign GraphQL request for AWS SigV4, skipping signing. Error: {}", err);
-                            return ControlFlow::Continue(req);
+                            return Ok(ControlFlow::Continue(req));
                         }
                     }.into_parts();
                     signing_instructions.apply_to_request(&mut req.subgraph_request);
@@ -212,17 +186,70 @@ impl Plugin for SubgraphAuth {
                 } else {
                     Ok(ControlFlow::Continue(req))
                 }
-            }).service(service)
-                .boxed()
+            }
+            }).buffered()
+            .service(service)
+            .boxed()
         } else {
             service
         }
     }
 }
 
+async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
+    let default_chain = if let AuthConfig::AWSSigV4(AWSSigV4Config::DefaultChain(config)) = &config
+    {
+        aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
+            .region(aws_types::region::Region::new(config.region.clone()))
+            .profile_name(
+                config
+                    .profile_name
+                    .as_ref()
+                    .map(|s| s.clone())
+                    .unwrap_or_default()
+                    .as_str(),
+            )
+            .build()
+            .await
+    } else {
+        aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
+            .build()
+            .await
+    };
+    match config {
+        AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(config)) => {
+            todo!()
+        }
+        AuthConfig::AWSSigV4(AWSSigV4Config::DefaultChain(config)) => {
+            let region = aws_types::region::Region::new(config.region.clone());
+            SigningParamsConfig {
+                credentials_provider: Some(Arc::new(default_chain) as Arc<dyn ProvideCredentials>),
+                region,
+                service_name: config.service.clone(),
+            }
+        }
+        AuthConfig::AWSSigV4(AWSSigV4Config::AssumeRoleProvider(config)) => {
+            let region = aws_types::region::Region::new(config.region.clone());
+            let rp = aws_config::sts::AssumeRoleProvider::builder(config.role.clone())
+                .session_name(config.session.clone())
+                .region(region.clone())
+                .build(default_chain);
+
+            SigningParamsConfig {
+                credentials_provider: Some(Arc::new(rp) as Arc<dyn ProvideCredentials>),
+                region,
+                service_name: config.service.clone(),
+            }
+        }
+    }
+}
+
 impl SubgraphAuth {
     fn params_for_service(&self, service_name: &str) -> Option<SigningParamsConfig> {
-        todo!()
+        self.signing_params
+            .subgraphs
+            .get(service_name).map(|config| config.clone())
+            .or_else(|| self.signing_params.all.clone())
     }
 }
 
