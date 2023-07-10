@@ -11,6 +11,9 @@ expression: paths
             Fragment(
                 "User",
             ),
+            Key(
+                "name",
+            ),
         ],
     ),
 ]

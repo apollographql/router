@@ -8,10 +8,10 @@ query {
   }
   itf {
     id
-    ...F
+    ... on User {
+      id2: id
+      name
+    }
   }
-}
-fragment F on User {
-  id2: id
 }
 

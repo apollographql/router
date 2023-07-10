@@ -1,14 +1,23 @@
 ---
 source: apollo-router/src/plugins/authorization/scopes.rs
-expression: doc
+expression: paths
 ---
-query {
-  topProducts {
-    type
-    internal
-  }
-  me {
-    id
-  }
-}
-
+[
+    Path(
+        [
+            Key(
+                "topProducts",
+            ),
+            Key(
+                "internal",
+            ),
+        ],
+    ),
+    Path(
+        [
+            Key(
+                "me",
+            ),
+        ],
+    ),
+]

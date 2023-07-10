@@ -18,6 +18,7 @@ use crate::spec::query::traverse;
 
 pub(crate) struct ScopeExtractionVisitor<'a> {
     compiler: &'a ApolloCompiler,
+    file_id: FileId,
     pub(crate) extracted_scopes: HashSet<String>,
 }
 
@@ -25,9 +26,10 @@ pub(crate) const REQUIRES_SCOPES_DIRECTIVE_NAME: &str = "requiresScopes";
 
 impl<'a> ScopeExtractionVisitor<'a> {
     #[allow(dead_code)]
-    pub(crate) fn new(compiler: &'a ApolloCompiler) -> Self {
+    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Self {
         Self {
             compiler,
+            file_id,
             extracted_scopes: HashSet::new(),
         }
     }
@@ -38,10 +40,13 @@ impl<'a> ScopeExtractionVisitor<'a> {
         );
 
         if let Some(ty) = field.ty().type_def(&self.compiler.db) {
-            self.extracted_scopes.extend(
-                scopes_argument(ty.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)).cloned(),
-            );
+            self.get_scopes_from_type(&ty)
         }
+    }
+
+    fn get_scopes_from_type(&mut self, ty: &TypeDefinition) {
+        self.extracted_scopes
+            .extend(scopes_argument(ty.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)).cloned());
     }
 }
 
@@ -78,6 +83,55 @@ impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
         }
 
         traverse::field(self, parent_type, node)
+    }
+
+    fn fragment_definition(&mut self, node: &hir::FragmentDefinition) -> Result<(), BoxError> {
+        if let Some(ty) = self
+            .compiler
+            .db
+            .types_definitions_by_name()
+            .get(node.type_condition())
+        {
+            self.get_scopes_from_type(ty);
+        }
+        traverse::fragment_definition(self, node)
+    }
+
+    fn fragment_spread(&mut self, node: &hir::FragmentSpread) -> Result<(), BoxError> {
+        let fragments = self.compiler.db.fragments(self.file_id);
+        let type_condition = fragments
+            .get(node.name())
+            .ok_or("MissingFragmentDefinition")?
+            .type_condition();
+
+        if let Some(ty) = self
+            .compiler
+            .db
+            .types_definitions_by_name()
+            .get(type_condition)
+        {
+            self.get_scopes_from_type(ty);
+        }
+        traverse::fragment_spread(self, node)
+    }
+
+    fn inline_fragment(
+        &mut self,
+        parent_type: &str,
+
+        node: &hir::InlineFragment,
+    ) -> Result<(), BoxError> {
+        if let Some(type_condition) = node.type_condition() {
+            if let Some(ty) = self
+                .compiler
+                .db
+                .types_definitions_by_name()
+                .get(type_condition)
+            {
+                self.get_scopes_from_type(ty);
+            }
+        }
+        traverse::inline_fragment(self, parent_type, node)
     }
 }
 
@@ -221,6 +275,8 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
             .get(condition)
             .is_some_and(|ty| self.is_type_authorized(ty));
 
+        // FIXME: if a field was removed inside a fragment definition, then we should add an unauthorized path
+        // starting at the fragment spread, instead of starting at the definition
         let res = if !fragment_is_authorized {
             self.query_requires_scopes = true;
             self.unauthorized_paths.push(self.current_path.clone());
@@ -338,7 +394,7 @@ mod tests {
         }
         assert!(diagnostics.is_empty());
 
-        let mut visitor = ScopeExtractionVisitor::new(&compiler);
+        let mut visitor = ScopeExtractionVisitor::new(&compiler, id);
         traverse::document(&mut visitor, id).unwrap();
 
         visitor.extracted_scopes.into_iter().collect()
@@ -399,6 +455,9 @@ mod tests {
         }
         "#;
 
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
+
         let (doc, paths) = filter(QUERY, HashSet::new());
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -450,6 +509,9 @@ mod tests {
         }
         "#;
 
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
+
         let (doc, paths) = filter(QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
@@ -470,6 +532,9 @@ mod tests {
         }
         "#;
 
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
+
         let (doc, paths) = filter(QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
@@ -486,6 +551,9 @@ mod tests {
             }
         }
         "#;
+
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
 
         let (doc, paths) = filter(QUERY, HashSet::new());
 
@@ -509,6 +577,9 @@ mod tests {
         }
         "#;
 
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
+
         let (doc, paths) = filter(QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
@@ -525,13 +596,32 @@ mod tests {
             itf {
                 id
                 ... on User {
+                    id2: id
                     name
                 }
             }
         }
         "#;
 
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
+
         let (doc, paths) = filter(QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        let (doc, paths) = filter(QUERY, ["read:user".to_string()].into_iter().collect());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        let (doc, paths) = filter(
+            QUERY,
+            ["read:user".to_string(), "read:username".to_string()]
+                .into_iter()
+                .collect(),
+        );
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -551,11 +641,20 @@ mod tests {
         }
 
         fragment F on User {
+            id2: id
             name
         }
         "#;
 
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
+
         let (doc, paths) = filter(QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        let (doc, paths) = filter(QUERY, ["read:user".to_string()].into_iter().collect());
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);

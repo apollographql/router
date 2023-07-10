@@ -13,5 +13,6 @@ query {
 }
 fragment F on User {
   id2: id
+  name
 }
 

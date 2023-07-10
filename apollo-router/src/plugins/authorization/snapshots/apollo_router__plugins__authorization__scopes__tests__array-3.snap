@@ -6,11 +6,12 @@ expression: paths
     Path(
         [
             Key(
-                "itf",
+                "topProducts",
             ),
-            Fragment(
-                "User",
+            Key(
+                "publicReviews",
             ),
+            Flatten,
         ],
     ),
 ]
