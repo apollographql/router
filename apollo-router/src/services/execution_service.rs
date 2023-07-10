@@ -152,13 +152,11 @@ impl ExecutionService {
             };
             let stream = filter_stream(first, receiver, stream_mode);
             StreamWrapper(stream, tx_close_signal).boxed()
+        } else if had_initial_data {
+            // If it's a subscription event
+            once(ready(first)).boxed()
         } else {
-            // TODO: Si initial data je pense qu'on peut juste faire du once(ready(first))
-            if had_initial_data {
-                once(ready(first)).boxed()
-            } else {
-                once(ready(first)).chain(receiver).boxed()
-            }
+            once(ready(first)).chain(receiver).boxed()
         };
 
         if had_initial_data {
@@ -168,7 +166,6 @@ impl ExecutionService {
             ));
         }
 
-        // TODO: Ca on fait pas si y a initial_data
         let schema = self.schema.clone();
         let mut nullified_paths: Vec<Path> = vec![];
 

@@ -304,6 +304,7 @@ pub struct SubscriptionTaskParams {
     pub(crate) subscription_handle: SubscriptionHandle,
     pub(crate) subscription_config: SubscriptionConfig,
     pub(crate) stream_rx: futures::channel::mpsc::Receiver<HandleStream<String, graphql::Response>>,
+    pub(crate) service_name: String,
 }
 
 async fn subscription_task(
@@ -320,6 +321,7 @@ async fn subscription_task(
     };
     let subscription_config = sub_params.subscription_config;
     let subscription_handle = sub_params.subscription_handle;
+    let service_name = sub_params.service_name;
     let mut receiver = sub_params.stream_rx;
     let mut sender = sub_params.client_sender;
 
@@ -388,8 +390,7 @@ async fn subscription_task(
                 match message {
                     Some(mut val) => {
                         if display_body {
-                            // TODO get the service_name
-                            // tracing::info!(http.request.body = ?val, apollo.subgraph.name = %service_name, "Subscription event body from subgraph {service_name:?}");
+                            tracing::info!(http.request.body = ?val, apollo.subgraph.name = %service_name, "Subscription event body from subgraph {service_name:?}");
                         }
                         val.created_at = Some(Instant::now());
                         let res = dispatch_event(&execution_service_factory, query_plan.as_ref(), context.clone(), val, sender.clone())

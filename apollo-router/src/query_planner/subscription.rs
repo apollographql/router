@@ -159,6 +159,7 @@ impl SubscriptionNode {
                         subscription_handle,
                         subscription_config,
                         stream_rx: rx_handle,
+                        service_name: self.service_name.clone(),
                     };
 
                     if let Err(err) = subscription_conf_tx.send(subs_params).await {
