@@ -170,6 +170,7 @@ reqwest = { version = "0.11.18", default-features = false, features = [
     "json",
     "stream",
 ] }
+# note: this dependency should _always_ be pinned, prefix the version with an `=`
 router-bridge = "=0.3.1+v2.4.9"
 rust-embed="6.8.1"
 rustls = "0.20.8"
@@ -259,6 +260,7 @@ test-log = { version = "0.2.12", default-features = false, features = [
     "trace",
 ] }
 test-span = "0.7"
+toml = "0.7"
 tower-test = "0.4.0"
 
 # See note above in this file about `^tracing` packages which also applies to
