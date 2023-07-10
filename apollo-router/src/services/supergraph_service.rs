@@ -2531,4 +2531,35 @@ mod tests {
 
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
     }
+
+    #[tokio::test]
+    async fn missing_entities() {
+        let subgraphs = MockedSubgraphs([
+            ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{id activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "__typename": "User", "id": "0", "activeOrganization": { "__typename": "Organization", "id": "1" } } } }}
+            ).build()),
+            ("orga", MockSubgraph::builder().with_json(serde_json::json!{{"query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}","variables":{"representations":[{"__typename":"Organization","id":"1"}]}}},
+                                                       serde_json::json!{{"data": {}, "errors":[{"message":"error"}]}}).build())
+        ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .context(defer_context())
+            .query("query { currentUser { id  activeOrganization{ id name } } }")
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
 }
