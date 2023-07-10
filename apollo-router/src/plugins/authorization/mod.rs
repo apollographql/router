@@ -72,7 +72,6 @@ pub(crate) struct Conf {
 
 pub(crate) struct AuthorizationPlugin {
     require_authentication: bool,
-    enable_authorization_directives: bool,
 }
 
 impl AuthorizationPlugin {
@@ -150,6 +149,59 @@ impl AuthorizationPlugin {
 
             context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
         }
+    }
+
+    pub(crate) fn update_cache_key(context: &Context) {
+        let is_authenticated = context.contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS);
+
+        let request_scopes = context
+            .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+            .and_then(|value| {
+                value.as_object().and_then(|object| {
+                    object.get("scope").and_then(|v| {
+                        v.as_str()
+                            .map(|s| s.split(' ').map(|s| s.to_string()).collect::<HashSet<_>>())
+                    })
+                })
+            });
+        let query_scopes = context.get_json_value(REQUIRED_SCOPES_KEY).and_then(|v| {
+            v.as_array().map(|v| {
+                v.iter()
+                    .filter_map(|s| s.as_str().map(|s| s.to_string()))
+                    .collect::<HashSet<_>>()
+            })
+        });
+
+        let mut scopes = match (request_scopes, query_scopes) {
+            (None, _) => vec![],
+            (_, None) => vec![],
+            (Some(req), Some(query)) => req.intersection(&query).cloned().collect(),
+        };
+        scopes.sort();
+
+        let mut policies = context
+            .get_json_value(REQUIRED_POLICIES_KEY)
+            .and_then(|v| {
+                v.as_object().map(|v| {
+                    v.iter()
+                        .filter_map(|(policy, result)| match result {
+                            Value::Bool(true) => Some(policy.as_str().to_string()),
+                            _ => None,
+                        })
+                        .collect::<Vec<String>>()
+                })
+            })
+            .unwrap_or_default();
+        policies.sort();
+
+        context
+            .upsert(QUERY_PLANNER_CACHE_KEY_METADATA, |mut o: Object| {
+                o.insert("is_authenticated", is_authenticated.into());
+                o.insert("scopes", scopes.into());
+                o.insert("policies", policies.into());
+                o
+            })
+            .unwrap();
     }
 
     pub(crate) fn filter_query(
@@ -407,14 +459,11 @@ impl Plugin for AuthorizationPlugin {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(AuthorizationPlugin {
             require_authentication: init.config.require_authentication,
-            enable_authorization_directives: init
-                .config
-                .experimental_enable_authorization_directives,
         })
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        let service = if self.require_authentication {
+        if self.require_authentication {
             ServiceBuilder::new()
                 .checkpoint(move |request: supergraph::Request| {
                     if request
@@ -440,77 +489,6 @@ impl Plugin for AuthorizationPlugin {
                             .build()?;
                         Ok(ControlFlow::Break(response))
                     }
-                })
-                .service(service)
-                .boxed()
-        } else {
-            service
-        };
-
-        if self.enable_authorization_directives {
-            ServiceBuilder::new()
-                .map_request(move |request: supergraph::Request| {
-                    let is_authenticated = request
-                        .context
-                        .contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS);
-
-                    let request_scopes = request
-                        .context
-                        .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
-                        .and_then(|value| {
-                            value.as_object().and_then(|object| {
-                                object.get("scope").and_then(|v| {
-                                    v.as_str().map(|s| {
-                                        s.split(' ').map(|s| s.to_string()).collect::<HashSet<_>>()
-                                    })
-                                })
-                            })
-                        });
-                    let query_scopes = request
-                        .context
-                        .get_json_value(REQUIRED_SCOPES_KEY)
-                        .and_then(|v| {
-                            v.as_array().map(|v| {
-                                v.iter()
-                                    .filter_map(|s| s.as_str().map(|s| s.to_string()))
-                                    .collect::<HashSet<_>>()
-                            })
-                        });
-
-                    let mut scopes = match (request_scopes, query_scopes) {
-                        (None, _) => vec![],
-                        (_, None) => vec![],
-                        (Some(req), Some(query)) => req.intersection(&query).cloned().collect(),
-                    };
-                    scopes.sort();
-
-                    let mut policies = request
-                        .context
-                        .get_json_value(REQUIRED_POLICIES_KEY)
-                        .and_then(|v| {
-                            v.as_object().map(|v| {
-                                v.iter()
-                                    .filter_map(|(policy, result)| match result {
-                                        Value::Bool(true) => Some(policy.as_str().to_string()),
-                                        _ => None,
-                                    })
-                                    .collect::<Vec<String>>()
-                            })
-                        })
-                        .unwrap_or_default();
-                    policies.sort();
-
-                    request
-                        .context
-                        .upsert(QUERY_PLANNER_CACHE_KEY_METADATA, |mut o: Object| {
-                            o.insert("is_authenticated", is_authenticated.into());
-                            o.insert("scopes", scopes.into());
-                            o.insert("policies", policies.into());
-                            o
-                        })
-                        .unwrap();
-
-                    request
                 })
                 .service(service)
                 .boxed()

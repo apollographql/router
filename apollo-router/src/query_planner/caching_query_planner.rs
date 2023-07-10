@@ -21,6 +21,7 @@ use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::json_ext::Object;
+use crate::plugins::authorization::AuthorizationPlugin;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
@@ -52,6 +53,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     delegate: T,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
+    enable_authorization_directives: bool,
 }
 
 impl<T: Clone + 'static> CachingQueryPlanner<T>
@@ -77,11 +79,15 @@ where
             )
             .await,
         );
+
+        let enable_authorization_directives =
+            AuthorizationPlugin::enable_directives(&configuration, &schema).unwrap_or(false);
         Self {
             cache,
             delegate,
             schema,
             plugins: Arc::new(plugins),
+            enable_authorization_directives,
         }
     }
 
@@ -148,6 +154,13 @@ where
                     .lock()
                     .insert(Compiler(Arc::new(Mutex::new(compiler))));
 
+                context
+                    .insert(
+                        QUERY_PLANNER_CACHE_KEY_METADATA,
+                        caching_key.metadata.clone(),
+                    )
+                    .expect("should not fail");
+
                 let request = QueryPlannerRequest {
                     query,
                     operation_name: operation,
@@ -206,6 +219,11 @@ where
     fn call(&mut self, request: query_planner::CachingRequest) -> Self::Future {
         let mut qp = self.clone();
         let schema_id = self.schema.schema_id.clone();
+
+        if self.enable_authorization_directives {
+            AuthorizationPlugin::update_cache_key(&request.context);
+        }
+
         Box::pin(async move {
             let caching_key = CachingQueryKey {
                 schema_id,
