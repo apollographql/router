@@ -1,0 +1,17 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+assertion_line: 766
+expression: stream.next_response().await.unwrap()
+---
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "couldn't find mock for query {\"query\":\"{computer(id:\\\"Computer1\\\"){id errorField}}\"}",
+      "extensions": {
+        "code": "FETCH_ERROR"
+      }
+    }
+  ],
+  "hasNext": true
+}

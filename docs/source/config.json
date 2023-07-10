@@ -1,19 +1,28 @@
 {
   "title": "Router (self-hosted)",
-  "algoliaFilters": ["docset:router"],
+  "algoliaFilters": [
+    "docset:router"
+  ],
   "sidebar": {
     "Introduction": "/",
     "Quickstart": "/quickstart",
     "Moving from @apollo/gateway": "/migrating-from-gateway",
     "Federation version support": "/federation-version-support",
-    "Enterprise features": ["/enterprise-features", ["enterprise"]],
+    "Enterprise features": [
+      "/enterprise-features",
+      [
+        "enterprise"
+      ]
+    ],
     "Configuring the Router": {
       "Overview": "/configuration/overview",
       "Caching": {
         "In-memory caching": "/configuration/in-memory-caching",
         "Distributed caching": [
           "/configuration/distributed-caching",
-          ["enterprise"]
+          [
+            "enterprise"
+          ]
         ]
       },
       "Debugging": {
@@ -27,8 +36,18 @@
       "Security": {
         "CORS": "/configuration/cors",
         "CSRF prevention": "/configuration/csrf",
-        "JWT Authentication": ["/configuration/authn-jwt", ["enterprise"]],
-        "Operation limits": ["/configuration/operation-limits", ["enterprise"]],
+        "JWT Authentication": [
+          "/configuration/authn-jwt",
+          [
+            "enterprise"
+          ]
+        ],
+        "Operation limits": [
+          "/configuration/operation-limits",
+          [
+            "enterprise"
+          ]
+        ],
         "Privacy and data collection": "/privacy"
       }
     },
@@ -39,7 +58,9 @@
       "GraphQL Subscriptions": {
         "Subscriptions setup": [
           "/executing-operations/subscription-support",
-          ["enterprise"]
+          [
+            "enterprise"
+          ]
         ],
         "Subgraph protocol: HTTP callback": [
           "/executing-operations/subscription-callback-protocol",
@@ -50,7 +71,9 @@
         ],
         "Client protocol: HTTP multipart": [
           "/executing-operations/subscription-multipart-protocol",
-          ["enterprise"]
+          [
+            "enterprise"
+          ]
         ]
       }
     },
@@ -75,7 +98,12 @@
       "Overview": "/customizations/overview",
       "Rhai scripts": "/customizations/rhai",
       "Rhai API reference": "/customizations/rhai-api",
-      "External coprocessing": ["/customizations/coprocessor", ["enterprise"]],
+      "External coprocessing": [
+        "/customizations/coprocessor",
+        [
+          "enterprise"
+        ]
+      ],
       "Native Rust plugins": "/customizations/native",
       "Custom router binary": "/customizations/custom-binary"
     },
