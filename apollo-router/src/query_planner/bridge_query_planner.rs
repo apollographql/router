@@ -975,7 +975,7 @@ mod tests {
             .as_str()
             .expect("router-bridge in Cargo.toml dependencies is not a string");
         assert!(
-            router_bridge_version.contains("="),
+            router_bridge_version.contains('='),
             "router-bridge in Cargo.toml is not pinned with a '=' prefix"
         );
     }
