@@ -216,18 +216,17 @@ impl Plugin for SubgraphAuth {
 async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
     let default_chain = if let AuthConfig::AWSSigV4(AWSSigV4Config::DefaultChain(config)) = &config
     {
-        aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
-            .region(aws_types::region::Region::new(config.region.clone()))
-            .profile_name(
-                config
-                    .profile_name
-                    .as_ref()
-                    .cloned()
-                    .unwrap_or_default()
-                    .as_str(),
-            )
-            .build()
-            .await
+        let aws_config =
+            aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
+                .region(aws_types::region::Region::new(config.region.clone()));
+
+        let aws_config = if let Some(profile_name) = &config.profile_name {
+            aws_config.profile_name(profile_name.as_str())
+        } else {
+            aws_config
+        };
+
+        aws_config.build().await
     } else {
         aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
             .build()
