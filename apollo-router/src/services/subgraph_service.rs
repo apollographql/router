@@ -1003,8 +1003,9 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
+    use crate::plugins::subscription::SubgraphPassthroughMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
-    use crate::plugins::subscription::{SubgraphPassthroughMode, SUBSCRIPTION_CALLBACK_HMAC_KEY};
+    use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
     use crate::protocols::websocket::ClientMessage;
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
