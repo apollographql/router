@@ -46,7 +46,8 @@ pub(crate) struct Config {
     #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
 
-    /// Temporality
+    /// Temporality for export (default: `Cumulative`).
+    /// Note that when exporting to Datadog agent use `Delta`.
     #[serde(default)]
     pub(crate) temporality: Temporality,
 }
