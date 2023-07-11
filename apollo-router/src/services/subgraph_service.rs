@@ -717,7 +717,7 @@ enum ContentType {
     ApplicationGraphqlResponseJson,
 }
 
-fn content_type(service_name: &str, parts: &Parts) -> Result<ContentType, FetchError> {
+fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<ContentType, FetchError> {
     let content_type = parts
         .headers
         .get(header::CONTENT_TYPE)
@@ -777,7 +777,7 @@ async fn do_fetch(
             http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
         );
     }
-    let content_type = content_type(service_name, &parts);
+    let content_type = get_graphql_content_type(service_name, &parts);
 
     let body = if content_type.is_ok() {
         let body = hyper::body::to_bytes(body)
