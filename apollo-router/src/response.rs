@@ -165,10 +165,10 @@ impl Response {
         // If the data entry in the response is not present, the errors entry in the response must not be empty.
         // It must contain at least one error. The errors it contains should indicate why no data was able to be returned.
         if data.is_none() && errors.is_empty() {
-            Err(FetchError::SubrequestMalformedResponse {
+            return Err(FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
                 reason: "graphql response without data must contain at least one error".to_string(),
-            })?;
+            });
         }
 
         Ok(Response {
