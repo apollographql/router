@@ -133,7 +133,7 @@ impl Plugin for Rhai {
         let sdl = init.supergraph_sdl.clone();
         let scripts_path = match init.config.scripts {
             Some(path) => path,
-            None => "./rhai".into(),
+            None => "rhai".into(),
         };
 
         let main_file = match init.config.main {
