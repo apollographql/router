@@ -479,6 +479,7 @@ mod tests {
     use std::sync::Arc;
 
     use futures::future::BoxFuture;
+    use http::StatusCode;
     use hyper::Body;
     use serde_json::json;
     use tower::BoxError;
@@ -517,7 +518,7 @@ mod tests {
         mock_http_client
     }
 
-    /*#[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity)]
     fn mock_with_deferred_callback(
         callback: fn(
             hyper::Request<Body>,
@@ -539,7 +540,7 @@ mod tests {
         });
 
         mock_http_client
-    }*/
+    }
 
     #[tokio::test]
     async fn external_plugin_supergraph_request() {
@@ -744,6 +745,137 @@ mod tests {
             response.body_mut().next().await.unwrap().errors[0]
                 .message
                 .as_str()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_response() {
+        let supergraph_stage = SupergraphStage {
+            response: SupergraphResponseConf {
+                headers: true,
+                context: true,
+                body: true,
+                sdl: true,
+                status_code: false,
+            },
+            request: Default::default(),
+        };
+
+        let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_call()
+            .returning(|req: supergraph::Request| {
+                Ok(supergraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+
+        let mock_http_client = mock_with_deferred_callback(move |res: hyper::Request<Body>| {
+            Box::pin(async {
+                let deserialized_response: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
+                        .unwrap();
+
+                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
+                assert_eq!(
+                    PipelineStep::SupergraphResponse.to_string(),
+                    deserialized_response.stage
+                );
+
+                assert_eq!(
+                    json! {{"data":{ "test": 1234_u32 }}},
+                    deserialized_response.body.unwrap()
+                );
+
+                let input = json!(
+                      {
+                  "version": 1,
+                  "stage": "SupergraphResponse",
+                  "control": {
+                      "break": 400
+                  },
+                  "id": "1b19c05fdafc521016df33148ad63c1b",
+                  "headers": {
+                    "cookie": [
+                      "tasty_cookie=strawberry"
+                    ],
+                    "content-type": [
+                      "application/json"
+                    ],
+                    "host": [
+                      "127.0.0.1:4000"
+                    ],
+                    "apollo-federation-include-trace": [
+                      "ftv1"
+                    ],
+                    "apollographql-client-name": [
+                      "manual"
+                    ],
+                    "accept": [
+                      "*/*"
+                    ],
+                    "user-agent": [
+                      "curl/7.79.1"
+                    ],
+                    "content-length": [
+                      "46"
+                    ]
+                  },
+                  "body": {
+                    "data": { "test": 42 }
+                  },
+                  "context": {
+                    "entries": {
+                      "accepts-json": false,
+                      "accepts-wildcard": true,
+                      "accepts-multipart": false,
+                      "this-is-a-test-context": 42
+                    }
+                  },
+                  "sdl": "the sdl shouldnt change"
+                });
+                Ok(hyper::Response::builder()
+                    .body(Body::from(serde_json::to_string(&input).unwrap()))
+                    .unwrap())
+            })
+        });
+
+        let service = supergraph_stage.as_service(
+            mock_http_client,
+            mock_supergraph_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::canned_builder().build().unwrap();
+
+        let mut res = service.oneshot(request).await.unwrap();
+
+        // Let's assert that the router request has been transformed as it should have.
+        assert_eq!(res.response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            res.response.headers().get("cookie").unwrap(),
+            "tasty_cookie=strawberry"
+        );
+
+        assert_eq!(
+            res.context
+                .get::<&str, u8>("this-is-a-test-context")
+                .unwrap()
+                .unwrap(),
+            42
+        );
+
+        let body = res.response.body_mut().next().await.unwrap();
+        // the body should have changed:
+        assert_eq!(
+            json!({ "data": { "test": 42_u32 } }),
+            serde_json::to_value(&body).unwrap(),
         );
     }
 }
