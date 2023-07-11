@@ -781,7 +781,7 @@ async fn do_fetch(
             .instrument(tracing::debug_span!("aggregate_response_data"))
             .await
             .map_err(|err| {
-                tracing::error!(fetch_error = format!("{err:?}").as_str());
+                tracing::error!(fetch_error = ?err);
                 FetchError::SubrequestHttpError {
                     status_code: Some(parts.status.as_u16()),
                     service: service_name.to_string(),
