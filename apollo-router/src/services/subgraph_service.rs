@@ -718,11 +718,14 @@ enum ContentType {
 }
 
 fn content_type(service_name: &str, parts: &Parts) -> Result<ContentType, FetchError> {
-    match parts.headers.get(header::CONTENT_TYPE).map(|v| v.to_str().map(MediaType::parse)) {
-        Some(Ok(Ok(content_type)))if (content_type.ty == APPLICATION && content_type.subty == JSON) => Ok(ContentType::ApplicationJson),
-        Some(Ok(Ok(content_type)))if (content_type.ty == APPLICATION && content_type.subty == GRAPHQL_RESPONSE && content_type.suffix == Some(JSON)) => Ok(ContentType::ApplicationGraphqlResponseJson),
-        Some(Ok(Ok(content_type))) =>
-            {
+    let content_type = parts
+        .headers
+        .get(header::CONTENT_TYPE)
+        .map(|v| v.to_str().map(MediaType::parse));
+    match content_type {
+        Some(Ok(Ok(content_type))) if (content_type.ty == APPLICATION && content_type.subty == JSON) => Ok(ContentType::ApplicationJson),
+        Some(Ok(Ok(content_type))) if (content_type.ty == APPLICATION && content_type.subty == GRAPHQL_RESPONSE && content_type.suffix == Some(JSON)) => Ok(ContentType::ApplicationGraphqlResponseJson),
+        Some(Ok(Ok(content_type))) => {
                 Err(FetchError::SubrequestHttpError {
                     status_code: Some(parts.status.as_u16()),
                     service: service_name.to_string(),
