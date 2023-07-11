@@ -258,7 +258,7 @@ async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
             let rp = aws_config::sts::AssumeRoleProvider::builder(config.role.clone())
                 .session_name(config.session.clone())
                 .region(region.clone());
-            rp = if let Some(external_id) = config.external_id {
+            rp = if let Some(external_id) = &config.external_id {
                 rp.external_id(external_id.as_str())
             } else {
                 rp
