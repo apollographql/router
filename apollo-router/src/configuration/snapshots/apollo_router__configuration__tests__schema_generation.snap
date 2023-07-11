@@ -4098,6 +4098,15 @@ expression: "&schema"
                     "grpc",
                     "http"
                   ]
+                },
+                "temporality": {
+                  "description": "Temporality",
+                  "default": "cumulative",
+                  "type": "string",
+                  "enum": [
+                    "cumulative",
+                    "delta"
+                  ]
                 }
               },
               "additionalProperties": false,
@@ -4551,6 +4560,15 @@ expression: "&schema"
                   "enum": [
                     "grpc",
                     "http"
+                  ]
+                },
+                "temporality": {
+                  "description": "Temporality",
+                  "default": "cumulative",
+                  "type": "string",
+                  "enum": [
+                    "cumulative",
+                    "delta"
                   ]
                 }
               },
