@@ -84,9 +84,6 @@ impl SupergraphStage {
 
             AsyncCheckpointLayer::new(move |request: supergraph::Request| {
                 let request_config = request_config.clone();
-                let coprocessor_url = coprocessor_url.clone();
-                let http_client = http_client.clone();
-                let sdl = sdl.clone();
 
                 async move {
                     process_supergraph_request_stage(
@@ -407,7 +404,7 @@ mod tests {
         mock_http_client
     }
 
-    #[allow(clippy::type_complexity)]
+    /*#[allow(clippy::type_complexity)]
     fn mock_with_deferred_callback(
         callback: fn(
             hyper::Request<Body>,
@@ -429,7 +426,7 @@ mod tests {
         });
 
         mock_http_client
-    }
+    }*/
 
     #[tokio::test]
     async fn external_plugin_supergraph_request() {
