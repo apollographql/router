@@ -257,6 +257,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         reason: "subscription is not enabled".to_string(),
                         status_code: None,
                     })?;
+
                 let mode = subscription_config.mode.get_subgraph_config(&service_name);
 
                 match &mode {
@@ -297,6 +298,11 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             tracing::info!(
                                 monotonic_counter.apollo_router_deduplicated_subscriptions_total = 1u64,
                                 mode = %"callback",
+                            );
+                            tracing::info!(
+                                monotonic_counter.apollo.router.operations.subscriptions = 1u64,
+                                mode = %"callback",
+                                service_name = %service_name,
                             );
                             // Dedup happens here
                             return Ok(SubgraphResponse::builder()
@@ -440,6 +446,11 @@ async fn call_websocket(
         tracing::info!(
             monotonic_counter.apollo_router_deduplicated_subscriptions_total = 1u64,
             mode = %"passthrough",
+        );
+        tracing::info!(
+            monotonic_counter.apollo.router.operations.subscriptions = 1u64,
+            mode = %"passthrough",
+            service_name = %service_name,
         );
 
         // Dedup happens here
