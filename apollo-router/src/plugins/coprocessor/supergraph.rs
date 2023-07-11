@@ -371,19 +371,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::sync::Arc;
 
     use futures::future::BoxFuture;
-    use http::header::ACCEPT;
-    use http::header::CONTENT_TYPE;
-    use http::HeaderMap;
-    use http::HeaderValue;
-    use http::Method;
-    use http::StatusCode;
     use hyper::Body;
-    use mime::APPLICATION_JSON;
-    use mime::TEXT_HTML;
     use serde_json::json;
     use tower::BoxError;
     use tower::ServiceExt;
@@ -391,14 +382,7 @@ mod tests {
     use super::super::*;
     use super::*;
     use crate::plugin::test::MockHttpClientService;
-    use crate::plugin::test::MockRouterService;
-    use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
-    use crate::services::external::Externalizable;
-    use crate::services::external::PipelineStep;
-    use crate::services::external::EXTERNALIZABLE_VERSION;
-    use crate::services::router_service;
-    use crate::services::subgraph;
     use crate::services::supergraph;
 
     #[allow(clippy::type_complexity)]
@@ -579,22 +563,22 @@ mod tests {
         );
     }
 
-    /*#[tokio::test]
-    async fn external_plugin_subgraph_request_controlflow_break() {
-        let subgraph_stage = SubgraphStage {
-            request: SubgraphRequestConf {
+    #[tokio::test]
+    async fn external_plugin_supergraph_request_controlflow_break() {
+        let supergraph_stage = SupergraphStage {
+            request: SupergraphRequestConf {
                 headers: false,
                 context: false,
                 body: true,
-                uri: false,
+                sdl: false,
                 method: false,
-                service_name: false,
+                path: false,
             },
-            response: Default::default(),
+            //response: Default::default(),
         };
 
         // This will never be called because we will fail at the coprocessor.
-        let mock_subgraph_service = MockSubgraphService::new();
+        let mock_supergraph_service = MockSupergraphService::new();
 
         let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
             Box::pin(async {
@@ -602,7 +586,7 @@ mod tests {
                     .body(Body::from(
                         r##"{
                                 "version": 1,
-                                "stage": "SubgraphRequest",
+                                "stage": "SupergraphRequest",
                                 "control": {
                                     "break": 200
                                 },
@@ -623,17 +607,19 @@ mod tests {
             })
         });
 
-        let service = subgraph_stage.as_service(
+        let service = supergraph_stage.as_service(
             mock_http_client,
-            mock_subgraph_service.boxed(),
+            mock_supergraph_service.boxed(),
             "http://test".to_string(),
-            "my_subgraph_service_name".to_string(),
+            Arc::new("".to_string()),
         );
 
-        let request = sugraph::Request::fake_builder().build();
+        let request = supergraph::Request::fake_builder().build().unwrap();
 
-        let crate::services::subgraph::Response { response, context } =
-            service.oneshot(request).await.unwrap();
+        let crate::services::supergraph::Response {
+            mut response,
+            context,
+        } = service.oneshot(request).await.unwrap();
 
         assert!(context.get::<_, bool>("testKey").unwrap().unwrap());
 
@@ -643,7 +629,9 @@ mod tests {
 
         assert_eq!(
             "my error message",
-            response.into_body().errors[0].message.as_str()
+            response.body_mut().next().await.unwrap().errors[0]
+                .message
+                .as_str()
         );
-    }*/
+    }
 }
