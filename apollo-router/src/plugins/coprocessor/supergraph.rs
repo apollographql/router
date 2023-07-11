@@ -111,10 +111,6 @@ impl SupergraphStage {
 
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
-            let coprocessor_url = coprocessor_url.clone();
-            let sdl: Arc<String> = sdl.clone();
-            let http_client = http_client.clone();
-            let response_config = response_config.clone();
 
             MapFutureLayer::new(move |fut| {
                 let coprocessor_url = coprocessor_url.clone();
