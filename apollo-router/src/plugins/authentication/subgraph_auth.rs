@@ -115,7 +115,6 @@ struct Config {
 
 struct SubgraphAuth {
     signing_params: SigningParams,
-    config: Config,
 }
 
 #[derive(Clone, Default)]
@@ -148,7 +147,6 @@ impl Plugin for SubgraphAuth {
 
         Ok(SubgraphAuth {
             signing_params: { SigningParams { all, subgraphs } },
-            config: init.config,
         })
     }
 
@@ -353,6 +351,7 @@ mod test {
     use http::header::CONTENT_TYPE;
     use http::header::HOST;
     use regex::Regex;
+    use tower::Service;
 
     use super::*;
     use crate::graphql::Request;
@@ -423,15 +422,24 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = AuthLayer::new(AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(
-            AWSSigV4HardcodedConfig {
-                access_key_id: "id".to_string(),
-                secret_access_key: "secret".to_string(),
-                region: "us-east-1".to_string(),
-                service: "lambda".to_string(),
-            },
-        )))
-        .layer(mock);
+        let mut service = SubgraphAuth::new(
+            PluginInit::fake_builder()
+                .config(Config {
+                    all: Some(AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(
+                        AWSSigV4HardcodedConfig {
+                            access_key_id: "id".to_string(),
+                            secret_access_key: "secret".to_string(),
+                            region: "us-east-1".to_string(),
+                            service: "lambda".to_string(),
+                        },
+                    ))),
+                    subgraphs: Default::default(),
+                })
+                .build(),
+        )
+        .await
+        .unwrap()
+        .subgraph_service("test_subgraph", mock.boxed());
 
         service.ready().await?.call(subgraph_request).await?;
         Ok(())
