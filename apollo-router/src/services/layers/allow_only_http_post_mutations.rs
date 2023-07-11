@@ -17,6 +17,7 @@ use tower::Layer;
 use tower::Service;
 use tower::ServiceBuilder;
 
+use super::query_analysis::Compiler;
 use crate::graphql::Error;
 use crate::json_ext::Object;
 use crate::layers::async_checkpoint::AsyncCheckpointService;
@@ -24,8 +25,6 @@ use crate::layers::ServiceBuilderExt;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::query::QUERY_EXECUTABLE;
-
-use super::query_analysis::Compiler;
 
 #[derive(Default)]
 pub(crate) struct AllowOnlyHttpPostMutationsLayer {}
