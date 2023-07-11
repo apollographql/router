@@ -12,9 +12,11 @@ use tower_service::Service;
 
 use super::externalize_header_map;
 use super::*;
+use crate::graphql;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
+use crate::response;
 use crate::services::supergraph;
 
 /// What information is passed to a router request/response stage
@@ -35,7 +37,7 @@ pub(super) struct SupergraphRequestConf {
     pub(super) method: bool,
 }
 
-/*/// What information is passed to a router request/response stage
+/// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SupergraphResponseConf {
@@ -49,7 +51,7 @@ pub(super) struct SupergraphResponseConf {
     pub(super) sdl: bool,
     /// Send the HTTP status
     pub(super) status_code: bool,
-}*/
+}
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default)]
@@ -57,7 +59,7 @@ pub(super) struct SupergraphStage {
     /// The request configuration
     pub(super) request: SupergraphRequestConf,
     // /// The response configuration
-    //pub(super) response: SupergraphResponseConf,
+    pub(super) response: SupergraphResponseConf,
 }
 
 impl SupergraphStage {
@@ -78,6 +80,9 @@ impl SupergraphStage {
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
+            let coprocessor_url = coprocessor_url.clone();
+            let http_client = http_client.clone();
+            let sdl = sdl.clone();
 
             AsyncCheckpointLayer::new(move |request: supergraph::Request| {
                 let request_config = request_config.clone();
@@ -104,11 +109,16 @@ impl SupergraphStage {
             })
         });
 
-        /*let response_layer = (self.response != Default::default()).then_some({
+        let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
+            let coprocessor_url = coprocessor_url.clone();
+            let sdl: Arc<String> = sdl.clone();
+            let http_client = http_client.clone();
+            let response_config = response_config.clone();
+
             MapFutureLayer::new(move |fut| {
-                let sdl = sdl.clone();
                 let coprocessor_url = coprocessor_url.clone();
+                let sdl: Arc<String> = sdl.clone();
                 let http_client = http_client.clone();
                 let response_config = response_config.clone();
 
@@ -131,7 +141,7 @@ impl SupergraphStage {
                     })
                 }
             })
-        });*/
+        });
 
         fn external_service_span() -> impl Fn(&supergraph::Request) -> tracing::Span + Clone {
             move |_request: &supergraph::Request| {
@@ -146,7 +156,7 @@ impl SupergraphStage {
         ServiceBuilder::new()
             .instrument(external_service_span())
             .option_layer(request_layer)
-            //.option_layer(response_layer)
+            .option_layer(response_layer)
             .buffered()
             .service(service)
             .boxed()
@@ -282,12 +292,11 @@ where
     Ok(ControlFlow::Continue(request))
 }
 
-/*
 async fn process_supergraph_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
-    service_name: String,
-    mut response: supergraph::Response,
+    sdl: Arc<String>,
+    response: supergraph::Response,
     response_config: SupergraphResponseConf,
 ) -> Result<supergraph::Response, BoxError>
 where
@@ -298,38 +307,46 @@ where
         + 'static,
     <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
 {
-    // Call into our out of process processor with a body of our body
-    // First, extract the data we need from our response and prepare our
-    // external call. Use our configuration to figure out which data to send.
+    // split the response into parts + body
+    let (mut parts, body) = response.response.into_parts();
 
-    let (parts, body) = response.response.into_parts();
-    let bytes = Bytes::from(serde_json::to_vec(&body)?);
+    // we split the body (which is a stream) into first response + rest of responses,
+    // for which we will implement mapping later
+    let (first, rest): (Option<response::Response>, graphql::ResponseStream) =
+        body.into_future().await;
 
+    // If first is None, we return an error
+    let first = first.ok_or_else(|| {
+        BoxError::from("Coprocessor cannot convert body into future due to problem with first part")
+    })?;
+
+    // Now we process our first chunk of response
+    // Encode headers, body, status, context, sdl to create a payload
     let headers_to_send = response_config
         .headers
         .then(|| externalize_header_map(&parts.headers))
         .transpose()?;
-
-    let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-
     let body_to_send = response_config
         .body
-        .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
-        .transpose()?;
+        .then(|| serde_json::to_value(&first).expect("serialization will not fail"));
+    let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
     let context_to_send = response_config.context.then(|| response.context.clone());
+    let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
-    let payload = Externalizable::subgraph_builder()
+    let payload = Externalizable::supergraph_builder()
         .stage(PipelineStep::SupergraphResponse)
         .and_id(TraceId::maybe_new().map(|id| id.to_string()))
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)
         .and_status_code(status_to_send)
+        .and_sdl(sdl_to_send.clone())
         .build();
 
+    // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
     let guard = response.context.enter_active_request();
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
     drop(guard);
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -340,16 +357,15 @@ where
     // that we replace "bits" of our incoming response with the updated bits if they
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
-
-    let new_body: crate::graphql::Response = match co_processor_output.body {
+    let new_body: crate::response::Response = match co_processor_output.body {
         Some(value) => serde_json::from_value(value)?,
-        None => body,
+        None => first,
     };
 
-    response.response = http::Response::from_parts(parts, new_body);
+    //response.response = http::Response::from_parts(parts, stream::once(future::ready(new_body)));
 
     if let Some(control) = co_processor_output.control {
-        *response.response.status_mut() = control.get_http_status()?
+        parts.status = control.get_http_status()?
     }
 
     if let Some(context) = co_processor_output.context {
@@ -361,12 +377,106 @@ where
     }
 
     if let Some(headers) = co_processor_output.headers {
-        *response.response.headers_mut() = internalize_header_map(headers)?;
+        parts.headers = internalize_header_map(headers)?;
     }
 
-    Ok(response)
+    // Now break our co-processor modified response back into parts
+    //let (parts, body) = response.response.into_parts();
+
+    // Clone all the bits we need
+    let context = response.context.clone();
+    let map_context = response.context.clone();
+
+    // Map the rest of our body to process subsequent chunks of response
+    let mapped_stream = rest
+        .then(move |deferred_response| {
+            let generator_client = http_client.clone();
+            let generator_coprocessor_url = coprocessor_url.clone();
+            let generator_map_context = map_context.clone();
+            let generator_sdl_to_send = sdl_to_send.clone();
+
+            async move {
+                let body_to_send = response_config.body.then(|| {
+                    serde_json::to_value(&deferred_response).expect("serialization will not fail")
+                });
+                let context_to_send = response_config
+                    .context
+                    .then(|| generator_map_context.clone());
+
+                // Note: We deliberately DO NOT send headers or status_code even if the user has
+                // requested them. That's because they are meaningless on a deferred response and
+                // providing them will be a source of confusion.
+                let payload = Externalizable::router_builder()
+                    .stage(PipelineStep::SupergraphResponse)
+                    .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+                    .and_body(body_to_send)
+                    .and_context(context_to_send)
+                    .and_sdl(generator_sdl_to_send)
+                    .build();
+
+                // Second, call our co-processor and get a reply.
+                tracing::debug!(?payload, "externalized output");
+                let guard = generator_map_context.enter_active_request();
+                let co_processor_result = payload
+                    .call(generator_client, &generator_coprocessor_url)
+                    .await;
+                drop(guard);
+                tracing::debug!(?co_processor_result, "co-processor returned");
+                let co_processor_output = co_processor_result?;
+
+                validate_coprocessor_output(
+                    &co_processor_output,
+                    PipelineStep::SupergraphResponse,
+                )?;
+
+                // Third, process our reply and act on the contents. Our processing logic is
+                // that we replace "bits" of our incoming response with the updated bits if they
+                // are present in our co_processor_output. If they aren't present, just use the
+                // bits that we sent to the co_processor.
+                let new_deferred_response: crate::response::Response =
+                    match co_processor_output.body {
+                        Some(value) => serde_json::from_value(value)?,
+                        None => deferred_response,
+                    };
+
+                if let Some(context) = co_processor_output.context {
+                    for (key, value) in context.try_into_iter()? {
+                        generator_map_context.upsert_json_value(key, move |_current| value);
+                    }
+                }
+
+                // We return the deferred_response into our stream of response chunks
+                Ok(new_deferred_response)
+            }
+        })
+        .map(|res: Result<response::Response, BoxError>| match res {
+            Ok(response) => response,
+            Err(e) => {
+                tracing::error!("coprocessor error handling deferred supergraph response: {e}");
+                response::Response::builder()
+                    .error(
+                        Error::builder()
+                            .message("Internal error handling deferred response")
+                            .extension_code("INTERNAL_ERROR")
+                            .build(),
+                    )
+                    .build()
+            }
+        });
+
+    //response.response = http::Response::from_parts(parts, stream::once(future::ready(new_body)));
+
+    // Create our response stream which consists of the bytes from our first body chained with the
+    // rest of the responses in our mapped stream.
+    //let bytes = hyper::body::to_bytes(body).await.map_err(BoxError::from);
+    let stream = once(ready(new_body)).chain(mapped_stream).boxed();
+
+    // Finally, return a response which has a Body that wraps our stream of response chunks.
+    Ok(supergraph::Response {
+        context,
+        response: http::Response::from_parts(parts, stream),
+    })
 }
-*/
 
 #[cfg(test)]
 mod tests {
@@ -396,15 +506,15 @@ mod tests {
             println!("mock_with_callback [{}]", line!());
 
             let mut mock_http_client = MockHttpClientService::new();
-            mock_http_client.expect_call().returning(callback);
+            //mock_http_client.expect_call().returning(callback);
 
-            /*mock_http_client.expect_clone().returning(move || {
+            mock_http_client.expect_clone().returning(move || {
                 println!("mock_with_callback [{}]", line!());
 
                 let mut mock_http_client = MockHttpClientService::new();
                 mock_http_client.expect_call().returning(callback);
                 mock_http_client
-            });*/
+            });
             mock_http_client
         });
 
@@ -446,7 +556,7 @@ mod tests {
                 method: false,
                 path: false,
             },
-            //response: Default::default(),
+            response: Default::default(),
         };
 
         // This will never be called because we will fail at the coprocessor.
@@ -580,7 +690,7 @@ mod tests {
                 method: false,
                 path: false,
             },
-            //response: Default::default(),
+            response: Default::default(),
         };
 
         // This will never be called because we will fail at the coprocessor.
