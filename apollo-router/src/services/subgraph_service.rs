@@ -989,7 +989,6 @@ mod tests {
     use http::Uri;
     use hyper::service::make_service_fn;
     use hyper::Body;
-    use serde_json::json;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use tower::service_fn;
@@ -1601,7 +1600,7 @@ mod tests {
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .status(StatusCode::OK)
                 .body(
-                    serde_json::to_string(&Response::builder().data(json!({})).build())
+                    serde_json::to_string(&Response::builder().data(Value::Null).build())
                         .expect("always valid")
                         .into(),
                 )
