@@ -81,7 +81,7 @@ where
         );
 
         let enable_authorization_directives =
-            AuthorizationPlugin::enable_directives(&configuration, &schema).unwrap_or(false);
+            AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
         Self {
             cache,
             delegate,
