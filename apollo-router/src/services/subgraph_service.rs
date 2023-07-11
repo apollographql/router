@@ -984,7 +984,8 @@ where
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
-    use std::net::{SocketAddr, TcpListener};
+    use std::net::SocketAddr;
+    use std::net::TcpListener;
     use std::str::FromStr;
 
     use axum::extract::ws::Message;
