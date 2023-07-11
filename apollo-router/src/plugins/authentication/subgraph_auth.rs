@@ -158,6 +158,7 @@ impl Plugin for SubgraphAuth {
                 async move {
                     let signing_params = signing_params.clone();
                 if let Some(credentials_provider) = &signing_params.credentials_provider {
+                    // TODO: DONT UNWRAP YO
                     let credentials = credentials_provider.provide_credentials().await.unwrap();
                     let settings = get_signing_settings(&signing_params);
                     let mut builder = http_request::SigningParams::builder()
