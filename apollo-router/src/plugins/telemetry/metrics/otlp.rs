@@ -7,6 +7,7 @@ use opentelemetry_otlp::TonicExporterBuilder;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 
@@ -55,7 +56,8 @@ impl MetricsConfigurator for super::super::otlp::Config {
                             .map(|(k, v)| KeyValue::new(k, v)),
                     ))
                     .build()?;
-                builder = builder.with_meter_provider(exporter.clone());
+                builder = builder
+                    .with_meter_provider(FilterMeterProvider::public_metrics(exporter.clone()));
                 builder = builder.with_exporter(exporter);
                 Ok(builder)
             }

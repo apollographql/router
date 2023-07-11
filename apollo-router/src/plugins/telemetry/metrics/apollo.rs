@@ -16,6 +16,7 @@ use url::Url;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::apollo_exporter::{get_uname, ApolloExporter};
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
@@ -118,7 +119,8 @@ impl Config {
                     .with_metadata(metadata),
             )
             .build()?;
-        builder = builder.with_meter_provider(exporter.clone());
+        builder =
+            builder.with_meter_provider(FilterMeterProvider::apollo_metrics(exporter.clone()));
         builder = builder.with_exporter(exporter);
         Ok(builder)
     }
