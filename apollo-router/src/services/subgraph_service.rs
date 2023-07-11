@@ -758,7 +758,7 @@ async fn do_fetch(
     let response = client
         .call(request)
         .map_err(|err| {
-            tracing::error!(fetch_error = format!("{err:?}").as_str());
+            tracing::error!(fetch_error = ?err);
             FetchError::SubrequestHttpError {
                 status_code: None,
                 service: service_name.to_string(),
