@@ -78,12 +78,12 @@ impl SupergraphStage {
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
-            let coprocessor_url = coprocessor_url.clone();
-            let http_client = http_client.clone();
-            let sdl = sdl.clone();
 
             AsyncCheckpointLayer::new(move |request: supergraph::Request| {
                 let request_config = request_config.clone();
+                let coprocessor_url = coprocessor_url.clone();
+                let http_client = http_client.clone();
+                let sdl = sdl.clone();
 
                 async move {
                     process_supergraph_request_stage(
@@ -390,14 +390,21 @@ mod tests {
             hyper::Request<Body>,
         ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
     ) -> MockHttpClientService {
+        println!("mock_with_callback [{}]", line!());
         let mut mock_http_client = MockHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {
+            println!("mock_with_callback [{}]", line!());
+
             let mut mock_http_client = MockHttpClientService::new();
-            mock_http_client.expect_clone().returning(move || {
+            mock_http_client.expect_call().returning(callback);
+
+            /*mock_http_client.expect_clone().returning(move || {
+                println!("mock_with_callback [{}]", line!());
+
                 let mut mock_http_client = MockHttpClientService::new();
                 mock_http_client.expect_call().returning(callback);
                 mock_http_client
-            });
+            });*/
             mock_http_client
         });
 
