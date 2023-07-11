@@ -41,6 +41,23 @@ struct AWSSigV4HardcodedConfig {
     service: String,
 }
 
+impl ProvideCredentials for AWSSigV4HardcodedConfig {
+    fn provide_credentials<'a>(
+        &'a self,
+    ) -> aws_credential_types::provider::future::ProvideCredentials<'a>
+    where
+        Self: 'a,
+    {
+        aws_credential_types::provider::future::ProvideCredentials::ready(Ok(Credentials::new(
+            self.access_key_id.clone(),
+            self.secret_access_key.clone(),
+            None,
+            None,
+            "apollo-router",
+        )))
+    }
+}
+
 /// todo[igni]: document before merging.
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 struct DefaultChainConfig {
@@ -218,7 +235,13 @@ async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
     };
     match config {
         AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(config)) => {
-            todo!()
+            let region = aws_types::region::Region::new(config.region.clone());
+            let credentials_provider = Arc::new(config.clone()) as Arc<dyn ProvideCredentials>;
+            SigningParamsConfig {
+                region,
+                service_name: config.service.clone(),
+                credentials_provider: Some(credentials_provider),
+            }
         }
         AuthConfig::AWSSigV4(AWSSigV4Config::DefaultChain(config)) => {
             let region = aws_types::region::Region::new(config.region.clone());
