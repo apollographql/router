@@ -630,7 +630,7 @@ async fn call_http(
         tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
     }
 
-    // Perform the actual fetch. I this fails then
+    // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     let (parts, content_type, body) = do_fetch(
         client,
         &context,
