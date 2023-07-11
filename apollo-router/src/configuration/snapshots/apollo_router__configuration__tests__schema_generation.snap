@@ -4100,12 +4100,23 @@ expression: "&schema"
                   ]
                 },
                 "temporality": {
-                  "description": "Temporality",
+                  "description": "Temporality for export (default: `Cumulative`). Note that when exporting to Datadog agent use `Delta`.",
                   "default": "cumulative",
-                  "type": "string",
-                  "enum": [
-                    "cumulative",
-                    "delta"
+                  "oneOf": [
+                    {
+                      "description": "Export cumulative metrics.",
+                      "type": "string",
+                      "enum": [
+                        "cumulative"
+                      ]
+                    },
+                    {
+                      "description": "Export delta metrics. `Delta` should be used when exporting to DataDog Agent.",
+                      "type": "string",
+                      "enum": [
+                        "delta"
+                      ]
+                    }
                   ]
                 }
               },
@@ -4563,12 +4574,23 @@ expression: "&schema"
                   ]
                 },
                 "temporality": {
-                  "description": "Temporality",
+                  "description": "Temporality for export (default: `Cumulative`). Note that when exporting to Datadog agent use `Delta`.",
                   "default": "cumulative",
-                  "type": "string",
-                  "enum": [
-                    "cumulative",
-                    "delta"
+                  "oneOf": [
+                    {
+                      "description": "Export cumulative metrics.",
+                      "type": "string",
+                      "enum": [
+                        "cumulative"
+                      ]
+                    },
+                    {
+                      "description": "Export delta metrics. `Delta` should be used when exporting to DataDog Agent.",
+                      "type": "string",
+                      "enum": [
+                        "delta"
+                      ]
+                    }
                   ]
                 }
               },
