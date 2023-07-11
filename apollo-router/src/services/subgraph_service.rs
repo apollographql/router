@@ -724,22 +724,31 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
         .get(header::CONTENT_TYPE)
         .map(|v| v.to_str().map(MediaType::parse));
     match content_type {
-        Some(Ok(Ok(content_type))) if (content_type.ty == APPLICATION && content_type.subty == JSON) => Ok(ContentType::ApplicationJson),
-        Some(Ok(Ok(content_type))) if (content_type.ty == APPLICATION && content_type.subty == GRAPHQL_RESPONSE && content_type.suffix == Some(JSON)) => Ok(ContentType::ApplicationGraphqlResponseJson),
         Some(Ok(Ok(content_type))) => {
+            if content_type.ty == APPLICATION && content_type.subty == JSON {
+                Ok(ContentType::ApplicationJson)
+            } else if content_type.ty == APPLICATION
+                && content_type.subty == GRAPHQL_RESPONSE
+                && content_type.suffix == Some(JSON)
+            {
+                Ok(ContentType::ApplicationGraphqlResponseJson)
+            } else {
                 Err(FetchError::SubrequestHttpError {
                     status_code: Some(parts.status.as_u16()),
                     service: service_name.to_string(),
-                    reason: format!("subgraph didn't return JSON (expected content-type: {} or content-type: {GRAPHQL_JSON_RESPONSE_HEADER_VALUE}; found content-type: {content_type})", APPLICATION_JSON.essence_str()),
+                    reason: format!("subgraph didn't return JSON (expected content-type: {} or content-type: {}; found content-type: {content_type})", APPLICATION_JSON.essence_str(), GRAPHQL_JSON_RESPONSE_HEADER_VALUE),
                 })
             }
-        None | Some(_) => {
-            Err(FetchError::SubrequestHttpError {
-                status_code: Some(parts.status.as_u16()),
-                service: service_name.to_string(),
-                reason: format!("subgraph didn't return JSON (expected content-type: {} or content-type: {GRAPHQL_JSON_RESPONSE_HEADER_VALUE})", APPLICATION_JSON.essence_str()),
-            })
         }
+        None | Some(_) => Err(FetchError::SubrequestHttpError {
+            status_code: Some(parts.status.as_u16()),
+            service: service_name.to_string(),
+            reason: format!(
+                "subgraph didn't return JSON (expected content-type: {} or content-type: {})",
+                APPLICATION_JSON.essence_str(),
+                GRAPHQL_JSON_RESPONSE_HEADER_VALUE
+            ),
+        }),
     }
 }
 
