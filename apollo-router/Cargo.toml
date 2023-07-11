@@ -78,7 +78,7 @@ clap = { version = "4.3.11", default-features = false, features = [
 ] }
 console-subscriber = { version = "0.1.10", optional = true }
 ci_info = {version="0.14.10", features=["serde-1"] }
-dashmap = { version = "5.4.0", features = ["serde"] }
+dashmap = { version = "5.5.0", features = ["serde"] }
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", default-features = false, features = [
     "from",
@@ -170,14 +170,15 @@ reqwest = { version = "0.11.18", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = "0.3.0+v2.4.8"
+# note: this dependency should _always_ be pinned, prefix the version with an `=`
+router-bridge = "=0.3.1+v2.4.9"
 rust-embed="6.8.1"
 rustls = "0.20.8"
 rustls-pemfile = "1.0.3"
 schemars = { version = "0.8.12", features = ["url"] }
 shellexpand = "3.1.0"
 sha2 = "0.10.7"
-serde = { version = "1.0.167", features = ["derive", "rc"] }
+serde = { version = "1.0.171", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.1", features = ["preserve_order"] }
 serde_json = { version = "1.0.100", features = ["preserve_order", "float_roundtrip"] }
 serde_urlencoded = "0.7.1"
@@ -259,6 +260,7 @@ test-log = { version = "0.2.12", default-features = false, features = [
     "trace",
 ] }
 test-span = "0.7"
+toml = "0.7"
 tower-test = "0.4.0"
 
 # See note above in this file about `^tracing` packages which also applies to

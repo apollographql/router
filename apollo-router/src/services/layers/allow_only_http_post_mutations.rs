@@ -4,6 +4,10 @@
 
 use std::ops::ControlFlow;
 
+use apollo_compiler::hir::OperationType;
+use apollo_compiler::HirDatabase;
+use apollo_compiler::InputDatabase;
+use futures::future::BoxFuture;
 use http::header::HeaderName;
 use http::HeaderValue;
 use http::Method;
@@ -11,76 +15,148 @@ use http::StatusCode;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
+use tower::ServiceBuilder;
 
+use super::query_analysis::Compiler;
 use crate::graphql::Error;
 use crate::json_ext::Object;
-use crate::layers::sync_checkpoint::CheckpointService;
-use crate::services::ExecutionRequest;
-use crate::services::ExecutionResponse;
+use crate::layers::async_checkpoint::AsyncCheckpointService;
+use crate::layers::ServiceBuilderExt;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
+use crate::spec::query::QUERY_EXECUTABLE;
 
 #[derive(Default)]
 pub(crate) struct AllowOnlyHttpPostMutationsLayer {}
 
 impl<S> Layer<S> for AllowOnlyHttpPostMutationsLayer
 where
-    S: Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError> + Send + 'static,
-    <S as Service<ExecutionRequest>>::Future: Send + 'static,
+    S: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    <S as Service<SupergraphRequest>>::Future: Send + 'static,
 {
-    type Service = CheckpointService<S, ExecutionRequest>;
+    type Service = AsyncCheckpointService<
+        S,
+        BoxFuture<'static, Result<ControlFlow<SupergraphResponse, SupergraphRequest>, BoxError>>,
+        SupergraphRequest,
+    >;
 
     fn layer(&self, service: S) -> Self::Service {
-        CheckpointService::new(
-            |req: ExecutionRequest| {
-                if req.supergraph_request.method() != Method::POST
-                    && req.query_plan.contains_mutations()
-                {
-                    let errors = vec![Error::builder()
-                        .message("Mutations can only be sent over HTTP POST".to_string())
-                        .extension_code("MUTATION_FORBIDDEN")
-                        .build()];
-                    let mut res = ExecutionResponse::builder()
-                        .errors(errors)
-                        .extensions(Object::default())
-                        .status_code(StatusCode::METHOD_NOT_ALLOWED)
-                        .context(req.context)
-                        .build()?;
-                    res.response.headers_mut().insert(
-                        HeaderName::from_static("allow"),
-                        HeaderValue::from_static("POST"),
+        ServiceBuilder::new()
+            .checkpoint_async(|req: SupergraphRequest| {
+                Box::pin(async {
+                    if req.supergraph_request.method() == Method::POST {
+                        return Ok(ControlFlow::Continue(req));
+                    }
+
+                    let compiler = match req.context.private_entries.lock().get::<Compiler>() {
+                        None => {
+                            let errors = vec![Error::builder()
+                                .message("Cannot find compiler".to_string())
+                                .extension_code("MISSING_COMPILER")
+                                .build()];
+                            let res = SupergraphResponse::builder()
+                                .errors(errors)
+                                .extensions(Object::default())
+                                .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                                .context(req.context.clone())
+                                .build()?;
+
+                            return Ok(ControlFlow::Break(res));
+                        }
+                        Some(c) => c.0.clone(),
+                    };
+
+                    let c = compiler.lock().await.snapshot();
+                    let file_id = c
+                        .source_file(QUERY_EXECUTABLE.into())
+                        .expect("the query is already loaded in the compiler");
+
+                    let op = c.find_operation(
+                        file_id,
+                        req.supergraph_request.body().operation_name.clone(),
                     );
-                    Ok(ControlFlow::Break(res))
-                } else {
-                    Ok(ControlFlow::Continue(req))
-                }
-            },
-            service,
-        )
+                    drop(c);
+
+                    match op {
+                        None => {
+                            let errors = vec![Error::builder()
+                                .message("Cannot find operation".to_string())
+                                .extension_code("MISSING_OPERATION")
+                                .build()];
+                            let res = SupergraphResponse::builder()
+                                .errors(errors)
+                                .extensions(Object::default())
+                                .status_code(StatusCode::METHOD_NOT_ALLOWED)
+                                .context(req.context)
+                                .build()?;
+
+                            Ok(ControlFlow::Break(res))
+                        }
+                        Some(op) => {
+                            if op.operation_ty() == OperationType::Mutation {
+                                let errors = vec![Error::builder()
+                                    .message(
+                                        "Mutations can only be sent over HTTP POST".to_string(),
+                                    )
+                                    .extension_code("MUTATION_FORBIDDEN")
+                                    .build()];
+                                let mut res = SupergraphResponse::builder()
+                                    .errors(errors)
+                                    .extensions(Object::default())
+                                    .status_code(StatusCode::METHOD_NOT_ALLOWED)
+                                    .context(req.context)
+                                    .build()?;
+                                res.response.headers_mut().insert(
+                                    HeaderName::from_static("allow"),
+                                    HeaderValue::from_static("POST"),
+                                );
+                                Ok(ControlFlow::Break(res))
+                            } else {
+                                Ok(ControlFlow::Continue(req))
+                            }
+                        }
+                    }
+                })
+                    as BoxFuture<
+                        'static,
+                        Result<ControlFlow<SupergraphResponse, SupergraphRequest>, BoxError>,
+                    >
+            })
+            .service(service)
     }
 }
 
 #[cfg(test)]
 mod forbid_http_get_mutations_tests {
-    use serde_json::json;
+    use std::sync::Arc;
+
+    use apollo_compiler::ApolloCompiler;
+    use tokio::sync::Mutex;
     use tower::ServiceExt;
 
     use super::*;
     use crate::error::Error;
-    use crate::graphql;
     use crate::graphql::Response;
-    use crate::http_ext;
-    use crate::plugin::test::MockExecutionService;
+    use crate::plugin::test::MockSupergraphService;
     use crate::query_planner::fetch::OperationKind;
-    use crate::query_planner::PlanNode;
-    use crate::query_planner::QueryPlan;
+    use crate::Context;
 
     #[tokio::test]
     async fn it_lets_http_post_queries_pass_through() {
-        let mut mock_service = MockExecutionService::new();
+        let mut mock_service = MockSupergraphService::new();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
+        mock_service.expect_clone().returning(move || {
+            let mut service = MockSupergraphService::new();
+
+            service
+                .expect_call()
+                .times(1)
+                .returning(move |_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
+            service
+        });
 
         let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
 
@@ -98,12 +174,17 @@ mod forbid_http_get_mutations_tests {
 
     #[tokio::test]
     async fn it_lets_http_post_mutations_pass_through() {
-        let mut mock_service = MockExecutionService::new();
+        let mut mock_service = MockSupergraphService::new();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
+        mock_service.expect_clone().returning(move || {
+            let mut service = MockSupergraphService::new();
+
+            service
+                .expect_call()
+                .times(1)
+                .returning(move |_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
+            service
+        });
 
         let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
 
@@ -121,12 +202,17 @@ mod forbid_http_get_mutations_tests {
 
     #[tokio::test]
     async fn it_lets_http_get_queries_pass_through() {
-        let mut mock_service = MockExecutionService::new();
+        let mut mock_service = MockSupergraphService::new();
 
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
+        mock_service.expect_clone().returning(move || {
+            let mut service = MockSupergraphService::new();
+
+            service
+                .expect_call()
+                .times(1)
+                .returning(move |_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
+            service
+        });
 
         let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
 
@@ -158,8 +244,11 @@ mod forbid_http_get_mutations_tests {
         let expected_status = StatusCode::METHOD_NOT_ALLOWED;
         let expected_allow_header = "POST";
 
-        let mut service_stack =
-            AllowOnlyHttpPostMutationsLayer::default().layer(MockExecutionService::new());
+        let mut mock_service = MockSupergraphService::new();
+        mock_service
+            .expect_clone()
+            .returning(MockSupergraphService::new);
+        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
 
         let forbidden_requests = [
             Method::GET,
@@ -192,46 +281,30 @@ mod forbid_http_get_mutations_tests {
         assert_eq!(&response.errors[0], expected_error);
     }
 
-    fn create_request(method: Method, operation_kind: OperationKind) -> ExecutionRequest {
-        let root: PlanNode = if operation_kind == OperationKind::Mutation {
-            serde_json::from_value(json!({
-                "kind": "Sequence",
-                "nodes": [
-                    {
-                        "kind": "Fetch",
-                        "serviceName": "product",
-                        "variableUsages": [],
-                        "operation": "{__typename}",
-                        "operationKind": "mutation"
-                      },
-                ]
-            }))
-            .unwrap()
-        } else {
-            serde_json::from_value(json!({
-                "kind": "Sequence",
-                "nodes": [
-                    {
-                        "kind": "Fetch",
-                        "serviceName": "product",
-                        "variableUsages": [],
-                        "operation": "{__typename}",
-                        "operationKind": "query"
-                      },
-                ]
-            }))
-            .unwrap()
+    fn create_request(method: Method, operation_kind: OperationKind) -> SupergraphRequest {
+        let query = match operation_kind {
+            OperationKind::Query => "query { a }",
+            OperationKind::Mutation => "mutation { a }",
+
+            OperationKind::Subscription => "subscription { a }",
         };
 
-        let request = http_ext::Request::fake_builder()
-            .method(method)
-            .body(graphql::Request::default())
-            .build()
-            .expect("expecting valid request");
+        let mut compiler = ApolloCompiler::new();
+        compiler.add_executable(query, QUERY_EXECUTABLE);
 
-        ExecutionRequest::fake_builder()
-            .supergraph_request(request)
-            .query_plan(QueryPlan::fake_builder().root(root).build())
+        let context = Context::new();
+        context
+            .private_entries
+            .lock()
+            .insert(Compiler(Arc::new(Mutex::new(compiler))));
+
+        let request = SupergraphRequest::fake_builder()
+            .method(method)
+            .query(query)
+            .context(context)
             .build()
+            .unwrap();
+
+        request
     }
 }

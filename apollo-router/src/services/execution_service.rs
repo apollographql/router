@@ -23,7 +23,6 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
-use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use super::new_service::ServiceFactory;
 use super::Plugins;
 use super::SubgraphServiceFactory;
@@ -526,7 +525,6 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
             .map(|p| p.config.clone());
 
         ServiceBuilder::new()
-            .layer(AllowOnlyHttpPostMutationsLayer::default())
             .service(
                 self.plugins.iter().rev().fold(
                     crate::services::execution_service::ExecutionService {
