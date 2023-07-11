@@ -1338,12 +1338,73 @@ expression: "&schema"
                     {
                       "type": "object",
                       "required": [
-                        "default_credentials_chain"
+                        "default_chain"
                       ],
                       "properties": {
-                        "default_credentials_chain": {
+                        "default_chain": {
                           "description": "todo[igni]: document before merging.",
-                          "type": "object"
+                          "type": "object",
+                          "required": [
+                            "region",
+                            "service"
+                          ],
+                          "properties": {
+                            "profile_name": {
+                              "description": "todo[igni]: document before merging.",
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "region": {
+                              "description": "todo[igni]: document before merging.",
+                              "type": "string"
+                            },
+                            "service": {
+                              "description": "todo[igni]: document before merging.",
+                              "type": "string"
+                            }
+                          }
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "assume_role_provider"
+                      ],
+                      "properties": {
+                        "assume_role_provider": {
+                          "description": "todo[igni]: document before merging.",
+                          "type": "object",
+                          "required": [
+                            "region",
+                            "role",
+                            "service",
+                            "session"
+                          ],
+                          "properties": {
+                            "external_id": {
+                              "description": "todo[igni]: document before merging.",
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "region": {
+                              "description": "todo[igni]: document before merging.",
+                              "type": "string"
+                            },
+                            "role": {
+                              "description": "todo[igni]: document before merging.",
+                              "type": "string"
+                            },
+                            "service": {
+                              "description": "todo[igni]: document before merging.",
+                              "type": "string"
+                            },
+                            "session": {
+                              "description": "todo[igni]: document before merging.",
+                              "type": "string"
+                            }
+                          }
                         }
                       },
                       "additionalProperties": false
@@ -1412,12 +1473,73 @@ expression: "&schema"
                       {
                         "type": "object",
                         "required": [
-                          "default_credentials_chain"
+                          "default_chain"
                         ],
                         "properties": {
-                          "default_credentials_chain": {
+                          "default_chain": {
                             "description": "todo[igni]: document before merging.",
-                            "type": "object"
+                            "type": "object",
+                            "required": [
+                              "region",
+                              "service"
+                            ],
+                            "properties": {
+                              "profile_name": {
+                                "description": "todo[igni]: document before merging.",
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "region": {
+                                "description": "todo[igni]: document before merging.",
+                                "type": "string"
+                              },
+                              "service": {
+                                "description": "todo[igni]: document before merging.",
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "assume_role_provider"
+                        ],
+                        "properties": {
+                          "assume_role_provider": {
+                            "description": "todo[igni]: document before merging.",
+                            "type": "object",
+                            "required": [
+                              "region",
+                              "role",
+                              "service",
+                              "session"
+                            ],
+                            "properties": {
+                              "external_id": {
+                                "description": "todo[igni]: document before merging.",
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "region": {
+                                "description": "todo[igni]: document before merging.",
+                                "type": "string"
+                              },
+                              "role": {
+                                "description": "todo[igni]: document before merging.",
+                                "type": "string"
+                              },
+                              "service": {
+                                "description": "todo[igni]: document before merging.",
+                                "type": "string"
+                              },
+                              "session": {
+                                "description": "todo[igni]: document before merging.",
+                                "type": "string"
+                              }
+                            }
                           }
                         },
                         "additionalProperties": false

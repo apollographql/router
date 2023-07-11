@@ -404,6 +404,8 @@ mod test {
             .withf(|request| {
                 let authorization_regex = Regex::new(r"AWS4-HMAC-SHA256 Credential=id/\d{8}/us-east-1/lambda/aws4_request, SignedHeaders=content-length;content-type;host;x-amz-content-sha256;x-amz-date, Signature=[a-f0-9]{64}").unwrap();
                 let authorization_header_str = request.subgraph_request.headers().get("authorization").unwrap().to_str().unwrap();
+                dbg!(authorization_header_str);
+                
                 assert_eq!(match authorization_regex.find(authorization_header_str) {
                     Some(m) => m.as_str(),
                     None => "no match"
