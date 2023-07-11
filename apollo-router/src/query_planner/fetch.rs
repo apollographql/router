@@ -378,16 +378,16 @@ impl FetchNode {
                 }
             }
 
-            errors.push(
-                Error::builder()
-                    .path(current_dir.clone())
-                    .message(format!(
-                        "Subgraph response from '{}' was missing key `_entities`",
-                        self.service_name
-                    ))
-                    .extension_code("PARSE_ERROR")
-                    .build(),
-            );
+            // if we get here, it means that the response was missing the `_entities` key
+            // This can happen if the subgraph failed during query execution e.g. for permissions checks.
+            // In this case we should add an additional error because the subgraph should have returned an error that will be bubbled up to the client.
+            // However, if they have not then print a warning to the logs.
+            if errors.is_empty() {
+                tracing::warn!(
+                    "Subgraph response from '{}' was missing key `_entities` and had no errors. This is likely a bug in the subgraph.",
+                    self.service_name
+                );
+            }
 
             (Value::Null, errors)
         } else {
