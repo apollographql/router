@@ -4,8 +4,10 @@ use std::sync::Arc;
 use futures::future;
 use futures::stream;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use tower::{BoxError, ServiceBuilder};
+use serde::Deserialize;
+use serde::Serialize;
+use tower::BoxError;
+use tower::ServiceBuilder;
 use tower_service::Service;
 
 use super::externalize_header_map;
