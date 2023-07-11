@@ -148,7 +148,7 @@ where
     ) -> Self {
         assert!(matches!(
             stage,
-            PipelineStep::SubgraphRequest | PipelineStep::SubgraphResponse
+            PipelineStep::SupergraphRequest | PipelineStep::SupergraphResponse
         ));
         Externalizable {
             version: EXTERNALIZABLE_VERSION,
