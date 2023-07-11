@@ -655,7 +655,7 @@ where
     // If first is None, or contains an error we return an error
     let opt_first: Option<Bytes> = first.and_then(|f| f.ok());
     let bytes = match opt_first {
-        Some(b) => b.to_vec(),
+        Some(b) => b,
         None => {
             tracing::error!(
                 "Coprocessor cannot convert body into future due to problem with first part"
@@ -674,7 +674,7 @@ where
         .transpose()?;
     let body_to_send = response_config
         .body
-        .then(|| String::from_utf8(bytes.clone()))
+        .then(|| std::str::from_utf8(&bytes).map(|s| s.to_string()))
         .transpose()?;
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
     let context_to_send = response_config.context.then(|| response.context.clone());
@@ -829,7 +829,6 @@ where
     // First, extract the data we need from our request and prepare our
     // external call. Use our configuration to figure out which data to send.
     let (parts, body) = request.subgraph_request.into_parts();
-    let bytes = Bytes::from(serde_json::to_vec(&body)?);
 
     let headers_to_send = request_config
         .headers
@@ -838,7 +837,7 @@ where
 
     let body_to_send = request_config
         .body
-        .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
+        .then(|| serde_json::to_value(&body))
         .transpose()?;
     let context_to_send = request_config.context.then(|| request.context.clone());
     let uri = request_config.uri.then(|| parts.uri.to_string());
@@ -962,7 +961,6 @@ where
     // external call. Use our configuration to figure out which data to send.
 
     let (parts, body) = response.response.into_parts();
-    let bytes = Bytes::from(serde_json::to_vec(&body)?);
 
     let headers_to_send = response_config
         .headers
@@ -973,7 +971,7 @@ where
 
     let body_to_send = response_config
         .body
-        .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
+        .then(|| serde_json::to_value(&body))
         .transpose()?;
     let context_to_send = response_config.context.then(|| response.context.clone());
     let service_name = response_config.service_name.then_some(service_name);
