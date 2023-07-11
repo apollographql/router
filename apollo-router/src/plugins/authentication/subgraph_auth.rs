@@ -80,6 +80,8 @@ struct AssumeRoleProvider {
     region: String,
     /// todo[igni]: document before merging.
     service: String,
+    /// todo[igni]: document before merging.
+    external_id: Option<String>,
 }
 
 /// todo[igni]: document before merging.
@@ -255,8 +257,14 @@ async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
             let region = aws_types::region::Region::new(config.region.clone());
             let rp = aws_config::sts::AssumeRoleProvider::builder(config.role.clone())
                 .session_name(config.session.clone())
-                .region(region.clone())
-                .build(default_chain);
+                .region(region.clone());
+            rp = if let Some(external_id) = config.external_id {
+                rp.external_id(external_id.as_str())
+            } else {
+                rp
+            };
+
+            let rp = rp.build(default_chain);
 
             SigningParamsConfig {
                 credentials_provider: Some(Arc::new(rp) as Arc<dyn ProvideCredentials>),
