@@ -639,6 +639,7 @@ async fn call_http(
         display_headers,
         display_body,
     )
+    .instrument(subgraph_req_span)
     .await?;
 
     let mut graphql_response = match (content_type, body, parts.status.is_success()) {
