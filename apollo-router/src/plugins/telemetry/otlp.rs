@@ -211,8 +211,10 @@ pub(crate) enum Protocol {
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Temporality {
+    /// Export cumulative metrics.
     #[default]
     Cumulative,
+    /// Export delta metrics. `Delta` should be used when exporting to DataDog Agent.
     Delta,
 }
 
