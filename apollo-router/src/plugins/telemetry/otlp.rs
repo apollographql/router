@@ -45,6 +45,10 @@ pub(crate) struct Config {
     /// Batch processor settings
     #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
+
+    /// Temporality
+    #[serde(default)]
+    pub(crate) temporality: Temporality,
 }
 
 impl Config {
@@ -201,6 +205,14 @@ pub(crate) enum Protocol {
     #[default]
     Grpc,
     Http,
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum Temporality {
+    #[default]
+    Cumulative,
+    Delta,
 }
 
 mod metadata_map_serde {
