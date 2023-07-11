@@ -11,12 +11,14 @@ use indexmap::IndexMap;
 use router_bridge::planner::Planner;
 use tokio::sync::Mutex;
 use tower::BoxError;
+use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
 use super::execution;
+use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use super::layers::content_negociation;
 use super::layers::query_analysis::Compiler;
 use super::layers::query_analysis::QueryAnalysisLayer;
@@ -446,7 +448,8 @@ impl SupergraphCreator {
             .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
             .expect("traffic shaping should always be part of the plugin list");
 
-        let supergraph_service = shaping.supergraph_service_internal(supergraph_service);
+        let supergraph_service = AllowOnlyHttpPostMutationsLayer::default()
+            .layer(shaping.supergraph_service_internal(supergraph_service));
 
         ServiceBuilder::new()
             .layer(content_negociation::SupergraphLayer::default())
