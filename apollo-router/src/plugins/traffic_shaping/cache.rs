@@ -162,13 +162,9 @@ where
                 .and_then(|v| v.as_object_mut())
                 .map(|o| o.insert("_entities", new_entities.into()));
             response.response.body_mut().data = data;
-            Ok(response)
-        } else {
-            Err(FetchError::MalformedResponse {
-                reason: "expected  entities".to_string(),
-            }
-            .into())
         }
+
+        Ok(response)
     } else {
         let entities = insert_entities_in_result(&mut Vec::new(), &cache, &mut result).await?;
         let mut data = Object::default();

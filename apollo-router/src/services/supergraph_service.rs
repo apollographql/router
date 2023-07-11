@@ -11,12 +11,14 @@ use indexmap::IndexMap;
 use router_bridge::planner::Planner;
 use tokio::sync::Mutex;
 use tower::BoxError;
+use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
 use super::execution;
+use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use super::layers::content_negociation;
 use super::layers::query_analysis::Compiler;
 use super::layers::query_analysis::QueryAnalysisLayer;
@@ -446,7 +448,8 @@ impl SupergraphCreator {
             .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
             .expect("traffic shaping should always be part of the plugin list");
 
-        let supergraph_service = shaping.supergraph_service_internal(supergraph_service);
+        let supergraph_service = AllowOnlyHttpPostMutationsLayer::default()
+            .layer(shaping.supergraph_service_internal(supergraph_service));
 
         ServiceBuilder::new()
             .layer(content_negociation::SupergraphLayer::default())
@@ -712,7 +715,7 @@ mod tests {
             )
             .with_json(
                 serde_json::json!{{
-                    "query":"{computer(id:\"Computer1\"){errorField id}}",
+                    "query":"{computer(id:\"Computer1\"){id errorField}}",
                 }},
                 serde_json::json!{{
                     "data": {
@@ -2524,6 +2527,37 @@ mod tests {
         let request = supergraph::Request::fake_builder()
             .context(defer_context())
             .query(query)
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn missing_entities() {
+        let subgraphs = MockedSubgraphs([
+            ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{id activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "__typename": "User", "id": "0", "activeOrganization": { "__typename": "Organization", "id": "1" } } } }}
+            ).build()),
+            ("orga", MockSubgraph::builder().with_json(serde_json::json!{{"query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}","variables":{"representations":[{"__typename":"Organization","id":"1"}]}}},
+                                                       serde_json::json!{{"data": {}, "errors":[{"message":"error"}]}}).build())
+        ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .context(defer_context())
+            .query("query { currentUser { id  activeOrganization{ id name } } }")
             .build()
             .unwrap();
 
