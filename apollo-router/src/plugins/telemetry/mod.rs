@@ -815,8 +815,8 @@ impl Telemetry {
                 }
                 ::tracing::info!(
                     monotonic_counter.apollo.router.operations = 1u64,
-                    operation_name = operation_name,
-                    status = parts.status.as_u16(),
+                    graphql.operation.name = operation_name,
+                    http.response.status_code = parts.status.as_u16(),
                 );
                 let response = http::Response::from_parts(
                     parts,
@@ -832,8 +832,8 @@ impl Telemetry {
 
                 ::tracing::info!(
                     monotonic_counter.apollo.router.operations = 1u64,
-                    operation_name = operation_name,
-                    status = 500,
+                    graphql.operation.name = operation_name,
+                    http.response.status_code = 500,
                 );
                 Err(err)
             }
