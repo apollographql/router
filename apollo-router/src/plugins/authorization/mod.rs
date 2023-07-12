@@ -200,7 +200,7 @@ impl AuthorizationPlugin {
                 compiler.set_type_system_hir(schema.type_system.clone());
                 let _id = compiler.add_executable(&query, "query");
 
-                match Self::scopes_filter_query(&compiler, &scopes)? {
+                match Self::scopes_filter_query(&compiler, scopes)? {
                     None => Ok(Some((query, paths, Arc::new(Mutex::new(compiler))))),
                     Some((new_query, new_paths)) => {
                         let mut compiler = ApolloCompiler::new();
