@@ -1,7 +1,12 @@
 use buildstructor::buildstructor;
 use opentelemetry::metrics::noop::NoopMeterProvider;
-use opentelemetry::metrics::{Meter, MeterProvider};
+use opentelemetry::metrics::{
+    Counter, Histogram, InstrumentProvider, Meter, MeterProvider, ObservableCounter,
+    ObservableGauge, ObservableUpDownCounter, Unit, UpDownCounter,
+};
+use opentelemetry::{Context, InstrumentationLibrary};
 use regex::Regex;
+use std::sync::Arc;
 
 pub(crate) struct FilterMeterProvider<T: MeterProvider> {
     delegate: T,
@@ -24,7 +29,7 @@ impl<T: MeterProvider> FilterMeterProvider<T> {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .allow(
-                Regex::new(r"apollo\.router\.(operations|config)\..*")
+                Regex::new(r"apollo\.router\.(operations?|config)(\..*|$)")
                     .expect("regex should have been valid"),
             )
             .build()
@@ -34,10 +39,114 @@ impl<T: MeterProvider> FilterMeterProvider<T> {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .deny(
-                Regex::new(r"apollo\.router\.(operations|config)\..*")
+                Regex::new(r"apollo\.router\.(operations?|config)(\..*|$)")
                     .expect("regex should have been valid"),
             )
             .build()
+    }
+}
+
+struct FilteredInstrumentProvider {
+    noop: Meter,
+    delegate: Meter,
+    deny: Option<Regex>,
+    allow: Option<Regex>,
+}
+macro_rules! filter_meter_fn {
+    ($name:ident, $ty:ty, $wrapper:ident, $implementation:ident) => {
+        fn $name(
+            &self,
+            name: String,
+            description: Option<String>,
+            unit: Option<Unit>,
+        ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
+            let mut builder = match (&self.deny, &self.allow) {
+                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(name),
+                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(name),
+                (_, _) => self.delegate.$name(name),
+            };
+            if let Some(description) = &description {
+                builder = builder.with_description(description);
+            }
+            if let Some(unit) = &unit {
+                builder = builder.with_unit(unit.clone());
+            }
+            builder.try_init()
+        }
+    };
+}
+
+impl InstrumentProvider for FilteredInstrumentProvider {
+    filter_meter_fn!(u64_counter, u64, Counter, AggregateCounter);
+    filter_meter_fn!(f64_counter, f64, Counter, AggregateCounter);
+
+    filter_meter_fn!(
+        f64_observable_counter,
+        f64,
+        ObservableCounter,
+        AggregateObservableCounter
+    );
+    filter_meter_fn!(
+        u64_observable_counter,
+        u64,
+        ObservableCounter,
+        AggregateObservableCounter
+    );
+
+    filter_meter_fn!(u64_histogram, u64, Histogram, AggregateHistogram);
+    filter_meter_fn!(f64_histogram, f64, Histogram, AggregateHistogram);
+    filter_meter_fn!(i64_histogram, i64, Histogram, AggregateHistogram);
+
+    filter_meter_fn!(
+        i64_up_down_counter,
+        i64,
+        UpDownCounter,
+        AggregateUpDownCounter
+    );
+    filter_meter_fn!(
+        f64_up_down_counter,
+        f64,
+        UpDownCounter,
+        AggregateUpDownCounter
+    );
+
+    filter_meter_fn!(
+        i64_observable_up_down_counter,
+        i64,
+        ObservableUpDownCounter,
+        AggregateObservableUpDownCounter
+    );
+    filter_meter_fn!(
+        f64_observable_up_down_counter,
+        f64,
+        ObservableUpDownCounter,
+        AggregateObservableUpDownCounter
+    );
+
+    filter_meter_fn!(
+        f64_observable_gauge,
+        f64,
+        ObservableGauge,
+        AggregateObservableGauge
+    );
+    filter_meter_fn!(
+        i64_observable_gauge,
+        i64,
+        ObservableGauge,
+        AggregateObservableGauge
+    );
+    filter_meter_fn!(
+        u64_observable_gauge,
+        u64,
+        ObservableGauge,
+        AggregateObservableGauge
+    );
+
+    fn register_callback(
+        &self,
+        callback: Box<dyn Fn(&Context) + Send + Sync>,
+    ) -> opentelemetry::metrics::Result<()> {
+        self.delegate.register_callback(callback)
     }
 }
 
@@ -48,29 +157,61 @@ impl<T: MeterProvider> MeterProvider for FilterMeterProvider<T> {
         version: Option<&'static str>,
         schema_url: Option<&'static str>,
     ) -> Meter {
-        match (&self.deny, &self.allow) {
-            (Some(deny), _) if !deny.is_match(name) => {
-                self.delegate.versioned_meter(name, version, schema_url)
-            }
-            (_, Some(allow)) if allow.is_match(name) => {
-                self.delegate.versioned_meter(name, version, schema_url)
-            }
-            (_, _) => NoopMeterProvider::default().versioned_meter(name, version, schema_url),
-        }
+        let delegate = self.delegate.versioned_meter(name, version, schema_url);
+        Meter::new(
+            InstrumentationLibrary::new(name, version, schema_url),
+            Arc::new(FilteredInstrumentProvider {
+                noop: NoopMeterProvider::new().versioned_meter(name, version, schema_url),
+                delegate,
+                deny: self.deny.clone(),
+                allow: self.allow.clone(),
+            }),
+        )
     }
 }
 
 #[cfg(test)]
 mod test {
     use crate::plugins::telemetry::metrics::filter::FilterMeterProvider;
-    use opentelemetry::metrics::noop::NoopMeterProvider;
-    use opentelemetry::metrics::{Meter, MeterProvider};
+    use opentelemetry::metrics::{noop, Counter, InstrumentProvider, Meter, MeterProvider, Unit};
+    use opentelemetry::{Context, InstrumentationLibrary};
     use std::collections::HashSet;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
 
     #[derive(Default, Clone)]
+    struct MockInstrumentProvider {
+        counters_created: Arc<Mutex<HashSet<(String, Option<String>, Option<Unit>)>>>,
+        callbacks_registered: Arc<AtomicU64>,
+    }
+
+    impl InstrumentProvider for MockInstrumentProvider {
+        // We're only going to bother with testing counters and callbacks because the code is implemented as a macro and if it's right for counters it's right for everything else.
+        fn u64_counter(
+            &self,
+            name: String,
+            description: Option<String>,
+            unit: Option<Unit>,
+        ) -> opentelemetry::metrics::Result<Counter<u64>> {
+            self.counters_created
+                .lock()
+                .expect("lock should not be poisoned")
+                .insert((name.clone(), description, unit));
+            Ok(Counter::new(Arc::new(noop::NoopSyncInstrument::new())))
+        }
+
+        fn register_callback(
+            &self,
+            _callback: Box<dyn Fn(&Context) + Send + Sync>,
+        ) -> opentelemetry::metrics::Result<()> {
+            self.callbacks_registered.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[derive(Default, Clone)]
     struct MockMeterProvider {
-        meters: Arc<Mutex<HashSet<String>>>,
+        instrument_provider: Arc<MockInstrumentProvider>,
     }
 
     impl MeterProvider for MockMeterProvider {
@@ -80,47 +221,102 @@ mod test {
             version: Option<&'static str>,
             schema_url: Option<&'static str>,
         ) -> Meter {
-            self.meters
-                .lock()
-                .expect("mutex poisoned")
-                .insert(name.to_string());
-            NoopMeterProvider::new().versioned_meter(name, version, schema_url)
+            Meter::new(
+                InstrumentationLibrary::new(name, version, schema_url),
+                self.instrument_provider.clone(),
+            )
         }
     }
 
     #[test]
     fn test_apollo_metrics() {
         let delegate = MockMeterProvider::default();
-        let filtered = FilterMeterProvider::apollo_metrics(delegate.clone());
-        filtered.versioned_meter("apollo.router.operations.test", None, None);
-        filtered.versioned_meter("apollo.router.unknown.test", None, None);
+        let filtered = FilterMeterProvider::apollo_metrics(delegate.clone())
+            .versioned_meter("filtered", None, None);
+        filtered.u64_counter("apollo.router.operations").init();
+        filtered.u64_counter("apollo.router.operation").init();
+        filtered.u64_counter("apollo.router.operations.test").init();
+        filtered.u64_counter("apollo.router.unknown.test").init();
         assert!(delegate
-            .meters
+            .instrument_provider
+            .counters_created
             .lock()
             .unwrap()
-            .contains("apollo.router.operations.test"));
+            .contains(&("apollo.router.operations.test".to_string(), None, None)));
+        assert!(delegate
+            .instrument_provider
+            .counters_created
+            .lock()
+            .unwrap()
+            .contains(&("apollo.router.operations".to_string(), None, None)));
+        assert!(delegate
+            .instrument_provider
+            .counters_created
+            .lock()
+            .unwrap()
+            .contains(&("apollo.router.operation".to_string(), None, None)));
         assert!(!delegate
-            .meters
+            .instrument_provider
+            .counters_created
             .lock()
             .unwrap()
-            .contains("apollo.router.unknown.test"));
+            .contains(&("apollo.router.unknown.test".to_string(), None, None)));
     }
 
     #[test]
-    fn test_filter() {
+    fn test_public_metrics() {
         let delegate = MockMeterProvider::default();
-        let filtered = FilterMeterProvider::public_metrics(delegate.clone());
-        filtered.versioned_meter("apollo.router.operations.test", None, None);
-        filtered.versioned_meter("apollo.router.unknown.test", None, None);
+        let filtered = FilterMeterProvider::public_metrics(delegate.clone())
+            .versioned_meter("filtered", None, None);
+        filtered.u64_counter("apollo.router.operations").init();
+        filtered.u64_counter("apollo.router.operation").init();
+        filtered.u64_counter("apollo.router.operations.test").init();
+        filtered.u64_counter("apollo.router.unknown.test").init();
         assert!(!delegate
-            .meters
+            .instrument_provider
+            .counters_created
             .lock()
             .unwrap()
-            .contains("apollo.router.operations.test"));
+            .contains(&("apollo.router.operations.test".to_string(), None, None)));
+        assert!(!delegate
+            .instrument_provider
+            .counters_created
+            .lock()
+            .unwrap()
+            .contains(&("apollo.router.operations".to_string(), None, None)));
+        assert!(!delegate
+            .instrument_provider
+            .counters_created
+            .lock()
+            .unwrap()
+            .contains(&("apollo.router.operation".to_string(), None, None)));
         assert!(delegate
-            .meters
+            .instrument_provider
+            .counters_created
             .lock()
             .unwrap()
-            .contains("apollo.router.unknown.test"));
+            .contains(&("apollo.router.unknown.test".to_string(), None, None)));
+    }
+
+    #[test]
+    fn test_description_and_unit() {
+        let delegate = MockMeterProvider::default();
+        let filtered = FilterMeterProvider::apollo_metrics(delegate.clone())
+            .versioned_meter("filtered", None, None);
+        filtered
+            .u64_counter("apollo.router.operations")
+            .with_description("desc")
+            .with_unit(Unit::new("ms"))
+            .init();
+        assert!(delegate
+            .instrument_provider
+            .counters_created
+            .lock()
+            .unwrap()
+            .contains(&(
+                "apollo.router.operations".to_string(),
+                Some("desc".to_string()),
+                Some(Unit::new("ms"))
+            )));
     }
 }

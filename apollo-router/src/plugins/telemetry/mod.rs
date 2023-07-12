@@ -780,6 +780,7 @@ impl Telemetry {
                 .collect::<Vec<KeyValue>>()
         })
         .unwrap_or_default();
+        let operation_name = context.operation_name().unwrap_or_default();
         let res = match result {
             Ok(response) => {
                 metric_attrs.push(KeyValue::new(
@@ -812,6 +813,11 @@ impl Telemetry {
                 if !parts.status.is_success() {
                     metric_attrs.push(KeyValue::new("error", parts.status.to_string()));
                 }
+                ::tracing::info!(
+                    monotonic_counter.apollo.router.operations = 1u64,
+                    operation_name = operation_name,
+                    status = parts.status.as_u16(),
+                );
                 let response = http::Response::from_parts(
                     parts,
                     once(ready(first_response.unwrap_or_default()))
@@ -824,6 +830,11 @@ impl Telemetry {
             Err(err) => {
                 metric_attrs.push(KeyValue::new("status", "500"));
 
+                ::tracing::info!(
+                    monotonic_counter.apollo.router.operations = 1u64,
+                    operation_name = operation_name,
+                    status = 500,
+                );
                 Err(err)
             }
         };
