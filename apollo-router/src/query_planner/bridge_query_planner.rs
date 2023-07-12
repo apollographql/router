@@ -26,11 +26,10 @@ use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::introspection::Introspection;
-use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authorization::AuthorizationPlugin;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::labeler::add_defer_labels;
-use crate::query_planner::QUERY_PLANNER_CACHE_KEY_METADATA;
 use crate::services::layers::query_analysis::Compiler;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
@@ -358,6 +357,12 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
             context,
         } = req;
 
+        let metadata = context
+            .private_entries
+            .lock()
+            .get::<CacheKeyMetadata>()
+            .cloned()
+            .unwrap_or_default();
         let this = self.clone();
         let fut = async move {
             let start = Instant::now();
@@ -404,10 +409,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                         original_query,
                         filtered_query: filtered_query.to_string(),
                         operation_name: operation_name.to_owned(),
-                        metadata: context
-                            .get::<_, Object>(QUERY_PLANNER_CACHE_KEY_METADATA)
-                            .unwrap_or_default()
-                            .unwrap_or_default(),
+                        metadata,
                     },
                     compiler,
                 )
@@ -998,7 +1000,7 @@ mod tests {
                     original_query: original_query.to_string(),
                     filtered_query: filtered_query.to_string(),
                     operation_name,
-                    metadata: Object::new(),
+                    metadata: CacheKeyMetadata::default(),
                 },
                 Arc::new(Mutex::new(compiler)),
             )
