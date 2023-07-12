@@ -395,7 +395,6 @@ pub(crate) struct CachingQueryKey {
     pub(crate) metadata: CacheKeyMetadata,
 }
 
-#[allow(clippy::print_in_format_impl)]
 impl std::fmt::Display for CachingQueryKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut hasher = Sha256::new();
@@ -410,8 +409,6 @@ impl std::fmt::Display for CachingQueryKey {
         hasher.update(&serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
         let metadata = hex::encode(hasher.finalize());
 
-        //FIXME for the redis cache test
-        println!("will write metadata key: {metadata:}");
         write!(
             f,
             "plan.{}.{}.{}.{}",
