@@ -5539,12 +5539,10 @@ fn filtered_defer_fragment() {
     .unwrap();
     let mut query = Query {
         string: query.to_string(),
-        compiler: Arc::new(Mutex::new(compiler)),
         fragments,
         operations,
         filtered_query: None,
         subselections,
-        added_labels: HashSet::new(),
         defer_stats,
         is_original: true,
         validation_error: None,
@@ -5565,12 +5563,10 @@ fn filtered_defer_fragment() {
 
     let filtered = Query {
         string: filtered_query.to_string(),
-        compiler: Arc::new(Mutex::new(compiler)),
         fragments,
         operations,
         filtered_query: None,
         subselections,
-        added_labels: HashSet::new(),
         defer_stats,
         is_original: false,
         validation_error: None,

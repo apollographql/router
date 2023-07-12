@@ -124,11 +124,17 @@ impl QueryAnalysisLayer {
         };
 
         request.context.extend(&context);
+        request
+            .context
+            .private_entries
+            .lock()
+            .insert(Compiler(compiler));
 
         Ok(SupergraphRequest {
             supergraph_request: request.supergraph_request,
             context: request.context,
-            compiler: Some(compiler),
         })
     }
 }
+
+pub(crate) struct Compiler(pub(crate) Arc<Mutex<ApolloCompiler>>);

@@ -420,7 +420,6 @@ impl RouterService {
         Ok(SupergraphRequest {
             supergraph_request: http::Request::from_parts(parts, graphql_request?),
             context,
-            compiler: None,
         })
     }
 }

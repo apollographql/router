@@ -113,7 +113,7 @@ flowchart LR;
     }
     ```
 
-    - You _only_ need to modify subgraph schemas that define `Subscription` fields.
+    - You can _skip_ modifying subgraph schemas that don't define any `Subscription` fields.
 
 After you complete these prerequisites, you can safely [configure your router](#router-setup) for subscriptions.
 
@@ -138,17 +138,23 @@ subscription:
       subgraphs: # Overrides subscription settings for individual subgraphs
         reviews: # Overrides settings for the 'reviews' subgraph
           path: /ws # Overrides '/subscriptions' defined above
-          protocol: graphql_transport_ws # The WebSocket-based protocol to use for subscription communication (Default: graphql_ws)
+          protocol: graphql_transport_ws # The WebSocket-based subprotocol to use for subscription communication (Default: graphql_ws)
 ```
 
-This example enables subscriptions in **passthrough mode**, which uses long-lived WebSocket connections. The following WebSocket subprotocols are supported:
+This example enables subscriptions in **passthrough mode**, which uses long-lived WebSocket connections.
 
-- [`graphql_ws`](https://github.com/enisdenjo/graphql-ws)
-- [`subscriptions-transport-ws`](https://github.com/apollographql/subscriptions-transport-ws) (⚠️ unmaintained)
+The router supports the following WebSocket subprotocols, specified via the `protocol` option:
+
+- `graphql_ws`
+  - Legacy subprotocol used by the [`subscriptions-transport-ws` library](https://github.com/apollographql/subscriptions-transport-ws), which is **unmaintained**
+  - For backward compatibility, this is the default value.
+- `graphql_transport_ws`
+  - Used by the [graphql-ws](https://github.com/enisdenjo/graphql-ws) library
+  - This subprotocol is recommended for GraphQL server libraries implementing WebSocket-based subscriptions.
 
 > ⚠️ **Your router must use whichever subprotocol is expected by each of your subgraphs!**
 
-By default, the router uses `graphql-ws` for all subgraphs. You can change this global default and/or override it for individual subgraphs by setting the `protocol` key as shown above.
+By default, the router uses `graphql_ws` for all subgraphs. You can change this global default and/or override it for individual subgraphs by setting the `protocol` key as shown above.
 
 Your router creates a separate WebSocket connection for each client subscription, _unless_ it can perform [subscription deduplication](#subscription-deduplication).
 
