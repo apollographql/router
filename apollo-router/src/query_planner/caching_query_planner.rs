@@ -106,7 +106,6 @@ where
     pub(crate) async fn warm_up(
         &mut self,
         query_analysis: &QueryAnalysisLayer,
-        //FIXME: use cache keys that return is_authenticated and scopes
         cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
         let schema_id = self.schema.schema_id.clone();

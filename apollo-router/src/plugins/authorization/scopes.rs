@@ -34,17 +34,17 @@ impl<'a> ScopeExtractionVisitor<'a> {
         }
     }
 
-    fn get_scopes_from_field(&mut self, field: &FieldDefinition) {
+    fn scopes_from_field(&mut self, field: &FieldDefinition) {
         self.extracted_scopes.extend(
             scopes_argument(field.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)).cloned(),
         );
 
         if let Some(ty) = field.ty().type_def(&self.compiler.db) {
-            self.get_scopes_from_type(&ty)
+            self.scopes_from_type(&ty)
         }
     }
 
-    fn get_scopes_from_type(&mut self, ty: &TypeDefinition) {
+    fn scopes_from_type(&mut self, ty: &TypeDefinition) {
         self.extracted_scopes
             .extend(scopes_argument(ty.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)).cloned());
     }
@@ -78,7 +78,7 @@ impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
             .get(parent_type)
         {
             if let Some(field) = ty.field(&self.compiler.db, node.name()) {
-                self.get_scopes_from_field(field);
+                self.scopes_from_field(field);
             }
         }
 
@@ -92,7 +92,7 @@ impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
             .types_definitions_by_name()
             .get(node.type_condition())
         {
-            self.get_scopes_from_type(ty);
+            self.scopes_from_type(ty);
         }
         traverse::fragment_definition(self, node)
     }
@@ -110,7 +110,7 @@ impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
             .types_definitions_by_name()
             .get(type_condition)
         {
-            self.get_scopes_from_type(ty);
+            self.scopes_from_type(ty);
         }
         traverse::fragment_spread(self, node)
     }
@@ -128,7 +128,7 @@ impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
                 .types_definitions_by_name()
                 .get(type_condition)
             {
-                self.get_scopes_from_type(ty);
+                self.scopes_from_type(ty);
             }
         }
         traverse::inline_fragment(self, parent_type, node)
@@ -249,6 +249,11 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
             .get(node.type_condition())
             .is_some_and(|ty| self.is_type_authorized(ty));
 
+        // FIXME: if a field was removed inside a fragment definition, then we should add an unauthorized path
+        // starting at the fragment spread, instead of starting at the definition.
+        // If we modified the transform visitor implementation to modify the fragment definitions before the
+        // operations, we would be able to store the list of unauthorized paths per fragment, and at the point
+        // of application, generate unauthorized paths starting at the operation root
         if !fragment_is_authorized {
             Ok(None)
         } else {
@@ -275,8 +280,6 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
             .get(condition)
             .is_some_and(|ty| self.is_type_authorized(ty));
 
-        // FIXME: if a field was removed inside a fragment definition, then we should add an unauthorized path
-        // starting at the fragment spread, instead of starting at the definition
         let res = if !fragment_is_authorized {
             self.query_requires_scopes = true;
             self.unauthorized_paths.push(self.current_path.clone());
