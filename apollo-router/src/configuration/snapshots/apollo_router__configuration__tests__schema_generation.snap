@@ -1317,6 +1317,30 @@ expression: "&schema"
                               "description": "todo[igni]: document before merging.",
                               "type": "string"
                             },
+                            "assume_role": {
+                              "description": "todo[igni]: document before merging.",
+                              "type": "object",
+                              "required": [
+                                "role_arn",
+                                "session_name"
+                              ],
+                              "properties": {
+                                "external_id": {
+                                  "description": "todo[igni]: document before merging.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "role_arn": {
+                                  "description": "todo[igni]: document before merging.",
+                                  "type": "string"
+                                },
+                                "session_name": {
+                                  "description": "todo[igni]: document before merging.",
+                                  "type": "string"
+                                }
+                              },
+                              "nullable": true
+                            },
                             "region": {
                               "description": "todo[igni]: document before merging.",
                               "type": "string"
@@ -1349,6 +1373,30 @@ expression: "&schema"
                             "service_name"
                           ],
                           "properties": {
+                            "assume_role": {
+                              "description": "todo[igni]: document before merging.",
+                              "type": "object",
+                              "required": [
+                                "role_arn",
+                                "session_name"
+                              ],
+                              "properties": {
+                                "external_id": {
+                                  "description": "todo[igni]: document before merging.",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "role_arn": {
+                                  "description": "todo[igni]: document before merging.",
+                                  "type": "string"
+                                },
+                                "session_name": {
+                                  "description": "todo[igni]: document before merging.",
+                                  "type": "string"
+                                }
+                              },
+                              "nullable": true
+                            },
                             "profile_name": {
                               "description": "todo[igni]: document before merging.",
                               "type": "string",
@@ -1359,48 +1407,6 @@ expression: "&schema"
                               "type": "string"
                             },
                             "service_name": {
-                              "description": "todo[igni]: document before merging.",
-                              "type": "string"
-                            }
-                          }
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "required": [
-                        "assume_role_provider"
-                      ],
-                      "properties": {
-                        "assume_role_provider": {
-                          "description": "todo[igni]: document before merging.",
-                          "type": "object",
-                          "required": [
-                            "region",
-                            "role_arn",
-                            "service_name",
-                            "session_name"
-                          ],
-                          "properties": {
-                            "external_id": {
-                              "description": "todo[igni]: document before merging.",
-                              "type": "string",
-                              "nullable": true
-                            },
-                            "region": {
-                              "description": "todo[igni]: document before merging.",
-                              "type": "string"
-                            },
-                            "role_arn": {
-                              "description": "todo[igni]: document before merging.",
-                              "type": "string"
-                            },
-                            "service_name": {
-                              "description": "todo[igni]: document before merging.",
-                              "type": "string"
-                            },
-                            "session_name": {
                               "description": "todo[igni]: document before merging.",
                               "type": "string"
                             }
@@ -1452,6 +1458,30 @@ expression: "&schema"
                                 "description": "todo[igni]: document before merging.",
                                 "type": "string"
                               },
+                              "assume_role": {
+                                "description": "todo[igni]: document before merging.",
+                                "type": "object",
+                                "required": [
+                                  "role_arn",
+                                  "session_name"
+                                ],
+                                "properties": {
+                                  "external_id": {
+                                    "description": "todo[igni]: document before merging.",
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "role_arn": {
+                                    "description": "todo[igni]: document before merging.",
+                                    "type": "string"
+                                  },
+                                  "session_name": {
+                                    "description": "todo[igni]: document before merging.",
+                                    "type": "string"
+                                  }
+                                },
+                                "nullable": true
+                              },
                               "region": {
                                 "description": "todo[igni]: document before merging.",
                                 "type": "string"
@@ -1484,6 +1514,30 @@ expression: "&schema"
                               "service_name"
                             ],
                             "properties": {
+                              "assume_role": {
+                                "description": "todo[igni]: document before merging.",
+                                "type": "object",
+                                "required": [
+                                  "role_arn",
+                                  "session_name"
+                                ],
+                                "properties": {
+                                  "external_id": {
+                                    "description": "todo[igni]: document before merging.",
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "role_arn": {
+                                    "description": "todo[igni]: document before merging.",
+                                    "type": "string"
+                                  },
+                                  "session_name": {
+                                    "description": "todo[igni]: document before merging.",
+                                    "type": "string"
+                                  }
+                                },
+                                "nullable": true
+                              },
                               "profile_name": {
                                 "description": "todo[igni]: document before merging.",
                                 "type": "string",
@@ -1494,48 +1548,6 @@ expression: "&schema"
                                 "type": "string"
                               },
                               "service_name": {
-                                "description": "todo[igni]: document before merging.",
-                                "type": "string"
-                              }
-                            }
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "required": [
-                          "assume_role_provider"
-                        ],
-                        "properties": {
-                          "assume_role_provider": {
-                            "description": "todo[igni]: document before merging.",
-                            "type": "object",
-                            "required": [
-                              "region",
-                              "role_arn",
-                              "service_name",
-                              "session_name"
-                            ],
-                            "properties": {
-                              "external_id": {
-                                "description": "todo[igni]: document before merging.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "region": {
-                                "description": "todo[igni]: document before merging.",
-                                "type": "string"
-                              },
-                              "role_arn": {
-                                "description": "todo[igni]: document before merging.",
-                                "type": "string"
-                              },
-                              "service_name": {
-                                "description": "todo[igni]: document before merging.",
-                                "type": "string"
-                              },
-                              "session_name": {
                                 "description": "todo[igni]: document before merging.",
                                 "type": "string"
                               }

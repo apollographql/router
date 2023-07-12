@@ -39,6 +39,8 @@ struct AWSSigV4HardcodedConfig {
     region: String,
     /// todo[igni]: document before merging.
     service_name: String,
+    /// todo[igni]: document before merging.
+    assume_role: Option<AssumeRoleProvider>,
 }
 
 impl ProvideCredentials for AWSSigV4HardcodedConfig {
@@ -67,6 +69,8 @@ struct DefaultChainConfig {
     profile_name: Option<String>,
     /// todo[igni]: document before merging.
     service_name: String,
+    /// todo[igni]: document before merging.
+    assume_role: Option<AssumeRoleProvider>,
 }
 
 /// todo[igni]: document before merging.
@@ -77,10 +81,6 @@ struct AssumeRoleProvider {
     /// todo[igni]: document before merging.
     session_name: String,
     /// todo[igni]: document before merging.
-    region: String,
-    /// todo[igni]: document before merging.
-    service_name: String,
-    /// todo[igni]: document before merging.
     external_id: Option<String>,
 }
 
@@ -90,7 +90,6 @@ struct AssumeRoleProvider {
 enum AWSSigV4Config {
     Hardcoded(AWSSigV4HardcodedConfig),
     DefaultChain(DefaultChainConfig),
-    AssumeRoleProvider(AssumeRoleProvider),
 }
 
 #[derive(Clone, JsonSchema, Deserialize)]
@@ -236,7 +235,23 @@ async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
     match config {
         AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(config)) => {
             let region = aws_types::region::Region::new(config.region.clone());
-            let credentials_provider = Arc::new(config.clone()) as Arc<dyn ProvideCredentials>;
+            let credentials_provider: Arc<dyn ProvideCredentials> =
+                if let Some(assume_role_provider) = &config.assume_role {
+                    let rp = aws_config::sts::AssumeRoleProvider::builder(
+                        assume_role_provider.role_arn.clone(),
+                    )
+                    .session_name(assume_role_provider.session_name.clone())
+                    .region(region.clone());
+                    let rp = if let Some(external_id) = &assume_role_provider.external_id {
+                        rp.external_id(external_id.as_str())
+                    } else {
+                        rp
+                    };
+
+                    Arc::new(rp.build(default_chain))
+                } else {
+                    Arc::new(config.clone())
+                };
             SigningParamsConfig {
                 region,
                 service_name: config.service_name.clone(),
@@ -245,27 +260,25 @@ async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
         }
         AuthConfig::AWSSigV4(AWSSigV4Config::DefaultChain(config)) => {
             let region = aws_types::region::Region::new(config.region.clone());
-            SigningParamsConfig {
-                credentials_provider: Some(Arc::new(default_chain) as Arc<dyn ProvideCredentials>),
-                region,
-                service_name: config.service_name.clone(),
-            }
-        }
-        AuthConfig::AWSSigV4(AWSSigV4Config::AssumeRoleProvider(config)) => {
-            let region = aws_types::region::Region::new(config.region.clone());
-            let rp = aws_config::sts::AssumeRoleProvider::builder(config.role_arn.clone())
-                .session_name(config.session_name.clone())
-                .region(region.clone());
-            let rp = if let Some(external_id) = &config.external_id {
-                rp.external_id(external_id.as_str())
-            } else {
-                rp
-            };
+            let credentials_provider: Arc<dyn ProvideCredentials> =
+                if let Some(assume_role_provider) = &config.assume_role {
+                    let rp = aws_config::sts::AssumeRoleProvider::builder(
+                        assume_role_provider.role_arn.clone(),
+                    )
+                    .session_name(assume_role_provider.session_name.clone())
+                    .region(region.clone());
+                    let rp = if let Some(external_id) = &assume_role_provider.external_id {
+                        rp.external_id(external_id.as_str())
+                    } else {
+                        rp
+                    };
 
-            let rp = rp.build(default_chain);
-
+                    Arc::new(rp.build(default_chain))
+                } else {
+                    Arc::new(default_chain)
+                };
             SigningParamsConfig {
-                credentials_provider: Some(Arc::new(rp) as Arc<dyn ProvideCredentials>),
+                credentials_provider: Some(credentials_provider),
                 region,
                 service_name: config.service_name.clone(),
             }
@@ -431,6 +444,7 @@ mod test {
                             secret_access_key: "secret".to_string(),
                             region: "us-east-1".to_string(),
                             service_name: "s3".to_string(),
+                            assume_role: None,
                         },
                     ))),
                     subgraphs: Default::default(),
