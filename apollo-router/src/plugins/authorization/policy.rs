@@ -35,8 +35,11 @@ impl<'a> PolicyExtractionVisitor<'a> {
     }
 
     fn get_policies_from_field(&mut self, field: &FieldDefinition) {
-        self.extracted_policies
-            .extend(policies_argument(field.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned());
+        if let Some(policy) =
+            policies_argument(field.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned()
+        {
+            self.extracted_policies.insert(policy);
+        }
 
         if let Some(ty) = field.ty().type_def(&self.compiler.db) {
             self.get_policies_from_type(&ty)
@@ -44,19 +47,21 @@ impl<'a> PolicyExtractionVisitor<'a> {
     }
 
     fn get_policies_from_type(&mut self, ty: &TypeDefinition) {
-        self.extracted_policies
-            .extend(policies_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned());
+        if let Some(policy) =
+            policies_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned()
+        {
+            self.extracted_policies.insert(policy);
+        }
     }
 }
 
-fn policies_argument(opt_directive: Option<&hir::Directive>) -> impl Iterator<Item = &String> {
+fn policies_argument(opt_directive: Option<&hir::Directive>) -> Option<&String> {
     opt_directive
         .and_then(|directive| directive.argument_by_name("policy"))
         .and_then(|value| match value {
             Value::String { value, .. } => Some(value),
             _ => None,
         })
-        .into_iter()
 }
 
 impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
@@ -142,12 +147,12 @@ impl<'a> PolicyFilteringVisitor<'a> {
     pub(crate) fn new(
         compiler: &'a ApolloCompiler,
         file_id: FileId,
-        scopes: HashSet<String>,
+        successful_policies: HashSet<String>,
     ) -> Self {
         Self {
             compiler,
             file_id,
-            request_policies: scopes,
+            request_policies: successful_policies,
             query_requires_policies: false,
             unauthorized_paths: vec![],
             current_path: Path::default(),
@@ -155,12 +160,13 @@ impl<'a> PolicyFilteringVisitor<'a> {
     }
 
     fn is_field_authorized(&mut self, field: &FieldDefinition) -> bool {
-        let field_policies = policies_argument(field.directive_by_name(POLICY_DIRECTIVE_NAME))
-            .cloned()
-            .collect::<HashSet<_>>();
-
-        if !self.request_policies.is_superset(&field_policies) {
-            return false;
+        match policies_argument(field.directive_by_name(POLICY_DIRECTIVE_NAME)) {
+            None => return false,
+            Some(policy) => {
+                if !self.request_policies.contains(policy) {
+                    return false;
+                }
+            }
         }
 
         if let Some(ty) = field.ty().type_def(&self.compiler.db) {
@@ -171,11 +177,10 @@ impl<'a> PolicyFilteringVisitor<'a> {
     }
 
     fn is_type_authorized(&self, ty: &TypeDefinition) -> bool {
-        let type_policies = policies_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME))
-            .cloned()
-            .collect::<HashSet<_>>();
-
-        self.request_policies.is_superset(&type_policies)
+        match policies_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME)) {
+            None => false,
+            Some(policy) => self.request_policies.contains(policy),
+        }
     }
 }
 
