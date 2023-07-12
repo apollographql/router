@@ -214,27 +214,14 @@ impl Plugin for SubgraphAuth {
 }
 
 async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
-    let default_chain = if let AuthConfig::AWSSigV4(AWSSigV4Config::DefaultChain(config)) = &config
-    {
-        let aws_config =
-            aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
-                .region(aws_types::region::Region::new(config.region.clone()));
-
-        let aws_config = if let Some(profile_name) = &config.profile_name {
-            aws_config.profile_name(profile_name.as_str())
-        } else {
-            aws_config
-        };
-
-        aws_config.build().await
-    } else {
-        aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
-            .build()
-            .await
-    };
     match config {
         AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(config)) => {
             let region = aws_types::region::Region::new(config.region.clone());
+
+            let chain =
+                aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
+                    .build()
+                    .await;
             let credentials_provider: Arc<dyn ProvideCredentials> =
                 if let Some(assume_role_provider) = &config.assume_role {
                     let rp = aws_config::sts::AssumeRoleProvider::builder(
@@ -248,7 +235,7 @@ async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
                         rp
                     };
 
-                    Arc::new(rp.build(default_chain))
+                    Arc::new(rp.build(chain))
                 } else {
                     Arc::new(config.clone())
                 };
@@ -260,6 +247,19 @@ async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
         }
         AuthConfig::AWSSigV4(AWSSigV4Config::DefaultChain(config)) => {
             let region = aws_types::region::Region::new(config.region.clone());
+
+            let aws_config =
+                aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
+                    .region(region.clone());
+
+            let aws_config = if let Some(profile_name) = &config.profile_name {
+                aws_config.profile_name(profile_name.as_str())
+            } else {
+                aws_config
+            };
+
+            let chain = aws_config.build().await;
+
             let credentials_provider: Arc<dyn ProvideCredentials> =
                 if let Some(assume_role_provider) = &config.assume_role {
                     let rp = aws_config::sts::AssumeRoleProvider::builder(
@@ -273,9 +273,9 @@ async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
                         rp
                     };
 
-                    Arc::new(rp.build(default_chain))
+                    Arc::new(rp.build(chain))
                 } else {
-                    Arc::new(default_chain)
+                    Arc::new(chain)
                 };
             SigningParamsConfig {
                 credentials_provider: Some(credentials_provider),
