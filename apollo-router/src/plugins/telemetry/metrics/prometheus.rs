@@ -84,13 +84,10 @@ impl MetricsConfigurator for Config {
         metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         if self.enabled {
-            let mut controller = controllers::basic(
-                processors::factory(
-                    selectors::simple::histogram(metrics_config.buckets.clone()),
-                    aggregation::stateless_temporality_selector(),
-                )
-                .with_memory(true),
-            )
+            let mut controller = controllers::basic(processors::factory(
+                selectors::simple::histogram(metrics_config.buckets.clone()),
+                aggregation::stateless_temporality_selector(),
+            ))
             .with_resource(Resource::new(
                 metrics_config
                     .resources

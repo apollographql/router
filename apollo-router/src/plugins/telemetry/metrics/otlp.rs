@@ -10,6 +10,7 @@ use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
+use crate::plugins::telemetry::otlp::Temporality;
 
 // TODO Remove MetricExporterBuilder once upstream issue is fixed
 // This has to exist because Http is not currently supported for metrics export
@@ -39,23 +40,41 @@ impl MetricsConfigurator for super::super::otlp::Config {
         metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         let exporter: MetricExporterBuilder = self.exporter()?;
+
         match exporter.exporter {
             Some(exporter) => {
-                let exporter = opentelemetry_otlp::new_pipeline()
-                    .metrics(
-                        selectors::simple::histogram(metrics_config.buckets.clone()),
-                        aggregation::stateless_temporality_selector(),
-                        opentelemetry::runtime::Tokio,
-                    )
-                    .with_exporter(exporter)
-                    .with_resource(Resource::new(
-                        metrics_config
-                            .resources
-                            .clone()
-                            .into_iter()
-                            .map(|(k, v)| KeyValue::new(k, v)),
-                    ))
-                    .build()?;
+                let exporter = match self.temporality {
+                    Temporality::Cumulative => opentelemetry_otlp::new_pipeline()
+                        .metrics(
+                            selectors::simple::histogram(metrics_config.buckets.clone()),
+                            aggregation::stateless_temporality_selector(),
+                            opentelemetry::runtime::Tokio,
+                        )
+                        .with_exporter(exporter)
+                        .with_resource(Resource::new(
+                            metrics_config
+                                .resources
+                                .clone()
+                                .into_iter()
+                                .map(|(k, v)| KeyValue::new(k, v)),
+                        ))
+                        .build()?,
+                    Temporality::Delta => opentelemetry_otlp::new_pipeline()
+                        .metrics(
+                            selectors::simple::histogram(metrics_config.buckets.clone()),
+                            aggregation::delta_temporality_selector(),
+                            opentelemetry::runtime::Tokio,
+                        )
+                        .with_exporter(exporter)
+                        .with_resource(Resource::new(
+                            metrics_config
+                                .resources
+                                .clone()
+                                .into_iter()
+                                .map(|(k, v)| KeyValue::new(k, v)),
+                        ))
+                        .build()?,
+                };
                 builder = builder
                     .with_meter_provider(FilterMeterProvider::public_metrics(exporter.clone()));
                 builder = builder.with_exporter(exporter);
