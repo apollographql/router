@@ -9,6 +9,7 @@ use opentelemetry::sdk::trace::Builder;
 use opentelemetry::Key;
 use opentelemetry::Value;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
+use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -53,14 +54,14 @@ pub(crate) struct Config {
 }
 
 impl TracingConfigurator for Config {
-    fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
+    fn apply(&self, builder: Builder, trace: &Trace) -> Result<Builder, BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
         let url = match &self.endpoint {
             AgentEndpoint::Default(_) => None,
             AgentEndpoint::Url(s) => Some(s),
         };
         let enable_span_mapping = self.enable_span_mapping.then_some(true);
-        let trace_config: sdk::trace::Config = trace_config.into();
+        let trace_config: sdk::trace::Config = trace.into();
         let exporter = opentelemetry_datadog::new_pipeline()
             .with(&url, |builder, e| {
                 builder.with_agent_endpoint(e.to_string().trim_end_matches('/'))
@@ -86,6 +87,13 @@ impl TracingConfigurator for Config {
                     // Set it explicitly here
                     builder.with_service_name(service_name.as_str())
                 },
+            )
+            .with_version(
+                trace_config
+                    .resource
+                    .get(SERVICE_VERSION)
+                    .expect("cargo version is set as a resource default;qed")
+                    .to_string(),
             )
             .with_trace_config(trace_config)
             .build_exporter()?;
