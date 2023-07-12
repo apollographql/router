@@ -17,4 +17,4 @@ tracing-opentelemetry 0.18.0 -> 0.19.0
 
 This allows us to close a number of opentelemetry related issues.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3196
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3421
