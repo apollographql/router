@@ -10,7 +10,6 @@ use opentelemetry::Key;
 use opentelemetry::Value;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
-
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
