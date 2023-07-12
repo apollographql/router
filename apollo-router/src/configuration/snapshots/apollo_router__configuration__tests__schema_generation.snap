@@ -1310,7 +1310,7 @@ expression: "&schema"
                             "access_key_id",
                             "region",
                             "secret_access_key",
-                            "service"
+                            "service_name"
                           ],
                           "properties": {
                             "access_key_id": {
@@ -1325,7 +1325,7 @@ expression: "&schema"
                               "description": "todo[igni]: document before merging.",
                               "type": "string"
                             },
-                            "service": {
+                            "service_name": {
                               "description": "todo[igni]: document before merging.",
                               "type": "string"
                             }
@@ -1346,7 +1346,7 @@ expression: "&schema"
                           "type": "object",
                           "required": [
                             "region",
-                            "service"
+                            "service_name"
                           ],
                           "properties": {
                             "profile_name": {
@@ -1358,7 +1358,7 @@ expression: "&schema"
                               "description": "todo[igni]: document before merging.",
                               "type": "string"
                             },
-                            "service": {
+                            "service_name": {
                               "description": "todo[igni]: document before merging.",
                               "type": "string"
                             }
@@ -1378,9 +1378,9 @@ expression: "&schema"
                           "type": "object",
                           "required": [
                             "region",
-                            "role",
-                            "service",
-                            "session"
+                            "role_arn",
+                            "service_name",
+                            "session_name"
                           ],
                           "properties": {
                             "external_id": {
@@ -1392,15 +1392,15 @@ expression: "&schema"
                               "description": "todo[igni]: document before merging.",
                               "type": "string"
                             },
-                            "role": {
+                            "role_arn": {
                               "description": "todo[igni]: document before merging.",
                               "type": "string"
                             },
-                            "service": {
+                            "service_name": {
                               "description": "todo[igni]: document before merging.",
                               "type": "string"
                             },
-                            "session": {
+                            "session_name": {
                               "description": "todo[igni]: document before merging.",
                               "type": "string"
                             }
@@ -1445,7 +1445,7 @@ expression: "&schema"
                               "access_key_id",
                               "region",
                               "secret_access_key",
-                              "service"
+                              "service_name"
                             ],
                             "properties": {
                               "access_key_id": {
@@ -1460,7 +1460,7 @@ expression: "&schema"
                                 "description": "todo[igni]: document before merging.",
                                 "type": "string"
                               },
-                              "service": {
+                              "service_name": {
                                 "description": "todo[igni]: document before merging.",
                                 "type": "string"
                               }
@@ -1481,7 +1481,7 @@ expression: "&schema"
                             "type": "object",
                             "required": [
                               "region",
-                              "service"
+                              "service_name"
                             ],
                             "properties": {
                               "profile_name": {
@@ -1493,7 +1493,7 @@ expression: "&schema"
                                 "description": "todo[igni]: document before merging.",
                                 "type": "string"
                               },
-                              "service": {
+                              "service_name": {
                                 "description": "todo[igni]: document before merging.",
                                 "type": "string"
                               }
@@ -1513,9 +1513,9 @@ expression: "&schema"
                             "type": "object",
                             "required": [
                               "region",
-                              "role",
-                              "service",
-                              "session"
+                              "role_arn",
+                              "service_name",
+                              "session_name"
                             ],
                             "properties": {
                               "external_id": {
@@ -1527,15 +1527,15 @@ expression: "&schema"
                                 "description": "todo[igni]: document before merging.",
                                 "type": "string"
                               },
-                              "role": {
+                              "role_arn": {
                                 "description": "todo[igni]: document before merging.",
                                 "type": "string"
                               },
-                              "service": {
+                              "service_name": {
                                 "description": "todo[igni]: document before merging.",
                                 "type": "string"
                               },
-                              "session": {
+                              "session_name": {
                                 "description": "todo[igni]: document before merging.",
                                 "type": "string"
                               }

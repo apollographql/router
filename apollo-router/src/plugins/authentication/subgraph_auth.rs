@@ -38,7 +38,7 @@ struct AWSSigV4HardcodedConfig {
     /// todo[igni]: document before merging.
     region: String,
     /// todo[igni]: document before merging.
-    service: String,
+    service_name: String,
 }
 
 impl ProvideCredentials for AWSSigV4HardcodedConfig {
@@ -66,20 +66,20 @@ struct DefaultChainConfig {
     /// todo[igni]: document before merging.
     profile_name: Option<String>,
     /// todo[igni]: document before merging.
-    service: String,
+    service_name: String,
 }
 
 /// todo[igni]: document before merging.
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 struct AssumeRoleProvider {
     /// todo[igni]: document before merging.
-    role: String,
+    role_arn: String,
     /// todo[igni]: document before merging.
-    session: String,
+    session_name: String,
     /// todo[igni]: document before merging.
     region: String,
     /// todo[igni]: document before merging.
-    service: String,
+    service_name: String,
     /// todo[igni]: document before merging.
     external_id: Option<String>,
 }
@@ -239,7 +239,7 @@ async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
             let credentials_provider = Arc::new(config.clone()) as Arc<dyn ProvideCredentials>;
             SigningParamsConfig {
                 region,
-                service_name: config.service.clone(),
+                service_name: config.service_name.clone(),
                 credentials_provider: Some(credentials_provider),
             }
         }
@@ -248,13 +248,13 @@ async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
             SigningParamsConfig {
                 credentials_provider: Some(Arc::new(default_chain) as Arc<dyn ProvideCredentials>),
                 region,
-                service_name: config.service.clone(),
+                service_name: config.service_name.clone(),
             }
         }
         AuthConfig::AWSSigV4(AWSSigV4Config::AssumeRoleProvider(config)) => {
             let region = aws_types::region::Region::new(config.region.clone());
-            let rp = aws_config::sts::AssumeRoleProvider::builder(config.role.clone())
-                .session_name(config.session.clone())
+            let rp = aws_config::sts::AssumeRoleProvider::builder(config.role_arn.clone())
+                .session_name(config.session_name.clone())
                 .region(region.clone());
             let rp = if let Some(external_id) = &config.external_id {
                 rp.external_id(external_id.as_str())
@@ -267,7 +267,7 @@ async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
             SigningParamsConfig {
                 credentials_provider: Some(Arc::new(rp) as Arc<dyn ProvideCredentials>),
                 region,
-                service_name: config.service.clone(),
+                service_name: config.service_name.clone(),
             }
         }
     }
@@ -371,7 +371,7 @@ mod test {
               access_key_id: "test"
               secret_access_key: "test"
               region: "us-east-1"
-              service: "lambda"
+              service_name: "lambda"
         "#,
         )
         .unwrap();
@@ -388,7 +388,7 @@ mod test {
                 access_key_id: "test"
                 secret_access_key: "test"
                 region: "us-east-1"
-                service: "lambda"
+                service_name: "lambda"
         "#,
         )
         .unwrap();
@@ -430,7 +430,7 @@ mod test {
                             access_key_id: "id".to_string(),
                             secret_access_key: "secret".to_string(),
                             region: "us-east-1".to_string(),
-                            service: "s3".to_string(),
+                            service_name: "s3".to_string(),
                         },
                     ))),
                     subgraphs: Default::default(),
