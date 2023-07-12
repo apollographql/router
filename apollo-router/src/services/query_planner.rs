@@ -2,13 +2,11 @@
 
 use std::sync::Arc;
 
-use apollo_compiler::ApolloCompiler;
 use async_trait::async_trait;
 use derivative::Derivative;
 use serde::Deserialize;
 use serde::Serialize;
 use static_assertions::assert_impl_all;
-use tokio::sync::Mutex;
 
 use crate::error::QueryPlannerError;
 use crate::graphql;
@@ -22,8 +20,6 @@ assert_impl_all!(Request: Send);
 pub(crate) struct Request {
     pub(crate) query: String,
     pub(crate) operation_name: Option<String>,
-    #[derivative(Debug = "ignore")]
-    pub(crate) compiler: Arc<Mutex<ApolloCompiler>>,
     pub(crate) context: Context,
 }
 
@@ -33,17 +29,11 @@ impl Request {
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
     #[builder]
-    pub(crate) fn new(
-        query: String,
-        operation_name: Option<String>,
-        context: Context,
-        compiler: Arc<Mutex<ApolloCompiler>>,
-    ) -> Request {
+    pub(crate) fn new(query: String, operation_name: Option<String>, context: Context) -> Request {
         Self {
             query,
             operation_name,
             context,
-            compiler,
         }
     }
 }
@@ -55,8 +45,6 @@ pub(crate) struct CachingRequest {
     pub(crate) query: String,
     pub(crate) operation_name: Option<String>,
     pub(crate) context: Context,
-    #[derivative(Debug = "ignore")]
-    pub(crate) compiler: Arc<Mutex<ApolloCompiler>>,
 }
 
 #[buildstructor::buildstructor]
@@ -68,13 +56,11 @@ impl CachingRequest {
     pub(crate) fn new(
         query: String,
         operation_name: Option<String>,
-        compiler: Arc<Mutex<ApolloCompiler>>,
         context: Context,
     ) -> CachingRequest {
         Self {
             query,
             operation_name,
-            compiler,
             context,
         }
     }

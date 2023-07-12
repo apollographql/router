@@ -231,6 +231,22 @@ If set, disables sending anonymous usage information to Apollo.
 <tr>
 <td>
 
+##### `--listen`
+
+`APOLLO_ROUTER_LISTEN_ADDRESS`
+
+</td>
+<td>
+
+If set, the listen address of the router. 
+
+</td>
+</tr>
+
+
+<tr>
+<td>
+
 ##### `-V` / `--version`
 
 </td>
@@ -526,7 +542,7 @@ The Apollo Router supports enforcing three types of request limits for enhanced 
 The router rejects any request that violates at least one of these limits.
 
 ```yaml title="router.yaml"
-preview_operation_limits:
+limits:
   # Network-based limits
   experimental_http_max_request_bytes: 2000000 # Default value: 2 MB
 
@@ -598,6 +614,18 @@ fragment ProductVariation on Product {
 Note that the router calculates the recursion depth for each operation and fragment _separately_.  Even if a fragment is included in an operation, that fragment's recursion depth does not contribute to the _operation's_ recursion depth.
 
 > In versions of the Apollo Router prior to 1.17, this limit was defined via the config option `experimental_parser_recursion_limit`.
+
+### GraphQL Validation Mode
+
+We are experimenting with a new GraphQL validation implementation written in Rust. The legacy implementation is part of the JavaScript query planner. This is part of a project to remove JavaScript from the Router to improve performance and memory behavior.
+
+To opt in to the new validation implementation, set:
+
+```yaml {4,8} title="router.yaml"
+experimental_graphql_validation_mode: new
+```
+
+This is an experimental option while we are still finding edge cases in the new implementation, but it will become the default in the future.
 
 ### Plugins
 

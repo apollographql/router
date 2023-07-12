@@ -607,6 +607,33 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "experimental_graphql_validation_mode": {
+      "description": "Set the GraphQL validation implementation to use.",
+      "default": "legacy",
+      "oneOf": [
+        {
+          "description": "Use the new Rust-based implementation.",
+          "type": "string",
+          "enum": [
+            "new"
+          ]
+        },
+        {
+          "description": "Use the old JavaScript-based implementation.",
+          "type": "string",
+          "enum": [
+            "legacy"
+          ]
+        },
+        {
+          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
+          "type": "string",
+          "enum": [
+            "both"
+          ]
+        }
+      ]
+    },
     "forbid_mutations": {
       "description": "Forbid mutations configuration",
       "type": "boolean"
@@ -1070,58 +1097,8 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
-    "override_subgraph_url": {
-      "description": "Subgraph URL mappings",
-      "anyOf": [
-        {
-          "description": "Subgraph URL mappings",
-          "type": "object",
-          "additionalProperties": {
-            "type": "string",
-            "format": "uri"
-          }
-        }
-      ]
-    },
-    "plugins": {
-      "description": "Plugin configuration",
-      "default": null,
-      "properties": {
-        "experimental.broken": {
-          "description": "This is a broken plugin for testing purposes only.",
-          "type": "object",
-          "required": [
-            "enabled"
-          ],
-          "properties": {
-            "enabled": {
-              "description": "Enable the broken plugin.",
-              "type": "boolean"
-            }
-          }
-        },
-        "experimental.expose_query_plan": {
-          "description": "Expose query plan",
-          "type": "boolean"
-        },
-        "experimental.restricted": {
-          "description": "Restricted plugin (for testing purposes only)",
-          "type": "object",
-          "required": [
-            "enabled"
-          ],
-          "properties": {
-            "enabled": {
-              "description": "Enable the restricted plugin (for testing purposes only)",
-              "type": "boolean"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "preview_operation_limits": {
-      "description": "Operation limits",
+    "limits": {
+      "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
       "default": {
         "max_depth": null,
         "max_height": null,
@@ -1191,6 +1168,82 @@ expression: "&schema"
           "description": "If set to true (which is the default is dev mode), requests that exceed a `max_*` limit are *not* rejected. Instead they are executed normally, and a warning is logged.",
           "default": false,
           "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "override_subgraph_url": {
+      "description": "Subgraph URL mappings",
+      "anyOf": [
+        {
+          "description": "Subgraph URL mappings",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      ]
+    },
+    "plugins": {
+      "description": "Plugin configuration",
+      "default": null,
+      "properties": {
+        "experimental.broken": {
+          "description": "This is a broken plugin for testing purposes only.",
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "Enable the broken plugin.",
+              "type": "boolean"
+            }
+          }
+        },
+        "experimental.expose_query_plan": {
+          "description": "Expose query plan",
+          "type": "boolean"
+        },
+        "experimental.restricted": {
+          "description": "Restricted plugin (for testing purposes only)",
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "Enable the restricted plugin (for testing purposes only)",
+              "type": "boolean"
+            }
+          }
+        },
+        "test.always_fails_to_start": {
+          "description": "Configuration for the test plugin",
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "description": "The name of the test",
+              "type": "string"
+            }
+          }
+        },
+        "test.always_starts_and_stops": {
+          "description": "Configuration for the test plugin",
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "description": "The name of the test",
+              "type": "string"
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -4045,6 +4098,26 @@ expression: "&schema"
                     "grpc",
                     "http"
                   ]
+                },
+                "temporality": {
+                  "description": "Temporality for export (default: `Cumulative`). Note that when exporting to Datadog agent use `Delta`.",
+                  "default": "cumulative",
+                  "oneOf": [
+                    {
+                      "description": "Export cumulative metrics.",
+                      "type": "string",
+                      "enum": [
+                        "cumulative"
+                      ]
+                    },
+                    {
+                      "description": "Export delta metrics. `Delta` should be used when exporting to DataDog Agent.",
+                      "type": "string",
+                      "enum": [
+                        "delta"
+                      ]
+                    }
+                  ]
                 }
               },
               "additionalProperties": false,
@@ -4499,6 +4572,26 @@ expression: "&schema"
                     "grpc",
                     "http"
                   ]
+                },
+                "temporality": {
+                  "description": "Temporality for export (default: `Cumulative`). Note that when exporting to Datadog agent use `Delta`.",
+                  "default": "cumulative",
+                  "oneOf": [
+                    {
+                      "description": "Export cumulative metrics.",
+                      "type": "string",
+                      "enum": [
+                        "cumulative"
+                      ]
+                    },
+                    {
+                      "description": "Export delta metrics. `Delta` should be used when exporting to DataDog Agent.",
+                      "type": "string",
+                      "enum": [
+                        "delta"
+                      ]
+                    }
+                  ]
                 }
               },
               "additionalProperties": false,
@@ -4774,32 +4867,6 @@ expression: "&schema"
         }
       },
       "additionalProperties": false
-    },
-    "test.always_fails_to_start": {
-      "description": "Configuration for the test plugin",
-      "type": "object",
-      "required": [
-        "name"
-      ],
-      "properties": {
-        "name": {
-          "description": "The name of the test",
-          "type": "string"
-        }
-      }
-    },
-    "test.always_starts_and_stops": {
-      "description": "Configuration for the test plugin",
-      "type": "object",
-      "required": [
-        "name"
-      ],
-      "properties": {
-        "name": {
-          "description": "The name of the test",
-          "type": "string"
-        }
-      }
     },
     "tls": {
       "description": "TLS related configuration options.",

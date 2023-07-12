@@ -9,7 +9,6 @@ use apollo_compiler::InputDatabase;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::spec::Query;
 use crate::Configuration;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -59,12 +58,13 @@ impl OperationLimits<bool> {
 }
 
 /// Returns which limits are exceeded by the given query, if any
-pub(crate) async fn check(
+pub(crate) fn check(
     configuration: &Configuration,
-    query: &mut Query,
+    query: &str,
+    compiler: &ApolloCompiler,
     operation_name: Option<String>,
 ) -> Result<(), OperationLimits<bool>> {
-    let config_limits = &configuration.preview_operation_limits;
+    let config_limits = &configuration.limits;
     let max = OperationLimits {
         depth: config_limits.max_depth,
         height: config_limits.max_height,
@@ -75,8 +75,6 @@ pub(crate) async fn check(
         // No configured limit
         return Ok(());
     }
-
-    let compiler = query.compiler.lock().await;
 
     let ids = compiler.db.executable_definition_files();
     // We create a new compiler for each query
@@ -93,7 +91,7 @@ pub(crate) async fn check(
 
     let mut fragment_cache = HashMap::new();
     let measured = count(
-        &compiler,
+        compiler,
         query_id,
         &mut fragment_cache,
         operation.selection_set(),
@@ -115,7 +113,6 @@ pub(crate) async fn check(
             }
         });
         let message = messages.join(", ");
-        let query = &query.string;
         tracing::warn!(
             "request exceeded complexity limits: {message}, \
             query: {query:?}, operation name: {operation_name:?}"

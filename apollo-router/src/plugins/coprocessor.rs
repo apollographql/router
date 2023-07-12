@@ -515,9 +515,9 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    request.context.enter_active_request();
+    let guard = request.context.enter_active_request();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    request.context.leave_active_request();
+    drop(guard);
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
@@ -664,9 +664,9 @@ where
 
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
-    response.context.enter_active_request();
+    let guard = response.context.enter_active_request();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    response.context.leave_active_request();
+    drop(guard);
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
@@ -739,11 +739,11 @@ where
 
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
-                generator_map_context.enter_active_request();
+                let guard = generator_map_context.enter_active_request();
                 let co_processor_result = payload
                     .call(generator_client, &generator_coprocessor_url)
                     .await;
-                generator_map_context.leave_active_request();
+                drop(guard);
                 tracing::debug!(?co_processor_result, "co-processor returned");
                 let co_processor_output = co_processor_result?;
 
@@ -829,9 +829,9 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    request.context.enter_active_request();
+    let guard = request.context.enter_active_request();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    request.context.leave_active_request();
+    drop(guard);
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphRequest)?;
@@ -961,9 +961,9 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    response.context.enter_active_request();
+    let guard = response.context.enter_active_request();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    response.context.leave_active_request();
+    drop(guard);
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 

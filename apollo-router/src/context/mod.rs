@@ -21,6 +21,9 @@ use crate::json_ext::Value;
 
 pub(crate) mod extensions;
 
+/// The key of the resolved operation name. This is subject to change and should not be relied on.
+pub(crate) const OPERATION_NAME: &str = "operation_name";
+
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
 
@@ -205,13 +208,11 @@ impl Context {
     }
 
     /// Notify the busy timer that we're waiting on a network request
-    pub(crate) fn enter_active_request(&self) {
-        self.busy_timer.lock().increment_active_requests()
-    }
-
-    /// Notify the busy timer that we stopped waiting on a network request
-    pub(crate) fn leave_active_request(&self) {
-        self.busy_timer.lock().decrement_active_requests()
+    pub(crate) fn enter_active_request(&self) -> BusyTimerGuard {
+        self.busy_timer.lock().increment_active_requests();
+        BusyTimerGuard {
+            busy_timer: self.busy_timer.clone(),
+        }
     }
 
     /// How much time was spent working on the request
@@ -223,6 +224,16 @@ impl Context {
         for kv in other.entries.iter() {
             self.entries.insert(kv.key().clone(), kv.value().clone());
         }
+    }
+}
+
+pub(crate) struct BusyTimerGuard {
+    busy_timer: Arc<Mutex<BusyTimer>>,
+}
+
+impl Drop for BusyTimerGuard {
+    fn drop(&mut self) {
+        self.busy_timer.lock().decrement_active_requests()
     }
 }
 

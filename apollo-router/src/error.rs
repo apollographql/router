@@ -3,10 +3,6 @@ use std::sync::Arc;
 
 use displaydoc::Display;
 use lazy_static::__Deref;
-use miette::Diagnostic;
-use miette::NamedSource;
-use miette::Report;
-use miette::SourceSpan;
 use router_bridge::introspect::IntrospectionError;
 use router_bridge::planner::PlannerError;
 use router_bridge::planner::UsageReporting;
@@ -30,7 +26,7 @@ use crate::spec::SpecError;
 ///
 /// Note that these are not actually returned to the client, but are instead converted to JSON for
 /// [`struct@Error`].
-#[derive(Error, Display, Debug, Clone, Serialize)]
+#[derive(Error, Display, Debug, Clone, Serialize, Eq, PartialEq)]
 #[serde(untagged)]
 #[ignore_extra_doc_attributes]
 #[non_exhaustive]
@@ -503,54 +499,71 @@ pub(crate) enum SchemaError {
     UrlParse(String, http::uri::InvalidUri),
     /// Could not find an URL for subgraph {0}
     MissingSubgraphUrl(String),
-    /// Parsing error(s).
+    /// GraphQL parser error(s).
     Parse(ParseErrors),
+    /// GraphQL parser or validation error(s).
+    Validate(ValidationErrors),
     /// Api error(s): {0}
     Api(String),
 }
 
-/// Collection of schema parsing errors.
+/// Collection of schema validation errors.
 #[derive(Clone, Debug)]
 pub(crate) struct ParseErrors {
-    pub(crate) raw_schema: String,
     pub(crate) errors: Vec<apollo_parser::Error>,
 }
 
-#[derive(Error, Debug, Diagnostic)]
-#[error("{}", self.ty)]
-#[diagnostic(code("apollo-parser parsing error."))]
-struct ParserError {
-    ty: String,
-    #[source_code]
-    src: NamedSource,
-    #[label("{}", self.ty)]
-    span: SourceSpan,
+impl std::fmt::Display for ParseErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut errors = self.errors.iter();
+        if let Some(error) = errors.next() {
+            write!(f, "{}", error.message())?;
+        }
+        for error in errors {
+            write!(f, "\n{}", error.message())?;
+        }
+        Ok(())
+    }
 }
 
-impl ParseErrors {
+/// Collection of schema validation errors.
+#[derive(Clone, Debug)]
+pub(crate) struct ValidationErrors {
+    pub(crate) errors: Vec<apollo_compiler::ApolloDiagnostic>,
+}
+
+impl std::fmt::Display for ValidationErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut errors = self.errors.iter();
+        if let Some(error) = errors.next() {
+            write!(f, "{}", error.data)?;
+        }
+        for error in errors {
+            write!(f, "\n{}", error.data)?;
+        }
+        Ok(())
+    }
+}
+
+impl ValidationErrors {
     #[allow(clippy::needless_return)]
     pub(crate) fn print(&self) {
         if LevelFilter::current() == LevelFilter::OFF && cfg!(not(debug_assertions)) {
             return;
         } else if atty::is(atty::Stream::Stdout) {
-            // Fancy Miette reports for TTYs
+            // Fancy reports for TTYs
             self.errors.iter().for_each(|err| {
-                let report = Report::new(ParserError {
-                    src: NamedSource::new("supergraph_schema", self.raw_schema.clone()),
-                    span: (err.index(), err.data().len()).into(),
-                    ty: err.message().into(),
-                });
                 // `format!` works around https://github.com/rust-lang/rust/issues/107118
                 // to test the panic from https://github.com/apollographql/router/issues/2269
                 #[allow(clippy::format_in_format_args)]
                 {
-                    println!("{}", format!("{report:?}"));
+                    println!("{}", format!("{err}"));
                 }
             });
         } else {
             // Best effort to display errors
-            self.errors.iter().for_each(|r| {
-                println!("{r:#?}");
+            self.errors.iter().for_each(|diag| {
+                println!("{}", diag.data);
             });
         };
     }

@@ -49,9 +49,6 @@ pub struct Response {
     #[serde(skip, default)]
     pub created_at: Option<Instant>,
 
-    #[serde(skip_serializing)]
-    pub subselection: Option<String>,
-
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub incremental: Vec<IncrementalResponse>,
 }
@@ -67,7 +64,7 @@ impl Response {
         path: Option<Path>,
         errors: Vec<Error>,
         extensions: Map<ByteString, Value>,
-        subselection: Option<String>,
+        _subselection: Option<String>,
         has_next: Option<bool>,
         subscribed: Option<bool>,
         incremental: Vec<IncrementalResponse>,
@@ -79,7 +76,6 @@ impl Response {
             path,
             errors,
             extensions,
-            subselection,
             has_next,
             subscribed,
             incremental,
@@ -165,6 +161,15 @@ impl Response {
                 })?,
             None => vec![],
         };
+        // Graphql spec says:
+        // If the data entry in the response is not present, the errors entry in the response must not be empty.
+        // It must contain at least one error. The errors it contains should indicate why no data was able to be returned.
+        if data.is_none() && errors.is_empty() {
+            return Err(FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: "graphql response without data must contain at least one error".to_string(),
+            });
+        }
 
         Ok(Response {
             label,
@@ -172,7 +177,6 @@ impl Response {
             path,
             errors,
             extensions,
-            subselection: None,
             has_next,
             subscribed: None,
             incremental,
@@ -448,6 +452,18 @@ mod tests {
                 )
                 .has_next(true)
                 .build()
+        );
+    }
+
+    #[test]
+    fn test_no_data_and_no_errors() {
+        let response = Response::from_bytes("test", "{\"errors\":null}".into());
+        assert_eq!(
+            response.expect_err("no data and no errors"),
+            FetchError::SubrequestMalformedResponse {
+                service: "test".to_string(),
+                reason: "graphql response without data must contain at least one error".to_string(),
+            }
         );
     }
 }
