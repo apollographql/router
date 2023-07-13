@@ -376,9 +376,6 @@ where
         parts.headers = internalize_header_map(headers)?;
     }
 
-    // Now break our co-processor modified response back into parts
-    //let (parts, body) = response.response.into_parts();
-
     // Clone all the bits we need
     let context = response.context.clone();
     let map_context = response.context.clone();
@@ -460,11 +457,8 @@ where
             }
         });
 
-    //response.response = http::Response::from_parts(parts, stream::once(future::ready(new_body)));
-
-    // Create our response stream which consists of the bytes from our first body chained with the
+    // Create our response stream which consists of our first body chained with the
     // rest of the responses in our mapped stream.
-    //let bytes = hyper::body::to_bytes(body).await.map_err(BoxError::from);
     let stream = once(ready(new_body)).chain(mapped_stream).boxed();
 
     // Finally, return a response which has a Body that wraps our stream of response chunks.
@@ -497,17 +491,11 @@ mod tests {
             hyper::Request<Body>,
         ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
     ) -> MockHttpClientService {
-        println!("mock_with_callback [{}]", line!());
         let mut mock_http_client = MockHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {
-            println!("mock_with_callback [{}]", line!());
-
             let mut mock_http_client = MockHttpClientService::new();
-            //mock_http_client.expect_call().returning(callback);
 
             mock_http_client.expect_clone().returning(move || {
-                println!("mock_with_callback [{}]", line!());
-
                 let mut mock_http_client = MockHttpClientService::new();
                 mock_http_client.expect_call().returning(callback);
                 mock_http_client
