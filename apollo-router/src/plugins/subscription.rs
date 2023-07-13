@@ -56,22 +56,29 @@ pub(crate) struct Subscription {
 
 /// Subscriptions configuration
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct SubscriptionConfig {
+    /// Enable subscription or not
+    pub(crate) enabled: bool,
     /// Select a subscription mode (callback or passthrough)
+    #[serde(default)]
     pub(crate) mode: SubscriptionModeConfig,
     /// Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode)
     /// (default: true)
+    #[serde(default)]
     pub(crate) enable_deduplication: bool,
     /// This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.
+    #[serde(default)]
     pub(crate) max_opened_subscriptions: Option<usize>,
     /// It represent the capacity of the in memory queue to know how many events we can keep in a buffer
+    #[serde(default)]
     pub(crate) queue_capacity: Option<usize>,
 }
 
 impl Default for SubscriptionConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             mode: Default::default(),
             enable_deduplication: true,
             max_opened_subscriptions: None,
@@ -208,7 +215,8 @@ impl Plugin for Subscription {
         _subgraph_name: &str,
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
-        let enabled = self.config.mode.callback.is_some() || self.config.mode.passthrough.is_some();
+        let enabled = self.config.enabled
+            && (self.config.mode.callback.is_some() || self.config.mode.passthrough.is_some());
         ServiceBuilder::new()
             .checkpoint(move |req: subgraph::Request| {
                 if req.operation_kind == OperationKind::Subscription && !enabled {

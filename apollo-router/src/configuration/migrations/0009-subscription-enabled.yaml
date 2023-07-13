@@ -1,0 +1,5 @@
+description: Add enabled field in subscription
+actions:
+  - type: add
+    path: subscription.enabled
+    value: true

@@ -22,6 +22,7 @@ struct Migration {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Action {
+    Add { path: String, value: Value },
     Delete { path: String },
     Copy { from: String, to: String },
     Move { from: String, to: String },
@@ -69,6 +70,17 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
         transformer_builder.add_action(Parser::parse("", "").expect("migration must be valid"));
     for action in &migration.actions {
         match action {
+            Action::Add { path, value } => {
+                if !jsonpath_lib::select(config, &format!("$[?(@.{path})]"))
+                    .unwrap_or_default()
+                    .is_empty()
+                {
+                    transformer_builder = transformer_builder.add_action(
+                        Parser::parse(&format!(r#"const({value})"#), path)
+                            .expect("migration must be valid"),
+                    );
+                }
+            }
             Action::Delete { path } => {
                 if !jsonpath_lib::select(config, &format!("$.{path}"))
                     .unwrap_or_default()
@@ -116,6 +128,7 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
 
     // Now we need to clean up elements that should be deleted.
     cleanup(&mut new_config);
+    dbg!(&new_config);
 
     Ok(new_config)
 }
