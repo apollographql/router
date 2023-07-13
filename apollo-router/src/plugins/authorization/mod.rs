@@ -254,7 +254,7 @@ impl AuthorizationPlugin {
             }
         };
 
-        let filter_res = Self::scopes_filter_query(&compiler, &scopes)?;
+        let filter_res = Self::scopes_filter_query(&compiler, scopes)?;
 
         let compiler = match filter_res {
             None => compiler,
@@ -283,7 +283,7 @@ impl AuthorizationPlugin {
             }
         };
 
-        let filter_res = Self::policies_filter_query(&compiler, &policies)?;
+        let filter_res = Self::policies_filter_query(&compiler, policies)?;
 
         let compiler = match filter_res {
             None => compiler,
