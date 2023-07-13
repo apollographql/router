@@ -1288,14 +1288,13 @@ expression: "&schema"
           "description": "todo[igni]: document before merging.",
           "oneOf": [
             {
-              "description": "todo[igni]: document before merging.",
               "type": "object",
               "required": [
                 "aws_sig_v4"
               ],
               "properties": {
                 "aws_sig_v4": {
-                  "description": "todo[igni]: document before merging.",
+                  "description": "Configure AWS sigv4 auth.",
                   "oneOf": [
                     {
                       "type": "object",
@@ -1304,7 +1303,7 @@ expression: "&schema"
                       ],
                       "properties": {
                         "hardcoded": {
-                          "description": "todo[igni]: document before merging.",
+                          "description": "Hardcoded Config using assess_key and secret. Prefer using DefaultChain instead.",
                           "type": "object",
                           "required": [
                             "access_key_id",
@@ -1314,11 +1313,11 @@ expression: "&schema"
                           ],
                           "properties": {
                             "access_key_id": {
-                              "description": "todo[igni]: document before merging.",
+                              "description": "The ID for this access key.",
                               "type": "string"
                             },
                             "assume_role": {
-                              "description": "todo[igni]: document before merging.",
+                              "description": "Specify a role ARN for your credentials.",
                               "type": "object",
                               "required": [
                                 "role_arn",
@@ -1326,31 +1325,31 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "external_id": {
-                                  "description": "todo[igni]: document before merging.",
+                                  "description": "Unique identifier that might be required when you assume a role in another account.",
                                   "type": "string",
                                   "nullable": true
                                 },
                                 "role_arn": {
-                                  "description": "todo[igni]: document before merging.",
+                                  "description": "Amazon Resource Name (ARN) for the role assumed when making requests",
                                   "type": "string"
                                 },
                                 "session_name": {
-                                  "description": "todo[igni]: document before merging.",
+                                  "description": "Uniquely identify a session when the same role is assumed by different principals or for different reasons.",
                                   "type": "string"
                                 }
                               },
                               "nullable": true
                             },
                             "region": {
-                              "description": "todo[igni]: document before merging.",
+                              "description": "The aws region this chain applies to.",
                               "type": "string"
                             },
                             "secret_access_key": {
-                              "description": "todo[igni]: document before merging.",
+                              "description": "The secret key used to sign requests.",
                               "type": "string"
                             },
                             "service_name": {
-                              "description": "todo[igni]: document before merging.",
+                              "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
                               "type": "string"
                             }
                           },
@@ -1366,7 +1365,7 @@ expression: "&schema"
                       ],
                       "properties": {
                         "default_chain": {
-                          "description": "todo[igni]: document before merging.",
+                          "description": "Configuration of the DefaultChainProvider",
                           "type": "object",
                           "required": [
                             "region",
@@ -1374,7 +1373,7 @@ expression: "&schema"
                           ],
                           "properties": {
                             "assume_role": {
-                              "description": "todo[igni]: document before merging.",
+                              "description": "Specify a role ARN for your credentials.",
                               "type": "object",
                               "required": [
                                 "role_arn",
@@ -1382,32 +1381,32 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "external_id": {
-                                  "description": "todo[igni]: document before merging.",
+                                  "description": "Unique identifier that might be required when you assume a role in another account.",
                                   "type": "string",
                                   "nullable": true
                                 },
                                 "role_arn": {
-                                  "description": "todo[igni]: document before merging.",
+                                  "description": "Amazon Resource Name (ARN) for the role assumed when making requests",
                                   "type": "string"
                                 },
                                 "session_name": {
-                                  "description": "todo[igni]: document before merging.",
+                                  "description": "Uniquely identify a session when the same role is assumed by different principals or for different reasons.",
                                   "type": "string"
                                 }
                               },
                               "nullable": true
                             },
                             "profile_name": {
-                              "description": "todo[igni]: document before merging.",
+                              "description": "The profile name used by this provider",
                               "type": "string",
                               "nullable": true
                             },
                             "region": {
-                              "description": "todo[igni]: document before merging.",
+                              "description": "The aws region this chain applies to.",
                               "type": "string"
                             },
                             "service_name": {
-                              "description": "todo[igni]: document before merging.",
+                              "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
                               "type": "string"
                             }
                           }
@@ -1429,14 +1428,13 @@ expression: "&schema"
           "additionalProperties": {
             "oneOf": [
               {
-                "description": "todo[igni]: document before merging.",
                 "type": "object",
                 "required": [
                   "aws_sig_v4"
                 ],
                 "properties": {
                   "aws_sig_v4": {
-                    "description": "todo[igni]: document before merging.",
+                    "description": "Configure AWS sigv4 auth.",
                     "oneOf": [
                       {
                         "type": "object",
@@ -1445,7 +1443,7 @@ expression: "&schema"
                         ],
                         "properties": {
                           "hardcoded": {
-                            "description": "todo[igni]: document before merging.",
+                            "description": "Hardcoded Config using assess_key and secret. Prefer using DefaultChain instead.",
                             "type": "object",
                             "required": [
                               "access_key_id",
@@ -1455,11 +1453,11 @@ expression: "&schema"
                             ],
                             "properties": {
                               "access_key_id": {
-                                "description": "todo[igni]: document before merging.",
+                                "description": "The ID for this access key.",
                                 "type": "string"
                               },
                               "assume_role": {
-                                "description": "todo[igni]: document before merging.",
+                                "description": "Specify a role ARN for your credentials.",
                                 "type": "object",
                                 "required": [
                                   "role_arn",
@@ -1467,31 +1465,31 @@ expression: "&schema"
                                 ],
                                 "properties": {
                                   "external_id": {
-                                    "description": "todo[igni]: document before merging.",
+                                    "description": "Unique identifier that might be required when you assume a role in another account.",
                                     "type": "string",
                                     "nullable": true
                                   },
                                   "role_arn": {
-                                    "description": "todo[igni]: document before merging.",
+                                    "description": "Amazon Resource Name (ARN) for the role assumed when making requests",
                                     "type": "string"
                                   },
                                   "session_name": {
-                                    "description": "todo[igni]: document before merging.",
+                                    "description": "Uniquely identify a session when the same role is assumed by different principals or for different reasons.",
                                     "type": "string"
                                   }
                                 },
                                 "nullable": true
                               },
                               "region": {
-                                "description": "todo[igni]: document before merging.",
+                                "description": "The aws region this chain applies to.",
                                 "type": "string"
                               },
                               "secret_access_key": {
-                                "description": "todo[igni]: document before merging.",
+                                "description": "The secret key used to sign requests.",
                                 "type": "string"
                               },
                               "service_name": {
-                                "description": "todo[igni]: document before merging.",
+                                "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
                                 "type": "string"
                               }
                             },
@@ -1507,7 +1505,7 @@ expression: "&schema"
                         ],
                         "properties": {
                           "default_chain": {
-                            "description": "todo[igni]: document before merging.",
+                            "description": "Configuration of the DefaultChainProvider",
                             "type": "object",
                             "required": [
                               "region",
@@ -1515,7 +1513,7 @@ expression: "&schema"
                             ],
                             "properties": {
                               "assume_role": {
-                                "description": "todo[igni]: document before merging.",
+                                "description": "Specify a role ARN for your credentials.",
                                 "type": "object",
                                 "required": [
                                   "role_arn",
@@ -1523,32 +1521,32 @@ expression: "&schema"
                                 ],
                                 "properties": {
                                   "external_id": {
-                                    "description": "todo[igni]: document before merging.",
+                                    "description": "Unique identifier that might be required when you assume a role in another account.",
                                     "type": "string",
                                     "nullable": true
                                   },
                                   "role_arn": {
-                                    "description": "todo[igni]: document before merging.",
+                                    "description": "Amazon Resource Name (ARN) for the role assumed when making requests",
                                     "type": "string"
                                   },
                                   "session_name": {
-                                    "description": "todo[igni]: document before merging.",
+                                    "description": "Uniquely identify a session when the same role is assumed by different principals or for different reasons.",
                                     "type": "string"
                                   }
                                 },
                                 "nullable": true
                               },
                               "profile_name": {
-                                "description": "todo[igni]: document before merging.",
+                                "description": "The profile name used by this provider",
                                 "type": "string",
                                 "nullable": true
                               },
                               "region": {
-                                "description": "todo[igni]: document before merging.",
+                                "description": "The aws region this chain applies to.",
                                 "type": "string"
                               },
                               "service_name": {
-                                "description": "todo[igni]: document before merging.",
+                                "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
                                 "type": "string"
                               }
                             }

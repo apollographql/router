@@ -27,19 +27,20 @@ use crate::services::SubgraphRequest;
 
 register_plugin!("apollo", "subgraph_authentication", SubgraphAuth);
 
-/// todo[igni]: document before merging.
+/// Hardcoded Config using assess_key and secret.
+/// Prefer using DefaultChain instead.
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct AWSSigV4HardcodedConfig {
-    /// todo[igni]: document before merging.
+    /// The ID for this access key.
     access_key_id: String,
-    /// todo[igni]: document before merging.
+    /// The secret key used to sign requests.
     secret_access_key: String,
-    /// todo[igni]: document before merging.
+    /// The aws region this chain applies to.
     region: String,
-    /// todo[igni]: document before merging.
+    /// The service you're trying to access, eg: "s3", "vpc-lattice-svcs", etc.
     service_name: String,
-    /// todo[igni]: document before merging.
+    /// Specify a role ARN for your credentials.
     assume_role: Option<AssumeRoleProvider>,
 }
 
@@ -60,20 +61,20 @@ impl ProvideCredentials for AWSSigV4HardcodedConfig {
     }
 }
 
-/// todo[igni]: document before merging.
+/// Configuration of the DefaultChainProvider
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 struct DefaultChainConfig {
-    /// todo[igni]: document before merging.
+    /// The aws region this chain applies to.
     region: String,
-    /// todo[igni]: document before merging.
+    /// The profile name used by this provider
     profile_name: Option<String>,
-    /// todo[igni]: document before merging.
+    /// The service you're trying to access, eg: "s3", "vpc-lattice-svcs", etc.
     service_name: String,
-    /// todo[igni]: document before merging.
+    /// Specify a role ARN for your credentials.
     assume_role: Option<AssumeRoleProvider>,
 }
 
-/// todo[igni]: document before merging.
+/// Specify a role ARN for your credentials.
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 struct AssumeRoleProvider {
     /// Amazon Resource Name (ARN)
@@ -81,11 +82,11 @@ struct AssumeRoleProvider {
     role_arn: String,
     /// Uniquely identify a session when the same role is assumed by different principals or for different reasons.
     session_name: String,
-    /// Enique identifier that might be required when you assume a role in another account.
+    /// Unique identifier that might be required when you assume a role in another account.
     external_id: Option<String>,
 }
 
-/// todo[igni]: document before merging.
+/// Configure AWS sigv4 auth.
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 enum AWSSigV4Config {
@@ -97,7 +98,6 @@ enum AWSSigV4Config {
 #[serde(deny_unknown_fields)]
 enum AuthConfig {
     #[serde(rename = "aws_sig_v4")]
-    /// todo[igni]: document before merging.
     AWSSigV4(AWSSigV4Config),
 }
 
@@ -296,55 +296,6 @@ impl SubgraphAuth {
             .or_else(|| self.signing_params.all.clone())
     }
 }
-
-// struct AuthLayer {
-//     signing_params_config: SigningParamsConfig,
-// }
-
-// impl AuthLayer {
-//     fn new(signing_params_config: SigningParamsConfig) -> Self {
-//         Self {
-//             signing_params_config,
-//         }
-//     }
-// }
-
-// impl<S> Layer<S> for AuthLayer {
-//     type Service = AuthLayerService<S>;
-
-//     fn layer(&self, inner: S) -> Self::Service {
-//         AuthLayerService {
-//             inner,
-//             signing_params_config: self.signing_params_config.clone(),
-//         }
-//     }
-// }
-
-// struct AuthLayerService<S> {
-//     inner: S,
-//     signing_params_config: SigningParamsConfig,
-// }
-
-// impl<S> Service<SubgraphRequest> for AuthLayerService<S>
-// where
-//     S: Service<SubgraphRequest> + Clone + Send + 'static,
-//     S::Future: Send + 'static,
-// {
-//     type Response = S::Response;
-//     type Error = S::Error;
-//     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-//     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-//         self.inner.poll_ready(cx)
-//     }
-
-//     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
-//         let signing_params = self.signing_params_config.clone();
-//         Box::pin(async move {
-
-//         })
-//     }
-// }
 
 /// There are three possible cases
 /// https://github.com/awslabs/aws-sdk-rust/blob/9c3168dafa4fd8885ce4e1fd41cec55ce982a33c/sdk/aws-sigv4/src/http_request/sign.rs#L264C1-L271C6
