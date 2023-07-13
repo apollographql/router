@@ -434,10 +434,6 @@ async fn scopes_directive() {
 
     let req = graphql::Request {
         query: Some("query { orga(id: 1) { id creatorUser { id name phone } } }".to_string()),
-        variables: json! {{ "isAuthenticated": false }}
-            .as_object()
-            .unwrap()
-            .clone(),
         ..Default::default()
     };
     let request = router::Request {

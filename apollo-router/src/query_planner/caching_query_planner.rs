@@ -20,8 +20,8 @@ use tracing::Instrument;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
-use crate::json_ext::Object;
 use crate::plugins::authorization::AuthorizationPlugin;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
@@ -38,7 +38,6 @@ use crate::spec::SpecError;
 use crate::Configuration;
 use crate::Context;
 
-pub(crate) const QUERY_PLANNER_CACHE_KEY_METADATA: &str = "QUERY_PLANNER_CACHE_KEY_METADATA";
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
 
@@ -106,7 +105,6 @@ where
     pub(crate) async fn warm_up(
         &mut self,
         query_analysis: &QueryAnalysisLayer,
-        //FIXME: use cache keys that return is_authenticated and scopes
         cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
         let schema_id = self.schema.schema_id.clone();
@@ -154,12 +152,7 @@ where
                     .lock()
                     .insert(Compiler(Arc::new(Mutex::new(compiler))));
 
-                context
-                    .insert(
-                        QUERY_PLANNER_CACHE_KEY_METADATA,
-                        caching_key.metadata.clone(),
-                    )
-                    .expect("should not fail");
+                context.private_entries.lock().insert(caching_key.metadata);
 
                 let request = QueryPlannerRequest {
                     query,
@@ -231,8 +224,10 @@ where
                 operation: request.operation_name.to_owned(),
                 metadata: request
                     .context
-                    .get::<_, Object>(QUERY_PLANNER_CACHE_KEY_METADATA)
-                    .unwrap_or_default()
+                    .private_entries
+                    .lock()
+                    .get::<CacheKeyMetadata>()
+                    .cloned()
                     .unwrap_or_default(),
             };
 
@@ -397,7 +392,7 @@ pub(crate) struct CachingQueryKey {
     pub(crate) schema_id: Option<String>,
     pub(crate) query: String,
     pub(crate) operation: Option<String>,
-    pub(crate) metadata: Object,
+    pub(crate) metadata: CacheKeyMetadata,
 }
 
 impl std::fmt::Display for CachingQueryKey {
@@ -409,8 +404,11 @@ impl std::fmt::Display for CachingQueryKey {
         let mut hasher = Sha256::new();
         hasher.update(self.operation.as_deref().unwrap_or("-"));
         let operation = hex::encode(hasher.finalize());
-        let metadata =
-            serde_json::to_string(&self.metadata).expect("serialization should not fail");
+
+        let mut hasher = Sha256::new();
+        hasher.update(&serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
+        let metadata = hex::encode(hasher.finalize());
+
         write!(
             f,
             "plan.{}.{}.{}.{}",
@@ -426,7 +424,7 @@ impl std::fmt::Display for CachingQueryKey {
 pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) query: String,
     pub(crate) operation: Option<String>,
-    pub(crate) metadata: Object,
+    pub(crate) metadata: CacheKeyMetadata,
 }
 
 #[cfg(test)]

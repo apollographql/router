@@ -360,6 +360,9 @@ impl Exporter {
                     )),
                 })]
             }
+            // SUBSCRIBE_SPAN_NAME => {
+            // TODO: in the future we could add a subscription node in the report.proto and do exactly the same logic than in FETCH_SPAN_NAME branch
+            // }
             FLATTEN_SPAN_NAME => {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
                     node: Some(proto::reports::trace::query_plan_node::Node::Flatten(

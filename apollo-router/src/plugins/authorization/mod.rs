@@ -11,6 +11,7 @@ use http::StatusCode;
 use router_bridge::planner::UsageReporting;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::Value;
 use tokio::sync::Mutex;
 use tower::BoxError;
@@ -30,7 +31,6 @@ use crate::error::QueryPlannerError;
 use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
-use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -38,7 +38,6 @@ use crate::plugin::PluginInit;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::query_planner::FilteredQuery;
 use crate::query_planner::QueryKey;
-use crate::query_planner::QUERY_PLANNER_CACHE_KEY_METADATA;
 use crate::register_plugin;
 use crate::services::supergraph;
 use crate::spec::query::transform;
@@ -57,6 +56,13 @@ pub(crate) mod scopes;
 
 const REQUIRED_SCOPES_KEY: &str = "apollo_authorization::scopes::required";
 const REQUIRED_POLICIES_KEY: &str = "apollo_authorization::policies::required";
+
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize)]
+pub(crate) struct CacheKeyMetadata {
+    is_authenticated: bool,
+    scopes: Vec<String>,
+    policies: Vec<String>,
+}
 
 /// Authorization plugin
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
@@ -194,14 +200,11 @@ impl AuthorizationPlugin {
             .unwrap_or_default();
         policies.sort();
 
-        context
-            .upsert(QUERY_PLANNER_CACHE_KEY_METADATA, |mut o: Object| {
-                o.insert("is_authenticated", is_authenticated.into());
-                o.insert("scopes", scopes.into());
-                o.insert("policies", policies.into());
-                o
-            })
-            .unwrap();
+        context.private_entries.lock().insert(CacheKeyMetadata {
+            is_authenticated,
+            scopes,
+            policies,
+        });
     }
 
     pub(crate) fn filter_query(
@@ -215,32 +218,9 @@ impl AuthorizationPlugin {
         compiler.set_type_system_hir(schema.type_system.clone());
         let _id = compiler.add_executable(&key.filtered_query, "query");
 
-        let is_authenticated = key
-            .metadata
-            .get("is_authenticated")
-            .and_then(|v| v.as_bool())
-            .unwrap_or_default();
-        let scopes = key
-            .metadata
-            .get("scopes")
-            .and_then(|v| v.as_array())
-            .map(|v| {
-                v.iter()
-                    .filter_map(|el| el.as_str().map(|s| s.to_string()))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        let policies = key
-            .metadata
-            .get("policies")
-            .and_then(|v| v.as_array())
-            .map(|v| {
-                v.iter()
-                    .filter_map(|el| el.as_str().map(|s| s.to_string()))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+        let is_authenticated = key.metadata.is_authenticated;
+        let scopes = &key.metadata.scopes;
+        let policies = &key.metadata.policies;
 
         let mut is_filtered = false;
         let mut unauthorized_paths: Vec<Path> = vec![];

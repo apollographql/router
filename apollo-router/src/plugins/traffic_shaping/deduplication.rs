@@ -17,9 +17,8 @@ use tower::ServiceExt;
 
 use crate::graphql::Request;
 use crate::http_ext;
-use crate::json_ext::Object;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::OperationKind;
-use crate::query_planner::QUERY_PLANNER_CACHE_KEY_METADATA;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
@@ -37,7 +36,7 @@ where
     }
 }
 
-type CacheKey = (http_ext::Request<Request>, Object);
+type CacheKey = (http_ext::Request<Request>, CacheKeyMetadata);
 
 type WaitMap = Arc<Mutex<HashMap<CacheKey, Sender<Result<CloneSubgraphResponse, String>>>>>;
 
@@ -80,8 +79,10 @@ where
                 (&request.subgraph_request).into(),
                 request
                     .context
-                    .get::<_, Object>(QUERY_PLANNER_CACHE_KEY_METADATA)
-                    .unwrap_or_default()
+                    .private_entries
+                    .lock()
+                    .get::<CacheKeyMetadata>()
+                    .cloned()
                     .unwrap_or_default(),
             );
 
@@ -117,8 +118,10 @@ where
                         (&request.subgraph_request).into(),
                         request
                             .context
-                            .get::<_, Object>(QUERY_PLANNER_CACHE_KEY_METADATA)
-                            .unwrap_or_default()
+                            .private_entries
+                            .lock()
+                            .get::<CacheKeyMetadata>()
+                            .cloned()
                             .unwrap_or_default(),
                     );
                     let res = {
