@@ -101,15 +101,15 @@ enum AuthConfig {
     AWSSigV4(AWSSigV4Config),
 }
 
-/// todo[igni]: document before merging.
+/// Configure subgraph authentication
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Config {
-    /// todo[igni]: document before merging.
+    /// Configuration that will apply to all subgraphs.
     #[serde(default)]
     all: Option<AuthConfig>,
     #[serde(default)]
-    /// todo[igni]: document before merging.
+    /// Create a configuration that will apply only to a specific subgraph.
     subgraphs: HashMap<String, AuthConfig>,
 }
 
@@ -158,8 +158,15 @@ impl Plugin for SubgraphAuth {
                 async move {
                     let signing_params = signing_params.clone();
                 if let Some(credentials_provider) = &signing_params.credentials_provider {
-                    // TODO: DONT UNWRAP YO
-                    let credentials = credentials_provider.provide_credentials().await.unwrap();
+                    let credentials = match credentials_provider.provide_credentials().await {
+                        Ok(credentials) => credentials,
+                        Err(err) => {
+                            tracing::warn!(
+                                "Failed to serialize GraphQL body for AWS SigV4 signing, skipping signing. Error: {}",
+                                err
+                            );
+                                return Ok(ControlFlow::Continue(req));
+                        }};
                     let settings = get_signing_settings(&signing_params);
                     let mut builder = http_request::SigningParams::builder()
                         .access_key(credentials.access_key_id())

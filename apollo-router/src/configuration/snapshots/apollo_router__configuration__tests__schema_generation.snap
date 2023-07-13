@@ -1281,11 +1281,11 @@ expression: "&schema"
       "additionalProperties": false
     },
     "subgraph_authentication": {
-      "description": "todo[igni]: document before merging.",
+      "description": "Configure subgraph authentication",
       "type": "object",
       "properties": {
         "all": {
-          "description": "todo[igni]: document before merging.",
+          "description": "Configuration that will apply to all subgraphs.",
           "oneOf": [
             {
               "type": "object",
@@ -1423,7 +1423,7 @@ expression: "&schema"
           "nullable": true
         },
         "subgraphs": {
-          "description": "todo[igni]: document before merging.",
+          "description": "Create a configuration that will apply only to a specific subgraph.",
           "type": "object",
           "additionalProperties": {
             "oneOf": [
