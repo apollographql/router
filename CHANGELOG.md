@@ -4,6 +4,116 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.24.0] - 2023-07-13
+
+## 🚀 Features
+
+### Add support for delta aggregation to otlp metrics ([PR #3412](https://github.com/apollographql/router/pull/3412))
+
+Add a new configuration option (Temporality) to the otlp metrics configuration.
+
+This may be useful to fix problems with metrics when being processed by datadog which tends to expect Delta, rather than Cumulative, aggregations.
+
+See:
+ - https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/6129
+ - https://github.com/DataDog/documentation/pull/15840
+
+for more details.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3412
+
+## 🐛 Fixes
+
+### Fix error handling for subgraphs ([Issue #3141](https://github.com/apollographql/router/issues/3141))
+
+The GraphQL spec is rather light on what should happen when we process responses from subgraphs. The current behaviour within the Router was inconsistently short circuiting response processing and this producing confusing errors.
+> #### Processing the response
+> 
+> If the response uses a non-200 status code and the media type of the response payload is application/json then the client MUST NOT rely on the body to be a well-formed GraphQL response since the source of the response may not be the server but instead some intermediary such as API gateways, proxies, firewalls, etc.
+
+The logic has been simplified and made consistent using the following rules:
+1. If the content type of the response is not `application/json` or `application/graphql-response+json` then we won't try to parse.
+2. If an HTTP status is not 2xx it will always be attached as a graphql error.
+3. If the response type is `application/json` and status is not 2xx and the body is not valid grapqhql the entire subgraph response will be attached as an error.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3328
+
+## 🛠 Maintenance
+
+### chore: router-bridge 0.3.0+v2.4.8 -> =0.3.1+2.4.9 ([PR #3407](https://github.com/apollographql/router/pull/3407))
+
+Updates `router-bridge` from ` = "0.3.0+v2.4.8"` to ` = "0.3.1+v2.4.9"`, note that with this PR, this dependency is now pinned to an exact version. This version update started failing tests because of a minor ordering change and it was not immediately clear why the test was failing. Pinning this dependency (that we own) allows us to only bring in the update at the proper time and will make test failures caused by the update to be more easily identified.
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/3407
+
+### remove the compiler from Query ([Issue #3373](https://github.com/apollographql/router/issues/3373))
+
+The `Query` object caches information extracted from the query that is used to format responses. It was carrying an `ApolloCompiler` instance, but now we don't really need it anymore, since it is now cached at the query analysis layer. We also should not carry it in the supergraph request and execution request, because that makes the builders hard to manipulate for plugin authors. Since we are not exposing the compiler in the public API yet, we move it inside the context's private entries, where it will be easily accessible from internal code.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3367
+
+### move AllowOnlyHttpPostMutationsLayer at the supergraph service level ([PR #3374](https://github.com/apollographql/router/pull/3374), [PR #3410](https://github.com/apollographql/router/pull/3410))
+
+Now that we have access to a compiler in supergraph requests, we don't need to look into the query plan to know if a request contains mutations
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3374 & https://github.com/apollographql/router/pull/3410
+
+### update opentelemetry to 0.19.0 ([Issue #2878](https://github.com/apollographql/router/issues/2878))
+
+
+We've updated the following opentelemetry related crates:
+
+```
+opentelemetry 0.18.0 -> 0.19.0
+opentelemetry-datadog 0.6.0 -> 0.7.0
+opentelemetry-http 0.7.0 -> 0.8.0
+opentelemetry-jaeger 0.17.0 -> 0.18.0
+opentelemetry-otlp 0.11.0 -> 0.12.0
+opentelemetry-semantic-conventions 0.10.0 -> 0.11.0
+opentelemetry-zipkin 0.16.0 -> 0.17.0
+opentelemetry-prometheus 0.11.0 -> 0.12.0
+tracing-opentelemetry 0.18.0 -> 0.19.0
+```
+
+This allows us to close a number of opentelemetry related issues.
+
+Note:
+
+The prometheus specification mandates naming format and, unfortunately, the router had two metrics which weren't compliant. The otel upgrade enforces the specification, so the affected metrics are now renamed (see below).
+
+The two affected metrics in the router were:
+
+apollo_router_cache_hit_count -> apollo_router_cache_hit_count_total
+apollo_router_cache_miss_count -> apollo_router_cache_miss_count_total
+
+If you are monitoring these metrics via prometheus, please update your dashboards with this name change.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3421
+
+### Synthesize defer labels without RNG or collisions ([PR #3381](https://github.com/apollographql/router/pull/3381) and [PR #3423](https://github.com/apollographql/router/pull/3423))
+
+The `@defer` directive accepts a `label` argument, but it is optional. To more accurately handle deferred responses, the Router internally rewrites queries to add labels on the `@defer` directive where they are missing. Responses eventually receive the reverse treatment to look as expected by client.
+
+This was done be generating random strings, handling collision with existing labels, and maintaining a `HashSet` of which labels had been synthesized. Instead, we now add a prefix to pre-existing labels and generate new labels without it. When processing a response, the absence of that prefix indicates a synthetic label.
+
+By [@SimonSapin](https://github.com/SimonSapin) and [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3381 and https://github.com/apollographql/router/pull/3423
+
+### Move subscription event execution at the execution service level ([PR #3395](https://github.com/apollographql/router/pull/3395))
+
+In order to prepare some future integration I moved the execution loop for subscription events at the execution_service level.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3395
+
+## 📚 Documentation
+
+### Document claim augmentation via coprocessors ([Issue #3102](https://github.com/apollographql/router/issues/3102))
+
+Claims augmentation is a common use case where user information from the JWT claims is used to look up more context like roles from databases, before sending it to subgraphs. This can be done with subgraphs, but it was not documented yet, and there was confusion on the order in which the plugins were called. This clears the confusion and provides an example configuration.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3386
+
+
+
 # [1.23.0] - 2023-07-07
 
 ## 🚀 Features
