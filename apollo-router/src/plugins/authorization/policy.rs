@@ -35,10 +35,10 @@ impl<'a> PolicyExtractionVisitor<'a> {
     }
 
     fn get_policies_from_field(&mut self, field: &FieldDefinition) {
-        if let Some(policy) =
-            policies_argument(field.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned()
-        {
-            self.extracted_policies.insert(policy);
+        for directive in field.directives_by_name(POLICY_DIRECTIVE_NAME) {
+            if let Some(policy) = policy_argument(directive) {
+                self.extracted_policies.insert(policy.clone());
+            }
         }
 
         if let Some(ty) = field.ty().type_def(&self.compiler.db) {
@@ -47,17 +47,17 @@ impl<'a> PolicyExtractionVisitor<'a> {
     }
 
     fn get_policies_from_type(&mut self, ty: &TypeDefinition) {
-        if let Some(policy) =
-            policies_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned()
-        {
-            self.extracted_policies.insert(policy);
+        for directive in ty.directives_by_name(POLICY_DIRECTIVE_NAME) {
+            if let Some(policy) = policy_argument(directive) {
+                self.extracted_policies.insert(policy.clone());
+            }
         }
     }
 }
 
-fn policies_argument(opt_directive: Option<&hir::Directive>) -> Option<&String> {
-    opt_directive
-        .and_then(|directive| directive.argument_by_name("policy"))
+fn policy_argument(directive: &hir::Directive) -> Option<&String> {
+    directive
+        .argument_by_name("policy")
         .and_then(|value| match value {
             Value::String { value, .. } => Some(value),
             _ => None,
@@ -160,11 +160,13 @@ impl<'a> PolicyFilteringVisitor<'a> {
     }
 
     fn is_field_authorized(&mut self, field: &FieldDefinition) -> bool {
-        match policies_argument(field.directive_by_name(POLICY_DIRECTIVE_NAME)) {
-            None => return false,
-            Some(policy) => {
-                if !self.request_policies.contains(policy) {
-                    return false;
+        for directive in field.directives_by_name(POLICY_DIRECTIVE_NAME) {
+            match policy_argument(directive) {
+                None => return false,
+                Some(policy) => {
+                    if !self.request_policies.contains(policy) {
+                        return false;
+                    }
                 }
             }
         }
@@ -177,10 +179,18 @@ impl<'a> PolicyFilteringVisitor<'a> {
     }
 
     fn is_type_authorized(&self, ty: &TypeDefinition) -> bool {
-        match policies_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME)) {
-            None => false,
-            Some(policy) => self.request_policies.contains(policy),
+        for directive in ty.directives_by_name(POLICY_DIRECTIVE_NAME) {
+            match policy_argument(directive) {
+                None => return false,
+                Some(policy) => {
+                    if !self.request_policies.contains(policy) {
+                        return false;
+                    }
+                }
+            }
         }
+
+        true
     }
 }
 
