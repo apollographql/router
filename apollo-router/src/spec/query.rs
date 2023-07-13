@@ -18,8 +18,6 @@ use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
-use tokio::sync::Mutex;
-use tokio::sync::MutexGuard;
 use tracing::level_filters::LevelFilter;
 
 use self::subselections::BooleanValues;
@@ -55,11 +53,6 @@ pub(crate) const QUERY_EXECUTABLE: &str = "query";
 #[derivative(PartialEq, Hash, Eq, Debug)]
 pub(crate) struct Query {
     pub(crate) string: String,
-    #[derivative(PartialEq = "ignore", Hash = "ignore", Debug = "ignore")]
-    #[serde(skip)]
-    // FIXME: find a way to have a correct compiler when deserializing
-    #[serde(default = "empty_compiler")]
-    pub(crate) compiler: Arc<Mutex<ApolloCompiler>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
@@ -69,8 +62,6 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) filtered_query: Option<Arc<Query>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) added_labels: HashSet<String>,
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) defer_stats: DeferStats,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) is_original: bool,
@@ -79,10 +70,6 @@ pub(crate) struct Query {
     /// XXX(@goto-bus-stop): Remove when only Rust validation is used
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) validation_error: Option<SpecError>,
-}
-
-fn empty_compiler() -> Arc<Mutex<ApolloCompiler>> {
-    Arc::new(Mutex::new(ApolloCompiler::new()))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -101,14 +88,12 @@ impl Query {
     pub(crate) fn empty() -> Self {
         Self {
             string: String::new(),
-            compiler: empty_compiler(),
             fragments: Fragments {
                 map: HashMap::new(),
             },
             operations: Vec::new(),
             subselections: HashMap::new(),
             filtered_query: None,
-            added_labels: HashSet::new(),
             defer_stats: DeferStats {
                 has_defer: false,
                 has_unconditional_defer: false,
@@ -298,12 +283,10 @@ impl Query {
 
         Ok(Query {
             string: query,
-            compiler: Arc::new(Mutex::new(compiler)),
             fragments,
             operations,
             subselections: HashMap::new(),
             filtered_query: None,
-            added_labels: HashSet::new(),
             defer_stats,
             is_original: true,
             validation_error: None,
@@ -368,23 +351,6 @@ impl Query {
             .collect::<Result<Vec<_>, SpecError>>()?;
 
         Ok((fragments, operations, defer_stats))
-    }
-
-    pub(crate) async fn compiler(&self) -> MutexGuard<'_, ApolloCompiler> {
-        self.compiler.lock().await
-    }
-
-    /// Create a new compiler for this query, without caching it
-    pub(crate) fn uncached_compiler(&self, schema: Option<&Schema>) -> ApolloCompiler {
-        let mut compiler = ApolloCompiler::new();
-        if let Some(schema) = schema {
-            compiler.set_type_system_hir(schema.type_system.clone());
-        }
-        // As long as this is the only executable document in this compiler
-        // we can use compiler’s `all_operations` and `all_fragments`.
-        // If that changes, we’ll need to carry around this ID somehow.
-        let _id = compiler.add_executable(&self.string, QUERY_EXECUTABLE);
-        compiler
     }
 
     #[allow(clippy::too_many_arguments)]
