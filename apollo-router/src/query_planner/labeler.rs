@@ -106,7 +106,7 @@ pub(crate) fn directive(
         encoder_directive.arg(apollo_encoder::Argument::new(arg.name().into(), value));
     }
     // Add a generated label if there wasn’t one already
-    if !has_label {
+    if is_defer && !has_label {
         encoder_directive.arg(apollo_encoder::Argument::new(
             LABEL_NAME.into(),
             apollo_encoder::Value::String(visitor.generate_label()),
