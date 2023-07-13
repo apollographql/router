@@ -414,9 +414,6 @@ dependencies = [
 name = "apollo-router-benchmarks"
 version = "1.24.0"
 dependencies = [
- "apollo-parser 0.4.1",
- "apollo-router",
- "apollo-smith",
  "arbitrary",
  "criterion",
  "memory-stats",
@@ -429,8 +426,6 @@ dependencies = [
 [[package]]
 name = "apollo-router-scaffold"
 version = "1.24.0"
-dependencies = [
- "anyhow",
  "cargo-scaffold",
  "clap 4.3.11",
  "copy_dir",

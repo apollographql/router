@@ -112,8 +112,6 @@ Claims augmentation is a common use case where user information from the JWT cla
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3386
 
-
-
 # [1.23.0] - 2023-07-07
 
 ## 🚀 Features
