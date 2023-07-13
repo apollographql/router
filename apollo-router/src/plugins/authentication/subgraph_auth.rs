@@ -76,11 +76,12 @@ struct DefaultChainConfig {
 /// todo[igni]: document before merging.
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 struct AssumeRoleProvider {
-    /// todo[igni]: document before merging.
+    /// Amazon Resource Name (ARN)
+    /// for the role assumed when making requests
     role_arn: String,
-    /// todo[igni]: document before merging.
+    /// Uniquely identify a session when the same role is assumed by different principals or for different reasons.
     session_name: String,
-    /// todo[igni]: document before merging.
+    /// Enique identifier that might be required when you assume a role in another account.
     external_id: Option<String>,
 }
 
