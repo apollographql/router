@@ -304,6 +304,16 @@ You can configure whether the Apollo Router reports GraphQL error information to
 - To prevent your router from reporting error information at all, you can set the `send` option to `false`.
 - To include all error details in your router's reports to GraphOS, you can set the `redact` option to `false`.
 
+<blockquote>
+
+**Your subgraph libraries must support federated tracing (also known as FTV1 tracing) to provide errors to GraphOS.**
+
+- To confirm support, check the `FEDERATED TRACING` entry for your library on [this page](/federation/building-supergraphs/supported-subgraphs).
+- Consult your library's documentation to learn how to enable federated tracing.
+    - If you use Apollo Server with `@apollo/subgraph`, federated tracing support is enabled automatically.
+
+</blockquote>
+
 See the example below:
 
 ```yaml title="router.yaml"
