@@ -17,7 +17,7 @@ mod tests {
     use tower::BoxError;
     use tower::ServiceExt;
 
-    use super::super::coprocessor::*;
+    use super::super::*;
     use crate::plugin::test::MockHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
