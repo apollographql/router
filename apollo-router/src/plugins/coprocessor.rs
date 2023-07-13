@@ -44,6 +44,7 @@ use crate::services::subgraph;
 use crate::tracer::TraceId;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
+const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 
 type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
 
@@ -71,7 +72,11 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
 
         let http_client = ServiceBuilder::new()
             .layer(TimeoutLayer::new(init.config.timeout))
-            .service(hyper::Client::builder().build(connector));
+            .service(
+                hyper::Client::builder()
+                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+                    .build(connector),
+            );
 
         CoprocessorPlugin::new(http_client, init.config, init.supergraph_sdl)
     }
