@@ -1069,6 +1069,33 @@ async fn defer_default_variable() {
     assert!(stream.next().await.is_none());
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn include_if_works() {
+    let config = serde_json::json!({
+        "supergraph": {
+            "introspection": true
+        },
+    });
+
+    let query = "query { ... Test @include(if: false) } fragment Test on Query { __typename }";
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .build()
+        .expect("expecting valid request");
+
+    let (router, _) = setup_router_and_registry(config).await;
+
+    let mut stream = router
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await;
+
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+}
+
 async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {
     reqwest::Client::new()
         .post("https://federation-demo-gateway.fly.dev/")
