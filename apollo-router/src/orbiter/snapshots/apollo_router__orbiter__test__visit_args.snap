@@ -2,6 +2,7 @@
 source: apollo-router/src/orbiter/mod.rs
 expression: usage
 ---
+args.apollo_uplink_endpoints.<redacted>: 1
 args.config_path.<redacted>: 1
 args.hot_reload.true: 1
 
