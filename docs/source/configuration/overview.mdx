@@ -513,6 +513,42 @@ See [Tracing in the Apollo Router](./tracing/).
 
 ### TLS
 
+#### TLS termination
+
+Clients can connect to the router directly over HTTPS, without terminating TLS in an intermediary. It can be configured under the `tls` configuration section:
+
+```yaml title="router.yaml"
+tls:
+  supergraph:
+    certificate: ${{file.{cert_path}}}
+    certificate_chain: ${{file.{certificate_chain_path}}}
+    key: ${{file.{key_path}}}
+```
+
+The file referenced in the `certificate_chain` value is expected to be the combination of several PEM certificates, concatenated together into a single file (as is commonplace with Apache TLS configuration).
+
+Supported TLS versions:
+* TLS 1.2
+* TLS 1.3
+
+Supported ciphersuites:
+* TLS13_AES_256_GCM_SHA384
+* TLS13_AES_128_GCM_SHA256
+* TLS13_CHACHA20_POLY1305_SHA256
+* TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+* TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+* TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+* TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+* TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+* TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+
+Supported key exchange groups:
+* X25519
+* SECP256R1
+* SECP384R1
+
+#### Overriding certificate authorities for subgraphs
+
 TLS connections to subgraphs are verified using the list of certificate authorities provided by the system. You can override this list with a combination of global and per-subgraph settings:
 
 ```yaml title="router.yaml"
@@ -526,6 +562,32 @@ tls:
       products:
         certificate_authorities: "${file./path/to/product_ca.crt}"
 ```
+
+The file referenced in the `certificate_authorities` value is expected to be the combination of several PEM certificates, concatenated together into a single file (as is commonplace with Apache TLS configuration).
+
+These certificates are only configurable via the Router's configuration since using SSL_CERT_FILE would also override certificates for sending telemetry and communicating with Apollo Uplink.
+
+**Note**: If the subgraph is presenting a self-signed certificate, it must be generated with the proper file extension and with `basicConstraints` disabled.
+It can be generated with the following command line from a certificate signing request (in this example, `server.csr`):
+
+```
+openssl x509 -req -in server.csr -signkey server.key -out server.crt -extfile v3.ext
+```
+
+And a `v3.ext` extension file like this, by changing the `subjectAltName` field to the subgraph's name:
+
+```
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always,issuer:always
+# this has to be disabled
+# basicConstraints       = CA:TRUE
+keyUsage               = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment, keyAgreement, keyCertSign
+subjectAltName         = DNS:local.apollo.dev
+issuerAltName          = issuer:copy
+```
+
+This will produce the file as server.crt which can be used in `certificate_authorities`.
+
 
 ### Request limits
 
