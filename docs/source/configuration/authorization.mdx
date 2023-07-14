@@ -31,7 +31,7 @@ For unauthenticated requests, the router removes `@authenticated` fields before 
 The router filters out fields that require authentication and only executes the parts of the query that don't require it.
 If every field in a particular subgraph's query is marked as requiring authentication, this can eliminate entire subgraph requests.
 
-Define the `@authenticated` directive on any subgraph schema you want to use it on.
+You can define the `@authenticated` directive on any subgraph schema like this:
 
 ```graphql
 directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
@@ -97,12 +97,11 @@ query {
   }
 }
 ```
+
 </CodeColumns>
 
 For an unauthenticated request, the router doesn't attempt to resolve the top-level `me` query nor the email for the user with `id: "1234"`.
 The response retains the initial request's shape but returns `null` for unauthorized fields and applies the [standard GraphQL null propagation rules](https://www.apollographql.com/blog/graphql/basics/using-nullability-in-graphql/#what-happens-if-you-try-to-return-null-for-a-non-null-field).
-
-
 
 ```json
 {
@@ -141,88 +140,128 @@ If every requested field requires authentication and a request is unauthenticate
 
 ### `@requiresScopes`
 
+The `@requiresScopes` directive marks fields and types as restricted based on the scopes you require.
+You can define the `@requiredScopes` directive on any subgraph schema like this:
+
 ```graphql
 directive @requiresScopes(scopes: [String!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
 
-The `@requiresScopes` directive restricts access to fields and types if the request did not present the right set of scopes, by loading from the request the context the object at key `apollo_authentication::JWT::claims`, and in that object the `scope` key, in the format defined by [OAuth2 access token scopes](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3), as a space separated list of scopes.
+The directive should include a `scopes` argument that expects an array of required scopes.
 
-Depending on which scope set is presented by the request, different parts of the query may be available.
+The directive validates the required scopes by loading the object at the `apollo_authentication::JWT::claims` key in a request's context.
+That object's `scope` key should contain a space separated list of scopes in the format defined by [OAuth2 access token scopes](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3).
 
-Assuming we have this schema:
+Depending on the scopes present on the request, the router filters out unauthorized fields and types.
+If a field's `scopes` array includes multiple scopes, the request must include _all_ required scopes to resolve it.
+
+#### Example `@requiresScopes` use case
+
+Imagine your social media platform has an ecommerce component.
+You need to be able to query for the following:
+
+- An authenticated user's profile (`me`)
+- Other user's emails
+- Products and the users who have ordered it
+
+Your schema may look something like this:
 
 ```graphql
 type Query {
-    me: User @requiresScopes(scopes: ["profile:read"])
-    products: [Products]
+  me: User @requiresScopes(scopes: ["profile:read"])
+  products: [Products]
 }
 
 type User {
-    id: ID
-    name: String
-    email: @requiresScopes(["user:read"])
+  id: ID
+  name: String
+  email: @requiresScopes(["user:read"])
 }
 
 type Product {
-    id: ID
-    name: String
-    amount: Int @requiresScopes(["employee", "inventory"])
-    orders: [User] @requiresScopes(["employee"])
+  id: ID
+  name: String
+  amount: Int @requiresScopes(["inventory:read"])
+  orders: [User] @requiresScopes(["user:read", "inventory:read"])
 }
 ```
 
-And this query:
+The router executes the following query differently, depending on the request's attached scopes:
 
 ```graphql
-{
-    me {
-        name
-        email
-    }
+query {
+  me {
+    name
+    email
+  }
 
-    products {
-        name
-        amount
-        orders {
-            name
-        }
+  products {
+    name
+    amount
+    orders {
+      name
     }
+  }
 }
 ```
 
-If the request presented the scopes `profile:read user:read`, then it would be interpreted as:
+If the request includes the `profile:read user:read` scope set, then the router would execute the following filtered query: 
 
+```graphql title="Request scopes: 'profile:read user:read'"
+query {
+  me {
+    name
+    email
+  }
 
-```graphql
-{
-    me {
-        name
-        email
-    }
-
-    products {
-        name
-    }
+  products {
+    name
+    /* The following fields are filtered out:
+    amount # Requires "inventory:read" scope
+    orders # Requires "user:read" and "inventory:read" scopes
+    */
+  }
 }
 ```
 
-And generate an error at path `/products/@/amount`.
+The response would include errors at the `/products/@/amount` and `/products/@/amount` paths.
 
-While if it presented the scopes `employee inventory`, it would filter the query as:
+If the request includes the `user:read inventory:read` scope set, then the router would execute the following filtered query: 
 
-```graphql
-{
-    products {
-        name
-        amount
-        orders {
-            name
-        }
+```graphql title="Request scopes: 'user:read inventory:read'"
+query {
+  /* The following fields are filtered out
+  me { # Requires the "profile:read" scope
+    name
+    email
+  }
+  */
+  products {
+    name
+    amount
+    orders {
+      name
     }
+  }
 }
 ```
 
-And generate an error at path `/me`.
+The response would include an error at the `/me` path.
+
+## Introspection
+
+Authorization directives don't affect introspection; all fields that require authorization remain accessible. Directives applied to fields aren't visible. If introspection might reveal too much information about internal types, then be sure to deactivate it:
+
+```yaml
+supergraph:
+  introspection: false
+```
+
+You can also hide fields using [contracts](/graphos/delivery/contracts/).
+
+## Query deduplication
+
+When [query deduplication](/configuration/traffic-shaping/#query-deduplication) is activated for subgraphs, the authorization status is accounted for: the router groups unauthenticated queries together, and authenticated queries are grouped by scope set.
 
 ## Composition and federation
 
@@ -322,17 +361,3 @@ query {
 }
 ```
 
-## Query deduplication
-
-When [query deduplication](/configuration/traffic-shaping/#query-deduplication) is activated for subgraphs, the authorization status is accounted for: unauthenticated queries will be grouped together, and authenticated queries will be grouped by scope set.
-
-## Introspection
-
-Introspection is not affected by authorization, so all types fields will be accessible. The directives applied to them will not be visible though. If introspection might reveal too much information about internal types, then it should be deactivated like this:
-
-```yaml
-supergraph:
-  introspection: false
-```
-
-Fields can also be hidden using [contracts](/graphos/delivery/contracts/).
