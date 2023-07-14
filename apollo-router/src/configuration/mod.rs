@@ -359,12 +359,14 @@ macro_rules! log_usage_metrics {
             if jsonpath_lib::select(value, $path).unwrap().first().is_some() {
                 tracing::info!($($metric).+ = 1u64);
             }
+            else {
+                tracing::info!($($metric).+ = 0u64);
+            }
         }
     };
     ($yaml:expr, $($metric:ident).+, $path:literal, $enabled_path:literal, $($($attr:ident).+, $attr_path:literal),+) => {
         if let Some(value) = jsonpath_lib::select($yaml, $path).unwrap().first() {
-            if let Some(value) = jsonpath_lib::select(value, $path).unwrap().first() {
-
+            if let Some(value) = jsonpath_lib::select(value, $enabled_path).unwrap().first() {
                 paste!{
                     $(let [<$($attr _ )+>] = match jsonpath_lib::select(value, $attr_path).unwrap().first(){
                         // If the value is an object we can only state that it is set, but not what it is set to.
@@ -375,9 +377,16 @@ macro_rules! log_usage_metrics {
                         // If the value is not set we log "<unset>".
                         None => "<unset>".to_string(),
                     };)+
+                    println!("{} = {}", stringify!($($metric).+), 1u64);
                     tracing::info!($($metric).+ = 1u64, $($($attr).+ = [<$($attr _ )+>]),+);
                 }
             }
+            else {
+                tracing::info!($($metric).+ = 0u64);
+            }
+        }
+        else {
+            tracing::info!($($metric).+ = 0u64);
         }
     };
 }
@@ -394,13 +403,13 @@ impl Configuration {
             log_usage_metrics!(
                 yaml,
                 value.apollo.router.config.authentication.jwt,
-                "authentication.jwt",
+                "$.authentication.jwt",
                 "$"
             );
             log_usage_metrics!(
                 yaml,
                 value.apollo.router.config.authorization,
-                "authorization",
+                "$.authorization",
                 "$"
             );
             log_usage_metrics!(
@@ -424,14 +433,14 @@ impl Configuration {
             log_usage_metrics!(
                 yaml,
                 value.apollo.router.config.persisted_queries,
-                "persisted_queries",
+                "$.persisted_queries",
                 "enabled"
             );
 
             log_usage_metrics!(
                 yaml,
                 value.apollo.router.config.subscriptions,
-                "subscription",
+                "$.subscription",
                 "$",
                 opt.mode,
                 "$.mode",
@@ -446,7 +455,7 @@ impl Configuration {
             log_usage_metrics!(
                 yaml,
                 value.apollo.router.config.limits,
-                "limits",
+                "$.limits",
                 "$",
                 opt.max_depth,
                 "$.max_depth",
@@ -468,8 +477,8 @@ impl Configuration {
             log_usage_metrics!(
                 yaml,
                 value.apollo.router.config.apq,
-                "apq",
-                "enabled",
+                "$.apq",
+                "$.enabled",
                 opt.router.cache.redis,
                 "$.router.cache.redis",
                 opt.router.cache.in_memory,
@@ -480,8 +489,8 @@ impl Configuration {
             log_usage_metrics!(
                 yaml,
                 value.apollo.router.config.traffic_shaping,
-                "traffic_shaping",
-                "enabled",
+                "$.traffic_shaping",
+                "$.enabled",
                 opt.router.timout,
                 "$.router.timeout",
                 opt.router.rate_limit,
@@ -509,7 +518,7 @@ impl Configuration {
             log_usage_metrics!(
                 yaml,
                 value.apollo.router.config.telemetry,
-                "telemetry",
+                "$.telemetry[?(@.endpoint || @.metrics.prometheus.enabled)]",
                 "$",
                 opt.metrics.otlp,
                 "$.metrics.otlp[?(@.endpoint)]",
