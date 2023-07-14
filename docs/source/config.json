@@ -36,19 +36,21 @@
       "Security": {
         "CORS": "/configuration/cors",
         "CSRF prevention": "/configuration/csrf",
-        "JWT Authentication": [
-          "/configuration/authn-jwt",
-          [
-            "enterprise"
-          ]
-        ],
-        "Authorization": [
+        "Access control": {
+          "JWT Authentication": [
+            "/configuration/authn-jwt",
+            [
+              "enterprise"
+            ]
+          ],
+        "Authorization directives": [
           "/configuration/authorization",
           [
             "enterprise",
             "experimental"
           ]
-        ],
+        ]
+        },
         "Operation limits": [
           "/configuration/operation-limits",
           [
