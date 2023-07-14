@@ -110,7 +110,7 @@ impl Config {
                 KeyValue::new("apollo.client.host", hostname()?),
                 KeyValue::new("apollo.client.uname", get_uname()?),
             ]))
-            .with_period(Duration::from_secs(10))
+            .with_period(Duration::from_secs(60))
             .with_exporter(
                 opentelemetry_otlp::new_exporter()
                     .tonic()
