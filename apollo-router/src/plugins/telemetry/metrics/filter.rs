@@ -80,22 +80,22 @@ impl InstrumentProvider for FilteredInstrumentProvider {
     filter_meter_fn!(u64_counter, u64, Counter);
     filter_meter_fn!(f64_counter, f64, Counter);
 
-    filter_meter_fn!(f64_observable_counter, f64, ObservableCounter,);
-    filter_meter_fn!(u64_observable_counter, u64, ObservableCounter,);
+    filter_meter_fn!(f64_observable_counter, f64, ObservableCounter);
+    filter_meter_fn!(u64_observable_counter, u64, ObservableCounter);
 
     filter_meter_fn!(u64_histogram, u64, Histogram);
     filter_meter_fn!(f64_histogram, f64, Histogram);
     filter_meter_fn!(i64_histogram, i64, Histogram);
 
-    filter_meter_fn!(i64_up_down_counter, i64, UpDownCounter,);
-    filter_meter_fn!(f64_up_down_counter, f64, UpDownCounter,);
+    filter_meter_fn!(i64_up_down_counter, i64, UpDownCounter);
+    filter_meter_fn!(f64_up_down_counter, f64, UpDownCounter);
 
-    filter_meter_fn!(i64_observable_up_down_counter, i64, ObservableUpDownCounter,);
-    filter_meter_fn!(f64_observable_up_down_counter, f64, ObservableUpDownCounter,);
+    filter_meter_fn!(i64_observable_up_down_counter, i64, ObservableUpDownCounter);
+    filter_meter_fn!(f64_observable_up_down_counter, f64, ObservableUpDownCounter);
 
-    filter_meter_fn!(f64_observable_gauge, f64, ObservableGauge,);
-    filter_meter_fn!(i64_observable_gauge, i64, ObservableGauge,);
-    filter_meter_fn!(u64_observable_gauge, u64, ObservableGauge,);
+    filter_meter_fn!(f64_observable_gauge, f64, ObservableGauge);
+    filter_meter_fn!(i64_observable_gauge, i64, ObservableGauge);
+    filter_meter_fn!(u64_observable_gauge, u64, ObservableGauge);
 
     fn register_callback(
         &self,

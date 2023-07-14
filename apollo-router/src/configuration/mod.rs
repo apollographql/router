@@ -25,6 +25,7 @@ use derivative::Derivative;
 use displaydoc::Display;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
+use paste::paste;
 use regex::Regex;
 use rustls::Certificate;
 use rustls::PrivateKey;
@@ -352,7 +353,180 @@ impl Configuration {
     }
 }
 
+macro_rules! log_usage_metrics {
+    ($yaml:expr, $($metric:ident).+, $path:literal, $enabled_path:literal) => {
+        if let Some(value) = jsonpath_lib::select($yaml, $path).unwrap().first() {
+            if jsonpath_lib::select(value, $path).unwrap().first().is_some() {
+                tracing::info!($($metric).+ = 1u64);
+            }
+        }
+    };
+    ($yaml:expr, $($metric:ident).+, $path:literal, $enabled_path:literal, $($($attr:ident).+, $attr_path:literal),+) => {
+        if let Some(value) = jsonpath_lib::select($yaml, $path).unwrap().first() {
+            if let Some(value) = jsonpath_lib::select(value, $path).unwrap().first() {
+
+                paste!{
+                    $(let [<$($attr _ )+>] = match jsonpath_lib::select(value, $attr_path).unwrap().first(){
+                        // If the value is an object we can only state that it is set, but not what it is set to.
+                        Some(Value::Object(_value)) => "true".to_string(),
+                        Some(Value::Array(value)) if !value.is_empty() => "true".to_string(),
+                        // Scalars can be logged as is.
+                        Some(value) => value.to_string(),
+                        // If the value is not set we log "<unset>".
+                        None => "<unset>".to_string(),
+                    };)+
+                    tracing::info!($($metric).+ = 1u64, $($($attr).+ = [<$($attr _ )+>]),+);
+                }
+            }
+        }
+    };
+}
+
 impl Configuration {
+    pub(crate) fn log_usage_metrics(&self) {
+        if let Some(yaml) = &self.validated_yaml {
+            log_usage_metrics!(
+                yaml,
+                value.apollo.router.config.defer,
+                "$.supergraph",
+                "$.defer_support"
+            );
+            log_usage_metrics!(
+                yaml,
+                value.apollo.router.config.authentication.jwt,
+                "authentication.jwt",
+                "$"
+            );
+            log_usage_metrics!(
+                yaml,
+                value.apollo.router.config.authorization,
+                "authorization",
+                "$"
+            );
+            log_usage_metrics!(
+                yaml,
+                value.apollo.router.config.coprocessor,
+                "$.coprocessor",
+                "$",
+                opt.router.request,
+                "$.router.request",
+                opt.router.response,
+                "$.router.response",
+                opt.supergraph.request,
+                "$.supergraph.response",
+                opt.supergraph.response,
+                "$.supergraph.request",
+                opt.subgraph.request,
+                "$.subgraph.request",
+                opt.subgraph.response,
+                "$.subgraph.response"
+            );
+            log_usage_metrics!(
+                yaml,
+                value.apollo.router.config.persisted_queries,
+                "persisted_queries",
+                "enabled"
+            );
+
+            log_usage_metrics!(
+                yaml,
+                value.apollo.router.config.subscriptions,
+                "subscription",
+                "$",
+                opt.mode,
+                "$.mode",
+                opt.deduplication,
+                "$.enable_deduplication",
+                opt.max_opened_subscriptions,
+                "$.max_opened_subscriptions",
+                opt.queue_capacity,
+                "$.queue_capacity"
+            );
+
+            log_usage_metrics!(
+                yaml,
+                value.apollo.router.config.limits,
+                "limits",
+                "$",
+                opt.max_depth,
+                "$.max_depth",
+                opt.max_aliases,
+                "$.max_aliases",
+                opt.max_height,
+                "$.max_height",
+                opt.max_root_fields,
+                "$.max_root_fields",
+                opt.parse.max_recursion,
+                "$.parser_max_recursion",
+                opt.parse.max_tokens,
+                "$.parser_max_tokens",
+                opt.warn_only,
+                "$.warn_only",
+                opt.http_max_request_bytes,
+                "$.experimental_http_max_request_bytes"
+            );
+            log_usage_metrics!(
+                yaml,
+                value.apollo.router.config.apq,
+                "apq",
+                "enabled",
+                opt.router.cache.redis,
+                "$.router.cache.redis",
+                opt.router.cache.in_memory,
+                "$.router.cache.in_memory",
+                opt.subgraph,
+                "$.subgraph..enabled[?(@ == true)]"
+            );
+            log_usage_metrics!(
+                yaml,
+                value.apollo.router.config.traffic_shaping,
+                "traffic_shaping",
+                "enabled",
+                opt.router.timout,
+                "$.router.timeout",
+                opt.router.rate_limit,
+                "$.router.global_rate_limit",
+                opt.subgraph.timout,
+                "$[?(@.all.timout || @.subgraphs..timout)]",
+                opt.subgraph.rate_limit,
+                "$[?(@.all.rate_limit || @.subgraphs..rate_limit)]",
+                opt.subgraph.http2,
+                "$[?(@.all.http2 || @.subgraphs..experimental_enable_http2)]",
+                opt.subgraph.compression,
+                "$[?(@.all.compression || @.subgraphs..compression)]",
+                opt.subgraph.deduplicate_query,
+                "$[?(@.all.deduplicate_query || @.subgraphs..deduplicate_query)]",
+                opt.subgraph.retry,
+                "$[?(@.all.retry || @.subgraphs..experimental_retry)]"
+            );
+
+            log_usage_metrics!(
+                yaml,
+                value.apollo.router.config.entities,
+                "$.traffic_shaping",
+                "$[?(@..experimental_entity_caching)]"
+            );
+            log_usage_metrics!(
+                yaml,
+                value.apollo.router.config.telemetry,
+                "telemetry",
+                "$",
+                opt.metrics.otlp,
+                "$.metrics.otlp[?(@.endpoint)]",
+                opt.metrics.prometheus,
+                "$.metrics.prometheus.enabled",
+                opt.tracing.otlp,
+                "$.tracing.otlp[?(@.endpoint)]",
+                opt.tracing.datadog,
+                "$.tracing.datadog[?(@.endpoint)]",
+                opt.tracing.jaeger,
+                "$.tracing.jaeger[?(@.endpoint)]",
+                opt.tracing.zipkin,
+                "$.tracing.zipkin[?(@.endpoint)]"
+            );
+        }
+    }
+
     pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
         // Sandbox and Homepage cannot be both enabled
         if self.sandbox.enabled && self.homepage.enabled {

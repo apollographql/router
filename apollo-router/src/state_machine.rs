@@ -374,6 +374,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             discussed.log_preview_used(yaml);
         }
 
+        // Now that the config is live we can log metrics
+        configuration.log_usage_metrics();
         Ok(Running {
             configuration,
             schema,
