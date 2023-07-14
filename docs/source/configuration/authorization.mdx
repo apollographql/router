@@ -279,7 +279,6 @@ type Query {
 ### Authorization and `@key` types
 
 The [`@key` directive](https://www.apollographql.com/docs/federation/entities/) lets you create an entity whose fields resolve across multiple subgraphs.
-
 If you use authorization directives on fields in [`@key` types](https://www.apollographql.com/docs/federation/entities/), Apollo still joins those fields between the subgraphs, but the client cannot query them directly.
 
 Consider these example subgraph schemas:
@@ -318,70 +317,74 @@ query {
 }
 ```
 
-For this query:
+But for this query:
 
 ```graphql
 query {
   product {
     id
-    value
+    name
   }
 }
 ```
 
-An unauthenticated request would resolve `null` for `id`. And since `id` is a non-nullable field, `product` would return `null`.
+an unauthenticated request would resolve `null` for `id`. And since `id` is a non-nullable field, `product` would return `null`.
 
-This behavior is similar to [contracts](/graphos/delivery/contracts/) and the [`@inaccessible` directive](https://www.apollographql.com/docs/federation/federated-types/federated-directives/#inaccessible).
+This behavior is similar to what you can create with [contracts](/graphos/delivery/contracts/) and the [`@inaccessible` directive](https://www.apollographql.com/docs/federation/federated-types/federated-directives/#inaccessible).
 
-### Interfaces
+### Authorization and interfaces
 
-In the case one of the types implementing an interface requires authorization, then querying the interface will be allowed, but any parts that require access to that type will be filtered.
+If a type [implementing an interface](https://www.apollographql.com/docs/apollo-server/schema/unions-interfaces/#interface-type) requires authorization, unauthorized requests can query the interface, but not any parts of the type that require authorization.
 
-As an example, with this schema, where the interface  `I` does not require authentication, but the `User` type does:
+For example, consider this schema where the `User` interface  doesn't require authentication, but the `Admin` type which implements `User` does:
 
 ```graphql
 type Query {
-  itf: I!
+  users: [User!]!
 }
 
-interface I {
-    id: ID
-}
-
-type User
-implements I
-@authenticated {
+interface User {
   id: ID
   name: String
 }
-```
 
-If we send this query with an inline fragment and a type condition on `User`:
-
-```graphql
-query {
-    itf {
-        id
-        ... on User {
-          name
-        }
-    }
+type Admin
+implements User
+@authenticated {
+  id: ID
+  name: String
+  role: String 
 }
 ```
 
-The query would be filtered as follows:
+If an unauthenticated request were to make this query:
 
 ```graphql
 query {
-  itf {
+  users {
     id
+    name
+    ... on Admin {
+      role
+    }
+  }
+}
+```
+
+The router woudl filter the query as follows:
+
+```graphql
+query {
+  users {
+    id
+    name
   }
 }
 ```
 
 ## Introspection
 
-Authorization directives don't affect introspection; all fields that require authorization remain accessible. Directives applied to fields aren't visible. If introspection might reveal too much information about internal types, then be sure to deactivate it:
+Authorization directives don't affect introspection; all fields that require authorization remain visible. However, directives applied to fields _aren't_ visible. If introspection might reveal too much information about internal types, then be sure to deactivate it:
 
 ```yaml
 supergraph:
