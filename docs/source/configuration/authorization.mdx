@@ -6,6 +6,9 @@ title: Authorization in the Apollo Router
 >
 > If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](/graphos/org/plans/#enterprise-trials).
 
+
+## Authorization directives
+
 The Apollo Router supports graph based authorization policies, through the `@authenticated` and `@requiresScopes` directives. They are used to authorize access to specific types or fields.
 
 They are defined as follows:
@@ -18,7 +21,7 @@ directive @requiresScopes(scopes: [String!]!) on OBJECT | FIELD_DEFINITION | INT
 
 To use them, you need either to configure [JWT authentication](./authn-jwt) or to add a [router service coprocessor](../customizations/coprocessor). The JWT plugin will validate the token, extract its claims and set them in the request context at the key `apollo_authentication::JWT::claims`. To participate in the authorization process, a coprocessor would need to set that key in the context.
 
-## `@authenticated`
+### `@authenticated`
 
 The `@authenticated` directive restricts access to fields and types if the request was not authenticated, by checking for the presence of the `apollo_authentication::JWT::claims` key in the request context. If those fields are restricted, the router will remove them entirely before planning the query, so the unauthenticated parts will still be executed and returned to the client, but the parts requiring authentication will never be requested from subgraphs, avoiding entire subgraph requests in some cases.
 
@@ -100,7 +103,7 @@ So the `me` top level operation would not even be executed. When returning the r
 
 If all the fields were removed, then the router would generate a query planner error indicating that the query is unauthorized.
 
-## `@requiresScopes`
+### `@requiresScopes`
 
 The `@requiresScopes` directive restricts access to fields and types if the request did not present the right set of scopes, by loading from the request the context the object at key `apollo_authentication::JWT::claims`, and in that object the `scope` key, in the format defined by [OAuth2 access token scopes](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3), as a space separated list of scopes.
 
@@ -180,7 +183,6 @@ While if it presented the scopes `employee inventory`, it would filter the query
 ```
 
 And generate an error at path `/me`.
-
 
 ## Composition and federation
 
@@ -280,7 +282,11 @@ query {
 }
 ```
 
-### Introspection
+### Query deduplication
+
+When [query deduplication](/configuration/traffic-shaping/#query-deduplication) is activated for subgraphs, the authorization status is accounted for: unauthenticated queries will be grouped together, and authenticated queries will be grouped by scope set.
+
+## Introspection
 
 Introspection is not affected by authorization, so all types fields will be accessible. The directives applied to them will not be visible though. If introspection might reveal too much information about internal types, then it should be deactivated like this:
 
@@ -290,7 +296,3 @@ supergraph:
 ```
 
 Fields can also be hidden using [Contracts](/graphos/delivery/contracts/).
-
-### Query deduplication
-
-When [query deduplication](/configuration/traffic-shaping/#query-deduplication) is activated for subgraphs, the authorization status is accounted for: unauthenticated queries will be grouped together, and authenticated queries will be grouped by scope set.
