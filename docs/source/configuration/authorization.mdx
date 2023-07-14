@@ -248,72 +248,90 @@ query {
 
 The response would include an error at the `/me` path.
 
-## Introspection
-
-Authorization directives don't affect introspection; all fields that require authorization remain accessible. Directives applied to fields aren't visible. If introspection might reveal too much information about internal types, then be sure to deactivate it:
-
-```yaml
-supergraph:
-  introspection: false
-```
-
-You can also hide fields using [contracts](/graphos/delivery/contracts/).
-
-## Query deduplication
-
-When [query deduplication](/configuration/traffic-shaping/#query-deduplication) is activated for subgraphs, the authorization status is accounted for: the router groups unauthenticated queries together, and authenticated queries are grouped by scope set.
-
 ## Composition and federation
 
-The authorization directives are defined by the subgraph author, and will be carried into the supergraph schema:
-- `@authenticated`: if defined on a field or type by any of the subgraphs, it will be set in the supergraph too
-- `@requiresScopes`: same as `@authenticated`, and if there are multiple applications, the supergraph schema will merge the sets of scopes required by each subgraph
+Authorization directives are defined at the subgraph level and the router composes them in the supergraph schema. In other words, if subgraph fields or types include either `@authenticated` or `@requiresScopes` directives, they are set on the supergraph too.
 
-### Authorization and `@key`
+If multiple shared subgraph fields include `@requiresScopes`, the supergraph schema merges the sets of scopes required by each subgraph. For example, imagine one subgraph requires the `profile:read` scope on the `users` query:
 
-When the authorization directives are set on fields used in `@key`, they will be usable by the router to join between subgraphs, but cannot be queried directly by the client. This behavior is similar to [contracts](/graphos/delivery/contracts/) and the [`@inaccessible` directive](https://www.apollographql.com/docs/federation/federated-types/federated-directives/#inaccessible).
-
-As an example, assuming we have these subgraphs definition:
-
-```graphql
-# subgraph A
+```graphql title="Subgraph A"
 type Query {
-  t: T
-}
-
-type T @key(fields: "id") {
-  id: ID! @authenticated
+  users: [User!]! @requiresScopes(scopes: ["profile:read"])
 }
 ```
 
-```graphql
-# subgraph B
-type T @key(fields: "id") {
-  id: ID! @authenticated
-  value: Int
+And another subgraph requires the `user:read` scope on `users` query:
+
+```graphql title="Subgraph B"
+type Query {
+  users: [User!]! @requiresScopes(scopes: ["user:read"])
 }
 ```
 
-The following query can be done when not authenticated:
+Then the supergraph schema would require both scopes for it.
+
+```graphql title="Supergraph"
+type Query {
+  users: [User!]! @requiresScopes(scopes: ["profile:read", "user:read"])
+}
+```
+
+### Authorization and `@key` types
+
+The [`@key` directive](https://www.apollographql.com/docs/federation/entities/) lets you create an entity whose fields resolve across multiple subgraphs.
+
+If you use authorization directives on fields in [`@key` types](https://www.apollographql.com/docs/federation/entities/), Apollo still joins those fields between the subgraphs, but the client cannot query them directly.
+
+Consider these example subgraph schemas:
+
+```graphql title="Product subgraph"
+type Query {
+  product: Product
+}
+
+type Product @key(fields: "id") {
+  id: ID! @authenticated
+  name: String!
+  price: Int @authenticated
+}
+```
+
+```graphql title="Inventory subgraph"
+type Query {
+  product: Product
+}
+
+type Product @key(fields: "id") {
+  id: ID! @authenticated
+  inStock: Boolean!
+}
+```
+
+An unauthenticated request would successfully execute this query:
 
 ```graphql
-{
-  t {
-    value
+query {
+  product {
+    name
+    inStock
   }
 }
 ```
 
-But this one would end up with a `null` in `id`, which would trigger nullability rules and nullify `t` too.
+For this query:
 
 ```graphql
-{
-  t {
+query {
+  product {
     id
     value
   }
 }
 ```
+
+An unauthenticated request would resolve `null` for `id`. And since `id` is a non-nullable field, `product` would return `null`.
+
+This behavior is similar to [contracts](/graphos/delivery/contracts/) and the [`@inaccessible` directive](https://www.apollographql.com/docs/federation/federated-types/federated-directives/#inaccessible).
 
 ### Interfaces
 
@@ -361,3 +379,17 @@ query {
 }
 ```
 
+## Introspection
+
+Authorization directives don't affect introspection; all fields that require authorization remain accessible. Directives applied to fields aren't visible. If introspection might reveal too much information about internal types, then be sure to deactivate it:
+
+```yaml
+supergraph:
+  introspection: false
+```
+
+You can also hide fields using [contracts](/graphos/delivery/contracts/).
+
+## Query deduplication
+
+When [query deduplication](/configuration/traffic-shaping/#query-deduplication) is activated for subgraphs, the authorization status is accounted for: the router groups unauthenticated queries together, and authenticated queries are grouped by scope set.
