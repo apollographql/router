@@ -93,7 +93,7 @@ impl Config {
         let exporter = opentelemetry_otlp::new_pipeline()
             .metrics(
                 selectors::simple::histogram(default_buckets()),
-                aggregation::stateless_temporality_selector(),
+                aggregation::delta_temporality_selector(),
                 opentelemetry::runtime::Tokio,
             )
             .with_resource(Resource::new([
@@ -110,7 +110,7 @@ impl Config {
                 KeyValue::new("apollo.client.host", hostname()?),
                 KeyValue::new("apollo.client.uname", get_uname()?),
             ]))
-            .with_period(Duration::from_secs(1))
+            .with_period(Duration::from_secs(10))
             .with_exporter(
                 opentelemetry_otlp::new_exporter()
                     .tonic()
