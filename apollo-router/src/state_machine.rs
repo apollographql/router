@@ -27,6 +27,7 @@ use super::router::ApolloRouterError::{self};
 use super::router::Event::UpdateConfiguration;
 use super::router::Event::UpdateSchema;
 use super::router::Event::{self};
+use crate::configuration::metrics::{Metrics, MetricsHandle};
 use crate::configuration::Configuration;
 use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
@@ -56,6 +57,7 @@ enum State<FA: RouterSuperServiceFactory> {
     },
     Running {
         configuration: Arc<Configuration>,
+        _metrics_handle: MetricsHandle,
         schema: Arc<String>,
         license: LicenseState,
         server_handle: Option<HttpServerHandle>,
@@ -161,6 +163,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 server_handle,
                 router_service_factory,
                 all_connections_stopped_signals,
+                ..
             } => {
                 tracing::info!(
                     new_schema = new_schema.is_some(),
@@ -374,10 +377,11 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             discussed.log_preview_used(yaml);
         }
 
-        // Now that the config is live we can log metrics
-        configuration.log_usage_metrics();
+        let metrics_handle = Metrics::spawn(&configuration).await;
+
         Ok(Running {
             configuration,
+            _metrics_handle: metrics_handle,
             schema,
             license,
             server_handle: Some(server_handle),
