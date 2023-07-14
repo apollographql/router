@@ -74,6 +74,7 @@ mod test {
     use crate::uplink::schema_stream::SupergraphSdlQuery;
     use crate::uplink::stream_from_uplink;
     use crate::uplink::Endpoints;
+    use crate::uplink::UplinkConfig;
     use crate::uplink::AWS_URL;
     use crate::uplink::GCP_URL;
 
@@ -84,15 +85,15 @@ mod test {
                 std::env::var("TEST_APOLLO_KEY"),
                 std::env::var("TEST_APOLLO_GRAPH_REF"),
             ) {
-                let results = stream_from_uplink::<SupergraphSdlQuery, String>(
+                let results = stream_from_uplink::<SupergraphSdlQuery, String>(UplinkConfig {
                     apollo_key,
                     apollo_graph_ref,
-                    Some(Endpoints::fallback(vec![
+                    endpoints: Some(Endpoints::fallback(vec![
                         Url::from_str(url).expect("url must be valid")
                     ])),
-                    Duration::from_secs(1),
-                    Duration::from_secs(5),
-                )
+                    poll_interval: Duration::from_secs(1),
+                    timeout: Duration::from_secs(5),
+                })
                 .take(1)
                 .collect::<Vec<_>>()
                 .await;
