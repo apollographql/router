@@ -381,8 +381,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
 
         if is_reload {
             // Send the updates
-            let _ = ROUTER_UPDATED.configuration.0.send(configuration.clone());
-            let _ = ROUTER_UPDATED.schema.0.send(parsed_schema);
+            ROUTER_UPDATED.configuration.0.send(configuration.clone()).expect("cannot send the configuration update to the static channel. Should not happen because the receiver will always live in static");
+            ROUTER_UPDATED.schema.0.send(parsed_schema).expect("cannot send the schema update to the static channel. Should not happen because the receiver will always live in static");
         }
 
         Ok(Running {
