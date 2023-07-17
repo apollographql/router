@@ -57,17 +57,12 @@ impl Metrics {
         // This macro will query the config json for a primary metric and optionally metric attributes.
         // The results will be cached for the next iteration.
         macro_rules! log_usage_metrics {
-            ($($metric:ident).+, $path:literal, $enabled_path:literal) => {
+            ($($metric:ident).+, $path:literal) => {
                 let metric_name = stringify!($($metric).+).to_string();
                 let metric = self.metrics.entry(metric_name.clone()).or_insert_with(|| {
-                    if let Some(value) = jsonpath_lib::select(&self.yaml, $path).unwrap().first() {
-                        if jsonpath_lib::select(value, $enabled_path).unwrap().first().is_some() {
-                            (1, HashMap::new())
-                        }
-                        else {
-                            (0, HashMap::new())
-                        }
-                    }
+                    if jsonpath_lib::select(&self.yaml, $path).unwrap().first().is_some() {
+                        (1, HashMap::new())
+                }
                     else {
                         (0, HashMap::new())
                     }
@@ -77,12 +72,11 @@ impl Metrics {
                 tracing::info!($($metric).+ = metric.0);
 
             };
-            ($($metric:ident).+, $path:literal, $enabled_path:literal, $($($attr:ident).+, $attr_path:literal),+) => {
+            ($($metric:ident).+, $path:literal, $($($attr:ident).+, $attr_path:literal),+) => {
                 let metric_name = stringify!($($metric).+).to_string();
                 let metric = self.metrics.entry(metric_name.clone()).or_insert_with(|| {
                     if let Some(value) = jsonpath_lib::select(&self.yaml, $path).unwrap().first() {
-                        if jsonpath_lib::select(value, $enabled_path).unwrap().first().is_some() {
-                              paste!{
+                        paste!{
                             let mut attributes = HashMap::new();
                             $(
                             let attr_name = stringify!([<$($attr _ )+>]).to_string();
@@ -92,23 +86,19 @@ impl Metrics {
                                 Some(Value::Array(value)) if !value.is_empty() => {attributes.insert(attr_name, "true".to_string());},
                                 // Scalars can be logged as is.
                                 Some(value) => {attributes.insert(attr_name, value.to_string());},
-                                // If the value is not set we log "<unset>".
+                                // If the value is not set we don't specify the attribute.
                                 None => {},
                             };)+
                             (1, attributes)
-                                  }
-                        }
-                        else {
-                            (0, HashMap::new())
                         }
                     }
                     else {
                         (0, HashMap::new())
                     }
-
                 });
 
                 // Now log the metric
+                // Note the use of `Empty` to prevent logging of attributes that have not been set.
                 paste!{
                     tracing::info!($($metric).+ = metric.0, $($($attr).+ = metric.1.get(stringify!([<$($attr _ )+>])).map(|v|v as &dyn Value).unwrap_or(&tracing::field::Empty)),+);
                 }
@@ -117,23 +107,16 @@ impl Metrics {
 
         log_usage_metrics!(
             value.apollo.router.config.defer,
-            "$.supergraph",
-            "$.defer_support"
+            "$.supergraph[?(@.defer_support==true)]"
         );
         log_usage_metrics!(
             value.apollo.router.config.authentication.jwt,
-            "$.authentication.jwt",
-            "$"
+            "$.authentication.jwt"
         );
-        log_usage_metrics!(
-            value.apollo.router.config.authorization,
-            "$.authorization",
-            "$"
-        );
+        log_usage_metrics!(value.apollo.router.config.authorization, "$.authorization");
         log_usage_metrics!(
             value.apollo.router.config.coprocessor,
             "$.coprocessor",
-            "$",
             opt.router.request,
             "$.router.request",
             opt.router.response,
@@ -149,14 +132,12 @@ impl Metrics {
         );
         log_usage_metrics!(
             value.apollo.router.config.persisted_queries,
-            "$.persisted_queries",
-            "enabled"
+            "$.persisted_queries[?(@.enabled==true)]"
         );
 
         log_usage_metrics!(
             value.apollo.router.config.subscriptions,
-            "$.subscription",
-            "$",
+            "$.subscription[?(@.enabled==true)]",
             opt.mode,
             "$.mode",
             opt.deduplication,
@@ -170,7 +151,6 @@ impl Metrics {
         log_usage_metrics!(
             value.apollo.router.config.limits,
             "$.limits",
-            "$",
             opt.max_depth,
             "$.max_depth",
             opt.max_aliases,
@@ -190,8 +170,7 @@ impl Metrics {
         );
         log_usage_metrics!(
             value.apollo.router.config.apq,
-            "$.apq",
-            "$.enabled",
+            "$.apq[?(@.enabled==true)]",
             opt.router.cache.redis,
             "$.router.cache.redis",
             opt.router.cache.in_memory,
@@ -202,7 +181,6 @@ impl Metrics {
         log_usage_metrics!(
             value.apollo.router.config.traffic_shaping,
             "$.traffic_shaping",
-            "$.enabled",
             opt.router.timout,
             "$.router.timeout",
             opt.router.rate_limit,
@@ -223,17 +201,15 @@ impl Metrics {
 
         log_usage_metrics!(
             value.apollo.router.config.entities,
-            "$.traffic_shaping",
-            "$[?(@..experimental_entity_caching)]"
+            "$.traffic_shaping[?(@..experimental_entity_caching)]"
         );
         log_usage_metrics!(
             value.apollo.router.config.telemetry,
-            "$.telemetry[?(@.endpoint || @.metrics.prometheus.enabled)]",
-            "$",
+            "$.telemetry[?(@.metrics.prometheus.enabled==true)]",
             opt.metrics.otlp,
             "$.metrics.otlp[?(@.endpoint)]",
             opt.metrics.prometheus,
-            "$.metrics.prometheus.enabled",
+            "$.metrics.prometheus[?(@.enabled==true)]",
             opt.tracing.otlp,
             "$.tracing.otlp[?(@.endpoint)]",
             opt.tracing.datadog,
@@ -256,15 +232,64 @@ mod test {
     fn test_export() {
         let mut metrics = Metrics {
             yaml: json!({
+                "supergraph": {
+                    "defer_support": true
+                },
+                "authentication": {
+                    "jwt": {
+
+                    }
+                },
+                "authorization": {
+
+                },
+                "coprocessor": {
+                    "router": {
+                        "request": true,
+                        "response": true
+                    },
+                    "supergraph": {
+                        "request": true,
+                        "response": true
+                    },
+                    "subgraph": {
+                        "request": true,
+                        "response": true
+                    },
+                },
+                "persisted_queries": {
+                    "enabled": true
+                },
+                "subscription": {
+                    "enabled": true
+                },
                 "limits": {
                     "max_depth": 1002
                 },
-                "supergraph": {
-                    "defer_support": true
-                }
+                "apq": {
+                    "enabled": true
+                },
+                "traffic_shaping": {
+                    "experimental_entity_caching": true,
+                    "router": {
+                        "timeout": "1s"
+                    }
+                },
+                "entities": {
+                    "experimental_entity_caching": true
+                },
+                "telemetry": {
+                    "metrics": {
+                        "prometheus": {
+                            "enabled": true
+                        }
+                    }
+                },
+
             }),
             metrics: Default::default(),
         };
+
         // Log the metrics but also populate the cache
         metrics.log_usage_metrics();
         insta::with_settings!({sort_maps => true}, {

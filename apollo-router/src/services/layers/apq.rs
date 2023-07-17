@@ -38,7 +38,7 @@ impl PersistedQuery {
             .and_then(|value| serde_json_bytes::from_value(value.clone()).ok())
     }
 
-    /// Attempt to decode the sha256 hash in a `PersistedQuery`
+    /// Attempt to decode the sha256 hash in a [`PersistedQuery`]
     pub(crate) fn decode_hash(self) -> Option<(String, Vec<u8>)> {
         hex::decode(self.sha256hash.as_bytes())
             .ok()
