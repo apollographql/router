@@ -58,7 +58,7 @@ pub(crate) struct Subscription {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SubscriptionConfig {
-    /// Enable subscription or not
+    /// Enable subscription
     pub(crate) enabled: bool,
     /// Select a subscription mode (callback or passthrough)
     #[serde(default)]
@@ -632,6 +632,7 @@ mod tests {
             .create_instance(
                 &Value::from_str(
                     r#"{
+                "enabled": true,
                 "mode": {
                     "preview_callback": {
                         "public_url": "http://localhost:4000",
@@ -763,6 +764,7 @@ mod tests {
             .create_instance(
                 &Value::from_str(
                     r#"{
+                "enabled": true,
                 "mode": {
                     "preview_callback": {
                         "public_url": "http://localhost:4000",
@@ -847,6 +849,7 @@ mod tests {
             .create_instance(
                 &Value::from_str(
                     r#"{
+                "enabled": true,
                 "mode": {
                     "preview_callback": {
                         "public_url": "http://localhost:4000",
@@ -988,7 +991,12 @@ mod tests {
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
             .create_instance(
-                &Value::from_str(r#"{}"#).unwrap(),
+                &Value::from_str(
+                    r#"{
+                    "enabled": false
+                }"#,
+                )
+                .unwrap(),
                 Default::default(),
                 Default::default(),
             )
@@ -1036,6 +1044,7 @@ mod tests {
     #[test]
     fn it_test_subscription_config() {
         let config_with_callback: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
             "mode": {
                 "preview_callback": {
                     "public_url": "http://localhost:4000",
@@ -1061,6 +1070,7 @@ mod tests {
 
         let config_with_callback_default: SubscriptionConfig =
             serde_json::from_value(serde_json::json!({
+                "enabled": true,
                 "mode": {
                     "preview_callback": {
                         "public_url": "http://localhost:4000",
@@ -1087,6 +1097,7 @@ mod tests {
 
         let config_with_passthrough: SubscriptionConfig =
             serde_json::from_value(serde_json::json!({
+                "enabled": true,
                 "mode": {
                     "passthrough": {
                         "subgraphs": {
@@ -1112,6 +1123,7 @@ mod tests {
 
         let config_with_passthrough_override: SubscriptionConfig =
             serde_json::from_value(serde_json::json!({
+                "enabled": true,
                 "mode": {
                     "passthrough": {
                         "all": {
@@ -1144,6 +1156,7 @@ mod tests {
 
         let config_with_passthrough_all: SubscriptionConfig =
             serde_json::from_value(serde_json::json!({
+                "enabled": true,
                 "mode": {
                     "passthrough": {
                         "all": {
@@ -1173,6 +1186,7 @@ mod tests {
         );
 
         let config_with_both_mode: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
             "mode": {
                 "preview_callback": {
                     "public_url": "http://localhost:4000",
@@ -1203,6 +1217,7 @@ mod tests {
 
         let config_with_passthrough_precedence: SubscriptionConfig =
             serde_json::from_value(serde_json::json!({
+                "enabled": true,
                 "mode": {
                     "preview_callback": {
                         "public_url": "http://localhost:4000",
@@ -1237,8 +1252,10 @@ mod tests {
             ))
         );
 
-        let config_without_mode: SubscriptionConfig =
-            serde_json::from_value(serde_json::json!({})).unwrap();
+        let config_without_mode: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true
+        }))
+        .unwrap();
 
         let subgraph_cfg = config_without_mode.mode.get_subgraph_config("test");
         assert_eq!(subgraph_cfg, None);
