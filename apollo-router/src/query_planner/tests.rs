@@ -110,6 +110,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
             sender,
             None,
             &None,
+            None,
         )
         .await;
     assert_eq!(result.errors.len(), 1);
@@ -169,6 +170,7 @@ async fn fetch_includes_operation_name() {
             sender,
             None,
             &None,
+            None,
         )
         .await;
 
@@ -225,6 +227,7 @@ async fn fetch_makes_post_requests() {
             sender,
             None,
             &None,
+            None,
         )
         .await;
 
@@ -370,6 +373,7 @@ async fn defer() {
             sender,
             None,
             &None,
+            None,
         )
         .await;
 
@@ -468,6 +472,7 @@ async fn defer_if_condition() {
             sender,
             None,
             &None,
+            None,
         )
         .await;
 
@@ -488,6 +493,7 @@ async fn defer_if_condition() {
             default_sender,
             None,
             &None,
+            None,
         )
         .await;
 
@@ -514,6 +520,7 @@ async fn defer_if_condition() {
             sender,
             None,
             &None,
+            None,
         )
         .await;
     insta::assert_json_snapshot!(defer_disabled);
@@ -633,6 +640,7 @@ async fn dependent_mutations() {
             sender,
             None,
             &None,
+            None,
         )
         .await;
 }

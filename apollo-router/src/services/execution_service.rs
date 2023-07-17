@@ -23,7 +23,6 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
-use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use super::new_service::ServiceFactory;
 use super::Plugins;
 use super::SubgraphServiceFactory;
@@ -95,7 +94,6 @@ impl Service<ExecutionRequest> for ExecutionService {
 
     fn call(&mut self, req: ExecutionRequest) -> Self::Future {
         let clone = self.clone();
-
         let mut this = std::mem::replace(self, clone);
 
         let fut = async move { this.call_inner(req).await }.in_current_span();
@@ -107,10 +105,10 @@ impl ExecutionService {
     async fn call_inner(&mut self, req: ExecutionRequest) -> Result<ExecutionResponse, BoxError> {
         let context = req.context;
         let ctx = context.clone();
-        let (sender, receiver) = mpsc::channel(10);
         let variables = req.supergraph_request.body().variables.clone();
         let operation_name = req.supergraph_request.body().operation_name.clone();
 
+        let (sender, receiver) = mpsc::channel(10);
         let is_deferred = req
             .query_plan
             .is_deferred(operation_name.as_deref(), &variables);
@@ -119,12 +117,16 @@ impl ExecutionService {
             let (tx_close_signal, rx_close_signal) = broadcast::channel(1);
             (
                 Some(tx_close_signal),
-                Some(SubscriptionHandle::new(rx_close_signal)),
+                Some(SubscriptionHandle::new(
+                    rx_close_signal,
+                    req.subscription_tx,
+                )),
             )
         } else {
             (None, None)
         };
 
+        let has_initial_data = req.source_stream_value.is_some();
         let mut first = req
             .query_plan
             .execute(
@@ -135,10 +137,11 @@ impl ExecutionService {
                 sender,
                 subscription_handle.clone(),
                 &self.subscription_config,
+                req.source_stream_value,
             )
             .await;
         let query = req.query_plan.query.clone();
-        let stream = if is_deferred || is_subscription {
+        let stream = if (is_deferred || is_subscription) && !has_initial_data {
             let stream_mode = if is_deferred {
                 StreamMode::Defer
             } else {
@@ -148,9 +151,19 @@ impl ExecutionService {
             };
             let stream = filter_stream(first, receiver, stream_mode);
             StreamWrapper(stream, tx_close_signal).boxed()
+        } else if has_initial_data {
+            // If it's a subscription event
+            once(ready(first)).boxed()
         } else {
             once(ready(first)).chain(receiver).boxed()
         };
+
+        if has_initial_data {
+            return Ok(ExecutionResponse::new_from_response(
+                http::Response::new(stream as _),
+                ctx,
+            ));
+        }
 
         let schema = self.schema.clone();
         let mut nullified_paths: Vec<Path> = vec![];
@@ -255,14 +268,7 @@ impl ExecutionService {
                     ),
                 });
 
-                if response
-                    .label
-                    .as_ref()
-                    .map(|label| query.added_labels.contains(label))
-                    .unwrap_or(false)
-                {
-                    response.label = None;
-                }
+                response.label = rewrite_defer_label(&response);
                 Some(response)
             }
             // if the deferred response specified a path, we must extract the
@@ -322,11 +328,12 @@ impl ExecutionService {
         operation_name: Option<&str>,
         has_next: bool,
         variables_set: BooleanValues,
-        mut response: Response,
+        response: Response,
         sub_responses: Vec<(Path, Value)>,
     ) -> Option<Response> {
         let query = query.clone();
 
+        let rewritten_label = rewrite_defer_label(&response);
         let incremental = sub_responses
             .into_iter()
             .filter_map(move |(path, data)| {
@@ -347,15 +354,6 @@ impl ExecutionService {
                     })
                     .cloned()
                     .collect::<Vec<_>>();
-
-                if response
-                    .label
-                    .as_ref()
-                    .map(|label| query.added_labels.contains(label))
-                    .unwrap_or(false)
-                {
-                    response.label = None;
-                }
 
                 let extensions: Object = response
                     .extensions
@@ -394,7 +392,7 @@ impl ExecutionService {
                 if !data.is_null() || !errors.is_empty() || !extensions.is_empty() {
                     Some(
                         IncrementalResponse::builder()
-                            .and_label(response.label.clone())
+                            .and_label(rewritten_label.clone())
                             .data(data)
                             .path(path)
                             .errors(errors)
@@ -413,6 +411,21 @@ impl ExecutionService {
                 .incremental(incremental)
                 .build(),
         )
+    }
+}
+
+fn rewrite_defer_label(response: &Response) -> Option<String> {
+    if let Some(label) = &response.label {
+        #[allow(clippy::manual_map)] // use an explicit `if` to comment each case
+        if let Some(rest) = label.strip_prefix('_') {
+            // Drop the prefix added in labeler.rs
+            Some(rest.to_owned())
+        } else {
+            // Remove the synthetic lable generated in labeler.rs
+            None
+        }
+    } else {
+        None
     }
 }
 
@@ -512,7 +525,6 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
             .map(|p| p.config.clone());
 
         ServiceBuilder::new()
-            .layer(AllowOnlyHttpPostMutationsLayer::default())
             .service(
                 self.plugins.iter().rev().fold(
                     crate::services::execution_service::ExecutionService {

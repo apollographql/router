@@ -26,7 +26,7 @@ use crate::spec::SpecError;
 ///
 /// Note that these are not actually returned to the client, but are instead converted to JSON for
 /// [`struct@Error`].
-#[derive(Error, Display, Debug, Clone, Serialize)]
+#[derive(Error, Display, Debug, Clone, Serialize, Eq, PartialEq)]
 #[serde(untagged)]
 #[ignore_extra_doc_attributes]
 #[non_exhaustive]
