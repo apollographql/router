@@ -25,13 +25,14 @@ use url::Url;
 
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
-use crate::configuration::ConfigurationError;
 use crate::configuration::Discussed;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
+use crate::uplink::Endpoints;
+use crate::uplink::UplinkConfig;
 use crate::LicenseSource;
 
 #[cfg(all(
@@ -241,6 +242,42 @@ pub struct Opt {
     pub(crate) version: bool,
 }
 
+impl Opt {
+    pub(crate) fn uplink_config(&self) -> Result<UplinkConfig, anyhow::Error> {
+        Ok(UplinkConfig {
+            apollo_key: self
+                .apollo_key
+                .clone()
+                .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
+            apollo_graph_ref: self
+                .apollo_graph_ref
+                .clone()
+                .ok_or(Self::err_require_opt("APOLLO_GRAPH_REF"))?,
+            endpoints: self
+                .apollo_uplink_endpoints
+                .as_ref()
+                .map(|endpoints| Self::parse_endpoints(endpoints))
+                .transpose()?,
+            poll_interval: self.apollo_uplink_poll_interval,
+            timeout: self.apollo_uplink_timeout,
+        })
+    }
+
+    fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
+        Ok(Endpoints::fallback(
+            endpoints
+                .split(',')
+                .map(|endpoint| Url::parse(endpoint.trim()))
+                .collect::<Result<Vec<Url>, ParseError>>()
+                .map_err(|err| anyhow!("invalid Apollo Uplink endpoint, {}", err))?,
+        ))
+    }
+
+    fn err_require_opt(env_var: &str) -> anyhow::Error {
+        anyhow!("Use of Apollo Graph OS requires setting the {env_var} environment variable")
+    }
+}
+
 /// Wrapper so that clap can display the default config path in the help message.
 /// Uses ProjectDirs to get the default location.
 #[derive(Debug)]
@@ -419,19 +456,6 @@ impl Executable {
         license: Option<LicenseSource>,
         mut opt: Opt,
     ) -> Result<()> {
-        let uplink_endpoints: Option<Vec<Url>> = opt
-            .apollo_uplink_endpoints
-            .map(|e| {
-                e.split(',')
-                    .map(|endpoint| Url::parse(endpoint.trim()))
-                    .collect::<Result<Vec<Url>, ParseError>>()
-            })
-            .transpose()
-            .map_err(|err| ConfigurationError::InvalidConfiguration {
-                message:
-                    "invalid apollo-uplink-endpoints, this must be a list of comma separated URLs",
-                error: err.to_string(),
-            })?;
         if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
             return Err(anyhow!("apollo-uplink-poll-interval must be at least 10s"));
         }
@@ -471,7 +495,8 @@ impl Executable {
         };
 
         let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
-        let schema = match (schema, &opt.supergraph_path, &opt.apollo_key) {
+
+        let schema_source = match (schema, &opt.supergraph_path, &opt.apollo_key) {
             (Some(_), Some(_), _) => {
                 return Err(anyhow!(
                     "--supergraph and APOLLO_ROUTER_SUPERGRAPH_PATH cannot be used when a custom schema source is in use"
@@ -493,18 +518,10 @@ impl Executable {
                     delay: None,
                 }
             }
-            (_, None, Some(apollo_key)) => {
+            (_, None, Some(_apollo_key)) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
-
-                let apollo_graph_ref = opt.apollo_graph_ref.as_ref().ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
-                SchemaSource::Registry {
-                    apollo_key: apollo_key.to_string(),
-                    apollo_graph_ref: apollo_graph_ref.to_string(),
-                    urls: uplink_endpoints.clone(),
-                    poll_interval: opt.apollo_uplink_poll_interval,
-                    timeout: opt.apollo_uplink_timeout
-                }
+                SchemaSource::Registry(opt.uplink_config()?)
             }
             _ => {
                 return Err(anyhow!(
@@ -545,7 +562,10 @@ impl Executable {
         // 1. explicit path from cli
         // 2. env APOLLO_ROUTER_LICENSE
         // 3. uplink
-        let license = license.unwrap_or_else(|| {
+
+        let license = if let Some(license) = license {
+            license
+        } else {
             match (
                 &opt.apollo_router_license,
                 &opt.apollo_router_license_path,
@@ -564,21 +584,18 @@ impl Executable {
                     }
                 }
                 (Some(_license), _, _, _) => LicenseSource::Env,
-                (_, _, Some(apollo_key), Some(apollo_graph_ref)) => LicenseSource::Registry {
-                    apollo_key: apollo_key.to_string(),
-                    apollo_graph_ref: apollo_graph_ref.to_string(),
-                    urls: uplink_endpoints.clone(),
-                    poll_interval: opt.apollo_uplink_poll_interval,
-                    timeout: opt.apollo_uplink_timeout,
-                },
+                (_, _, Some(_apollo_key), Some(_apollo_graph_ref)) => {
+                    LicenseSource::Registry(opt.uplink_config()?)
+                }
 
                 _ => LicenseSource::default(),
             }
-        });
+        };
 
         let router = RouterHttpServer::builder()
             .configuration(configuration)
-            .schema(schema)
+            .and_uplink(opt.uplink_config().ok())
+            .schema(schema_source)
             .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
             .start();
