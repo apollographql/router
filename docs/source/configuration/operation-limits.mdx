@@ -124,9 +124,9 @@ limits:
   warn_only: true # warn_only mode always enabled
 ```
 
-## HTTP Response
+## Response format for exceeded limits
 
-If you have enabled operation limits to reject any operations that exceeed the configureed limits, clients will get an `HTTP 400` response with a GraphQL error.
+Whenever your router rejects a request because it exceeds an operation limit, the router responds with a 400 HTTP status code and a standard GraphQL error response body:
 
 ```json5
 # HTTP 400
@@ -143,4 +143,4 @@ If you have enabled operation limits to reject any operations that exceeed the c
 }
 ```
 
-If you have enabled `warn_only` mode, the response will return `HTTP 200` and execute as normal with just the added logs.
+If you run your router in [`warn_only` mode](#warn_only-mode), the router logs the limit violation but executes the operation as normal, returning a 200 status code with the expected response.
