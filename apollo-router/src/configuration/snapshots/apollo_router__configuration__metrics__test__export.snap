@@ -35,8 +35,8 @@ value.apollo.router.config.subscriptions:
   - 1
   - {}
 value.apollo.router.config.telemetry:
-  - 0
-  - {}
+  - 1
+  - opt_metrics_prometheus_: "true"
 value.apollo.router.config.traffic_shaping:
   - 1
   - opt_router_timout_: "\"1s\""

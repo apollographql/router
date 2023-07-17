@@ -1,7 +1,11 @@
 use crate::Configuration;
+use jsonpath_rust::parser::model::JsonPath;
+use jsonpath_rust::path::json_path_instance;
+use jsonpath_rust::JsonPathValue;
 use paste::paste;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::OwnedSemaphorePermit;
@@ -51,18 +55,63 @@ impl Metrics {
     }
 }
 
+/// Json paths may return either pointers to the original json or new data. This custom pointer type allows us to handle both cases.
+enum JsonPtr<'a, Data> {
+    /// The slice of the initial json data
+    Slice(&'a Data),
+    /// The new data that was generated from the input data (like length operator)
+    NewValue(Data),
+}
+
+/// Allow deref from json pointer to value.
+impl<'a> Deref for JsonPtr<'a, Value> {
+    type Target = Value;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            JsonPtr::Slice(v) => *v,
+            JsonPtr::NewValue(v) => v,
+        }
+    }
+}
+
+/// Extension trait to add a find method to json path.
+trait JsonPathExt {
+    fn find<'a>(&'a self, value: &'a Value) -> Vec<JsonPtr<'a, Value>>;
+}
+
+impl JsonPathExt for JsonPath {
+    fn find<'a>(&'a self, value: &'a Value) -> Vec<JsonPtr<'a, Value>> {
+        json_path_instance(self, value)
+            .find((&(*value)).into())
+            .into_iter()
+            .filter(|v| v.has_value())
+            .map(|v| match v {
+                JsonPathValue::Slice(v) => JsonPtr::Slice(v),
+                JsonPathValue::NewValue(v) => JsonPtr::NewValue(v),
+                JsonPathValue::NoValue => unreachable!("has_value was already checked"),
+            })
+            .collect()
+    }
+}
+
 impl Metrics {
     pub(crate) fn log_usage_metrics(&mut self) {
         // We have to have a macro here because tracing requires it. However, we also need to cache the metrics as json path is slow.
         // This macro will query the config json for a primary metric and optionally metric attributes.
         // The results will be cached for the next iteration.
+
+        // The reason we use jsonpath_rust is that jsonpath_lib has correctness issues and looks abandoned.
+        // We should consider converting the rest of the codebase to use jsonpath_rust.
+        // The only issue is that jsonpath_rust's API takes ownership of the json Value. It has lower level APIs that don't but for some reason they don't get exposed.
+
         macro_rules! log_usage_metrics {
             ($($metric:ident).+, $path:literal) => {
                 let metric_name = stringify!($($metric).+).to_string();
                 let metric = self.metrics.entry(metric_name.clone()).or_insert_with(|| {
-                    if jsonpath_lib::select(&self.yaml, $path).unwrap().first().is_some() {
+                    if JsonPath::try_from($path).expect("json path must be valid").find(&self.yaml).first().is_some() {
                         (1, HashMap::new())
-                }
+                    }
                     else {
                         (0, HashMap::new())
                     }
@@ -75,12 +124,12 @@ impl Metrics {
             ($($metric:ident).+, $path:literal, $($($attr:ident).+, $attr_path:literal),+) => {
                 let metric_name = stringify!($($metric).+).to_string();
                 let metric = self.metrics.entry(metric_name.clone()).or_insert_with(|| {
-                    if let Some(value) = jsonpath_lib::select(&self.yaml, $path).unwrap().first() {
+                    if let Some(value) = JsonPath::try_from($path).expect("json path must be valid").find(&self.yaml).first() {
                         paste!{
                             let mut attributes = HashMap::new();
                             $(
                             let attr_name = stringify!([<$($attr _ )+>]).to_string();
-                            match jsonpath_lib::select(value, $attr_path).unwrap().first() {
+                            match JsonPath::try_from($attr_path).expect("json path must be valid").find(value).into_iter().next().as_deref() {
                                 // If the value is an object we can only state that it is set, but not what it is set to.
                                 Some(Value::Object(_value)) => {attributes.insert(attr_name, "true".to_string());},
                                 Some(Value::Array(value)) if !value.is_empty() => {attributes.insert(attr_name, "true".to_string());},
