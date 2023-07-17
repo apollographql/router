@@ -12,14 +12,16 @@ The Apollo Router allows you to control access to specific fields and types thro
 - The `@authenticated` directive works in a binary way: requests are either authorized to access a specific field or type or they aren't.
 - The `@requiresScopes` directive allows you granular access control through scopes that you define.
 
-You define and use the directives on a subgraph level, and the router [composes](#composition-and-federation) them to the supergraph.
+You define and use the directives on a subgraph level, and the router [composes](#composition-and-federation) them on to the supergraph schema.
 
 ## Prequisites
 
 To use the router's authorization directives, you need to either configure [JWT authentication](./authn-jwt) or add a [router service coprocessor](../customizations/coprocessor).
+Regardless of which you choose, you need to include **claims** in a request's context.
+**Claims** are the individual details of a requests' scope. They might include details like the ID of the associated user and/or any scopes assigned to that user.
 
-The JWT plugin validates the token, extract its claims, and sets them in the request context at the key `apollo_authentication::JWT::claims`.
-To participate in the authorization process, a coprocessor needs to set the key `apollo_authentication::JWT::claims` in requests' context.
+If you configure [JWT authentication](./authn-jwt), the Apollo Router automatically adds a JWT token's claims to the request's context at the `apollo_authentication::JWT::claims` key.
+To participate in the authorization process, the coprocessor you add needs to set the key `apollo_authentication::JWT::claims` in request contexts.
 
 ## Authorization directives
 
