@@ -6,14 +6,13 @@ use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
 use futures::prelude::*;
-use url::Url;
 
 use crate::router::Event;
 use crate::router::Event::NoMoreSchema;
 use crate::router::Event::UpdateSchema;
 use crate::uplink::schema_stream::SupergraphSdlQuery;
 use crate::uplink::stream_from_uplink;
-use crate::uplink::Endpoints;
+use crate::uplink::UplinkConfig;
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 
@@ -47,22 +46,7 @@ pub enum SchemaSource {
 
     /// Apollo managed federation.
     #[display(fmt = "Registry")]
-    Registry {
-        /// The Apollo key: `<YOUR_GRAPH_API_KEY>`
-        apollo_key: String,
-
-        /// The apollo graph reference: `<YOUR_GRAPH_ID>@<VARIANT>`
-        apollo_graph_ref: String,
-
-        /// The endpoint polled to fetch its latest supergraph schema.
-        urls: Option<Vec<Url>>,
-
-        /// The duration between polling
-        poll_interval: Duration,
-
-        /// The HTTP client timeout for each poll
-        timeout: Duration,
-    },
+    Registry(UplinkConfig),
 }
 
 impl From<&'_ str> for SchemaSource {
@@ -124,29 +108,19 @@ impl SchemaSource {
                     }
                 }
             }
-            SchemaSource::Registry {
-                apollo_key,
-                apollo_graph_ref,
-                urls,
-                poll_interval,
-                timeout,
-            } => stream_from_uplink::<SupergraphSdlQuery, String>(
-                apollo_key,
-                apollo_graph_ref,
-                urls.map(Endpoints::fallback),
-                poll_interval,
-                timeout,
-            )
-            .filter_map(|res| {
-                future::ready(match res {
-                    Ok(schema) => Some(UpdateSchema(schema)),
-                    Err(e) => {
-                        tracing::error!("{}", e);
-                        None
-                    }
-                })
-            })
-            .boxed(),
+            SchemaSource::Registry(uplink_config) => {
+                stream_from_uplink::<SupergraphSdlQuery, String>(uplink_config)
+                    .filter_map(|res| {
+                        future::ready(match res {
+                            Ok(schema) => Some(UpdateSchema(schema)),
+                            Err(e) => {
+                                tracing::error!("{}", e);
+                                None
+                            }
+                        })
+                    })
+                    .boxed()
+            }
         }
         .chain(stream::iter(vec![NoMoreSchema]))
     }
