@@ -535,9 +535,9 @@ pub(crate) struct Supergraph {
     pub(crate) introspection: bool,
 
     /// Enable reuse of query fragments
-    /// Default: false
+    /// Default: depends on the federation version
     #[serde(rename = "experimental_reuse_query_fragments")]
-    pub(crate) reuse_query_fragments: bool,
+    pub(crate) reuse_query_fragments: Option<bool>,
 
     /// Set to false to disable defer support
     pub(crate) defer_support: bool,
@@ -567,7 +567,7 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            reuse_query_fragments: reuse_query_fragments.unwrap_or_default(),
+            reuse_query_fragments,
         }
     }
 }
@@ -590,7 +590,7 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            reuse_query_fragments: reuse_query_fragments.unwrap_or_default(),
+            reuse_query_fragments,
         }
     }
 }
