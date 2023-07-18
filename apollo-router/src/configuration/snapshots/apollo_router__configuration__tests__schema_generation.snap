@@ -1482,6 +1482,7 @@ expression: "&schema"
         "listen": "127.0.0.1:4000",
         "path": "/",
         "introspection": false,
+        "experimental_reuse_query_fragments": false,
         "defer_support": true,
         "query_planning": {
           "experimental_cache": {
@@ -1498,6 +1499,11 @@ expression: "&schema"
         "defer_support": {
           "description": "Set to false to disable defer support",
           "default": true,
+          "type": "boolean"
+        },
+        "experimental_reuse_query_fragments": {
+          "description": "Enable reuse of query fragments Default: false",
+          "default": false,
           "type": "boolean"
         },
         "introspection": {
