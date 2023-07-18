@@ -1482,7 +1482,7 @@ expression: "&schema"
         "listen": "127.0.0.1:4000",
         "path": "/",
         "introspection": false,
-        "experimental_reuse_query_fragments": false,
+        "experimental_reuse_query_fragments": null,
         "defer_support": true,
         "query_planning": {
           "experimental_cache": {
@@ -1502,9 +1502,10 @@ expression: "&schema"
           "type": "boolean"
         },
         "experimental_reuse_query_fragments": {
-          "description": "Enable reuse of query fragments Default: false",
-          "default": false,
-          "type": "boolean"
+          "description": "Enable reuse of query fragments Default: depends on the federation version",
+          "default": null,
+          "type": "boolean",
+          "nullable": true
         },
         "introspection": {
           "description": "Enable introspection Default: false",

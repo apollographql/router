@@ -1,13 +1,12 @@
-### Update router bridge and add option for `reuse_query_fragments`  ([Issue #3452](https://github.com/apollographql/router/issues/3452))
+### Add option to disable reuse of query fragments  ([Issue #3452](https://github.com/apollographql/router/issues/3452))
 
-Federation v2.4.9 enabled a new feature for [query fragment reuse](https://github.com/apollographql/federation/pull/2639) that is causing issues for some users.
-
-A new option has been added to he router config file to opt into this feature:
+A new option has been added to the Router to allow disabling of the reuse of query fragments. This is useful for debugging purposes.
 ```yaml
 supergraph:
-  experimental_reuse_query_fragments: true
+  experimental_reuse_query_fragments: false
 ```
 
-The default is disabled.
+The default value depends on the version of federation.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3453
+****
