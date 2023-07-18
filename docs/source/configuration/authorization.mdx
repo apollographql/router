@@ -6,18 +6,17 @@ title: Authorization in the Apollo Router
 >
 > If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](/graphos/org/plans/#enterprise-trials).
 
-You may need to restrict sensitive information to authorized users or enforce conditional access rules for particular fields.
-The Apollo Router allows you to control access to specific fields and types through the `@authenticated` and `@requiresScopes` directives:
+You may need to restrict sensitive information to authenticated users or enforce conditional access rules for particular fields.
+The Apollo Router lets you control access to specific fields and types through the `@authenticated` and `@requiresScopes` directives:
 
-- The `@authenticated` directive works in a binary way: requests are either authorized to access a specific field or type or they aren't.
-- The `@requiresScopes` directive allows you granular access control through scopes that you define.
+- The `@authenticated` directive works in a binary way: authenticated requests can either access a specific field or type or they can't.
+- The `@requiresScopes` directive allows you granular access control through scopes you define.
 
-You define and use the directives on a subgraph level, and the router [composes](#composition-and-federation) them on to the supergraph schema.
+You define and use these directives on subgraph schemas, and the router [composes](#composition-and-federation) them on to the supergraph schema.
 
 ## Prequisites
 
-To use the router's authorization directives, you need to either configure [JWT authentication](./authn-jwt) or add a [router service coprocessor](../customizations/coprocessor).
-Regardless of which you choose, you need to include **claims** in a request's context.
+To use the router's authorization directives, you need to either configure [JWT authentication](./authn-jwt) or add a [router service coprocessor](../customizations/coprocessor) that includes **claims** in a request's context.
 **Claims** are the individual details of a requests' scope. They might include details like the ID of the associated user and/or any scopes assigned to that user.
 
 If you configure [JWT authentication](./authn-jwt), the Apollo Router automatically adds a JWT token's claims to the request's context at the `apollo_authentication::JWT::claims` key.
