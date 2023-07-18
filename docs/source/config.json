@@ -37,11 +37,11 @@
         "CORS": "/configuration/cors",
         "CSRF prevention": "/configuration/csrf",
         "JWT Authentication": [
-            "/configuration/authn-jwt",
-            [
-              "enterprise"
-            ]
-          ],
+          "/configuration/authn-jwt",
+          [
+            "enterprise"
+          ]
+        ],
         "Authorization": [
           "/configuration/authorization",
           [
