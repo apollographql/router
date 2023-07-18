@@ -181,7 +181,7 @@ impl Metrics {
         );
         log_usage_metrics!(
             value.apollo.router.config.persisted_queries,
-            "$.persisted_queries[?(@.enabled==true)]"
+            "$.preview_persisted_queries[?(@.enabled==true)]"
         );
 
         log_usage_metrics!(
@@ -254,7 +254,7 @@ impl Metrics {
         );
         log_usage_metrics!(
             value.apollo.router.config.telemetry,
-            "$.telemetry[?(@.metrics.prometheus.enabled==true)]",
+            "$.telemetry[?(@..endpoint || @.metrics.prometheus.enabled == true)]",
             opt.metrics.otlp,
             "$.metrics.otlp[?(@.endpoint)]",
             opt.metrics.prometheus,
@@ -275,74 +275,30 @@ impl Metrics {
 mod test {
     use crate::configuration::metrics::Metrics;
     use insta::assert_yaml_snapshot;
-    use serde_json::json;
+    use rust_embed::RustEmbed;
+
+    #[derive(RustEmbed)]
+    #[folder = "src/configuration/testdata/metrics"]
+    struct Asset;
 
     #[test]
-    fn test_export() {
-        let mut metrics = Metrics {
-            yaml: json!({
-                "supergraph": {
-                    "defer_support": true
-                },
-                "authentication": {
-                    "jwt": {
+    fn test_metrics() {
+        for file_name in Asset::iter() {
+            let source = Asset::get(&file_name).expect("test file must exist");
+            let input = std::str::from_utf8(&source.data)
+                .expect("expected utf8")
+                .to_string();
+            let yaml = &serde_yaml::from_str::<serde_json::Value>(&input)
+                .expect("config must be valid yaml");
 
-                    }
-                },
-                "authorization": {
-
-                },
-                "coprocessor": {
-                    "router": {
-                        "request": true,
-                        "response": true
-                    },
-                    "supergraph": {
-                        "request": true,
-                        "response": true
-                    },
-                    "subgraph": {
-                        "request": true,
-                        "response": true
-                    },
-                },
-                "persisted_queries": {
-                    "enabled": true
-                },
-                "subscription": {
-                    "enabled": true
-                },
-                "limits": {
-                    "max_depth": 1002
-                },
-                "apq": {
-                    "enabled": true
-                },
-                "traffic_shaping": {
-                    "experimental_entity_caching": true,
-                    "router": {
-                        "timeout": "1s"
-                    }
-                },
-                "entities": {
-                    "experimental_entity_caching": true
-                },
-                "telemetry": {
-                    "metrics": {
-                        "prometheus": {
-                            "enabled": true
-                        }
-                    }
-                },
-
-            }),
-            metrics: Default::default(),
-        };
-
-        // Log the metrics but also populate the cache
-        metrics.log_usage_metrics();
-        insta::with_settings!({sort_maps => true}, {
-            assert_yaml_snapshot!(&metrics.metrics);
-        });
+            let mut metrics = Metrics {
+                yaml: yaml.clone(),
+                metrics: Default::default(),
+            };
+            metrics.log_usage_metrics();
+            insta::with_settings!({sort_maps => true, snapshot_suffix => file_name}, {
+                assert_yaml_snapshot!(&metrics.metrics);
+            });
+        }
     }
 }

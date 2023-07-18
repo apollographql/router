@@ -3,41 +3,36 @@ source: apollo-router/src/configuration/metrics.rs
 expression: "&metrics.metrics"
 ---
 value.apollo.router.config.apq:
-  - 1
+  - 0
   - {}
 value.apollo.router.config.authentication.jwt:
-  - 1
+  - 0
   - {}
 value.apollo.router.config.authorization:
-  - 1
+  - 0
   - {}
 value.apollo.router.config.coprocessor:
-  - 1
-  - opt_router_request_: "true"
-    opt_router_response_: "true"
-    opt_subgraph_request_: "true"
-    opt_subgraph_response_: "true"
-    opt_supergraph_request_: "true"
-    opt_supergraph_response_: "true"
+  - 0
+  - {}
 value.apollo.router.config.defer:
   - 1
   - {}
 value.apollo.router.config.entities:
-  - 1
+  - 0
   - {}
 value.apollo.router.config.limits:
-  - 1
-  - opt_max_depth_: "1002"
+  - 0
+  - {}
 value.apollo.router.config.persisted_queries:
-  - 1
+  - 0
   - {}
 value.apollo.router.config.subscriptions:
-  - 1
+  - 0
   - {}
 value.apollo.router.config.telemetry:
-  - 1
-  - opt_metrics_prometheus_: "true"
+  - 0
+  - {}
 value.apollo.router.config.traffic_shaping:
-  - 1
-  - opt_router_timout_: "\"1s\""
+  - 0
+  - {}
 

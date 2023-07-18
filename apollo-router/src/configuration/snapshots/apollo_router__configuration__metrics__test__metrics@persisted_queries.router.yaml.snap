@@ -1,0 +1,38 @@
+---
+source: apollo-router/src/configuration/metrics.rs
+expression: "&metrics.metrics"
+---
+value.apollo.router.config.apq:
+  - 0
+  - {}
+value.apollo.router.config.authentication.jwt:
+  - 0
+  - {}
+value.apollo.router.config.authorization:
+  - 0
+  - {}
+value.apollo.router.config.coprocessor:
+  - 0
+  - {}
+value.apollo.router.config.defer:
+  - 0
+  - {}
+value.apollo.router.config.entities:
+  - 0
+  - {}
+value.apollo.router.config.limits:
+  - 0
+  - {}
+value.apollo.router.config.persisted_queries:
+  - 1
+  - {}
+value.apollo.router.config.subscriptions:
+  - 0
+  - {}
+value.apollo.router.config.telemetry:
+  - 0
+  - {}
+value.apollo.router.config.traffic_shaping:
+  - 0
+  - {}
+
