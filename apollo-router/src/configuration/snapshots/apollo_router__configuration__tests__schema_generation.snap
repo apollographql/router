@@ -1475,6 +1475,7 @@ expression: "&schema"
         "listen": "127.0.0.1:4000",
         "path": "/",
         "introspection": false,
+        "reuse_query_fragments": false,
         "defer_support": true,
         "query_planning": {
           "experimental_cache": {
@@ -1591,6 +1592,11 @@ expression: "&schema"
             }
           },
           "additionalProperties": false
+        },
+        "reuse_query_fragments": {
+          "description": "Enable reuse of query fragments Default: false",
+          "default": false,
+          "type": "boolean"
         }
       },
       "additionalProperties": false

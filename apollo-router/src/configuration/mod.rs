@@ -534,6 +534,10 @@ pub(crate) struct Supergraph {
     /// Default: false
     pub(crate) introspection: bool,
 
+    /// Enable reuse of query fragments
+    /// Default: false
+    pub(crate) reuse_query_fragments: bool,
+
     /// Set to false to disable defer support
     pub(crate) defer_support: bool,
 
@@ -554,6 +558,7 @@ impl Supergraph {
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
+        reuse_query_fragments: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -561,6 +566,7 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
+            reuse_query_fragments: reuse_query_fragments.unwrap_or_default(),
         }
     }
 }
@@ -575,6 +581,7 @@ impl Supergraph {
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
+        reuse_query_fragments: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -582,6 +589,7 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
+            reuse_query_fragments: reuse_query_fragments.unwrap_or_default(),
         }
     }
 }
