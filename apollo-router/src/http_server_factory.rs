@@ -1,4 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -15,7 +14,7 @@ use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
-use crate::uplink::entitlement::EntitlementState;
+use crate::uplink::license_enforcement::LicenseState;
 
 /// Factory for creating the http server component.
 ///
@@ -32,11 +31,13 @@ pub(crate) trait HttpServerFactory {
         main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
-        entitlement: EntitlementState,
+        license: LicenseState,
         all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self::Future
     where
         RF: RouterFactory;
+    fn live(&self, live: bool);
+    fn ready(&self, ready: bool);
 }
 
 type MainAndExtraListeners = (Listener, Vec<(ListenAddr, Listener)>);
@@ -112,7 +113,7 @@ impl HttpServerHandle {
         router: RF,
         configuration: Arc<Configuration>,
         web_endpoints: MultiMap<ListenAddr, Endpoint>,
-        entitlement: EntitlementState,
+        license: LicenseState,
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,
@@ -138,7 +139,7 @@ impl HttpServerHandle {
                 Some(main_listener),
                 extra_listeners,
                 web_endpoints,
-                entitlement,
+                license,
                 self.all_connections_stopped_sender.clone(),
             )
             .await?;

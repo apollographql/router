@@ -1,5 +1,4 @@
 //! Externalization plugin
-// With regards to ELv2 licensing, this entire file is license key functionality
 
 use std::collections::HashMap;
 use std::ops::ControlFlow;
@@ -8,6 +7,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use futures::future::ready;
+use futures::stream::once;
+use futures::StreamExt;
+use futures::TryStreamExt;
 use http::header::HeaderName;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -41,6 +44,7 @@ use crate::services::subgraph;
 use crate::tracer::TraceId;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
+const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 
 type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
 
@@ -68,7 +72,11 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
 
         let http_client = ServiceBuilder::new()
             .layer(TimeoutLayer::new(init.config.timeout))
-            .service(hyper::Client::builder().build(connector));
+            .service(
+                hyper::Client::builder()
+                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+                    .build(connector),
+            );
 
         CoprocessorPlugin::new(http_client, init.config, init.supergraph_sdl)
     }
@@ -107,7 +115,7 @@ where
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + Sync + 'static,
+    <C as tower::Service<http::Request<Body>>>::Future: Send + Sync + 'static,
 {
     http_client: C,
     configuration: Conf,
@@ -121,7 +129,7 @@ where
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + Sync + 'static,
+    <C as tower::Service<http::Request<Body>>>::Future: Send + Sync + 'static,
 {
     fn new(http_client: C, configuration: Conf, sdl: Arc<String>) -> Result<Self, BoxError> {
         Ok(Self {
@@ -262,7 +270,7 @@ impl RouterStage {
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + 'static,
+        <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -378,7 +386,7 @@ impl SubgraphStage {
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + 'static,
+        <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -474,7 +482,7 @@ where
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
 {
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our request and prepare our
@@ -490,35 +498,31 @@ where
     // HTTP GET requests don't have a body
     let body_to_send = request_config
         .body
-        .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
+        .then(|| String::from_utf8(bytes.to_vec()))
         .transpose()
         .unwrap_or_default();
 
     let path_to_send = request_config.path.then(|| parts.uri.to_string());
 
     let context_to_send = request_config.context.then(|| request.context.clone());
-    let sdl = request_config.sdl.then(|| sdl.clone().to_string());
+    let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
 
-    let payload = Externalizable {
-        version: EXTERNALIZABLE_VERSION,
-        stage: PipelineStep::RouterRequest.to_string(),
-        control: Some(Control::default()),
-        id: TraceId::maybe_new().map(|id| id.to_string()),
-        headers: headers_to_send,
-        body: body_to_send,
-        context: context_to_send,
-        sdl,
-        uri: None,
-        path: path_to_send,
-        method: Some(parts.method.to_string()),
-        service_name: None,
-        status_code: None,
-    };
+    let payload = Externalizable::router_builder()
+        .stage(PipelineStep::RouterRequest)
+        .control(Control::default())
+        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .and_headers(headers_to_send)
+        .and_body(body_to_send)
+        .and_context(context_to_send)
+        .and_sdl(sdl_to_send)
+        .and_path(path_to_send)
+        .method(parts.method.to_string())
+        .build();
 
     tracing::debug!(?payload, "externalized output");
-    request.context.enter_active_request().await;
+    let guard = request.context.enter_active_request();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    request.context.leave_active_request().await;
+    drop(guard);
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
@@ -533,18 +537,24 @@ where
         // Ensure the code is a valid http status code
         let code = control.get_http_status()?;
 
-        let graphql_response: crate::graphql::Response =
-            serde_json::from_value(co_processor_output.body.unwrap_or(serde_json::Value::Null))
-                .unwrap_or_else(|error| {
-                    crate::graphql::Response::builder()
-                        .errors(vec![Error::builder()
-                            .message(format!(
-                                "couldn't deserialize coprocessor output body: {error}"
-                            ))
-                            .extension_code("EXERNAL_DESERIALIZATION_ERROR")
-                            .build()])
-                        .build()
-                });
+        // At this point our body is a String. Try to get a valid JSON value from it
+        let body_as_value = co_processor_output
+            .body
+            .and_then(|b| serde_json::from_str(&b).ok())
+            .unwrap_or(serde_json::Value::Null);
+        // Now we have some JSON, let's see if it's the right "shape" to create a graphql_response.
+        // If it isn't, we create a graphql error response
+        let graphql_response: crate::graphql::Response = serde_json::from_value(body_as_value)
+            .unwrap_or_else(|error| {
+                crate::graphql::Response::builder()
+                    .errors(vec![Error::builder()
+                        .message(format!(
+                            "couldn't deserialize coprocessor output body: {error}"
+                        ))
+                        .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
+                        .build()])
+                    .build()
+            });
 
         let res = router::Response::builder()
             .errors(graphql_response.errors)
@@ -563,7 +573,9 @@ where
         }
 
         if let Some(context) = co_processor_output.context {
-            res.context = context;
+            for (key, value) in context.try_into_iter()? {
+                res.context.upsert_json_value(key, move |_current| value);
+            }
         }
 
         return Ok(ControlFlow::Break(res));
@@ -574,14 +586,18 @@ where
     // are present in our co_processor_output.
 
     let new_body = match co_processor_output.body {
-        Some(bytes) => Body::from(serde_json::to_vec(&bytes)?),
+        Some(bytes) => Body::from(bytes),
         None => Body::from(bytes),
     };
 
     request.router_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        request.context = context;
+        for (key, value) in context.try_into_iter()? {
+            request
+                .context
+                .upsert_json_value(key, move |_current| value);
+        }
     }
 
     if let Some(headers) = co_processor_output.headers {
@@ -604,47 +620,58 @@ where
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
 {
-    // Call into our out of process processor with a body of our body
-    // First, extract the data we need from our response and prepare our
-    // external call. Use our configuration to figure out which data to send.
+    // split the response into parts + body
     let (parts, body) = response.response.into_parts();
-    let bytes = hyper::body::to_bytes(body).await?;
 
+    // we split the body (which is a stream) into first response + rest of responses,
+    // for which we will implement mapping later
+    let (first, rest): (Option<Result<Bytes, hyper::Error>>, Body) = body.into_future().await;
+
+    // If first is None, or contains an error we return an error
+    let opt_first: Option<Bytes> = first.and_then(|f| f.ok());
+    let bytes = match opt_first {
+        Some(b) => b.to_vec(),
+        None => {
+            tracing::error!(
+                "Coprocessor cannot convert body into future due to problem with first part"
+            );
+            return Err(BoxError::from(
+                "Coprocessor cannot convert body into future due to problem with first part",
+            ));
+        }
+    };
+
+    // Now we process our first chunk of response
+    // Encode headers, body, status, context, sdl to create a payload
     let headers_to_send = response_config
         .headers
         .then(|| externalize_header_map(&parts.headers))
         .transpose()?;
     let body_to_send = response_config
         .body
-        .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
+        .then(|| String::from_utf8(bytes.clone()))
         .transpose()?;
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
     let context_to_send = response_config.context.then(|| response.context.clone());
-    let sdl = response_config.sdl.then(|| sdl.clone().to_string());
+    let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
-    let payload = Externalizable {
-        version: EXTERNALIZABLE_VERSION,
-        stage: PipelineStep::RouterResponse.to_string(),
-        control: None,
-        id: TraceId::maybe_new().map(|id| id.to_string()),
-        headers: headers_to_send,
-        body: body_to_send,
-        context: context_to_send,
-        status_code: status_to_send,
-        sdl,
-        uri: None,
-        path: None,
-        method: None,
-        service_name: None,
-    };
+    let payload = Externalizable::router_builder()
+        .stage(PipelineStep::RouterResponse)
+        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .and_headers(headers_to_send)
+        .and_body(body_to_send)
+        .and_context(context_to_send)
+        .and_status_code(status_to_send)
+        .and_sdl(sdl_to_send.clone())
+        .build();
 
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
-    response.context.enter_active_request().await;
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    response.context.leave_active_request().await;
+    let guard = response.context.enter_active_request();
+    let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
+    drop(guard);
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
@@ -656,24 +683,107 @@ where
     // bits that we sent to the co_processor.
 
     let new_body = match co_processor_output.body {
-        Some(bytes) => Body::from(serde_json::to_vec(&bytes)?),
+        Some(bytes) => Body::from(bytes),
         None => Body::from(bytes),
     };
 
     response.response = http::Response::from_parts(parts, new_body);
+
     if let Some(control) = co_processor_output.control {
         *response.response.status_mut() = control.get_http_status()?
     }
 
     if let Some(context) = co_processor_output.context {
-        response.context = context;
+        for (key, value) in context.try_into_iter()? {
+            response
+                .context
+                .upsert_json_value(key, move |_current| value);
+        }
     }
 
     if let Some(headers) = co_processor_output.headers {
         *response.response.headers_mut() = internalize_header_map(headers)?;
     }
 
-    Ok(response)
+    // Now break our co-processor modified response back into parts
+    let (parts, body) = response.response.into_parts();
+
+    // Clone all the bits we need
+    let context = response.context.clone();
+    let map_context = response.context.clone();
+
+    // Map the rest of our body to process subsequent chunks of response
+    let mapped_stream = rest
+        .map_err(BoxError::from)
+        .and_then(move |deferred_response| {
+            let generator_client = http_client.clone();
+            let generator_coprocessor_url = coprocessor_url.clone();
+            let generator_map_context = map_context.clone();
+            let generator_sdl_to_send = sdl_to_send.clone();
+
+            async move {
+                let bytes = deferred_response.to_vec();
+                let body_to_send = response_config
+                    .body
+                    .then(|| String::from_utf8(bytes.clone()))
+                    .transpose()?;
+                let context_to_send = response_config
+                    .context
+                    .then(|| generator_map_context.clone());
+
+                // Note: We deliberately DO NOT send headers or status_code even if the user has
+                // requested them. That's because they are meaningless on a deferred response and
+                // providing them will be a source of confusion.
+                let payload = Externalizable::router_builder()
+                    .stage(PipelineStep::RouterResponse)
+                    .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+                    .and_body(body_to_send)
+                    .and_context(context_to_send)
+                    .and_sdl(generator_sdl_to_send)
+                    .build();
+
+                // Second, call our co-processor and get a reply.
+                tracing::debug!(?payload, "externalized output");
+                let guard = generator_map_context.enter_active_request();
+                let co_processor_result = payload
+                    .call(generator_client, &generator_coprocessor_url)
+                    .await;
+                drop(guard);
+                tracing::debug!(?co_processor_result, "co-processor returned");
+                let co_processor_output = co_processor_result?;
+
+                validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
+
+                // Third, process our reply and act on the contents. Our processing logic is
+                // that we replace "bits" of our incoming response with the updated bits if they
+                // are present in our co_processor_output. If they aren't present, just use the
+                // bits that we sent to the co_processor.
+                let final_bytes: Bytes = match co_processor_output.body {
+                    Some(bytes) => bytes.into(),
+                    None => bytes.into(),
+                };
+
+                if let Some(context) = co_processor_output.context {
+                    for (key, value) in context.try_into_iter()? {
+                        generator_map_context.upsert_json_value(key, move |_current| value);
+                    }
+                }
+
+                // We return the final_bytes into our stream of response chunks
+                Ok(final_bytes)
+            }
+        });
+
+    // Create our response stream which consists of the bytes from our first body chained with the
+    // rest of the responses in our mapped stream.
+    let bytes = hyper::body::to_bytes(body).await.map_err(BoxError::from);
+    let final_stream = once(ready(bytes)).chain(mapped_stream).boxed();
+
+    // Finally, return a response which has a Body that wraps our stream of response chunks.
+    Ok(router::Response {
+        context,
+        response: http::Response::from_parts(parts, Body::wrap_stream(final_stream)),
+    })
 }
 // -----------------------------------------------------------------------------------------------------
 
@@ -690,7 +800,7 @@ where
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
 {
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our request and prepare our
@@ -711,26 +821,22 @@ where
     let uri = request_config.uri.then(|| parts.uri.to_string());
     let service_name = request_config.service_name.then_some(service_name);
 
-    let payload = Externalizable {
-        version: EXTERNALIZABLE_VERSION,
-        stage: PipelineStep::SubgraphRequest.to_string(),
-        control: Some(Control::default()),
-        id: TraceId::maybe_new().map(|id| id.to_string()),
-        headers: headers_to_send,
-        body: body_to_send,
-        context: context_to_send,
-        sdl: None,
-        service_name,
-        path: None,
-        uri,
-        method: Some(parts.method.to_string()),
-        status_code: None,
-    };
+    let payload = Externalizable::subgraph_builder()
+        .stage(PipelineStep::SubgraphRequest)
+        .control(Control::default())
+        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .and_headers(headers_to_send)
+        .and_body(body_to_send)
+        .and_context(context_to_send)
+        .method(parts.method.to_string())
+        .and_service_name(service_name)
+        .and_uri(uri)
+        .build();
 
     tracing::debug!(?payload, "externalized output");
-    request.context.enter_active_request().await;
+    let guard = request.context.enter_active_request();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    request.context.leave_active_request().await;
+    drop(guard);
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphRequest)?;
@@ -753,7 +859,7 @@ where
                                 .message(format!(
                                     "couldn't deserialize coprocessor output body: {error}"
                                 ))
-                                .extension_code("EXERNAL_DESERIALIZATION_ERROR")
+                                .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
                                 .build()])
                             .build()
                     });
@@ -765,13 +871,17 @@ where
                 *http_response.headers_mut() = internalize_header_map(headers)?;
             }
 
-            let mut subgraph_response = subgraph::Response {
+            let subgraph_response = subgraph::Response {
                 response: http_response,
                 context: request.context,
             };
 
             if let Some(context) = co_processor_output.context {
-                subgraph_response.context = context;
+                for (key, value) in context.try_into_iter()? {
+                    subgraph_response
+                        .context
+                        .upsert_json_value(key, move |_current| value);
+                }
             }
 
             subgraph_response
@@ -791,7 +901,11 @@ where
     request.subgraph_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        request.context = context;
+        for (key, value) in context.try_into_iter()? {
+            request
+                .context
+                .upsert_json_value(key, move |_current| value);
+        }
     }
 
     if let Some(headers) = co_processor_output.headers {
@@ -818,7 +932,7 @@ where
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
 {
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our response and prepare our
@@ -841,26 +955,20 @@ where
     let context_to_send = response_config.context.then(|| response.context.clone());
     let service_name = response_config.service_name.then_some(service_name);
 
-    let payload = Externalizable {
-        version: EXTERNALIZABLE_VERSION,
-        stage: PipelineStep::SubgraphResponse.to_string(),
-        control: None,
-        id: TraceId::maybe_new().map(|id| id.to_string()),
-        headers: headers_to_send,
-        body: body_to_send,
-        context: context_to_send,
-        status_code: status_to_send,
-        sdl: None,
-        uri: None,
-        path: None,
-        method: None,
-        service_name,
-    };
+    let payload = Externalizable::subgraph_builder()
+        .stage(PipelineStep::SubgraphResponse)
+        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .and_headers(headers_to_send)
+        .and_body(body_to_send)
+        .and_context(context_to_send)
+        .and_status_code(status_to_send)
+        .and_service_name(service_name)
+        .build();
 
     tracing::debug!(?payload, "externalized output");
-    response.context.enter_active_request().await;
+    let guard = response.context.enter_active_request();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    response.context.leave_active_request().await;
+    drop(guard);
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
@@ -883,7 +991,11 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        response.context = context;
+        for (key, value) in context.try_into_iter()? {
+            response
+                .context
+                .upsert_json_value(key, move |_current| value);
+        }
     }
 
     if let Some(headers) = co_processor_output.headers {
@@ -895,8 +1007,8 @@ where
 
 // -----------------------------------------------------------------------------------------
 
-fn validate_coprocessor_output(
-    co_processor_output: &Externalizable<serde_json::Value>,
+fn validate_coprocessor_output<T>(
+    co_processor_output: &Externalizable<T>,
     expected_step: PipelineStep,
 ) -> Result<(), BoxError> {
     if co_processor_output.version != EXTERNALIZABLE_VERSION {

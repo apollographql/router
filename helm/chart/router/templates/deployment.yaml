@@ -105,12 +105,12 @@ spec:
 
           livenessProbe:
             httpGet:
-              path: "/health"
+              path: "/health?live"
               port: {{ splitList ":" ((index .Values.router.configuration "health_check").listen | default ":8088") | last }}
             initialDelaySeconds: {{  ((.Values.probes).liveness).initialDelaySeconds | default 0 }}
           readinessProbe:
             httpGet:
-              path: "/health"
+              path: "/health?ready"
               port: {{ (splitList ":"  ((index .Values.router.configuration "health_check").listen | default ":8088")) | last }}
             initialDelaySeconds: {{ ((.Values.probes).readiness).initialDelaySeconds | default 0 }}
           resources:

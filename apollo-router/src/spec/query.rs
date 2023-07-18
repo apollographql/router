@@ -5,28 +5,32 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use apollo_compiler::hir;
+use apollo_compiler::validation::ValidationDatabase;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
+use apollo_compiler::FileId;
 use apollo_compiler::HirDatabase;
 use derivative::Derivative;
-use serde::de::Visitor;
+use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
-use tokio::sync::Mutex;
-use tokio::sync::MutexGuard;
-use tokio::sync::OnceCell;
 use tracing::level_filters::LevelFilter;
 
+use self::subselections::BooleanValues;
+use self::subselections::SubSelectionKey;
+use self::subselections::SubSelectionValue;
 use crate::error::FetchError;
+use crate::error::ValidationErrors;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
-use crate::json_ext::PathElement;
+use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
 use crate::spec::FieldType;
@@ -37,74 +41,69 @@ use crate::spec::Selection;
 use crate::spec::SpecError;
 use crate::Configuration;
 
+pub(crate) mod subselections;
+pub(crate) mod transform;
+pub(crate) mod traverse;
+
 pub(crate) const TYPENAME: &str = "__typename";
+pub(crate) const QUERY_EXECUTABLE: &str = "query";
 
 /// A GraphQL query.
-#[derive(Derivative, Default, Serialize, Deserialize)]
+#[derive(Derivative, Serialize, Deserialize)]
 #[derivative(PartialEq, Hash, Eq, Debug)]
 pub(crate) struct Query {
-    string: String,
-    #[derivative(PartialEq = "ignore", Hash = "ignore", Debug = "ignore")]
-    #[serde(skip)]
-    compiler: OnceCell<Mutex<ApolloCompiler>>,
+    pub(crate) string: String,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    fragments: Fragments,
+    pub(crate) fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) subselections: HashMap<SubSelection, Query>,
+    pub(crate) subselections: HashMap<SubSelectionKey, SubSelectionValue>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) filtered_query: Option<Arc<Query>>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) defer_stats: DeferStats,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) is_original: bool,
+    /// Validation errors, used for comparison with the JS implementation.
+    ///
+    /// XXX(@goto-bus-stop): Remove when only Rust validation is used
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) validation_error: Option<SpecError>,
 }
 
-#[derive(Debug, Derivative, Default)]
-#[derivative(PartialEq, Hash, Eq)]
-pub(crate) struct SubSelection {
-    pub(crate) path: Path,
-    pub(crate) subselection: String,
-}
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct DeferStats {
+    /// Is `@defer` used at all (except `@defer(if=false)`)
+    pub(crate) has_defer: bool,
 
-impl Serialize for SubSelection {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let s = format!("{}|{}", self.path, self.subselection);
-        serializer.serialize_str(&s)
-    }
-}
+    /// Is `@defer` used without `if` (or `@defer(if=true)`)
+    pub(crate) has_unconditional_defer: bool,
 
-impl<'de> Deserialize<'de> for SubSelection {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_str(SubSelectionVisitor)
-    }
-}
-
-struct SubSelectionVisitor;
-impl<'de> Visitor<'de> for SubSelectionVisitor {
-    type Value = SubSelection;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("a string containing the path and the subselection separated by |")
-    }
-
-    fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        if let Some((path, subselection)) = s.split_once('|') {
-            Ok(SubSelection {
-                path: Path::from(path),
-                subselection: subselection.to_string(),
-            })
-        } else {
-            Err(E::custom("invalid subselection"))
-        }
-    }
+    /// Names of boolean variables used in `@defer(if=$var)`
+    pub(crate) conditional_defer_variable_names: IndexSet<String>,
 }
 
 impl Query {
+    pub(crate) fn empty() -> Self {
+        Self {
+            string: String::new(),
+            fragments: Fragments {
+                map: HashMap::new(),
+            },
+            operations: Vec::new(),
+            subselections: HashMap::new(),
+            filtered_query: None,
+            defer_stats: DeferStats {
+                has_defer: false,
+                has_unconditional_defer: false,
+                conditional_defer_variable_names: IndexSet::new(),
+            },
+            is_original: true,
+            validation_error: None,
+        }
+    }
+
     /// Re-format the response value to match this query.
     ///
     /// This will discard unrequested fields and re-order the output to match the order of the
@@ -114,75 +113,68 @@ impl Query {
         &self,
         response: &mut Response,
         operation_name: Option<&str>,
-        is_deferred: bool,
         variables: Object,
         schema: &Schema,
+        defer_conditions: BooleanValues,
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
 
         let original_operation = self.operation(operation_name);
         match data {
             Some(Value::Object(mut input)) => {
-                if is_deferred {
-                    if let Some(subselection) = &response.subselection {
-                        // Get subselection from hashmap
-                        match self.subselections.get(&SubSelection {
-                            path: response.path.clone().unwrap_or_default(),
-                            subselection: subselection.clone(),
-                        }) {
-                            Some(subselection_query) => {
-                                let mut output = Object::default();
-                                let operation = &subselection_query.operations[0];
-                                let mut parameters = FormatParameters {
-                                    variables: &variables,
-                                    schema,
-                                    errors: Vec::new(),
-                                    nullified: Vec::new(),
-                                };
-                                // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
-                                // cf https://github.com/apollographql/router/issues/1677
-                                let operation_kind_if_root_typename =
-                                    original_operation.and_then(|op| {
-                                        op.selection_set
-                                            .iter()
-                                            .any(|f| f.is_typename_field())
-                                            .then(|| *op.kind())
-                                    });
-                                if let Some(operation_kind) = operation_kind_if_root_typename {
-                                    output.insert(TYPENAME, operation_kind.as_str().into());
-                                }
-
-                                response.data = Some(
-                                    match self.apply_root_selection_set(
-                                        operation,
-                                        &mut parameters,
-                                        &mut input,
-                                        &mut output,
-                                        &mut Path::default(),
-                                    ) {
-                                        Ok(()) => output.into(),
-                                        Err(InvalidValue) => Value::Null,
-                                    },
-                                );
-
-                                if !parameters.errors.is_empty() {
-                                    if let Ok(value) =
-                                        serde_json_bytes::to_value(&parameters.errors)
-                                    {
-                                        response.extensions.insert("valueCompletion", value);
-                                    }
-                                }
-
-                                return parameters.nullified;
+                if self.is_deferred(defer_conditions) {
+                    // Get subselection from hashmap
+                    match self.subselections.get(&SubSelectionKey {
+                        defer_label: response.label.clone(),
+                        defer_conditions,
+                    }) {
+                        Some(subselection) => {
+                            let mut output = Object::default();
+                            let mut parameters = FormatParameters {
+                                variables: &variables,
+                                schema,
+                                errors: Vec::new(),
+                                nullified: Vec::new(),
+                            };
+                            // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
+                            // cf https://github.com/apollographql/router/issues/1677
+                            let operation_kind_if_root_typename =
+                                original_operation.and_then(|op| {
+                                    op.selection_set
+                                        .iter()
+                                        .any(|f| f.is_typename_field())
+                                        .then(|| *op.kind())
+                                });
+                            if let Some(operation_kind) = operation_kind_if_root_typename {
+                                output.insert(TYPENAME, operation_kind.as_str().into());
                             }
-                            None => {
-                                failfast_debug!("can't find subselection for {:?}", subselection)
+
+                            response.data = Some(
+                                match self.apply_root_selection_set(
+                                    &subselection.type_name,
+                                    &subselection.selection_set,
+                                    &mut parameters,
+                                    &mut input,
+                                    &mut output,
+                                    &mut Vec::new(),
+                                ) {
+                                    Ok(()) => output.into(),
+                                    Err(InvalidValue) => Value::Null,
+                                },
+                            );
+
+                            if !parameters.errors.is_empty() {
+                                if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
+                                    response.extensions.insert("valueCompletion", value);
+                                }
                             }
+
+                            return parameters.nullified;
                         }
-                    // the primary query was empty, we return an empty object
-                    } else {
-                        response.data = Some(Value::Object(Object::default()));
-                        return vec![];
+                        None => {
+                            response.data = Some(Value::Object(Object::default()));
+                            return vec![];
+                        }
                     }
                 } else if let Some(operation) = original_operation {
                     let mut output = Object::default();
@@ -201,6 +193,7 @@ impl Query {
                             .collect()
                     };
 
+                    let operation_type_name = schema.root_operation_name(operation.kind);
                     let mut parameters = FormatParameters {
                         variables: &all_variables,
                         schema,
@@ -210,11 +203,12 @@ impl Query {
 
                     response.data = Some(
                         match self.apply_root_selection_set(
-                            operation,
+                            operation_type_name,
+                            &operation.selection_set,
                             &mut parameters,
                             &mut input,
                             &mut output,
-                            &mut Path::default(),
+                            &mut Vec::new(),
                         ) {
                             Ok(()) => output.into(),
                             Err(InvalidValue) => Value::Null,
@@ -261,81 +255,114 @@ impl Query {
         vec![]
     }
 
+    pub(crate) fn make_compiler(
+        query: &str,
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> (ApolloCompiler, FileId) {
+        let mut compiler = ApolloCompiler::new()
+            .recursion_limit(configuration.limits.parser_max_recursion)
+            .token_limit(configuration.limits.parser_max_tokens);
+        compiler.set_type_system_hir(schema.type_system.clone());
+        let id = compiler.add_executable(query, QUERY_EXECUTABLE);
+        (compiler, id)
+    }
+
+    #[cfg(test)]
     pub(crate) fn parse(
         query: impl Into<String>,
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
         let query = query.into();
-        let mut compiler = ApolloCompiler::new()
-            .recursion_limit(configuration.server.experimental_parser_recursion_limit);
-        let id = compiler.add_executable(&query, "query");
-        let ast = compiler.db.ast(id);
 
+        let (compiler, id) = Self::make_compiler(&query, schema, configuration);
+        Self::check_errors(&compiler, id)?;
+        let (fragments, operations, defer_stats) =
+            Self::extract_query_information(&compiler, schema)?;
+
+        Ok(Query {
+            string: query,
+            fragments,
+            operations,
+            subselections: HashMap::new(),
+            filtered_query: None,
+            defer_stats,
+            is_original: true,
+            validation_error: None,
+        })
+    }
+
+    /// Check for parse errors in a query in the compiler.
+    pub(crate) fn check_errors(compiler: &ApolloCompiler, id: FileId) -> Result<(), SpecError> {
+        let ast = compiler.db.ast(id);
         // Trace log recursion limit data
         let recursion_limit = ast.recursion_limit();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let errors = ast
-            .errors()
-            .map(|err| format!("{err:?}"))
-            .collect::<Vec<_>>();
-
-        if !errors.is_empty() {
-            let errors = errors.join(", ");
-            failfast_debug!("parsing error(s): {}", errors);
-            return Err(SpecError::ParsingError(errors));
+        let mut parse_errors = ast.errors().peekable();
+        if parse_errors.peek().is_some() {
+            let text = parse_errors
+                .map(|err| err.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            failfast_debug!("parsing error(s): {}", text);
+            return Err(SpecError::ParsingError(text));
         }
 
-        let fragments = Fragments::from_hir(&compiler, schema)?;
+        Ok(())
+    }
 
+    /// Check for validation errors in a query in the compiler.
+    pub(crate) fn validate_query(compiler: &ApolloCompiler, id: FileId) -> Result<(), SpecError> {
+        // Bail out on validation errors, only if the input is expected to be valid
+        let diagnostics = compiler.db.validate_executable(id);
+        let errors = diagnostics
+            .into_iter()
+            .filter(|err| err.data.is_error())
+            .collect::<Vec<_>>();
+
+        if errors.is_empty() {
+            return Ok(());
+        }
+
+        let errors = ValidationErrors { errors };
+        errors.print();
+
+        Err(SpecError::ValidationError(errors.to_string()))
+    }
+
+    /// Extract serializable data structures from the apollo-compiler HIR.
+    pub(crate) fn extract_query_information(
+        compiler: &ApolloCompiler,
+        schema: &Schema,
+    ) -> Result<(Fragments, Vec<Operation>, DeferStats), SpecError> {
+        let mut defer_stats = DeferStats {
+            has_defer: false,
+            has_unconditional_defer: false,
+            conditional_defer_variable_names: IndexSet::new(),
+        };
+        let fragments = Fragments::from_hir(compiler, schema, &mut defer_stats)?;
         let operations = compiler
             .db
             .all_operations()
             .iter()
-            .map(|operation| Operation::from_hir(operation, schema))
+            .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
-        Ok(Query {
-            string: query,
-            compiler: OnceCell::from(Mutex::new(compiler)),
-            fragments,
-            operations,
-            subselections: HashMap::new(),
-        })
-    }
-
-    pub(crate) async fn compiler(&self, schema: Option<&Schema>) -> MutexGuard<'_, ApolloCompiler> {
-        self.compiler
-            .get_or_init(|| async { Mutex::new(self.uncached_compiler(schema)) })
-            .await
-            .lock()
-            .await
-    }
-
-    /// Create a new compiler for this query, without caching it
-    pub(crate) fn uncached_compiler(&self, schema: Option<&Schema>) -> ApolloCompiler {
-        let mut compiler = ApolloCompiler::new();
-        if let Some(schema) = schema {
-            compiler.set_type_system_hir(schema.type_system.clone());
-        }
-        // As long as this is the only executable document in this compiler
-        // we can use compiler’s `all_operations` and `all_fragments`.
-        // If that changes, we’ll need to carry around this ID somehow.
-        let _id = compiler.add_executable(&self.string, "query");
-        compiler
+        Ok((fragments, operations, defer_stats))
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn format_value(
-        &self,
+    fn format_value<'a: 'b, 'b>(
+        &'a self,
         parameters: &mut FormatParameters,
-        field_type: &FieldType,
+        field_type: &hir::Type,
         input: &mut Value,
         output: &mut Value,
-        path: &mut Path,
-        parent_type: &FieldType,
-        selection_set: &[Selection],
+        path: &mut Vec<ResponsePathElement<'b>>,
+        parent_type: &hir::Type,
+        selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
         // for every type, if we have an invalid value, we will replace it with null
         // and return Ok(()), because values are optional by default
@@ -343,7 +370,7 @@ impl Query {
             // for non null types, we validate with the inner type, then if we get an InvalidValue
             // we set it to null and immediately return an error instead of Ok(()), because we
             // want the error to go up until the next nullable parent
-            FieldType::NonNull(inner_type) => {
+            hir::Type::NonNull { ty: inner_type, .. } => {
                 match self.format_value(
                     parameters,
                     inner_type,
@@ -357,17 +384,17 @@ impl Query {
                     Ok(_) => {
                         if output.is_null() {
                             let message = match path.last() {
-                                Some(PathElement::Key(k)) => format!(
+                                Some(ResponsePathElement::Key(k)) => format!(
                                     "Cannot return null for non-nullable field {parent_type}.{k}"
                                 ),
-                                Some(PathElement::Index(i)) => format!(
+                                Some(ResponsePathElement::Index(i)) => format!(
                                     "Cannot return null for non-nullable array element of type {inner_type} at index {i}"
                                 ),
                                 _ => todo!(),
                             };
                             parameters.errors.push(Error {
                                 message,
-                                path: Some(path.clone()),
+                                path: Some(Path::from_response_slice(path)),
                                 ..Error::default()
                             });
 
@@ -383,7 +410,7 @@ impl Query {
             // and should replace the entire list with null
             // if the types are nullable, the inner call to filter_errors will take care
             // of setting the current entry to null
-            FieldType::List(inner_type) => match input {
+            hir::Type::List { ty: inner_type, .. } => match input {
                 Value::Array(input_array) => {
                     if output.is_null() {
                         *output = Value::Array(
@@ -397,7 +424,7 @@ impl Query {
                         .iter_mut()
                         .enumerate()
                         .try_for_each(|(i, element)| {
-                            path.push(PathElement::Index(i));
+                            path.push(ResponsePathElement::Index(i));
                             let res = self.format_value(
                                 parameters,
                                 inner_type,
@@ -411,7 +438,7 @@ impl Query {
                             res
                         }) {
                         Err(InvalidValue) => {
-                            parameters.nullified.push(path.clone());
+                            parameters.nullified.push(Path::from_response_slice(path));
                             *output = Value::Null;
                             Ok(())
                         }
@@ -420,17 +447,69 @@ impl Query {
                 }
                 _ => Ok(()),
             },
+            hir::Type::Named { name, .. } if name == "Int" => {
+                let opt = if input.is_i64() {
+                    input.as_i64().and_then(|i| i32::try_from(i).ok())
+                } else if input.is_u64() {
+                    input.as_i64().and_then(|i| i32::try_from(i).ok())
+                } else {
+                    None
+                };
 
-            FieldType::Named(type_name) | FieldType::Introspection(type_name) => {
+                // if the value is invalid, we do not insert it in the output object
+                // which is equivalent to inserting null
+                if opt.is_some() {
+                    *output = input.clone();
+                } else {
+                    *output = Value::Null;
+                }
+                Ok(())
+            }
+            hir::Type::Named { name, .. } if name == "Float" => {
+                if input.as_f64().is_some() {
+                    *output = input.clone();
+                } else {
+                    *output = Value::Null;
+                }
+                Ok(())
+            }
+            hir::Type::Named { name, .. } if name == "Boolean" => {
+                if input.as_bool().is_some() {
+                    *output = input.clone();
+                } else {
+                    *output = Value::Null;
+                }
+                Ok(())
+            }
+            hir::Type::Named { name, .. } if name == "String" => {
+                if input.as_str().is_some() {
+                    *output = input.clone();
+                } else {
+                    *output = Value::Null;
+                }
+                Ok(())
+            }
+            hir::Type::Named { name, .. } if name == "Id" => {
+                if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
+                    *output = input.clone();
+                } else {
+                    *output = Value::Null;
+                }
+                Ok(())
+            }
+            hir::Type::Named {
+                name: type_name, ..
+            } => {
+                let definitions = &parameters.schema.type_system.definitions;
                 // we cannot know about the expected format of custom scalars
                 // so we must pass them directly to the client
-                if parameters.schema.custom_scalars.contains(type_name) {
+                if definitions.scalars.contains_key(type_name) {
                     *output = input.clone();
                     return Ok(());
-                } else if let Some(enum_type) = parameters.schema.enums.get(type_name) {
+                } else if let Some(enum_type) = definitions.enums.get(type_name) {
                     return match input.as_str() {
                         Some(s) => {
-                            if enum_type.contains(s) {
+                            if enum_type.value(s).is_some() {
                                 *output = input.clone();
                                 Ok(())
                             } else {
@@ -450,14 +529,15 @@ impl Query {
                         if let Some(input_type) =
                             input_object.get(TYPENAME).and_then(|val| val.as_str())
                         {
+                            let definitions = &parameters.schema.type_system.definitions;
                             // If there is a __typename, make sure the pointed type is a valid type of the schema. Otherwise, something is wrong, and in case we might
                             // be inadvertently leaking some data for an @inacessible type or something, nullify the whole object. However, do note that due to `@interfaceObject`,
                             // some subgraph can have returned a __typename that is the name of an interface in the supergraph, and this is fine (that is, we should not
                             // return such a __typename to the user, but as long as it's not returned, having it in the internal data is ok and sometimes expected).
-                            if !parameters.schema.object_types.contains_key(input_type)
-                                && !parameters.schema.interfaces.contains_key(input_type)
+                            if !definitions.objects.contains_key(input_type)
+                                && !definitions.interfaces.contains_key(input_type)
                             {
-                                parameters.nullified.push(path.clone());
+                                parameters.nullified.push(Path::from_response_slice(path));
                                 *output = Value::Null;
                                 return Ok(());
                             }
@@ -475,86 +555,34 @@ impl Query {
                                 input_object,
                                 output_object,
                                 path,
-                                &FieldType::Named(type_name.to_string()),
+                                field_type,
                             )
                             .is_err()
                         {
-                            parameters.nullified.push(path.clone());
+                            parameters.nullified.push(Path::from_response_slice(path));
                             *output = Value::Null;
                         }
 
                         Ok(())
                     }
                     _ => {
-                        parameters.nullified.push(path.clone());
+                        parameters.nullified.push(Path::from_response_slice(path));
                         *output = Value::Null;
                         Ok(())
                     }
                 }
             }
-
-            // the rest of the possible types just need to validate the expected value
-            FieldType::Int => {
-                let opt = if input.is_i64() {
-                    input.as_i64().and_then(|i| i32::try_from(i).ok())
-                } else if input.is_u64() {
-                    input.as_i64().and_then(|i| i32::try_from(i).ok())
-                } else {
-                    None
-                };
-
-                // if the value is invalid, we do not insert it in the output object
-                // which is equivalent to inserting null
-                if opt.is_some() {
-                    *output = input.clone();
-                } else {
-                    *output = Value::Null;
-                }
-                Ok(())
-            }
-            FieldType::Float => {
-                if input.as_f64().is_some() {
-                    *output = input.clone();
-                } else {
-                    *output = Value::Null;
-                }
-                Ok(())
-            }
-            FieldType::Boolean => {
-                if input.as_bool().is_some() {
-                    *output = input.clone();
-                } else {
-                    *output = Value::Null;
-                }
-                Ok(())
-            }
-            FieldType::String => {
-                if input.as_str().is_some() {
-                    *output = input.clone();
-                } else {
-                    *output = Value::Null;
-                }
-                Ok(())
-            }
-            FieldType::Id => {
-                if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
-                    *output = input.clone();
-                } else {
-                    *output = Value::Null;
-                }
-                Ok(())
-            }
         }
     }
 
-    fn apply_selection_set(
-        &self,
-        selection_set: &[Selection],
+    fn apply_selection_set<'a: 'b, 'b>(
+        &'a self,
+        selection_set: &'a [Selection],
         parameters: &mut FormatParameters,
         input: &mut Object,
         output: &mut Object,
-        path: &mut Path,
-        parent_type: &FieldType,
+        path: &mut Vec<ResponsePathElement<'b>>,
+        parent_type: &hir::Type,
     ) -> Result<(), InvalidValue> {
         // For skip and include, using .unwrap_or is legit here because
         // validate_variables should have already checked that
@@ -589,17 +617,23 @@ impl Query {
                             output.entry((*field_name).clone()).or_insert(Value::Null);
                         if name.as_str() == TYPENAME {
                             if let Some(input_str) = input_value.as_str() {
-                                if parameters.schema.object_types.contains_key(input_str) {
+                                if parameters
+                                    .schema
+                                    .type_system
+                                    .definitions
+                                    .objects
+                                    .contains_key(input_str)
+                                {
                                     *output_value = input_value.clone();
                                 } else {
                                     return Err(InvalidValue);
                                 }
                             }
                         } else {
-                            path.push(PathElement::Key(field_name.as_str().to_string()));
+                            path.push(ResponsePathElement::Key(field_name.as_str()));
                             let res = self.format_value(
                                 parameters,
-                                field_type,
+                                &field_type.0,
                                 input_value,
                                 output_value,
                                 path,
@@ -619,7 +653,7 @@ impl Query {
                                     "Cannot return null for non-nullable field {parent_type}.{}",
                                     field_name.as_str()
                                 ),
-                                path: Some(path.clone()),
+                                path: Some(Path::from_response_slice(path)),
                                 ..Error::default()
                             });
 
@@ -631,6 +665,8 @@ impl Query {
                     type_condition,
                     selection_set,
                     include_skip,
+                    defer: _,
+                    defer_label: _,
                     known_type,
                 } => {
                     if include_skip.should_skip(parameters.variables) {
@@ -658,6 +694,13 @@ impl Query {
                     };
 
                     if is_apply {
+                        // if this is the filtered query, we must keep the __typename field because the original query must know the type
+                        if !self.is_original {
+                            if let Some(input_type) = input.get(TYPENAME) {
+                                output.insert(TYPENAME, input_type.clone());
+                            }
+                        }
+
                         self.apply_selection_set(
                             selection_set,
                             parameters,
@@ -672,16 +715,14 @@ impl Query {
                     name,
                     known_type,
                     include_skip,
+                    defer: _,
+                    defer_label: _,
                 } => {
                     if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        if fragment.include_skip.should_skip(parameters.variables) {
-                            continue;
-                        }
-
                         let is_apply = if let Some(input_type) =
                             input.get(TYPENAME).and_then(|val| val.as_str())
                         {
@@ -701,6 +742,13 @@ impl Query {
                         };
 
                         if is_apply {
+                            // if this is the filtered query, we must keep the __typename field because the original query must know the type
+                            if !self.is_original {
+                                if let Some(input_type) = input.get(TYPENAME) {
+                                    output.insert(TYPENAME, input_type.clone());
+                                }
+                            }
+
                             self.apply_selection_set(
                                 &fragment.selection_set,
                                 parameters,
@@ -721,15 +769,16 @@ impl Query {
         Ok(())
     }
 
-    fn apply_root_selection_set(
-        &self,
-        operation: &Operation,
+    fn apply_root_selection_set<'a: 'b, 'b>(
+        &'a self,
+        root_type_name: &str,
+        selection_set: &'a [Selection],
         parameters: &mut FormatParameters,
         input: &mut Object,
         output: &mut Object,
-        path: &mut Path,
+        path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
-        for selection in &operation.selection_set {
+        for selection in selection_set {
             match selection {
                 Selection::Field {
                     name,
@@ -758,32 +807,29 @@ impl Query {
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
                             output.entry((*field_name).clone()).or_insert(Value::Null);
-                        path.push(PathElement::Key(field_name_str.to_string()));
+                        path.push(ResponsePathElement::Key(field_name_str));
                         let res = self.format_value(
                             parameters,
-                            field_type,
+                            &field_type.0,
                             input_value,
                             output_value,
                             path,
-                            field_type,
+                            &field_type.0,
                             selection_set,
                         );
                         path.pop();
                         res?
                     } else if name.as_str() == TYPENAME {
                         if !output.contains_key(field_name_str) {
-                            output.insert(
-                                field_name.clone(),
-                                Value::String(operation.kind.to_string().into()),
-                            );
+                            output.insert(field_name.clone(), Value::String(root_type_name.into()));
                         }
                     } else if field_type.is_non_null() {
                         parameters.errors.push(Error {
                             message: format!(
                                 "Cannot return null for non-nullable field {}.{field_name_str}",
-                                operation.kind
+                                root_type_name
                             ),
-                            path: Some(path.clone()),
+                            path: Some(Path::from_response_slice(path)),
                             ..Error::default()
                         });
                         return Err(InvalidValue);
@@ -798,9 +844,7 @@ impl Query {
                     ..
                 } => {
                     // top level objects will not provide a __typename field
-                    if type_condition.as_str()
-                        != parameters.schema.root_operation_name(operation.kind)
-                    {
+                    if type_condition.as_str() != root_type_name {
                         return Err(InvalidValue);
                     }
 
@@ -814,32 +858,28 @@ impl Query {
                         input,
                         output,
                         path,
-                        &FieldType::Named(type_condition.clone()),
+                        &FieldType::new_named(type_condition).0,
                     )?;
                 }
                 Selection::FragmentSpread {
                     name,
                     known_type: _,
                     include_skip,
+                    defer: _,
+                    defer_label: _,
                 } => {
                     if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        if fragment.include_skip.should_skip(parameters.variables) {
-                            continue;
-                        }
-
-                        let operation_type_name =
-                            parameters.schema.root_operation_name(operation.kind);
                         let is_apply = {
                             // check if the fragment matches the input type directly, and if not, check if the
                             // input type is a subtype of the fragment's type condition (interface, union)
-                            operation_type_name == fragment.type_condition.as_str()
+                            root_type_name == fragment.type_condition.as_str()
                                 || parameters
                                     .schema
-                                    .is_subtype(&fragment.type_condition, operation_type_name)
+                                    .is_subtype(&fragment.type_condition, root_type_name)
                         };
 
                         if !is_apply {
@@ -852,7 +892,7 @@ impl Query {
                             input,
                             output,
                             path,
-                            &FieldType::Named(operation_type_name.into()),
+                            &FieldType::new_named(root_type_name).0,
                         )?;
                     } else {
                         // the fragment should have been already checked with the schema
@@ -960,7 +1000,7 @@ impl Query {
         })
     }
 
-    fn operation(&self, operation_name: Option<&str>) -> Option<&Operation> {
+    pub(crate) fn operation(&self, operation_name: Option<impl AsRef<str>>) -> Option<&Operation> {
         match operation_name {
             Some(name) => self
                 .operations
@@ -968,7 +1008,7 @@ impl Query {
                 // we should have an error if the only operation is anonymous but the query specifies a name
                 .find(|op| {
                     if let Some(op_name) = op.name.as_deref() {
-                        op_name == name
+                        op_name == name.as_ref()
                     } else {
                         false
                     }
@@ -980,30 +1020,51 @@ impl Query {
     pub(crate) fn contains_error_path(
         &self,
         operation_name: Option<&str>,
-        subselection: Option<&str>,
-        response_path: Option<&Path>,
+        label: &Option<String>,
         path: &Path,
+        defer_conditions: BooleanValues,
     ) -> bool {
-        let operation = if let Some(subselection) = subselection {
-            // Get subselection from hashmap
-            match self.subselections.get(&SubSelection {
-                path: response_path.cloned().unwrap_or_default(),
-                subselection: subselection.to_string(),
-            }) {
-                Some(subselection_query) => &subselection_query.operations[0],
+        let selection_set = match self.subselections.get(&SubSelectionKey {
+            defer_label: label.clone(),
+            defer_conditions,
+        }) {
+            Some(subselection) => &subselection.selection_set,
+            None => match self.operation(operation_name) {
                 None => return false,
-            }
-        } else {
-            match self.operation(operation_name) {
-                None => return false,
-                Some(op) => op,
-            }
+                Some(op) => &op.selection_set,
+            },
         };
-
-        operation
-            .selection_set
+        selection_set
             .iter()
             .any(|selection| selection.contains_error_path(&path.0, &self.fragments))
+    }
+
+    pub(crate) fn defer_variables_set(
+        &self,
+        operation_name: Option<&str>,
+        variables: &Object,
+    ) -> BooleanValues {
+        let mut bits = 0_u32;
+        for (i, variable) in self
+            .defer_stats
+            .conditional_defer_variable_names
+            .iter()
+            .enumerate()
+        {
+            let value = variables
+                .get(variable.as_str())
+                .or_else(|| self.default_variable_value(operation_name, variable));
+
+            if matches!(value, Some(serde_json_bytes::Value::Bool(true))) {
+                bits |= 1 << i;
+            }
+        }
+
+        BooleanValues { bits }
+    }
+
+    pub(crate) fn is_deferred(&self, defer_conditions: BooleanValues) -> bool {
+        self.defer_stats.has_unconditional_defer || defer_conditions.bits != 0
     }
 }
 
@@ -1017,9 +1078,10 @@ struct FormatParameters<'a> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Operation {
-    name: Option<String>,
+    pub(crate) name: Option<String>,
     kind: OperationKind,
-    selection_set: Vec<Selection>,
+    type_name: String,
+    pub(crate) selection_set: Vec<Selection>,
     variables: HashMap<ByteString, Variable>,
 }
 
@@ -1030,19 +1092,22 @@ pub(crate) struct Variable {
 }
 
 impl Operation {
-    fn from_hir(operation: &hir::OperationDefinition, schema: &Schema) -> Result<Self, SpecError> {
+    pub(crate) fn from_hir(
+        operation: &hir::OperationDefinition,
+        schema: &Schema,
+        defer_stats: &mut DeferStats,
+    ) -> Result<Self, SpecError> {
         let name = operation.name().map(|s| s.to_owned());
         let kind = operation.operation_ty().into();
-        if kind == OperationKind::Subscription {
-            return Err(SpecError::SubscriptionNotSupported);
-        }
-        let current_field_type = FieldType::Named(schema.root_operation_name(kind).to_owned());
+        let type_name = schema.root_operation_name(kind).to_owned();
+        let current_field_type = FieldType::new_named(&type_name);
         let selection_set = operation
             .selection_set()
             .selection()
             .iter()
             .filter_map(|selection| {
-                Selection::from_hir(selection, &current_field_type, schema, 0).transpose()
+                Selection::from_hir(selection, &current_field_type, schema, 0, defer_stats)
+                    .transpose()
             })
             .collect::<Result<_, _>>()?;
         let variables = operation
@@ -1060,6 +1125,7 @@ impl Operation {
         Ok(Operation {
             selection_set,
             name,
+            type_name,
             variables,
             kind,
         })
@@ -1120,14 +1186,14 @@ impl From<hir::OperationType> for OperationKind {
 pub(crate) fn parse_hir_value(value: &hir::Value) -> Option<Value> {
     match value {
         hir::Value::Variable(_) => None,
-        hir::Value::Int(val) => Some((val.get() as i64).into()),
-        hir::Value::Float(val) => Some(val.get().into()),
-        hir::Value::Null => Some(Value::Null),
-        hir::Value::String(val) => Some(val.as_str().into()),
-        hir::Value::Boolean(val) => Some((*val).into()),
-        hir::Value::Enum(name) => Some(name.src().into()),
-        hir::Value::List(list) => list.iter().map(parse_hir_value).collect(),
-        hir::Value::Object(obj) => obj
+        hir::Value::Int { value, .. } => Some((value.get() as i64).into()),
+        hir::Value::Float { value, .. } => Some(value.get().into()),
+        hir::Value::Null { .. } => Some(Value::Null),
+        hir::Value::String { value, .. } => Some(value.as_str().into()),
+        hir::Value::Boolean { value, .. } => Some((*value).into()),
+        hir::Value::Enum { value, .. } => Some(value.src().into()),
+        hir::Value::List { value, .. } => value.iter().map(parse_hir_value).collect(),
+        hir::Value::Object { value, .. } => value
             .iter()
             .map(|(k, v)| Some((k.src(), parse_hir_value(v)?)))
             .collect(),

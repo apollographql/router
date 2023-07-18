@@ -24,16 +24,6 @@ expression: parts
         "extensions": {
           "code": "FETCH_ERROR"
         }
-      },
-      {
-        "message": "Subgraph response from 'reviews' was missing key `_entities`",
-        "path": [
-          "topProducts",
-          "@"
-        ],
-        "extensions": {
-          "code": "PARSE_ERROR"
-        }
       }
     ],
     "hasNext": true

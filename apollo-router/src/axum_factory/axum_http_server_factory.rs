@@ -1,7 +1,6 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::pin::Pin;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -19,6 +18,9 @@ use futures::channel::oneshot;
 use futures::future::join;
 use futures::future::join_all;
 use futures::prelude::*;
+use http::header::ACCEPT_ENCODING;
+use http::header::CONTENT_ENCODING;
+use http::HeaderValue;
 use http::Request;
 use http_body::combinators::UnsyncBoxBody;
 use hyper::Body;
@@ -32,10 +34,6 @@ use tokio_rustls::TlsAcceptor;
 use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceExt;
-use tower_http::compression::predicate::NotForContentType;
-use tower_http::compression::CompressionLayer;
-use tower_http::compression::DefaultPredicate;
-use tower_http::compression::Predicate;
 use tower_http::trace::TraceLayer;
 
 use super::listeners::ensure_endpoints_consistency;
@@ -45,6 +43,7 @@ use super::listeners::ListenersAndRouters;
 use super::utils::decompress_request_body;
 use super::utils::PropagatingMakeSpan;
 use super::ListenAddrAndRouter;
+use crate::axum_factory::compression::Compressor;
 use crate::axum_factory::listeners::get_extra_listeners;
 use crate::axum_factory::listeners::serve_router_on_listen_addr;
 use crate::configuration::Configuration;
@@ -58,17 +57,22 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
-use crate::uplink::entitlement::EntitlementState;
-use crate::uplink::entitlement::ENTITLEMENT_EXPIRED_SHORT_MESSAGE;
+use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
-#[derive(Debug)]
-pub(crate) struct AxumHttpServerFactory;
+#[derive(Debug, Default)]
+pub(crate) struct AxumHttpServerFactory {
+    live: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
+}
 
 impl AxumHttpServerFactory {
     pub(crate) fn new() -> Self {
-        Self
+        Self {
+            ..Default::default()
+        }
     }
 }
 
@@ -86,10 +90,12 @@ struct Health {
 }
 
 pub(crate) fn make_axum_router<RF>(
+    live: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
-    entitlement: EntitlementState,
+    license: LicenseState,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -106,15 +112,50 @@ where
             Endpoint::from_router_service(
                 "/health".to_string(),
                 service_fn(move |req: router::Request| {
-                    let health = Health {
-                        status: HealthStatus::Up,
+                    let mut status_code = StatusCode::OK;
+                    let health = if let Some(query) = req.router_request.uri().query() {
+                        let query_upper = query.to_ascii_uppercase();
+                        // Could be more precise, but sloppy match is fine for this use case
+                        if query_upper.starts_with("READY") {
+                            let status = if ready.load(Ordering::SeqCst) {
+                                HealthStatus::Up
+                            } else {
+                                // It's hard to get k8s to parse payloads. Especially since we
+                                // can't install curl or jq into our docker images because of CVEs.
+                                // So, compromise, k8s will interpret this as probe fail.
+                                status_code = StatusCode::SERVICE_UNAVAILABLE;
+                                HealthStatus::Down
+                            };
+                            Health { status }
+                        } else if query_upper.starts_with("LIVE") {
+                            let status = if live.load(Ordering::SeqCst) {
+                                HealthStatus::Up
+                            } else {
+                                // It's hard to get k8s to parse payloads. Especially since we
+                                // can't install curl or jq into our docker images because of CVEs.
+                                // So, compromise, k8s will interpret this as probe fail.
+                                status_code = StatusCode::SERVICE_UNAVAILABLE;
+                                HealthStatus::Down
+                            };
+                            Health { status }
+                        } else {
+                            Health {
+                                status: HealthStatus::Up,
+                            }
+                        }
+                    } else {
+                        Health {
+                            status: HealthStatus::Up,
+                        }
                     };
                     tracing::trace!(?health, request = ?req.router_request, "health check");
                     async move {
                         Ok(router::Response {
-                            response: http::Response::builder().body::<hyper::Body>(
-                                serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
-                            )?,
+                            response: http::Response::builder()
+                                .status(status_code)
+                                .body::<hyper::Body>(
+                                    serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
+                                )?,
                             context: req.context,
                         })
                     }
@@ -132,7 +173,7 @@ where
         endpoints
             .remove(&configuration.supergraph.listen)
             .unwrap_or_default(),
-        entitlement,
+        license,
     )?;
     let mut extra_endpoints = extra_endpoints(endpoints);
 
@@ -159,18 +200,22 @@ impl HttpServerFactory for AxumHttpServerFactory {
         mut main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
-        entitlement: EntitlementState,
+        license: LicenseState,
         all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self::Future
     where
         RF: RouterFactory,
     {
+        let live = self.live.clone();
+        let ready = self.ready.clone();
         Box::pin(async move {
             let all_routers = make_axum_router(
+                live.clone(),
+                ready.clone(),
                 service_factory,
                 &configuration,
                 extra_endpoints,
-                entitlement,
+                license,
             )?;
 
             // serve main router
@@ -306,13 +351,21 @@ impl HttpServerFactory for AxumHttpServerFactory {
             ))
         })
     }
+
+    fn live(&self, live: bool) {
+        self.live.store(live, Ordering::SeqCst);
+    }
+
+    fn ready(&self, ready: bool) {
+        self.ready.store(ready, Ordering::SeqCst);
+    }
 }
 
 fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
-    entitlement: EntitlementState,
+    license: LicenseState,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -324,17 +377,12 @@ where
     let main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
         .layer(middleware::from_fn_with_state(
-            (entitlement, Instant::now(), Arc::new(AtomicU64::new(0))),
-            entitlement_handler,
+            (license, Instant::now(), Arc::new(AtomicU64::new(0))),
+            license_handler,
         ))
-        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { entitlement }))
+        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license }))
         .layer(Extension(service_factory))
-        .layer(cors)
-        // Compress the response body, except for multipart responses such as with `@defer`.
-        // This is a work-around for https://github.com/apollographql/router/issues/1572
-        .layer(CompressionLayer::new().compress_when(
-            DefaultPredicate::new().and(NotForContentType::const_new("multipart/")),
-        ));
+        .layer(cors);
 
     let route = endpoints_on_main_listener
         .into_iter()
@@ -344,22 +392,22 @@ where
     Ok(ListenAddrAndRouter(listener, route))
 }
 
-async fn entitlement_handler<B>(
-    State((entitlement, start, delta)): State<(EntitlementState, Instant, Arc<AtomicU64>)>,
+async fn license_handler<B>(
+    State((license, start, delta)): State<(LicenseState, Instant, Arc<AtomicU64>)>,
     request: Request<B>,
     next: Next<B>,
 ) -> Response {
     if matches!(
-        entitlement,
-        EntitlementState::EntitledHalt | EntitlementState::EntitledWarn
+        license,
+        LicenseState::LicensedHalt | LicenseState::LicensedWarn
     ) {
         ::tracing::error!(
            monotonic_counter.apollo_router_http_requests_total = 1u64,
            status = %500u16,
-           error = ENTITLEMENT_EXPIRED_SHORT_MESSAGE,
+           error = LICENSE_EXPIRED_SHORT_MESSAGE,
         );
 
-        // This will rate limit logs about entitlement to 1 a second.
+        // This will rate limit logs about license to 1 a second.
         // The way it works is storing the delta in seconds from a starting instant.
         // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successfull log.
         // If not successful some other thread will have logged.
@@ -375,11 +423,11 @@ async fn entitlement_handler<B>(
                 )
                 .is_ok()
         {
-            ::tracing::error!("{}", ENTITLEMENT_EXPIRED_SHORT_MESSAGE);
+            ::tracing::error!("{}", LICENSE_EXPIRED_SHORT_MESSAGE);
         }
     }
 
-    if matches!(entitlement, EntitlementState::EntitledHalt) {
+    if matches!(license, LicenseState::LicensedHalt) {
         http::Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .body(UnsyncBoxBody::default())
@@ -434,9 +482,14 @@ async fn handle_graphql(
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();
+    let accept_encoding = request
+        .router_request
+        .headers()
+        .get(ACCEPT_ENCODING)
+        .cloned();
 
     let res = service.oneshot(request).await;
-    let dur = context.busy_time().await;
+    let dur = context.busy_time();
     let processing_seconds = dur.as_secs_f64();
 
     tracing::info!(histogram.apollo_router_processing_time = processing_seconds,);
@@ -467,7 +520,24 @@ async fn handle_graphql(
         }
         Ok(response) => {
             tracing::info!(counter.apollo_router_session_count_active = -1,);
-            response.response.into_response()
+            let (mut parts, body) = response.response.into_parts();
+
+            let opt_compressor = accept_encoding
+                .as_ref()
+                .and_then(|value| value.to_str().ok())
+                .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
+            let body = match opt_compressor {
+                None => body,
+                Some(compressor) => {
+                    parts.headers.insert(
+                        CONTENT_ENCODING,
+                        HeaderValue::from_static(compressor.content_encoding()),
+                    );
+                    Body::wrap_stream(compressor.process(body))
+                }
+            };
+
+            http::Response::from_parts(parts, body).into_response()
         }
     }
 }
