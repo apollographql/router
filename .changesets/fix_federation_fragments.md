@@ -5,7 +5,7 @@ Federation v2.4.9 enabled a new feature for [query fragment reuse](https://githu
 A new option has been added to he router config file to opt into this feature:
 ```yaml
 supergraph:
-  reuse_query_fragments: true
+  experimental_reuse_query_fragments: true
 ```
 
 The default is disabled.

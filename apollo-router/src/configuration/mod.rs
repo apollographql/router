@@ -536,6 +536,7 @@ pub(crate) struct Supergraph {
 
     /// Enable reuse of query fragments
     /// Default: false
+    #[serde(rename = "experimental_reuse_query_fragments")]
     pub(crate) reuse_query_fragments: bool,
 
     /// Set to false to disable defer support
