@@ -52,7 +52,7 @@ This rate limiting applies to all requests, there is no filtering per IP or othe
 
 ### Timeout
 
-The Apollo Router applies a default limit of 30 seconds to receive the entire client request. That limit is configurable:
+The Apollo Router applies a default limit of 30 seconds to receive the entire client request. The default limit of 30 seconds also applies for request between router to subgraphs. That limit is configurable:
 
 ```yaml title="router.yaml"
 traffic_shaping:
