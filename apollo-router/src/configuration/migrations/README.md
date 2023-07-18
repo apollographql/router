@@ -20,6 +20,9 @@ actions:
     to: some.destination
   - type: delete
     path: some.destination
+  - type: add
+    path: some.destination
+    value: someValue
 ```
 
 Each action is applied in order. Use the following formats for from, to and path.
