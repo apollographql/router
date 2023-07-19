@@ -518,6 +518,21 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub async fn assert_metrics_does_not_contain(&self, text: &str) {
+        if let Ok(metrics) = self
+            .get_metrics_response()
+            .await
+            .expect("failed to fetch metrics")
+            .text()
+            .await
+        {
+            if metrics.contains(text) {
+                panic!("'{text}' detected in metrics\n{metrics}");
+            }
+        }
+    }
+
+    #[allow(dead_code)]
     pub async fn assert_shutdown(&mut self) {
         let router = self.router.as_mut().expect("router must have been started");
         let now = Instant::now();
