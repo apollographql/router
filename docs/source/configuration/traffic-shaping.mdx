@@ -57,8 +57,7 @@ The Apollo Router applies a default timeout of 30 seconds for all requests, incl
 - Requests the client makes to the router
 - Requests the router makes to subgraphs
 - Initial requests subgraphs make to the router for [subscription callbacks](https://www.apollographql.com/docs/react/data/subscriptions/#http)
-
-> **Note:** For subscriptions callbacks, the timeout only applies to the initial request to the router. Once the subscription has been established, the request duration can exceed the timeout.
+  - For subscriptions callbacks, the timeout only applies to the initial request to the router. Once the subscription has been established, the request duration can exceed the timeout.
 
 You can change the default timeout for client requests to the router like so:
 
@@ -75,6 +74,8 @@ traffic_shaping:
   all: 
     timeout: 50s # If subgraph requests take more than 50 seconds, cancel the request (30 seconds by default)
 ```
+
+> **Note:** Since [deferred](/executing-operations/defer-support/#what-is-defer) fragments are separate requests, each fragment's request is individually subject to timeouts.
 
 ### Compression
 
