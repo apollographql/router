@@ -265,7 +265,7 @@ impl Metrics {
         log_usage_metrics!(
             value.apollo.router.config.entities,
             "$[?(@.traffic_shaping..experimental_entity_caching)]",
-            opt.caching,
+            opt.cache,
             "$[?(@.traffic_shaping..experimental_entity_caching)]"
         );
         log_usage_metrics!(
