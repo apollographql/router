@@ -45,6 +45,7 @@ traffic_shaping:
       - https://example.com
 
 subscription:
+  enabled: true
   mode:
     passthrough:
       subgraphs:

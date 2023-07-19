@@ -1679,6 +1679,7 @@ mod tests {
 
     fn subscription_config() -> SubscriptionConfig {
         SubscriptionConfig {
+            enabled: true,
             mode: SubscriptionModeConfig {
                 callback: Some(CallbackMode {
                     public_url: Url::parse("http://localhost:4000").unwrap(),
