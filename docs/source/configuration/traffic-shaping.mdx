@@ -60,7 +60,7 @@ The Apollo Router applies a default timeout of 30 seconds for all requests, incl
 
 > **Note:** For subscriptions callbacks, the timeout only applies to the initial request to the router. Once the subscription has been established, the request duration can exceed the timeout.
 
-You can change the default global timeout like so:
+You can change the timeout for all subgraph requests like so:
 
 ```yaml title="router.yaml"
 traffic_shaping:
