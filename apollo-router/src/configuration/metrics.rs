@@ -156,13 +156,18 @@ impl Metrics {
 
         log_usage_metrics!(
             value.apollo.router.config.defer,
-            "$.supergraph[?(@.defer_support==true)]"
+            "$.supergraph[?(@.defer_support == true)]"
         );
         log_usage_metrics!(
             value.apollo.router.config.authentication.jwt,
             "$.authentication.jwt"
         );
-        log_usage_metrics!(value.apollo.router.config.authorization, "$.authorization");
+        log_usage_metrics!(
+            value.apollo.router.config.authorization,
+            "$.authorization",
+            opt.require_authentication,
+            "$[?(@.require_authentication == true)]"
+        );
         log_usage_metrics!(
             value.apollo.router.config.coprocessor,
             "$.coprocessor",
@@ -182,47 +187,49 @@ impl Metrics {
         );
         log_usage_metrics!(
             value.apollo.router.config.persisted_queries,
-            "$.preview_persisted_queries[?(@.enabled==true)]",
+            "$.preview_persisted_queries[?(@.enabled == true)]",
             opt.log_unknown,
-            "$[?(@.log_unknown==true)]",
+            "$[?(@.log_unknown == true)]",
             opt.safelist.require_id,
-            "$[?(@.safelist.require_id==true)]",
+            "$[?(@.safelist.require_id == true)]",
             opt.safelist.enabled,
-            "$[?(@.safelist.enabled==true)]"
+            "$[?(@.safelist.enabled == true)]"
         );
 
         log_usage_metrics!(
             value.apollo.router.config.subscriptions,
-            "$.subscription[?(@.enabled==true)]",
-            opt.mode,
-            "$.mode",
+            "$.subscription[?(@.enabled == true)]",
+            opt.mode.passthrough,
+            "$.mode.passthrough",
+            opt.mode.callback,
+            "$.mode.callback",
             opt.deduplication,
-            "$.enable_deduplication",
+            "$[?(@.enable_deduplication == true)]",
             opt.max_opened_subscriptions,
-            "$.max_opened_subscriptions",
+            "$[?(@.max_opened_subscriptions)]",
             opt.queue_capacity,
-            "$.queue_capacity"
+            "$[?(@.queue_capacity)]"
         );
 
         log_usage_metrics!(
             value.apollo.router.config.limits,
             "$.limits",
             opt.max_depth,
-            "$.max_depth",
+            "$[?(@.max_depth)]",
             opt.max_aliases,
-            "$.max_aliases",
+            "$[?(@.max_aliases)]",
             opt.max_height,
-            "$.max_height",
+            "$[?(@.max_height)]",
             opt.max_root_fields,
-            "$.max_root_fields",
+            "$[?(@.max_root_fields)]",
             opt.parse.max_recursion,
-            "$.parser_max_recursion",
+            "$[?(@.parser_max_recursion)]",
             opt.parse.max_tokens,
-            "$.parser_max_tokens",
+            "$[?(@.parser_max_tokens)]",
             opt.warn_only,
-            "$.warn_only",
+            "$[?(@.warn_only)]",
             opt.http_max_request_bytes,
-            "$.experimental_http_max_request_bytes"
+            "$[?(@.experimental_http_max_request_bytes)]"
         );
         log_usage_metrics!(
             value.apollo.router.config.apq,
@@ -238,26 +245,28 @@ impl Metrics {
             value.apollo.router.config.traffic_shaping,
             "$.traffic_shaping",
             opt.router.timout,
-            "$.router.timeout",
+            "$$[?(@.router.timeout)]",
             opt.router.rate_limit,
             "$.router.global_rate_limit",
-            opt.subgraph.timout,
-            "$[?(@.all.timout || @.subgraphs..timout)]",
+            opt.subgraph.timeout,
+            "$[?(@.all.timeout || @.subgraphs..timeout)]",
             opt.subgraph.rate_limit,
-            "$[?(@.all.rate_limit || @.subgraphs..rate_limit)]",
+            "$[?(@.all.global_rate_limit || @.subgraphs..global_rate_limit)]",
             opt.subgraph.http2,
-            "$[?(@.all.http2 || @.subgraphs..experimental_enable_http2)]",
+            "$[?(@.all.experimental_enable_http2 == true || @.subgraphs..experimental_enable_http2 == true)]",
             opt.subgraph.compression,
             "$[?(@.all.compression || @.subgraphs..compression)]",
             opt.subgraph.deduplicate_query,
-            "$[?(@.all.deduplicate_query || @.subgraphs..deduplicate_query)]",
+            "$[?(@.all.deduplicate_query == true || @.subgraphs..deduplicate_query == true)]",
             opt.subgraph.retry,
-            "$[?(@.all.retry || @.subgraphs..experimental_retry)]"
+            "$[?(@.all.experimental_retry || @.subgraphs..experimental_retry)]"
         );
 
         log_usage_metrics!(
             value.apollo.router.config.entities,
-            "$.traffic_shaping[?(@..experimental_entity_caching)]"
+            "$[?(@.traffic_shaping..experimental_entity_caching)]",
+            opt.caching,
+            "$[?(@.traffic_shaping..experimental_entity_caching)]"
         );
         log_usage_metrics!(
             value.apollo.router.config.telemetry,
@@ -271,7 +280,7 @@ impl Metrics {
             opt.tracing.datadog,
             "$.tracing.datadog[?(@.endpoint)]",
             opt.tracing.jaeger,
-            "$.tracing.jaeger[?(@.endpoint)]",
+            "$.tracing.jaeger[?(@..endpoint)]",
             opt.tracing.zipkin,
             "$.tracing.zipkin[?(@.endpoint)]"
         );

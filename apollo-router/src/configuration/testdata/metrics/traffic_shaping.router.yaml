@@ -1,4 +1,9 @@
 traffic_shaping:
+  router:
+    timeout: 10s
+    global_rate_limit:
+      capacity: 100
+      interval: 1s
   all:
     deduplicate_query: true
     compression: br

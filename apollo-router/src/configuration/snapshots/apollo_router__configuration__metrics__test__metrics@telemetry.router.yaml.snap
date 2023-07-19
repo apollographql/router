@@ -18,8 +18,8 @@ value.apollo.router.config.defer:
   - 0
   - {}
 value.apollo.router.config.entities:
-  - 1
-  - opt_caching_: "true"
+  - 0
+  - {}
 value.apollo.router.config.limits:
   - 0
   - {}
@@ -30,9 +30,14 @@ value.apollo.router.config.subscriptions:
   - 0
   - {}
 value.apollo.router.config.telemetry:
-  - 0
-  - {}
-value.apollo.router.config.traffic_shaping:
   - 1
+  - opt_metrics_otlp_: "true"
+    opt_metrics_prometheus_: "true"
+    opt_tracing_datadog_: "true"
+    opt_tracing_jaeger_: "true"
+    opt_tracing_otlp_: "true"
+    opt_tracing_zipkin_: "true"
+value.apollo.router.config.traffic_shaping:
+  - 0
   - {}
 

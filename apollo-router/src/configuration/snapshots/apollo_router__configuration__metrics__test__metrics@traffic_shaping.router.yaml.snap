@@ -34,6 +34,12 @@ value.apollo.router.config.telemetry:
   - {}
 value.apollo.router.config.traffic_shaping:
   - 1
-  - opt_subgraph_compression_: "true"
+  - opt_router_rate_limit_: "true"
+    opt_router_timout_: "true"
+    opt_subgraph_compression_: "true"
     opt_subgraph_deduplicate_query_: "true"
+    opt_subgraph_http2_: "true"
+    opt_subgraph_rate_limit_: "true"
+    opt_subgraph_retry_: "true"
+    opt_subgraph_timeout_: "true"
 
