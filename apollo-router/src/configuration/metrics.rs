@@ -128,7 +128,7 @@ impl Metrics {
                         paste!{
                             let mut attributes = HashMap::new();
                             $(
-                            let attr_name = stringify!([<$($attr _ )+>]).to_string();
+                            let attr_name = stringify!([<$($attr __ )+>]).to_string();
                             match JsonPath::try_from($attr_path).expect("json path must be valid").find(value).into_iter().next().as_deref() {
                                 // If the value is an object we can only state that it is set, but not what it is set to.
                                 Some(Value::Object(_value)) => {attributes.insert(attr_name, "true".to_string());},
@@ -149,7 +149,7 @@ impl Metrics {
                 // Now log the metric
                 // Note the use of `Empty` to prevent logging of attributes that have not been set.
                 paste!{
-                    tracing::info!($($metric).+ = metric.0, $($($attr).+ = metric.1.get(stringify!([<$($attr _ )+>])).map(|v|v as &dyn Value).unwrap_or(&tracing::field::Empty)),+);
+                    tracing::info!($($metric).+ = metric.0, $($($attr).+ = metric.1.get(stringify!([<$($attr __ )+>])).map(|v|v as &dyn Value).unwrap_or(&tracing::field::Empty)),+);
                 }
             };
         }

@@ -22,14 +22,14 @@ value.apollo.router.config.entities:
   - {}
 value.apollo.router.config.limits:
   - 1
-  - opt_http_max_request_bytes_: "true"
-    opt_max_aliases_: "true"
-    opt_max_depth_: "true"
-    opt_max_height_: "true"
-    opt_max_root_fields_: "true"
-    opt_parse_max_recursion_: "true"
-    opt_parse_max_tokens_: "true"
-    opt_warn_only_: "true"
+  - opt__http_max_request_bytes__: "true"
+    opt__max_aliases__: "true"
+    opt__max_depth__: "true"
+    opt__max_height__: "true"
+    opt__max_root_fields__: "true"
+    opt__parse__max_recursion__: "true"
+    opt__parse__max_tokens__: "true"
+    opt__warn_only__: "true"
 value.apollo.router.config.persisted_queries:
   - 0
   - {}

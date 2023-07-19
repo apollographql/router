@@ -19,7 +19,7 @@ value.apollo.router.config.defer:
   - {}
 value.apollo.router.config.entities:
   - 1
-  - opt_caching_: "true"
+  - opt__caching__: "true"
 value.apollo.router.config.limits:
   - 0
   - {}

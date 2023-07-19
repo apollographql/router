@@ -28,9 +28,9 @@ value.apollo.router.config.persisted_queries:
   - {}
 value.apollo.router.config.subscriptions:
   - 1
-  - opt_max_opened_subscriptions_: "true"
-    opt_mode_passthrough_: "true"
-    opt_queue_capacity_: "true"
+  - opt__max_opened_subscriptions__: "true"
+    opt__mode__passthrough__: "true"
+    opt__queue_capacity__: "true"
 value.apollo.router.config.telemetry:
   - 0
   - {}
