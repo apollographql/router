@@ -6,6 +6,7 @@ value.apollo.router.config.apq:
   - 1
   - opt_router_cache_in_memory_: "true"
     opt_router_cache_redis_: "true"
+    opt_subgraph_: "true"
 value.apollo.router.config.authentication.jwt:
   - 0
   - {}

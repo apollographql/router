@@ -6,7 +6,7 @@ value.apollo.router.config.apq:
   - 0
   - {}
 value.apollo.router.config.authentication.jwt:
-  - 0
+  - 1
   - {}
 value.apollo.router.config.authorization:
   - 0
@@ -24,10 +24,8 @@ value.apollo.router.config.limits:
   - 0
   - {}
 value.apollo.router.config.persisted_queries:
-  - 1
-  - opt_log_unknown_: "true"
-    opt_safelist_enabled_: "true"
-    opt_safelist_require_id_: "true"
+  - 0
+  - {}
 value.apollo.router.config.subscriptions:
   - 0
   - {}

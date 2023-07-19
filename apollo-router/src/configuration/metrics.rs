@@ -170,18 +170,25 @@ impl Metrics {
             "$.router.request",
             opt.router.response,
             "$.router.response",
+            // Note that supergraph is not supported yet so these will always be empty
             opt.supergraph.request,
             "$.supergraph.response",
             opt.supergraph.response,
             "$.supergraph.request",
             opt.subgraph.request,
-            "$.subgraph.request",
+            "$.subgraph..request",
             opt.subgraph.response,
-            "$.subgraph.response"
+            "$.subgraph..response"
         );
         log_usage_metrics!(
             value.apollo.router.config.persisted_queries,
-            "$.preview_persisted_queries[?(@.enabled==true)]"
+            "$.preview_persisted_queries[?(@.enabled==true)]",
+            opt.log_unknown,
+            "$[?(@.log_unknown==true)]",
+            opt.safelist.require_id,
+            "$[?(@.safelist.require_id==true)]",
+            opt.safelist.enabled,
+            "$[?(@.safelist.enabled==true)]"
         );
 
         log_usage_metrics!(

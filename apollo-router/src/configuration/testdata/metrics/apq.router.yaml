@@ -7,3 +7,6 @@ apq:
       redis:
         urls:
           - "a"
+  subgraph:
+    all:
+      enabled: true

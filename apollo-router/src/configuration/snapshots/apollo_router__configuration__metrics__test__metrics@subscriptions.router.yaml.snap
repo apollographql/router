@@ -24,12 +24,10 @@ value.apollo.router.config.limits:
   - 0
   - {}
 value.apollo.router.config.persisted_queries:
-  - 1
-  - opt_log_unknown_: "true"
-    opt_safelist_enabled_: "true"
-    opt_safelist_require_id_: "true"
-value.apollo.router.config.subscriptions:
   - 0
+  - {}
+value.apollo.router.config.subscriptions:
+  - 1
   - {}
 value.apollo.router.config.telemetry:
   - 0
