@@ -65,6 +65,7 @@ traffic_shaping:
   router: 
     timeout: 50s # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
 ```
+Note that for subscriptions the timeout only applies to the initial response from the Router. Once the subscription has been established the request duration can exceed the timeout.
 
 ### Compression
 
