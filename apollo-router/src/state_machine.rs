@@ -177,50 +177,61 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     tracing::info!("loss of license detected, ignoring reload");
                     return self;
                 }
-
+                let mut need_reload = false;
                 // We update the running config. This is OK even in the case that the router could not reload as we always want to retain the latest information for when we try to reload next.
                 // In the case of a failed reload the server handle is retained, which has the old config/schema/license in.
                 if let Some(new_configuration) = new_configuration {
                     *configuration = new_configuration;
+                    need_reload = true;
                 }
                 if let Some(new_schema) = new_schema {
-                    *schema = new_schema;
+                    if schema.as_ref() != new_schema.as_ref() {
+                        *schema = new_schema;
+                        need_reload = true;
+                    }
                 }
                 if let Some(new_license) = new_license {
-                    *license = new_license;
+                    if *license != new_license {
+                        *license = new_license;
+                        need_reload = true;
+                    }
                 }
 
-                let mut guard = state_machine.listen_addresses.clone().write_owned().await;
-                let signals = std::mem::take(all_connections_stopped_signals);
-                new_state = match Self::try_start(
-                    state_machine,
-                    server_handle,
-                    Some(router_service_factory),
-                    configuration.clone(),
-                    schema.clone(),
-                    *license,
-                    &mut guard,
-                    signals,
-                )
-                .await
-                {
-                    Ok(new_state) => {
-                        tracing::info!("reload complete");
-                        Some(new_state)
-                    }
-                    Err(e) => {
-                        // If we encountered an error it may be fatal depending on if we consumed the server handle or not.
-                        match server_handle {
-                            None => {
-                                tracing::error!("fatal error while trying to reload; {}", e);
-                                Some(Errored(e))
-                            }
-                            Some(_) => {
-                                tracing::info!("error while reloading, continuing with previous configuration; {}", e);
-                                None
+                if need_reload {
+                    let mut guard = state_machine.listen_addresses.clone().write_owned().await;
+                    let signals = std::mem::take(all_connections_stopped_signals);
+                    new_state = match Self::try_start(
+                        state_machine,
+                        server_handle,
+                        Some(router_service_factory),
+                        configuration.clone(),
+                        schema.clone(),
+                        *license,
+                        &mut guard,
+                        signals,
+                    )
+                    .await
+                    {
+                        Ok(new_state) => {
+                            tracing::info!("reload complete");
+                            Some(new_state)
+                        }
+                        Err(e) => {
+                            // If we encountered an error it may be fatal depending on if we consumed the server handle or not.
+                            match server_handle {
+                                None => {
+                                    tracing::error!("fatal error while trying to reload; {}", e);
+                                    Some(Errored(e))
+                                }
+                                Some(_) => {
+                                    tracing::info!("error while reloading, continuing with previous configuration; {}", e);
+                                    None
+                                }
                             }
                         }
                     }
+                } else {
+                    tracing::info!("reload complete (nothing has been updated)");
                 }
             }
             _ => {}
@@ -822,6 +833,29 @@ mod tests {
     }
 
     #[test(tokio::test)]
+    async fn startup_no_reload_schema() {
+        let router_factory = create_mock_router_configurator(1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![
+                    UpdateConfiguration(Configuration::builder().build().unwrap()),
+                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateLicense(LicenseState::default()),
+                    UpdateSchema(minimal_schema.to_owned()),
+                    Shutdown
+                ])
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+    }
+
+    #[test(tokio::test)]
     async fn startup_reload_license() {
         let router_factory = create_mock_router_configurator(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2, 1, 1, 1, 1);
@@ -834,7 +868,7 @@ mod tests {
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(minimal_schema.to_owned()),
                     UpdateLicense(LicenseState::default()),
-                    UpdateLicense(LicenseState::default()),
+                    UpdateLicense(LicenseState::Licensed),
                     Shutdown
                 ])
             )
@@ -945,6 +979,7 @@ mod tests {
             .returning(|_, _, _, _| Err(BoxError::from("error")));
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
 
         assert_matches!(
             execute(
@@ -954,7 +989,7 @@ mod tests {
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateLicense(LicenseState::default()),
-                    UpdateSchema(example_schema()),
+                    UpdateSchema(minimal_schema.to_owned()),
                     Shutdown
                 ])
             )
@@ -996,6 +1031,7 @@ mod tests {
             });
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2, 1, 1, 1, 1);
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
 
         assert_matches!(
             execute(
@@ -1011,7 +1047,7 @@ mod tests {
                             .build()
                             .unwrap()
                     ),
-                    UpdateSchema(example_schema()),
+                    UpdateSchema(minimal_schema.to_owned()),
                     Shutdown
                 ]),
             )
