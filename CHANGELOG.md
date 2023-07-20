@@ -23,7 +23,7 @@ It has two modes of operation:
   * Reject unregistered operations
   * Require all operations to be sent as an ID
 
-Unlike automatic persisted queries (APQ), the ability to create a safelist of operations allows you to prevent a malicious actor from constructing a free-format query that could overload your subgraphh services.
+Unlike automatic persisted queries (APQ), the ability to create a safelist of operations allows you to prevent a malicious actor from constructing a free-format query that could overload your subgraph services.
 
 For more information con how to register queries and configure your router see the [Persisted Query documentation](https://www.apollographql.com/docs/graphos/routing/persisted-queries).
 
