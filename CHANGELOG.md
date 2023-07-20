@@ -42,7 +42,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 ### Enforce default buckets for metrics ([PR #3432](https://github.com/apollographql/router/pull/3432))
 
 When `telemetry.metrics.common` was not configured, no default metrics buckets were configured.
-With this fix by default it set these buckets: `[0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0]`
+With this fix the default buckets are: `[0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0]`
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3432
 
