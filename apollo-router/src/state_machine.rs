@@ -177,25 +177,27 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     tracing::info!("loss of license detected, ignoring reload");
                     return self;
                 }
-                let mut need_reload = false;
+                let (mut license_reload, mut schema_reload, mut configuration_reload) =
+                    (false, false, false);
                 // We update the running config. This is OK even in the case that the router could not reload as we always want to retain the latest information for when we try to reload next.
                 // In the case of a failed reload the server handle is retained, which has the old config/schema/license in.
                 if let Some(new_configuration) = new_configuration {
                     *configuration = new_configuration;
-                    need_reload = true;
+                    configuration_reload = true;
                 }
                 if let Some(new_schema) = new_schema {
                     if schema.as_ref() != new_schema.as_ref() {
                         *schema = new_schema;
-                        need_reload = true;
+                        schema_reload = true;
                     }
                 }
                 if let Some(new_license) = new_license {
                     if *license != new_license {
                         *license = new_license;
-                        need_reload = true;
+                        license_reload = true;
                     }
                 }
+                let need_reload = schema_reload || license_reload || configuration_reload;
 
                 if need_reload {
                     let mut guard = state_machine.listen_addresses.clone().write_owned().await;
@@ -213,7 +215,12 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     .await
                     {
                         Ok(new_state) => {
-                            tracing::info!("reload complete");
+                            tracing::info!(
+                                new_schema = schema_reload,
+                                new_license = license_reload,
+                                new_configuration = configuration_reload,
+                                "reload complete"
+                            );
                             Some(new_state)
                         }
                         Err(e) => {
@@ -231,7 +238,12 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         }
                     }
                 } else {
-                    tracing::info!("reload complete (nothing has been updated)");
+                    tracing::info!(
+                        new_schema = schema_reload,
+                        new_license = license_reload,
+                        new_configuration = configuration_reload,
+                        "reload complete"
+                    );
                 }
             }
             _ => {}
