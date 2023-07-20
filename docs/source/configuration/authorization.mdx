@@ -154,7 +154,7 @@ directive @requiresScopes(scopes: [String!]!) on OBJECT | FIELD_DEFINITION | INT
 The directive should include a `scopes` argument that expects an array of required scopes.
 
 The directive validates the required scopes by loading the object at the `apollo_authentication::JWT::claims` key in a request's context.
-That object's `scope` key should contain a space separated list of scopes in the format defined by [OAuth2 access token scopes](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3).
+That object's `scope` key should contain a space separated list of scopes in the format defined by the [OAuth2 RFC for access token scopes](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3).
 
 Depending on the scopes present on the request, the router filters out unauthorized fields and types.
 If a field's `scopes` array includes multiple scopes, the request must include _all_ required scopes to resolve it.
@@ -280,10 +280,10 @@ type Query {
 }
 ```
 
-### Authorization and `@key` types
+### Authorization and `@key` fields
 
 The [`@key` directive](https://www.apollographql.com/docs/federation/entities/) lets you create an entity whose fields resolve across multiple subgraphs.
-If you use authorization directives on fields in [`@key` types](https://www.apollographql.com/docs/federation/entities/), Apollo still joins those fields between the subgraphs, but the client cannot query them directly.
+If you use authorization directives on fields in [`@key` directives](https://www.apollographql.com/docs/federation/entities/), Apollo still joins those fields between the subgraphs, but the client cannot query them directly.
 
 Consider these example subgraph schemas:
 
