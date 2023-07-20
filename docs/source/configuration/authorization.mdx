@@ -157,6 +157,7 @@ That object's `scope` key should contain a space separated list of scopes in the
 
 Depending on the scopes present on the request, the router filters out unauthorized fields and types.
 If a field's `scopes` array includes multiple scopes, the request must include _all_ required scopes to resolve it.
+If every field on a particular subgraph query requires scopes that aren't present, this can eliminate entire subgraph requests.
 
 #### Example `@requiresScopes` use case
 
