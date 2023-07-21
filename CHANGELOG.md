@@ -10,11 +10,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ### Persisted Queries w/opt-in safelisting (preview) ([PR #3347](https://github.com/apollographql/router/pull/3347))
 
-> ⚠️ **Persisted queries is an [Enterprise feature](https://www.apollographql.com/blog/platform/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
->
-> If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](https://www.apollographql.com/docs/graphos/org/plans/#enterprise-trials).
-
-Persisted Queries gives you the tools to prevent unwanted traffic from reaching your graph.
+Persisted Queries is a forthcoming feature that helps you prevent unwanted traffic from reaching your graph.
 
 It has two modes of operation:
 * **Unregistered operation monitoring**
@@ -23,9 +19,9 @@ It has two modes of operation:
   * Reject unregistered operations
   * Require all operations to be sent as an ID
 
-Unlike automatic persisted queries (APQ), the ability to create a safelist of operations allows you to prevent a malicious actor from constructing a free-format query that could overload your subgraph services.
+Unlike automatic persisted queries (APQ), a safelist of operations lets you prevent a malicious actor from constructing a free-format query that could overload your subgraph services.
 
-For more information con how to register queries and configure your router see the [Persisted Query documentation](https://www.apollographql.com/docs/graphos/routing/persisted-queries).
+This feature is in a private preview phase and aren't available unless your enterprise organization has been granted preview access by Apollo.
 
 By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/3347
 
