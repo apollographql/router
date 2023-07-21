@@ -1,0 +1,72 @@
+---
+title: Operation safelisting with Persisted Queries
+description: With GraphOS Enterprise
+---
+
+> ⚠️ **Persisted queries is an [Enterprise feature](https://www.apollographql.com/blog/platform/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
+>
+> If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](https://www.apollographql.com/docs/graphos/org/plans/#enterprise-trials).
+
+Persisted Queries gives you the tools to prevent unwanted traffic from reaching your graph.
+
+It has two modes of operation:
+* **Unregistered operation monitoring**
+  * Your router can allow all GraphQL operations, while emitting structured traces containing unregistered operation bodies.
+* **Operation safelisting**
+  * Reject unregistered operations
+  * Require all operations to be sent as an ID
+
+Unlike automatic persisted queries (APQ), the ability to create a safelist of operations allows you to prevent a malicious actor from constructing a free-format query that could overload your subgraph services.
+
+***For more information on how to register queries, configure your router and update your graphql clients see the main [Persisted Query documentation](https://www.apollographql.com/docs/graphos/operations/persisted-queries).***
+
+## Setup
+
+To use persisted queries, you must run v1.25 or later of the Apollo Router. [Download the latest version.](../quickstart#download-options)
+
+You define persisted queries in your router's [YAML config file](./overview/#yaml-config-file), like so:
+
+```yaml title="router.yaml"
+preview_persisted_queries:
+  enabled: true
+  log_unknown: true
+  safelist:
+    require_id: true
+    enabled: true
+```
+
+### Logging unregistered operations
+
+When `log_unknown` is set to `true`, the router will emit structured traces containing the body of unregistered operations. This allows you to monitor the traffic hitting your graph .
+
+```yaml title="router.yaml"
+preview_persisted_queries:
+  enabled: true
+  log_unknown: true
+```
+
+### Enabling safelisting
+
+Enabling safelisting requires creation of a Persisted Query List (PQL). Refer to the [Persisted Query documentation](https://www.apollographql.com/docs/graphos/operations/persisted-queries) for more information on how to create these and update your clients. 
+
+Once you have a PQL set up then you can enable safelisting in your router's [YAML config file](./overview/#yaml-config-file), like so:
+
+```yaml title="router.yaml"
+preview_persisted_queries:
+  enabled: true
+  safelist:
+    enabled: true
+```
+
+### Requiring IDs
+
+Persisted queries uses a similar mechanism to APQ to allow clients to send queries as IDs and thus omit the body of the graphql query. This can significantly reduce the size of the request body and improve performance.
+
+```yaml title="router.yaml"
+preview_persisted_queries:
+  enabled: true
+  safelist:
+    enabled: true
+    require_id: true
+```
+
