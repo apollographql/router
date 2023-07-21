@@ -177,7 +177,6 @@ pub struct Opt {
     #[clap(
         env = APOLLO_ROUTER_DEV_ENV,
         long = "dev",
-        hide(true),
         action(ArgAction::SetTrue)
     )]
     dev: bool,

@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router-scaffold"
-version = "1.24.0"
+version = "1.25.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "Elastic-2.0"
@@ -8,7 +8,7 @@ publish = false
 
 [dependencies]
 anyhow = "1.0.72"
-clap = { version = "4.3.15", features = ["derive"] }
+clap = { version = "4.3.16", features = ["derive"] }
 cargo-scaffold = { version = "0.8.9", default-features = false }
 regex = "1"
 str_inflector = "0.12.0"

@@ -4,6 +4,87 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.25.0] - 2023-07-19
+
+## 🚀 Features
+
+### Persisted Queries w/opt-in safelisting (preview) ([PR #3347](https://github.com/apollographql/router/pull/3347))
+
+> ⚠️ **Persisted queries is an [Enterprise feature](https://www.apollographql.com/blog/platform/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
+>
+> If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](https://www.apollographql.com/docs/graphos/org/plans/#enterprise-trials).
+
+Persisted Queries gives you the tools to prevent unwanted traffic from reaching your graph.
+
+It has two modes of operation:
+* **Unregistered operation monitoring**
+  * Your router can allow all GraphQL operations, while emitting structured traces containing unregistered operation bodies.
+* **Operation safelisting**
+  * Reject unregistered operations
+  * Require all operations to be sent as an ID
+
+Unlike automatic persisted queries (APQ), the ability to create a safelist of operations allows you to prevent a malicious actor from constructing a free-format query that could overload your subgraph services.
+
+For more information con how to register queries and configure your router see the [Persisted Query documentation](https://www.apollographql.com/docs/graphos/routing/persisted-queries).
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/3347
+
+## 🐛 Fixes
+
+### Fix prometheus statistics issues with _total_total names([Issue #3443](https://github.com/apollographql/router/issues/3443))
+
+When producing prometheus statistics the otel crate (0.19.0) now automatically appends `_total` which is unhelpful.
+
+This fix removes `_total_total` from our statistics. However, counter metrics will still have `_total` appended to them if they did not so already.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3471
+
+### Enforce default buckets for metrics ([PR #3432](https://github.com/apollographql/router/pull/3432))
+
+When `telemetry.metrics.common` was not configured, no default metrics buckets were configured.
+With this fix the default buckets are: `[0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0]`
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3432
+
+## 📃 Configuration
+
+### Add `subscription.enabled` field to enable subscription support ([Issue #3428](https://github.com/apollographql/router/issues/3428))
+
+`enabled` is now required in `subscription` configuration. Example:
+
+```yaml
+subscription:
+  enabled: true
+  mode:
+    passthrough:
+      all:
+        path: /ws
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3450
+
+### Add option to disable reuse of query fragments  ([Issue #3452](https://github.com/apollographql/router/issues/3452))
+
+A new option has been added to the Router to allow disabling of the reuse of query fragments. This is useful for debugging purposes.
+```yaml
+supergraph:
+  experimental_reuse_query_fragments: false
+```
+
+The default value depends on the version of federation.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3453
+
+## 🛠 Maintenance
+
+### Coprocessor: Set a default pool idle timeout duration. ([PR #3434](https://github.com/apollographql/router/pull/3434))
+
+The default idle pool timeout duration in Hyper can sometimes trigger situations in which an HTTP request cannot complete (see [this comment](https://github.com/hyperium/hyper/issues/2136#issuecomment-589488526) for more information).
+
+This changeset sets a default timeout duration of 5 seconds.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3434
+
 # [1.24.0] - 2023-07-13
 
 ## 🚀 Features
