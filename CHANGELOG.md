@@ -10,22 +10,16 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ### Persisted Queries w/opt-in safelisting (preview) ([PR #3347](https://github.com/apollographql/router/pull/3347))
 
-> ⚠️ **Persisted queries is an [Enterprise feature](https://www.apollographql.com/blog/platform/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
->
-> If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](https://www.apollographql.com/docs/graphos/org/plans/#enterprise-trials).
+Persisted Queries is an upcoming feature that helps you prevent unwanted traffic from reaching your graph. It's in private preview and isn't available unless your enterprise organization has been granted preview access by Apollo.
 
-Persisted Queries gives you the tools to prevent unwanted traffic from reaching your graph.
-
-It has two modes of operation:
+Persisted Queries has two modes of operation:
 * **Unregistered operation monitoring**
-  * Your router can allow all GraphQL operations, while emitting structured traces containing unregistered operation bodies.
+  * Your router allows all GraphQL operations, while emitting structured traces containing unregistered operation bodies.
 * **Operation safelisting**
-  * Reject unregistered operations
-  * Require all operations to be sent as an ID
+  * Your router rejects unregistered operations.
+  * Your router requires all operations to be sent as an ID.
 
-Unlike automatic persisted queries (APQ), the ability to create a safelist of operations allows you to prevent a malicious actor from constructing a free-format query that could overload your subgraph services.
-
-For more information con how to register queries and configure your router see the [Persisted Query documentation](https://www.apollographql.com/docs/graphos/routing/persisted-queries).
+Unlike automatic persisted queries (APQ), an operation safelist lets you prevent malicious actors from constructing a free-format query that could overload your subgraph services.
 
 By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/3347
 
