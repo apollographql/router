@@ -10,18 +10,16 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ### Persisted Queries w/opt-in safelisting (preview) ([PR #3347](https://github.com/apollographql/router/pull/3347))
 
-Persisted Queries is a forthcoming feature that helps you prevent unwanted traffic from reaching your graph.
+Persisted Queries is an upcoming feature that helps you prevent unwanted traffic from reaching your graph. It's in private preview and isn't available unless your enterprise organization has been granted preview access by Apollo.
 
-It has two modes of operation:
+Persisted Queries has two modes of operation:
 * **Unregistered operation monitoring**
-  * Your router can allow all GraphQL operations, while emitting structured traces containing unregistered operation bodies.
+  * Your router allows all GraphQL operations, while emitting structured traces containing unregistered operation bodies.
 * **Operation safelisting**
-  * Reject unregistered operations
-  * Require all operations to be sent as an ID
+  * Your router rejects unregistered operations.
+  * Your router requires all operations to be sent as an ID.
 
-Unlike automatic persisted queries (APQ), a safelist of operations lets you prevent a malicious actor from constructing a free-format query that could overload your subgraph services.
-
-This feature is in a private preview phase and aren't available unless your enterprise organization has been granted preview access by Apollo.
+Unlike automatic persisted queries (APQ), an operation safelist lets you prevent malicious actors from constructing a free-format query that could overload your subgraph services.
 
 By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/3347
 
