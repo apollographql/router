@@ -80,7 +80,7 @@ For an unauthenticated request, the router would remove the `@authenticated` fie
 
 <CodeColumns>
 
-```graphql title="Query for an authenticated request"
+```graphql title="Query executed for an authenticated request"
 query {
   me {
     name
@@ -93,7 +93,7 @@ query {
 }
 ```
 
-```graphql title="Filtered query for an unauthenticated request"
+```graphql title="Query executed for an unauthenticated request"
 query {
   user(id: "1234") {
     name
@@ -103,7 +103,7 @@ query {
 
 </CodeColumns>
 
-For an unauthenticated request, the router doesn't attempt to resolve the top-level `me` query nor the email for the user with `id: "1234"`.
+For an unauthenticated request, the router doesn't attempt to resolve the top-level `me` query, nor the email for the user with `id: "1234"`.
 The response retains the initial request's shape but returns `null` for unauthorized fields and applies the [standard GraphQL null propagation rules](https://www.apollographql.com/blog/graphql/basics/using-nullability-in-graphql/#what-happens-if-you-try-to-return-null-for-a-non-null-field).
 
 ```json
@@ -139,7 +139,7 @@ The response retains the initial request's shape but returns `null` for unauthor
 }
 ```
 
-If every requested field requires authentication and a request is unauthenticated, the router generates a query planner error indicating that the query is unauthorized.
+If _every_ requested field requires authentication and a request is unauthenticated, the router generates a query planner error indicating that the query is unauthorized.
 
 ### `@requiresScopes`
 
@@ -190,9 +190,13 @@ type Product {
 }
 ```
 
-The router executes the following query differently, depending on the request's attached scopes:
+The router executes the following query differently, depending on the request's attached scopes.
 
-```graphql
+If the request includes the `profile:read user:read` scope set, then the router would execute the following filtered query:
+
+<CodeColumns>
+
+```graphql title="Raw query to router"
 query {
   me {
     name
@@ -209,9 +213,7 @@ query {
 }
 ```
 
-If the request includes the `profile:read user:read` scope set, then the router would execute the following filtered query: 
-
-```graphql title="Request scopes: 'profile:read user:read'"
+```graphql title="Scopes: 'profile:read user:read'"
 query {
   me {
     name
@@ -220,26 +222,25 @@ query {
 
   products {
     name
-    /* The following fields are filtered out:
-    amount # Requires "inventory:read" scope
-    orders # Requires "user:read" and "inventory:read" scopes
-    */
   }
 }
 ```
 
-The response would include errors at the `/products/@/amount` and `/products/@/amount` paths.
+</CodeColumns>
+
+The response would include errors at the `/products/@/amount` and `/products/@/orders` paths.
 
 If the request includes the `user:read inventory:read` scope set, then the router would execute the following filtered query: 
 
-```graphql title="Request scopes: 'user:read inventory:read'"
+<CodeColumns>
+
+```graphql title="Raw query to router"
 query {
-  /* The following fields are filtered out
-  me { # Requires the "profile:read" scope
+  me {
     name
     email
   }
-  */
+
   products {
     name
     amount
@@ -249,6 +250,20 @@ query {
   }
 }
 ```
+
+```graphql title="Scopes: 'user:read inventory:read'"
+query {
+  products {
+    name
+    amount
+    orders {
+      name
+    }
+  }
+}
+```
+
+</CodeColumns>
 
 The response would include an error at the `/me` path.
 
@@ -321,7 +336,7 @@ query {
 }
 ```
 
-But for this query:
+But for the following query, an unauthenticated request would resolve `null` for `id`. And since `id` is a non-nullable field, `product` would return `null`.
 
 ```graphql
 query {
@@ -331,8 +346,6 @@ query {
   }
 }
 ```
-
-an unauthenticated request would resolve `null` for `id`. And since `id` is a non-nullable field, `product` would return `null`.
 
 This behavior is similar to what you can create with [contracts](/graphos/delivery/contracts/) and the [`@inaccessible` directive](https://www.apollographql.com/docs/federation/federated-types/federated-directives/#inaccessible).
 
