@@ -31,6 +31,14 @@ By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https:/
 
 ## 🐛 Fixes
 
+### Fix issues around query fragment reuse
+
+[Federation 2.4.9](https://github.com/apollographql/federation/blob/main/gateway-js/CHANGELOG.md#249) contained a bug around query fragment reuse. The change was reverted in [2.4.10](https://github.com/apollographql/federation/blob/main/gateway-js/CHANGELOG.md#249)
+
+The version of federation used by the Router is now 2.4.10.
+
+By @BrynCooke in https://github.com/apollographql/router/pull/3453
+
 ### Fix prometheus statistics issues with _total_total names([Issue #3443](https://github.com/apollographql/router/issues/3443))
 
 When producing prometheus statistics the otel crate (0.19.0) now automatically appends `_total` which is unhelpful.
@@ -253,6 +261,10 @@ To maintain backwards compatibility; query parameters named "ready" and "live" h
 
 Sample queries:
 
+```
+curl -XPOST "http://localhost:8088/health?ready" OR curl  "http://localhost:8088/health?ready"
+curl -XPOST "http://localhost:8088/health?live" OR curl "http://localhost:8088/health?live"
+```
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3276
 
