@@ -39,6 +39,8 @@ use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
 use crate::ApolloRouterError::NoLicense;
 
+const STATE_RELOAD_EVENT: &str = "state reload event";
+
 #[derive(Default, Clone)]
 pub(crate) struct ListenAddresses {
     pub(crate) graphql_listen_address: Option<ListenAddr>,
@@ -162,25 +164,21 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 router_service_factory,
                 all_connections_stopped_signals,
             } => {
-                tracing::info!(
-                    new_schema = new_schema.is_some(),
-                    new_license = new_license.is_some(),
-                    new_configuration = new_configuration.is_some(),
-                    "reloading"
-                );
-
+                // When we get an unlicensed event, if we were licensed before then just carry on.
+                // This means that users can delete and then undelete their graphs in studio while having their routers continue to run.
                 if new_license == Some(LicenseState::Unlicensed)
                     && *license != LicenseState::Unlicensed
                 {
-                    // When we get an unlicensed event, if we were licensed before then just carry on.
-                    // This means that users can delete and then undelete their graphs in studio while having their routers continue to run.
-                    tracing::info!("loss of license detected, ignoring reload");
+                    tracing::info!(
+                        status = "ignoring reload because of loss of license",
+                        message = STATE_RELOAD_EVENT
+                    );
                     return self;
                 }
+
+                // Have things actually changed?
                 let (mut license_reload, mut schema_reload, mut configuration_reload) =
                     (false, false, false);
-                // We update the running config. This is OK even in the case that the router could not reload as we always want to retain the latest information for when we try to reload next.
-                // In the case of a failed reload the server handle is retained, which has the old config/schema/license in.
                 if let Some(new_configuration) = new_configuration {
                     *configuration = new_configuration;
                     configuration_reload = true;
@@ -197,9 +195,21 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         license_reload = true;
                     }
                 }
+
+                // Let users know we are about to process a state reload event
+                tracing::info!(
+                    new_schema = schema_reload,
+                    new_license = license_reload,
+                    new_configuration = configuration_reload,
+                    status = "starting",
+                    message = STATE_RELOAD_EVENT
+                );
+
                 let need_reload = schema_reload || license_reload || configuration_reload;
 
                 if need_reload {
+                    // We update the running config. This is OK even in the case that the router could not reload as we always want to retain the latest information for when we try to reload next.
+                    // In the case of a failed reload the server handle is retained, which has the old config/schema/license in.
                     let mut guard = state_machine.listen_addresses.clone().write_owned().await;
                     let signals = std::mem::take(all_connections_stopped_signals);
                     new_state = match Self::try_start(
@@ -219,7 +229,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                                 new_schema = schema_reload,
                                 new_license = license_reload,
                                 new_configuration = configuration_reload,
-                                "reload complete"
+                                status = "complete",
+                                message = STATE_RELOAD_EVENT
                             );
                             Some(new_state)
                         }
@@ -227,11 +238,15 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                             // If we encountered an error it may be fatal depending on if we consumed the server handle or not.
                             match server_handle {
                                 None => {
-                                    tracing::error!("fatal error while trying to reload; {}", e);
+                                    tracing::error!(
+                                        error = %e,
+                                        status = "fatal error while trying to reload",
+                                        message = STATE_RELOAD_EVENT
+                                    );
                                     Some(Errored(e))
                                 }
                                 Some(_) => {
-                                    tracing::info!("error while reloading, continuing with previous configuration; {}", e);
+                                    tracing::error!(error = %e, status = "error while reloading, continuing with previous configuration", message = STATE_RELOAD_EVENT);
                                     None
                                 }
                             }
@@ -242,7 +257,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         new_schema = schema_reload,
                         new_license = license_reload,
                         new_configuration = configuration_reload,
-                        "reload complete"
+                        status = "complete",
+                        message = STATE_RELOAD_EVENT
                     );
                 }
             }
