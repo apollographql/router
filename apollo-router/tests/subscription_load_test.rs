@@ -33,7 +33,11 @@ async fn test_subscription_load() -> Result<(), BoxError> {
     }
 
     for _ in 0..100 {
-        let (_id, resp) = router.run_query().await;
+        let (_id, resp) = router
+            .execute_query(
+                &json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}}),
+            )
+            .await;
         assert!(resp.status().is_success());
     }
 
@@ -61,7 +65,7 @@ async fn test_subscription_load_federated() -> Result<(), BoxError> {
     }
 
     for _ in 0..100 {
-        let (_id, resp) = router.run_query().await;
+        let (_id, resp) = router.execute_default_query().await;
         assert!(resp.status().is_success());
     }
 

@@ -1,0 +1,6 @@
+---
+source: apollo-router/src/query_planner/bridge_query_planner.rs
+expression: "subselections_keys(r#\"query Q($d1:Boolean!) { me {\n            username\n            name {\n                first\n                ... @defer(if: $d1, label: \"A\") { last }\n            }\n        }}\"#).await"
+---
+None 1 query{ me { username name { first } } }
+Some("A") 1 query{ me { name { last } } }

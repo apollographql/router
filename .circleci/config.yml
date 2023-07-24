@@ -506,7 +506,6 @@ jobs:
       RELEASE_BIN: router
       APPLE_TEAM_ID: "YQK948L752"
       APPLE_USERNAME: "opensource@apollographql.com"
-      MACOS_PRIMARY_BUNDLE_ID: com.apollographql.router
     steps:
       - checkout
       - setup_environment:
@@ -535,7 +534,6 @@ jobs:
                   --cert-bundle-password ${MACOS_CERT_BUNDLE_PASSWORD}
                   --keychain-password ${MACOS_KEYCHAIN_PASSWORD}
                   --notarization-password ${MACOS_NOTARIZATION_PASSWORD}
-                  --primary-bundle-id ${MACOS_PRIMARY_BUNDLE_ID}
                   --output artifacts/
       - when:
           condition:

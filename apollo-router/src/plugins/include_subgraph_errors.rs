@@ -215,9 +215,11 @@ mod test {
         RouterCreator::new(
             QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
             Arc::new(supergraph_creator),
+            Arc::new(Configuration::default()),
             Default::default(),
         )
         .await
+        .unwrap()
         .make()
         .boxed()
     }

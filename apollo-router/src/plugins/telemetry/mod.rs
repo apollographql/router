@@ -68,6 +68,8 @@ use self::reload::NullFieldFormatter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::reload::ReloadTracer;
+use crate::axum_factory::utils::REQUEST_SPAN_NAME;
+use crate::context::OPERATION_NAME;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -128,8 +130,6 @@ const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const OPERATION_KIND: &str = "apollo_telemetry::operation_kind";
-pub(crate) const GRAPHQL_OPERATION_NAME_CONTEXT_KEY: &str =
-    "apollo_telemetry::graphql_operation_name";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
@@ -235,6 +235,30 @@ impl Plugin for Telemetry {
         let config_later = self.config.clone();
 
         ServiceBuilder::new()
+            .map_response(|response: router::Response|{
+                // The current span *should* be the request span as we are outside the instrument block.
+                let span = Span::current();
+                if let Some(REQUEST_SPAN_NAME) = span.metadata().map(|metadata| metadata.name()) {
+
+                    //https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/
+                    let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
+                    let operation_name = response.context.get::<_, String>(OPERATION_NAME);
+
+                    if let Ok(Some(operation_kind)) = &operation_kind {
+                        span.record("graphql.operation.type", operation_kind);
+                    }
+                    if let Ok(Some(operation_name)) = &operation_name {
+                        span.record("graphql.operation.name", operation_name);
+                    }
+                    match (&operation_kind, &operation_name) {
+                        (Ok(Some(kind)), Ok(Some(name))) => span.record("otel.name", format!("{kind} {name}")),
+                        (Ok(Some(kind)), _) => span.record("otel.name", kind),
+                        _ => span.record("otel.name", "GraphQL Operation")
+                    };
+                }
+
+                response
+            })
             .instrument(move |request: &router::Request| {
                 let apollo = config.apollo.as_ref().cloned().unwrap_or_default();
                 let trace_id = TraceId::maybe_new()
@@ -670,22 +694,11 @@ impl Telemetry {
         move |request: &SupergraphRequest| {
             let http_request = &request.supergraph_request;
             let query = http_request.body().query.as_deref().unwrap_or_default();
-            let operation_name = http_request
-                .body()
-                .operation_name
-                .as_deref()
-                .unwrap_or_default();
-            if let Some(operation_name) = &http_request.body().operation_name {
-                let _ = request
-                    .context
-                    .insert(GRAPHQL_OPERATION_NAME_CONTEXT_KEY, operation_name.clone());
-            }
-
             let span = info_span!(
                 SUPERGRAPH_SPAN_NAME,
                 graphql.document = query,
                 // TODO add graphql.operation.type
-                graphql.operation.name = operation_name,
+                graphql.operation.name = field::Empty,
                 otel.kind = "INTERNAL",
                 apollo_private.field_level_instrumentation_ratio =
                     field_level_instrumentation_ratio,
@@ -695,6 +708,13 @@ impl Telemetry {
                     &config.send_variable_values,
                 ),
             );
+            if let Some(operation_name) = request
+                .context
+                .get::<_, String>(OPERATION_NAME)
+                .unwrap_or_default()
+            {
+                span.record("graphql.operation.name", operation_name);
+            }
 
             span
         }
@@ -870,7 +890,7 @@ impl Telemetry {
             let mut attributes: HashMap<String, AttributeValue> = HashMap::new();
             if let Some(operation_name) = &req.supergraph_request.body().operation_name {
                 attributes.insert(
-                    "operation_name".to_string(),
+                    OPERATION_NAME.to_string(),
                     AttributeValue::String(operation_name.clone()),
                 );
             }

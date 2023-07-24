@@ -19,9 +19,9 @@ async fn test_metrics_reloading() -> Result<(), BoxError> {
     router.assert_started().await;
 
     for _ in 0..2 {
-        router.run_query().await;
-        router.run_query().await;
-        router.run_query().await;
+        router.execute_default_query().await;
+        router.execute_default_query().await;
+        router.execute_default_query().await;
 
         // Get Prometheus metrics.
         let metrics_response = router.get_metrics_response().await.unwrap();
@@ -41,8 +41,8 @@ async fn test_metrics_reloading() -> Result<(), BoxError> {
         router.assert_reloaded().await;
     }
 
-    router.assert_metrics_contains(r#"apollo_router_cache_hit_count{kind="query planner",service_name="apollo-router",storage="memory"} 4"#, None).await;
-    router.assert_metrics_contains(r#"apollo_router_cache_miss_count{kind="query planner",service_name="apollo-router",storage="memory"} 2"#, None).await;
+    router.assert_metrics_contains(r#"apollo_router_cache_hit_count_total{kind="query planner",service_name="apollo-router",storage="memory",otel_scope_name="apollo/router",otel_scope_version=""} 4"#, None).await;
+    router.assert_metrics_contains(r#"apollo_router_cache_miss_count_total{kind="query planner",service_name="apollo-router",storage="memory",otel_scope_name="apollo/router",otel_scope_version=""} 2"#, None).await;
     router
         .assert_metrics_contains(r#"apollo_router_cache_hit_time"#, None)
         .await;
@@ -57,6 +57,9 @@ async fn test_metrics_reloading() -> Result<(), BoxError> {
         .await;
     router
         .assert_metrics_contains(r#"custom_header="test_custom""#, None)
+        .await;
+    router
+        .assert_metrics_does_not_contain(r#"_total_total{"#)
         .await;
 
     if std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok() {

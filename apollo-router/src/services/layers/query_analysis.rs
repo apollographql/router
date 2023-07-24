@@ -7,6 +7,7 @@ use http::StatusCode;
 use lru::LruCache;
 use tokio::sync::Mutex;
 
+use crate::context::OPERATION_NAME;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
@@ -46,7 +47,7 @@ impl QueryAnalysisLayer {
     }
 
     pub(crate) fn make_compiler(&self, query: &str) -> (ApolloCompiler, FileId) {
-        Query::make_compiler(query, &self.schema, &self.configuration)
+        Query::make_compiler(query, self.schema.api_schema(), &self.configuration)
     }
 
     pub(crate) async fn supergraph_request(
@@ -107,7 +108,7 @@ impl QueryAnalysisLayer {
                     .find_operation(file_id, op_name.clone())
                     .and_then(|operation| operation.name().map(|s| s.to_owned()));
 
-                context.insert("operation_name", operation_name).unwrap();
+                context.insert(OPERATION_NAME, operation_name).unwrap();
 
                 (*self.cache.lock().await).put(
                     QueryAnalysisKey {
@@ -123,11 +124,17 @@ impl QueryAnalysisLayer {
         };
 
         request.context.extend(&context);
+        request
+            .context
+            .private_entries
+            .lock()
+            .insert(Compiler(compiler));
 
         Ok(SupergraphRequest {
             supergraph_request: request.supergraph_request,
             context: request.context,
-            compiler: Some(compiler),
         })
     }
 }
+
+pub(crate) struct Compiler(pub(crate) Arc<Mutex<ApolloCompiler>>);

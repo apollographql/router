@@ -44,6 +44,7 @@ use crate::services::subgraph;
 use crate::tracer::TraceId;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
+const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 
 type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
 
@@ -71,7 +72,11 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
 
         let http_client = ServiceBuilder::new()
             .layer(TimeoutLayer::new(init.config.timeout))
-            .service(hyper::Client::builder().build(connector));
+            .service(
+                hyper::Client::builder()
+                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+                    .build(connector),
+            );
 
         CoprocessorPlugin::new(http_client, init.config, init.supergraph_sdl)
     }
@@ -515,9 +520,9 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    request.context.enter_active_request();
+    let guard = request.context.enter_active_request();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    request.context.leave_active_request();
+    drop(guard);
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
@@ -664,9 +669,9 @@ where
 
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
-    response.context.enter_active_request();
+    let guard = response.context.enter_active_request();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
-    response.context.leave_active_request();
+    drop(guard);
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
@@ -739,11 +744,11 @@ where
 
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
-                generator_map_context.enter_active_request();
+                let guard = generator_map_context.enter_active_request();
                 let co_processor_result = payload
                     .call(generator_client, &generator_coprocessor_url)
                     .await;
-                generator_map_context.leave_active_request();
+                drop(guard);
                 tracing::debug!(?co_processor_result, "co-processor returned");
                 let co_processor_output = co_processor_result?;
 
@@ -829,9 +834,9 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    request.context.enter_active_request();
+    let guard = request.context.enter_active_request();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    request.context.leave_active_request();
+    drop(guard);
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphRequest)?;
@@ -961,9 +966,9 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    response.context.enter_active_request();
+    let guard = response.context.enter_active_request();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    response.context.leave_active_request();
+    drop(guard);
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
