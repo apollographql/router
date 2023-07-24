@@ -306,9 +306,8 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             );
                             tracing::info!(
                                 monotonic_counter.apollo.router.operations.subscriptions = 1u64,
-                                mode = %"callback",
-                                graphql.operation.name = operation_name,
-                                federaion.service.name = service_name,
+                                subscriptions.mode = %"callback",
+                                subgraph.service.name = service_name,
                             );
                             // Dedup happens here
                             return Ok(SubgraphResponse::builder()
@@ -461,9 +460,8 @@ async fn call_websocket(
         let operation_name = context.operation_name().unwrap_or_default();
         tracing::info!(
             monotonic_counter.apollo.router.operations.subscriptions = 1u64,
-            mode = %"passthrough",
-            graphql.operation.name = operation_name,
-            federation.service.name = service_name,
+            subscriptions.mode = %"passthrough",
+            subgraph.service.name = service_name,
         );
 
         // Dedup happens here
