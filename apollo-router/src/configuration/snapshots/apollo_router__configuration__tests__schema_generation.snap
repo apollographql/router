@@ -1363,7 +1363,7 @@ expression: "&schema"
                               "type": "string"
                             },
                             "assume_role": {
-                              "description": "Specify a role ARN for your credentials.",
+                              "description": "Specify assumed role configuration.",
                               "type": "object",
                               "required": [
                                 "role_arn",
@@ -1419,7 +1419,7 @@ expression: "&schema"
                           ],
                           "properties": {
                             "assume_role": {
-                              "description": "Specify a role ARN for your credentials.",
+                              "description": "Specify assumed role configuration.",
                               "type": "object",
                               "required": [
                                 "role_arn",
@@ -1503,7 +1503,7 @@ expression: "&schema"
                                 "type": "string"
                               },
                               "assume_role": {
-                                "description": "Specify a role ARN for your credentials.",
+                                "description": "Specify assumed role configuration.",
                                 "type": "object",
                                 "required": [
                                   "role_arn",
@@ -1559,7 +1559,7 @@ expression: "&schema"
                             ],
                             "properties": {
                               "assume_role": {
-                                "description": "Specify a role ARN for your credentials.",
+                                "description": "Specify assumed role configuration.",
                                 "type": "object",
                                 "required": [
                                   "role_arn",

@@ -40,7 +40,7 @@ struct AWSSigV4HardcodedConfig {
     region: String,
     /// The service you're trying to access, eg: "s3", "vpc-lattice-svcs", etc.
     service_name: String,
-    /// Specify a role ARN for your credentials.
+    /// Specify assumed role configuration.
     assume_role: Option<AssumeRoleProvider>,
 }
 
@@ -70,11 +70,11 @@ struct DefaultChainConfig {
     profile_name: Option<String>,
     /// The service you're trying to access, eg: "s3", "vpc-lattice-svcs", etc.
     service_name: String,
-    /// Specify a role ARN for your credentials.
+    /// Specify assumed role configuration.
     assume_role: Option<AssumeRoleProvider>,
 }
 
-/// Specify a role ARN for your credentials.
+/// Specify assumed role configuration.
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 struct AssumeRoleProvider {
     /// Amazon Resource Name (ARN)
