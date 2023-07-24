@@ -293,22 +293,22 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             request.subscription_stream.clone().ok_or_else(|| {
                                 FetchError::SubrequestWsError {
                                     service: service_name.clone(),
-                                    reason: "cannot get the websocket stream".to_string(),
+                                    reason: "cannot get the callback stream".to_string(),
                                 }
                             })?;
                         stream_tx.send(handle.into_stream()).await?;
-
+                        tracing::info!(
+                            monotonic_counter.apollo.router.operations.subscriptions = 1u64,
+                            subscriptions.mode = %"callback",
+                            subscriptions.deduplicated = !created,
+                            subgraph.service.name = service_name,
+                        );
                         if !created {
-                            let operation_name = context.operation_name().unwrap_or_default();
                             tracing::info!(
                                 monotonic_counter.apollo_router_deduplicated_subscriptions_total = 1u64,
                                 mode = %"callback",
                             );
-                            tracing::info!(
-                                monotonic_counter.apollo.router.operations.subscriptions = 1u64,
-                                subscriptions.mode = %"callback",
-                                subgraph.service.name = service_name,
-                            );
+
                             // Dedup happens here
                             return Ok(SubgraphResponse::builder()
                                 .context(context)
@@ -437,11 +437,6 @@ async fn call_websocket(
         subscription_stream,
         ..
     } = request;
-    let operation_name = subgraph_request
-        .body()
-        .operation_name
-        .clone()
-        .unwrap_or_default();
     let mut subscription_stream_tx =
         subscription_stream.ok_or_else(|| FetchError::SubrequestWsError {
             service: service_name.clone(),
@@ -451,17 +446,18 @@ async fn call_websocket(
     let (handle, created) = notify
         .create_or_subscribe(subscription_hash.clone(), false)
         .await?;
+    let operation_name = context.operation_name().unwrap_or_default();
+    tracing::info!(
+        monotonic_counter.apollo.router.operations.subscriptions = 1u64,
+        subscriptions.mode = %"passthrough",
+        subscriptions.deduplicated = !created,
+        subgraph.service.name = service_name,
+    );
     if !created {
         subscription_stream_tx.send(handle.into_stream()).await?;
         tracing::info!(
             monotonic_counter.apollo_router_deduplicated_subscriptions_total = 1u64,
             mode = %"passthrough",
-        );
-        let operation_name = context.operation_name().unwrap_or_default();
-        tracing::info!(
-            monotonic_counter.apollo.router.operations.subscriptions = 1u64,
-            subscriptions.mode = %"passthrough",
-            subgraph.service.name = service_name,
         );
 
         // Dedup happens here

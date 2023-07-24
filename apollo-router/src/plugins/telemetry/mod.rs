@@ -780,7 +780,6 @@ impl Telemetry {
                 .collect::<Vec<KeyValue>>()
         })
         .unwrap_or_default();
-        let operation_name = context.operation_name().unwrap_or_default();
         let res = match result {
             Ok(response) => {
                 metric_attrs.push(KeyValue::new(
