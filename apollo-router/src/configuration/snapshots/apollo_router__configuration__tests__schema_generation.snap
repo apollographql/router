@@ -1349,7 +1349,7 @@ expression: "&schema"
                       ],
                       "properties": {
                         "hardcoded": {
-                          "description": "Hardcoded Config using assess_key and secret. Prefer using DefaultChain instead.",
+                          "description": "Hardcoded Config using access_key and secret. Prefer using DefaultChain instead.",
                           "type": "object",
                           "required": [
                             "access_key_id",
@@ -1387,7 +1387,7 @@ expression: "&schema"
                               "nullable": true
                             },
                             "region": {
-                              "description": "The aws region this chain applies to.",
+                              "description": "The AWS region this chain applies to.",
                               "type": "string"
                             },
                             "secret_access_key": {
@@ -1448,7 +1448,7 @@ expression: "&schema"
                               "nullable": true
                             },
                             "region": {
-                              "description": "The aws region this chain applies to.",
+                              "description": "The AWS region this chain applies to.",
                               "type": "string"
                             },
                             "service_name": {
@@ -1489,7 +1489,7 @@ expression: "&schema"
                         ],
                         "properties": {
                           "hardcoded": {
-                            "description": "Hardcoded Config using assess_key and secret. Prefer using DefaultChain instead.",
+                            "description": "Hardcoded Config using access_key and secret. Prefer using DefaultChain instead.",
                             "type": "object",
                             "required": [
                               "access_key_id",
@@ -1527,7 +1527,7 @@ expression: "&schema"
                                 "nullable": true
                               },
                               "region": {
-                                "description": "The aws region this chain applies to.",
+                                "description": "The AWS region this chain applies to.",
                                 "type": "string"
                               },
                               "secret_access_key": {
@@ -1588,7 +1588,7 @@ expression: "&schema"
                                 "nullable": true
                               },
                               "region": {
-                                "description": "The aws region this chain applies to.",
+                                "description": "The AWS region this chain applies to.",
                                 "type": "string"
                               },
                               "service_name": {

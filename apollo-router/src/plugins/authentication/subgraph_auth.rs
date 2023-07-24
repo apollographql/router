@@ -27,7 +27,7 @@ use crate::services::SubgraphRequest;
 
 register_plugin!("apollo", "subgraph_authentication", SubgraphAuth);
 
-/// Hardcoded Config using assess_key and secret.
+/// Hardcoded Config using access_key and secret.
 /// Prefer using DefaultChain instead.
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -36,7 +36,7 @@ struct AWSSigV4HardcodedConfig {
     access_key_id: String,
     /// The secret key used to sign requests.
     secret_access_key: String,
-    /// The aws region this chain applies to.
+    /// The AWS region this chain applies to.
     region: String,
     /// The service you're trying to access, eg: "s3", "vpc-lattice-svcs", etc.
     service_name: String,
@@ -64,7 +64,7 @@ impl ProvideCredentials for AWSSigV4HardcodedConfig {
 /// Configuration of the DefaultChainProvider
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 struct DefaultChainConfig {
-    /// The aws region this chain applies to.
+    /// The AWS region this chain applies to.
     region: String,
     /// The profile name used by this provider
     profile_name: Option<String>,
