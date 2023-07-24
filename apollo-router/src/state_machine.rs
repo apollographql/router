@@ -39,7 +39,7 @@ use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
 use crate::ApolloRouterError::NoLicense;
 
-const STATE_RELOAD_EVENT: &str = "state reload event";
+const STATE_CHANGE: &str = "state change";
 
 #[derive(Default, Clone)]
 pub(crate) struct ListenAddresses {
@@ -170,8 +170,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     && *license != LicenseState::Unlicensed
                 {
                     tracing::info!(
-                        status = "ignoring reload because of loss of license",
-                        message = STATE_RELOAD_EVENT
+                        event = STATE_CHANGE,
+                        "ignoring reload because of loss of license"
                     );
                     return self;
                 }
@@ -201,8 +201,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     new_schema = schema_reload,
                     new_license = license_reload,
                     new_configuration = configuration_reload,
-                    status = "starting",
-                    message = STATE_RELOAD_EVENT
+                    event = STATE_CHANGE,
+                    "processing event"
                 );
 
                 let need_reload = schema_reload || license_reload || configuration_reload;
@@ -229,8 +229,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                                 new_schema = schema_reload,
                                 new_license = license_reload,
                                 new_configuration = configuration_reload,
-                                status = "complete",
-                                message = STATE_RELOAD_EVENT
+                                event = STATE_CHANGE,
+                                "reload complete"
                             );
                             Some(new_state)
                         }
@@ -240,13 +240,13 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                                 None => {
                                     tracing::error!(
                                         error = %e,
-                                        status = "fatal error while trying to reload",
-                                        message = STATE_RELOAD_EVENT
+                                        event = STATE_CHANGE,
+                                        "fatal error while trying to reload"
                                     );
                                     Some(Errored(e))
                                 }
                                 Some(_) => {
-                                    tracing::error!(error = %e, status = "error while reloading, continuing with previous configuration", message = STATE_RELOAD_EVENT);
+                                    tracing::error!(error = %e, event = STATE_CHANGE, "error while reloading, continuing with previous configuration");
                                     None
                                 }
                             }
@@ -257,8 +257,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         new_schema = schema_reload,
                         new_license = license_reload,
                         new_configuration = configuration_reload,
-                        status = "complete",
-                        message = STATE_RELOAD_EVENT
+                        event = STATE_CHANGE,
+                        "no reload necessary"
                     );
                 }
             }
