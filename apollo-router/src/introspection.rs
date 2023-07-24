@@ -110,6 +110,7 @@ mod introspection_tests {
                         enable_defer: Some(true),
                     }),
                     graphql_validation: true,
+                    reuse_query_fragments: Some(false),
                 },
             )
             .await

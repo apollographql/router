@@ -125,6 +125,7 @@ Here's an example router configuration snippet that sets up subgraph subscriptio
 
 ```yaml title="router.yaml"
 subscription:
+  enabled: true
   mode:
     passthrough:
       all: # The router uses these subscription settings UNLESS overridden per-subgraph
@@ -173,6 +174,7 @@ Here's an example configuration that sets up subgraph subscriptions in callback 
 
 ```yaml title="router.yaml"
 subscription:
+  enabled: true
   mode:
     preview_callback:
       public_url: https://example.com:4000 # The router's public URL
@@ -188,6 +190,7 @@ If some of your subgraphs require [passthrough mode](#websocket-setup) and other
 
 ```yaml title="router.yaml"
 subscription:
+  enabled: true
   mode:
     passthrough:
       subgraphs:
@@ -351,6 +354,7 @@ You can disable subscription deduplication by adding the following to your route
 
 ```yaml title="router.yaml"
 subscription:
+  enabled: true
 # highlight-start
   enable_deduplication: false # default: true
 # highlight-end
@@ -411,6 +415,7 @@ You can configure the size of each event queue in your router's YAML config file
 
 ```yaml title="router.yaml"
 subscription:
+  enabled: true
   queue_capacity: 100000 # Default: 128
 ```
 
@@ -426,6 +431,7 @@ Client subscriptions are [long-lived HTTP connections](#how-it-works), which mea
 
 ```yaml title="router.yaml"
 subscription:
+  enabled: true
   #highlight-start
   max_opened_subscriptions: 150 # Only 150 simultaneous connections allowed
   #highlight-end

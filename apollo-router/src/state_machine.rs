@@ -1202,9 +1202,10 @@ mod tests {
                     move |_configuration: &Arc<Configuration>,
                           _,
                           previous_router_service_factory: &Option<&MockMyRouterFactory>,
-                          _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>| {
-                        previous_router_service_factory.is_some()
-                    },
+                          _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>|
+                          {
+                            previous_router_service_factory.is_some()
+                          },
                 )
                 .returning(move |_, _, _, _| {
                     let mut router = MockMyRouterFactory::new();
