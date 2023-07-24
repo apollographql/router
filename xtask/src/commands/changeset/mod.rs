@@ -376,66 +376,66 @@ impl Create {
 
                             match pr_info_opt {
                                 Some(pr_info) => {
-                                let issues= pr_info.closing_issues_references.as_ref().map(|i| {
-                                    i.nodes.as_ref().unwrap().iter().map(|j| {
-                                        j.as_ref().unwrap()
-                                    })
-                                }).unwrap().filter(|p| {
-                                    p.repository.name_with_owner == REPO_WITH_OWNER
-                                }).map(|p| {
-                                    TemplateResource {
-                                        number: p.number.to_string(),
-                                        url: p.url.to_string(),
+                                    let issues= pr_info.closing_issues_references.as_ref().map(|i| {
+                                        i.nodes.as_ref().unwrap().iter().map(|j| {
+                                            j.as_ref().unwrap()
+                                        })
+                                    }).unwrap().filter(|p| {
+                                        p.repository.name_with_owner == REPO_WITH_OWNER
+                                    }).map(|p| {
+                                        TemplateResource {
+                                            number: p.number.to_string(),
+                                            url: p.url.to_string(),
+                                        }
+                                    });
+
+                                    let pr_body = pr_info.body.clone().replace("\r\n", "\n");
+
+                                    // Remove the trailing part of the checklist from the PR body.
+                                    // In the future, we will use the "start metadata" HTML tag, but for now,
+                                    // we support both.
+                                    let pr_body_trailer_regex = regex::Regex::new(
+                                    r"(?ms)(^<!-- start metadata -->\n$\n)?^\*\*Checklist\*\*$[\s\S]*",
+                                    )?;
+
+                                    // Remove all the "Fixes" references, since we're already going to reference
+                                    // those in the course of generating the template.
+                                    let pr_body_fixes_regex = regex::Regex::new(
+                                        r"(?m)^(- )?Fix(es)? #.*$",
+                                    )?;
+
+                                    // Run the above Regexes and trim the blurb.
+                                    let clean_pr_body = pr_body_fixes_regex
+                                        .replace_all(pr_body_trailer_regex
+                                        .replace(&pr_body, "")
+                                        .trim(), "")
+                                        .trim()
+                                        .to_string();
+
+                                    TemplateContext {
+                                        title: pr_info.title.clone(),
+                                        issues: issues.collect_vec(),
+                                        pulls: vec!(TemplateResource {
+                                            number: pr_info.number.to_string(),
+                                            url: pr_info.url.to_string(),
+                                        }),
+                                        body: clean_pr_body,
+                                        author: pr_info.author.as_ref().unwrap().login.to_string(),
                                     }
-                                });
-
-                                let pr_body = pr_info.body.clone().replace("\r\n", "\n");
-
-                                // Remove the trailing part of the checklist from the PR body.
-                                // In the future, we will use the "start metadata" HTML tag, but for now,
-                                // we support both.
-                                let pr_body_trailer_regex = regex::Regex::new(
-                                r"(?ms)(^<!-- start metadata -->\n$\n)?^\*\*Checklist\*\*$[\s\S]*",
-                                )?;
-
-                                // Remove all the "Fixes" references, since we're already going to reference
-                                // those in the course of generating the template.
-                                let pr_body_fixes_regex = regex::Regex::new(
-                                    r"(?m)^(- )?Fix(es)? #.*$",
-                                )?;
-
-                                // Run the above Regexes and trim the blurb.
-                                let clean_pr_body = pr_body_fixes_regex
-                                    .replace_all(pr_body_trailer_regex
-                                    .replace(&pr_body, "")
-                                    .trim(), "")
-                                    .trim()
-                                    .to_string();
-
-                                TemplateContext {
-                                    title: pr_info.title.clone(),
-                                    issues: issues.collect_vec(),
-                                    pulls: vec!(TemplateResource {
-                                        number: pr_info.number.to_string(),
-                                        url: pr_info.url.to_string(),
-                                    }),
-                                    body: clean_pr_body,
-                                    author: pr_info.author.as_ref().unwrap().login.to_string(),
+                                },
+                                None => {
+                                    // TODO In a follow-up we should figure out how forks work with the GitHub API.
+                                    println!(
+                                        "{} {} {} {} {}",
+                                        style("The changeset will be").magenta(),
+                                        style("generic").red().bold(),
+                                        style("as we didn't find any PRs on GitHub for").magenta(),
+                                        style(&branch_name.as_ref().unwrap()).green(),
+                                        style("! (We don't support forks right now.)")
+                                    );
+                                    default_context
                                 }
-                            },
-                            None => {
-                                // TODO In a follow-up we should figure out how forks work with the GitHub API.
-                                println!(
-                                    "{} {} {} {} {}",
-                                    style("The changeset will be").magenta(),
-                                    style("generic").red().bold(),
-                                    style("as we didn't find any PRs on GitHub for").magenta(),
-                                    style(&branch_name.as_ref().unwrap()).green(),
-                                    style("! (We don't support forks right now.)")
-                                );
-                                default_context
                             }
-                        }
                         }
                     }
                 } else {
