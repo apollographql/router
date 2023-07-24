@@ -94,6 +94,78 @@ enum AWSSigV4Config {
     DefaultChain(DefaultChainConfig),
 }
 
+impl AWSSigV4Config {
+    async fn get_credentials_provider(&self) -> Arc<dyn ProvideCredentials> {
+        let region = self.region();
+
+        let role_provider_builder = self.assume_role().map(|assume_role_provider| {
+            let rp =
+                aws_config::sts::AssumeRoleProvider::builder(assume_role_provider.role_arn.clone())
+                    .session_name(assume_role_provider.session_name.clone())
+                    .region(region.clone());
+            if let Some(external_id) = &assume_role_provider.external_id {
+                rp.external_id(external_id.as_str())
+            } else {
+                rp
+            }
+        });
+
+        match self {
+            Self::DefaultChain(config) => {
+                let aws_config =
+                    aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
+                        .region(region.clone());
+
+                let aws_config = if let Some(profile_name) = &config.profile_name {
+                    aws_config.profile_name(profile_name.as_str())
+                } else {
+                    aws_config
+                };
+
+                let chain = aws_config.build().await;
+                if let Some(assume_role_provider) = role_provider_builder {
+                    Arc::new(assume_role_provider.build(chain))
+                } else {
+                    Arc::new(chain)
+                }
+            }
+            Self::Hardcoded(config) => {
+                let chain =
+                    aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
+                        .build()
+                        .await;
+                if let Some(assume_role_provider) = role_provider_builder {
+                    Arc::new(assume_role_provider.build(chain))
+                } else {
+                    Arc::new(config.clone())
+                }
+            }
+        }
+    }
+
+    fn region(&self) -> Region {
+        let region = match self {
+            Self::DefaultChain(config) => config.region.clone(),
+            Self::Hardcoded(config) => config.region.clone(),
+        };
+        aws_types::region::Region::new(region)
+    }
+
+    fn service_name(&self) -> String {
+        match self {
+            Self::DefaultChain(config) => config.service_name.clone(),
+            Self::Hardcoded(config) => config.service_name.clone(),
+        }
+    }
+
+    fn assume_role(&self) -> Option<AssumeRoleProvider> {
+        match self {
+            Self::DefaultChain(config) => config.assume_role.clone(),
+            Self::Hardcoded(config) => config.assume_role.clone(),
+        }
+    }
+}
+
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(deny_unknown_fields)]
 enum AuthConfig {
@@ -156,7 +228,6 @@ impl Plugin for SubgraphAuth {
             .checkpoint_async(move |mut req: SubgraphRequest| {
                 let signing_params = signing_params.clone();
                 async move {
-                    let signing_params = signing_params.clone();
                 if let Some(credentials_provider) = &signing_params.credentials_provider {
                     let credentials = match credentials_provider.provide_credentials().await {
                         Ok(credentials) => credentials,
@@ -165,8 +236,9 @@ impl Plugin for SubgraphAuth {
                                 "Failed to serialize GraphQL body for AWS SigV4 signing, skipping signing. Error: {}",
                                 err
                             );
-                                return Ok(ControlFlow::Continue(req));
+                            return Ok(ControlFlow::Continue(req));
                         }};
+
                     let settings = get_signing_settings(&signing_params);
                     let mut builder = http_request::SigningParams::builder()
                         .access_key(credentials.access_key_id())
@@ -207,7 +279,7 @@ impl Plugin for SubgraphAuth {
                         }
                     }.into_parts();
                     signing_instructions.apply_to_request(&mut req.subgraph_request);
-                     Ok(ControlFlow::Continue(req))
+                    Ok(ControlFlow::Continue(req))
                 } else {
                     Ok(ControlFlow::Continue(req))
                 }
@@ -223,72 +295,12 @@ impl Plugin for SubgraphAuth {
 
 async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
     match config {
-        AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(config)) => {
-            let region = aws_types::region::Region::new(config.region.clone());
-
-            let chain =
-                aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
-                    .build()
-                    .await;
-            let credentials_provider: Arc<dyn ProvideCredentials> =
-                if let Some(assume_role_provider) = &config.assume_role {
-                    let rp = aws_config::sts::AssumeRoleProvider::builder(
-                        assume_role_provider.role_arn.clone(),
-                    )
-                    .session_name(assume_role_provider.session_name.clone())
-                    .region(region.clone());
-                    let rp = if let Some(external_id) = &assume_role_provider.external_id {
-                        rp.external_id(external_id.as_str())
-                    } else {
-                        rp
-                    };
-
-                    Arc::new(rp.build(chain))
-                } else {
-                    Arc::new(config.clone())
-                };
+        AuthConfig::AWSSigV4(config) => {
+            let credentials_provider = config.get_credentials_provider().await;
             SigningParamsConfig {
-                region,
-                service_name: config.service_name.clone(),
+                region: config.region(),
+                service_name: config.service_name(),
                 credentials_provider: Some(credentials_provider),
-            }
-        }
-        AuthConfig::AWSSigV4(AWSSigV4Config::DefaultChain(config)) => {
-            let region = aws_types::region::Region::new(config.region.clone());
-
-            let aws_config =
-                aws_config::default_provider::credentials::DefaultCredentialsChain::builder()
-                    .region(region.clone());
-
-            let aws_config = if let Some(profile_name) = &config.profile_name {
-                aws_config.profile_name(profile_name.as_str())
-            } else {
-                aws_config
-            };
-
-            let chain = aws_config.build().await;
-
-            let credentials_provider: Arc<dyn ProvideCredentials> =
-                if let Some(assume_role_provider) = &config.assume_role {
-                    let rp = aws_config::sts::AssumeRoleProvider::builder(
-                        assume_role_provider.role_arn.clone(),
-                    )
-                    .session_name(assume_role_provider.session_name.clone())
-                    .region(region.clone());
-                    let rp = if let Some(external_id) = &assume_role_provider.external_id {
-                        rp.external_id(external_id.as_str())
-                    } else {
-                        rp
-                    };
-
-                    Arc::new(rp.build(chain))
-                } else {
-                    Arc::new(chain)
-                };
-            SigningParamsConfig {
-                credentials_provider: Some(credentials_provider),
-                region,
-                service_name: config.service_name.clone(),
             }
         }
     }
