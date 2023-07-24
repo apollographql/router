@@ -471,7 +471,12 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_reloaded(&mut self) {
-        self.assert_log_contains("state reload event").await;
+        self.assert_log_contains("reload complete").await;
+    }
+
+    #[allow(dead_code)]
+    pub async fn assert_no_reload_necessary(&mut self) {
+        self.assert_log_contains("no reload necessary").await;
     }
 
     #[allow(dead_code)]

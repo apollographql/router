@@ -151,7 +151,7 @@ async fn test_force_reload() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
     tokio::time::sleep(Duration::from_secs(2)).await;
-    router.assert_reloaded().await;
+    router.assert_no_reload_necessary().await;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -166,7 +166,7 @@ async fn test_reload_via_sighup() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
     router.send_sighup().await;
-    router.assert_reloaded().await;
+    router.assert_no_reload_necessary().await;
     router.graceful_shutdown().await;
     Ok(())
 }
