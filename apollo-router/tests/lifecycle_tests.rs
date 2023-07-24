@@ -88,12 +88,12 @@ async fn test_reload_config_with_broken_plugin() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_reload_config_with_broken_plugin_recovery() -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(HAPPY_CONFIG)
-        .build()
-        .await;
     for i in 0..3 {
         println!("iteration {i}");
+        let mut router = IntegrationTest::builder()
+            .config(HAPPY_CONFIG)
+            .build()
+            .await;
         router.start().await;
         router.assert_started().await;
         router.execute_default_query().await;
