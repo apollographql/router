@@ -88,12 +88,12 @@ async fn test_reload_config_with_broken_plugin() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_reload_config_with_broken_plugin_recovery() -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(HAPPY_CONFIG)
-        .build()
-        .await;
     for i in 0..3 {
         println!("iteration {i}");
+        let mut router = IntegrationTest::builder()
+            .config(HAPPY_CONFIG)
+            .build()
+            .await;
         router.start().await;
         router.assert_started().await;
         router.execute_default_query().await;
@@ -151,7 +151,7 @@ async fn test_force_reload() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
     tokio::time::sleep(Duration::from_secs(2)).await;
-    router.assert_reloaded().await;
+    router.assert_no_reload_necessary().await;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -166,7 +166,7 @@ async fn test_reload_via_sighup() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
     router.send_sighup().await;
-    router.assert_reloaded().await;
+    router.assert_no_reload_necessary().await;
     router.graceful_shutdown().await;
     Ok(())
 }

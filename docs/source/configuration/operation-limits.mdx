@@ -123,3 +123,24 @@ You can enable or disable `warn_only` mode in your router's [YAML config file](.
 limits:
   warn_only: true # warn_only mode always enabled
 ```
+
+## Response format for exceeded limits
+
+Whenever your router rejects a request because it exceeds an operation limit, the router responds with a 400 HTTP status code and a standard GraphQL error response body:
+
+```json5
+# HTTP 400
+{
+  "data": {},
+  "errors": [
+    {
+      "message": "Maximum height (field count) limit exceeded in this operation",
+      "extensions": {
+        "code": "MAX_HEIGHT_LIMIT"
+      }
+    }
+  ]
+}
+```
+
+If you run your router in [`warn_only` mode](#warn_only-mode), the router logs the limit violation but executes the operation as normal, returning a 200 status code with the expected response.

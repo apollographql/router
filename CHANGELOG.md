@@ -4,7 +4,92 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.25.0] - 2023-07-19
+
+## 🚀 Features
+
+### Persisted Queries w/opt-in safelisting (preview) ([PR #3347](https://github.com/apollographql/router/pull/3347))
+
+Persisted Queries is an upcoming feature that helps you prevent unwanted traffic from reaching your graph. It's in private preview and isn't available unless your enterprise organization has been granted preview access by Apollo.
+
+Persisted Queries has two modes of operation:
+* **Unregistered operation monitoring**
+  * Your router allows all GraphQL operations, while emitting structured traces containing unregistered operation bodies.
+* **Operation safelisting**
+  * Your router rejects unregistered operations.
+  * Your router requires all operations to be sent as an ID.
+
+Unlike automatic persisted queries (APQ), an operation safelist lets you prevent malicious actors from constructing a free-format query that could overload your subgraph services.
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/3347
+
+## 🐛 Fixes
+
+### Fix issues around query fragment reuse
+
+[Federation 2.4.9](https://github.com/apollographql/federation/blob/main/gateway-js/CHANGELOG.md#249) contained a bug around query fragment reuse. The change was reverted in [2.4.10](https://github.com/apollographql/federation/blob/main/gateway-js/CHANGELOG.md#249)
+
+The version of federation used by the Router is now 2.4.10.
+
+By @BrynCooke in https://github.com/apollographql/router/pull/3453
+
+### Fix prometheus statistics issues with _total_total names([Issue #3443](https://github.com/apollographql/router/issues/3443))
+
+When producing prometheus statistics the otel crate (0.19.0) now automatically appends `_total` which is unhelpful.
+
+This fix removes `_total_total` from our statistics. However, counter metrics will still have `_total` appended to them if they did not so already.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3471
+
+### Enforce default buckets for metrics ([PR #3432](https://github.com/apollographql/router/pull/3432))
+
+When `telemetry.metrics.common` was not configured, no default metrics buckets were configured.
+With this fix the default buckets are: `[0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0]`
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3432
+
+## 📃 Configuration
+
+### Add `subscription.enabled` field to enable subscription support ([Issue #3428](https://github.com/apollographql/router/issues/3428))
+
+`enabled` is now required in `subscription` configuration. Example:
+
+```yaml
+subscription:
+  enabled: true
+  mode:
+    passthrough:
+      all:
+        path: /ws
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3450
+
+### Add option to disable reuse of query fragments  ([Issue #3452](https://github.com/apollographql/router/issues/3452))
+
+A new option has been added to the Router to allow disabling of the reuse of query fragments. This is useful for debugging purposes.
+```yaml
+supergraph:
+  experimental_reuse_query_fragments: false
+```
+
+The default value depends on the version of federation.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3453
+
+## 🛠 Maintenance
+
+### Coprocessor: Set a default pool idle timeout duration. ([PR #3434](https://github.com/apollographql/router/pull/3434))
+
+The default idle pool timeout duration in Hyper can sometimes trigger situations in which an HTTP request cannot complete (see [this comment](https://github.com/hyperium/hyper/issues/2136#issuecomment-589488526) for more information).
+
+This changeset sets a default timeout duration of 5 seconds.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3434
+
 # [1.24.0] - 2023-07-13
+
+***Note that this release contains a bug in query planning around query fragment reuse and should not be used. If upgrading, consider going straight to 1.25.0.*** 
 
 ## 🚀 Features
 
@@ -172,6 +257,10 @@ To maintain backwards compatibility; query parameters named "ready" and "live" h
 
 Sample queries:
 
+```
+curl -XPOST "http://localhost:8088/health?ready" OR curl  "http://localhost:8088/health?ready"
+curl -XPOST "http://localhost:8088/health?live" OR curl "http://localhost:8088/health?live"
+```
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3276
 
