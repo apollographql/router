@@ -2,7 +2,7 @@
 
 [router](https://github.com/apollographql/router) Rust Graph Routing runtime for Apollo Federation
 
-![Version: 1.25.0](https://img.shields.io/badge/Version-1.25.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.25.0](https://img.shields.io/badge/AppVersion-v1.25.0-informational?style=flat-square)
+![Version: 1.26.0-alpha.0](https://img.shields.io/badge/Version-1.26.0--alpha.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.26.0-alpha.0](https://img.shields.io/badge/AppVersion-v1.26.0--alpha.0-informational?style=flat-square)
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@
 ## Get Repo Info
 
 ```console
-helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.25.0
+helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.26.0-alpha.0
 ```
 
 ## Install Chart
@@ -19,7 +19,7 @@ helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.25.0
 **Important:** only helm3 is supported
 
 ```console
-helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.25.0 --values my-values.yaml
+helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.26.0-alpha.0 --values my-values.yaml
 ```
 
 _See [configuration](#configuration) below._
@@ -69,6 +69,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | nameOverride | string | `""` |  |
 | nodeSelector | object | `{}` |  |
 | podAnnotations | object | `{}` |  |
+| podDisruptionBudget | object | `{}` | Sets the [pod disruption budget](https://kubernetes.io/docs/tasks/run-application/configure-pdb/) for Deployment pods |
 | podSecurityContext | object | `{}` |  |
 | priorityClassName | string | `""` | Set to existing PriorityClass name to control pod preemption by the scheduler |
 | probes.liveness | object | `{"initialDelaySeconds":0}` | Configure liveness probe |
