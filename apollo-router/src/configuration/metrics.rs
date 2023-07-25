@@ -160,7 +160,11 @@ impl Metrics {
         );
         log_usage_metrics!(
             value.apollo.router.config.authentication.jwt,
-            "$.authentication.jwt"
+            "$.authentication[?(@.jwt)]"
+        );
+        log_usage_metrics!(
+            value.apollo.router.config.authentication.sigv4,
+            "$.authentication[?(@.subgraph..sigv4)]"
         );
         log_usage_metrics!(
             value.apollo.router.config.authorization,
