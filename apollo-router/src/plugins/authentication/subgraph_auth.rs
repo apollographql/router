@@ -207,14 +207,17 @@ impl Plugin for SubgraphAuth {
     type Config = Config;
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let all = if let Some(config) = &init.config.all {
-            Some(make_signing_params(config).await)
+            Some(make_signing_params(config, "all").await?)
         } else {
             None
         };
 
         let mut subgraphs: HashMap<String, SigningParamsConfig> = Default::default();
         for (subgraph_name, config) in &init.config.subgraphs {
-            subgraphs.insert(subgraph_name.clone(), make_signing_params(config).await);
+            subgraphs.insert(
+                subgraph_name.clone(),
+                make_signing_params(config, subgraph_name.as_str()).await?,
+            );
         }
 
         Ok(SubgraphAuth {
@@ -293,15 +296,31 @@ impl Plugin for SubgraphAuth {
     }
 }
 
-async fn make_signing_params(config: &AuthConfig) -> SigningParamsConfig {
+async fn make_signing_params(
+    config: &AuthConfig,
+    subgraph_name: &str,
+) -> Result<SigningParamsConfig, BoxError> {
     match config {
         AuthConfig::AWSSigV4(config) => {
             let credentials_provider = config.get_credentials_provider().await;
-            SigningParamsConfig {
+            if let Err(e) = credentials_provider.provide_credentials().await {
+                let error_subgraph_name = if subgraph_name == "all" {
+                    "all subgraphs".to_string()
+                } else {
+                    format!("{} subgraph", subgraph_name)
+                };
+                return Err(format!(
+                    "auth: {}: couldn't get credentials from provider: {}",
+                    error_subgraph_name, e,
+                )
+                .into());
+            }
+
+            Ok(SigningParamsConfig {
                 region: config.region(),
                 service_name: config.service_name(),
                 credentials_provider: Some(credentials_provider),
-            }
+            })
         }
     }
 }
