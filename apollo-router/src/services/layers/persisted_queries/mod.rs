@@ -9,6 +9,7 @@ use http::HeaderValue;
 use id_extractor::PersistedQueryIdExtractor;
 pub(crate) use manifest_poller::PersistedQueryManifestPoller;
 use tower::BoxError;
+use tracing_core::field::Value;
 
 use crate::configuration::PersistedQueriesSafelist;
 use crate::graphql::Error as GraphQLError;
@@ -169,12 +170,17 @@ impl PersistedQueryLayer {
                 let mut body = request.supergraph_request.body_mut();
                 body.query = Some(persisted_query_body);
                 body.extensions.remove("persistedQuery");
+                tracing::info!(monotonic_counter.apollo.router.operations.persisted_queries = 1u64);
                 Ok(request)
             } else if self.apq_enabled {
                 // if APQ is also enabled, pass the request along to the APQ plugin
                 // where it will do its own lookup
                 Ok(request)
             } else {
+                tracing::info!(
+                    monotonic_counter.apollo.router.operations.persisted_queries = 1u64,
+                    persisted_quieries.not_found = true
+                );
                 // if APQ is not enabled, return an error indicating the query was not found
                 Err(supergraph_err_operation_not_found(
                     request,
@@ -203,25 +209,40 @@ impl PersistedQueryLayer {
 
             let mut is_persisted = None;
 
-            if self.log_unknown
-                && !is_operation_persisted(
-                    &mut is_persisted,
-                    manifest_poller.clone(),
-                    operation_body,
-                )
-            {
+            let known =
+                is_operation_persisted(&mut is_persisted, manifest_poller.clone(), operation_body);
+            let logged = self.log_unknown && !known;
+            if logged {
                 tracing::warn!(message = "unknown operation", operation_body);
             }
 
+            let logged_attr = if logged {
+                &logged as &dyn Value
+            } else {
+                &tracing::field::Empty
+            };
+
             if self.safelist_config.enabled {
                 if self.safelist_config.require_id {
+                    tracing::info!(
+                        monotonic_counter.apollo.router.operations.persisted_queries = 1u64,
+                        persisted_queries.safelist.rejected.missing_id = true,
+                        persisted_queries.logged = %logged_attr
+                    );
                     Err(supergraph_err_pq_id_required(request))
-                } else if is_operation_persisted(&mut is_persisted, manifest_poller, operation_body)
-                {
+                } else if known {
+                    tracing::info!(
+                        monotonic_counter.apollo.router.operations.persisted_queries = 1u64,
+                    );
                     // if the freeform GraphQL body we received was found in the manifest,
                     // allow the request to continue execution
                     Ok(request)
                 } else {
+                    tracing::info!(
+                        monotonic_counter.apollo.router.operations.persisted_queries = 1u64,
+                        persisted_queries.safelist.rejected.unknown = true,
+                        persisted_queries.logged = %logged_attr
+                    );
                     Err(supergraph_err_operation_not_in_safelist(request))
                 }
             } else {

@@ -260,7 +260,6 @@ pub trait Plugin: Send + Sync + 'static {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
     where
         Self: Sized;
-
     /// This function is EXPERIMENTAL and its signature is subject to change.
     ///
     /// This service runs at the very beginning and very end of the request lifecycle.
