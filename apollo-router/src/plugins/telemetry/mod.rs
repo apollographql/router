@@ -1147,7 +1147,7 @@ impl Telemetry {
             Ok(router_response) => {
                 let http_status_is_success = router_response.response.status().is_success();
 
-                // Only send the subscription-request metric if it's an http status in error because we won't enter the stream after.
+                // Only send the subscription-request metric if it's an http status in error because we won't always enter the stream after.
                 if operation_kind == OperationKind::Subscription && !http_status_is_success {
                     Self::update_apollo_metrics(
                         ctx,
@@ -1171,6 +1171,7 @@ impl Telemetry {
                             if !matches!(sender, Sender::Noop) {
                                 if operation_kind == OperationKind::Subscription {
                                     // The first empty response is always a heartbeat except if it's an error
+                                    // Don't count for subscription-request if http status was in error because it has been counted before
                                     if idx == 0 && http_status_is_success {
                                         Self::update_apollo_metrics(
                                             &ctx,
