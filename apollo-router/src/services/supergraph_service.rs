@@ -1,5 +1,6 @@
 //! Implements the router phase of the request lifecycle.
 
+use std::ops::Deref;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::Poll;
@@ -37,7 +38,7 @@ use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
 use crate::context::OPERATION_NAME;
-use crate::error::CacheResolverError;
+use crate::error::{CacheResolverError, QueryPlannerError};
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
@@ -78,6 +79,7 @@ pub(crate) struct SupergraphService {
     execution_service_factory: ExecutionServiceFactory,
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     schema: Arc<Schema>,
+    configuration: Arc<Configuration>,
 }
 
 #[buildstructor::buildstructor]
@@ -87,11 +89,13 @@ impl SupergraphService {
         query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
         execution_service_factory: ExecutionServiceFactory,
         schema: Arc<Schema>,
+        configuration: Arc<Configuration>,
     ) -> Self {
         SupergraphService {
             query_planner_service,
             execution_service_factory,
             schema,
+            configuration,
         }
     }
 }
@@ -113,13 +117,12 @@ impl Service<SupergraphRequest> for SupergraphService {
 
         let planning = std::mem::replace(&mut self.query_planner_service, clone);
 
-        let schema = self.schema.clone();
-
         let context_cloned = req.context.clone();
         let fut = service_call(
             planning,
             self.execution_service_factory.clone(),
-            schema,
+            self.schema.clone(),
+            self.configuration.clone(),
             req,
         )
         .or_else(|error: BoxError| async move {
@@ -150,6 +153,7 @@ async fn service_call(
     planning: CachingQueryPlanner<BridgeQueryPlanner>,
     execution_service_factory: ExecutionServiceFactory,
     schema: Arc<Schema>,
+    configuration: Arc<Configuration>,
     req: SupergraphRequest,
 ) -> Result<SupergraphResponse, BoxError> {
     let context = req.context;
@@ -165,6 +169,7 @@ async fn service_call(
         body.operation_name.clone(),
         context.clone(),
         schema.clone(),
+        configuration.clone(),
         req.supergraph_request
             .body()
             .query
@@ -492,6 +497,7 @@ async fn plan_query(
     operation_name: Option<String>,
     context: Context,
     schema: Arc<Schema>,
+    configuration: Arc<Configuration>,
     query_str: String,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
     // FIXME: we have about 80 tests creating a supergraph service and crafting a supergraph request for it
@@ -509,7 +515,7 @@ async fn plan_query(
         drop(entries);
     }
 
-    planning
+    let result = planning
         .call(
             query_planner::CachingRequest::builder()
                 .query(query_str)
@@ -521,7 +527,46 @@ async fn plan_query(
             QUERY_PLANNING_SPAN_NAME,
             "otel.kind" = "INTERNAL"
         ))
-        .await
+        .await;
+
+    // The reason that we log metrics here is that even if a query plan is cached we still want to log the metric for every operation.
+    // If limits ever becomes a plugin then we can pull this functionality out rather than have it leak into the main pipeline.
+    if configuration.limits.max_depth.is_some()
+        || configuration.limits.max_aliases.is_some()
+        || configuration.limits.max_height.is_some()
+        || configuration.limits.max_root_fields.is_some()
+    {
+        if let Some(QueryPlannerError::LimitExceeded(err)) = result.as_ref().err().map(|err| {
+            let CacheResolverError::RetrievalError(err) = err;
+            err.deref()
+        }) {
+            if err.aliases {
+                tracing::info!(
+                    monotonic_counter.apollo.router.operations.limits = 1u64,
+                    limits.failed.aliases = true
+                );
+            } else if err.depth {
+                tracing::info!(
+                    monotonic_counter.apollo.router.operations.limits = 1u64,
+                    limits.failed.depth = true
+                );
+            } else if err.height {
+                tracing::info!(
+                    monotonic_counter.apollo.router.operations.limits = 1u64,
+                    limits.failed.height = true
+                );
+            } else if err.root_fields {
+                tracing::info!(
+                    monotonic_counter.apollo.router.operations.limits = 1u64,
+                    limits.failed.root_fields = true
+                );
+            }
+        } else {
+            tracing::info!(monotonic_counter.apollo.router.operations.limits = 1u64,);
+        }
+    }
+
+    result
 }
 /// Builder which generates a plugin pipeline.
 ///
@@ -608,6 +653,7 @@ impl PluggableSupergraphServiceBuilder {
             query_planner_service,
             subgraph_service_factory,
             schema,
+            configuration,
             plugins,
         })
     }
@@ -619,6 +665,7 @@ pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     subgraph_service_factory: Arc<SubgraphServiceFactory>,
     schema: Arc<Schema>,
+    configuration: Arc<Configuration>,
     plugins: Arc<Plugins>,
 }
 
@@ -666,6 +713,7 @@ impl SupergraphCreator {
                 subgraph_service_factory: self.subgraph_service_factory.clone(),
             })
             .schema(self.schema.clone())
+            .configuration(self.configuration.clone())
             .build();
 
         let shaping = self
