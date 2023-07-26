@@ -9,10 +9,10 @@ use http::HeaderValue;
 use id_extractor::PersistedQueryIdExtractor;
 pub(crate) use manifest_poller::PersistedQueryManifestPoller;
 use tower::BoxError;
-use tracing_core::field::Value;
 
 use crate::configuration::PersistedQueriesSafelist;
 use crate::graphql::Error as GraphQLError;
+use crate::plugins::telemetry::utils::TracingUtils;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::Configuration;
@@ -216,18 +216,12 @@ impl PersistedQueryLayer {
                 tracing::warn!(message = "unknown operation", operation_body);
             }
 
-            let logged_attr = if logged {
-                &logged as &dyn Value
-            } else {
-                &tracing::field::Empty
-            };
-
             if self.safelist_config.enabled {
                 if self.safelist_config.require_id {
                     tracing::info!(
                         monotonic_counter.apollo.router.operations.persisted_queries = 1u64,
                         persisted_queries.safelist.rejected.missing_id = true,
-                        persisted_queries.logged = %logged_attr
+                        persisted_queries.logged = logged.or_empty()
                     );
                     Err(supergraph_err_pq_id_required(request))
                 } else if known {
@@ -241,7 +235,7 @@ impl PersistedQueryLayer {
                     tracing::info!(
                         monotonic_counter.apollo.router.operations.persisted_queries = 1u64,
                         persisted_queries.safelist.rejected.unknown = true,
-                        persisted_queries.logged = %logged_attr
+                        persisted_queries.logged = logged.or_empty()
                     );
                     Err(supergraph_err_operation_not_in_safelist(request))
                 }
