@@ -158,7 +158,7 @@ impl Service<router::Request> for PrometheusService {
             // otel 0.19.0 started adding "_total" onto various statistics.
             // Let's remove any problems they may have created for us.
             let stats = String::from_utf8_lossy(&result);
-            let modified_stats = stats.replace("_total_total{", "_total{");
+            let modified_stats = stats.replace("_total_total", "_total");
             Ok(router::Response {
                 response: http::Response::builder()
                     .status(StatusCode::OK)
