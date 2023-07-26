@@ -136,20 +136,26 @@ impl Metrics {
                                 // Scalars can be logged as is.
                                 Some(value) => {attributes.insert(attr_name, value.to_string());},
                                 // If the value is not set we don't specify the attribute.
-                                None => {},
+                                None => {attributes.insert(attr_name, "false".to_string());},
                             };)+
                             (1, attributes)
                         }
                     }
                     else {
-                        (0, HashMap::new())
+                        paste!{
+                            let mut attributes = HashMap::new();
+                            $(
+                                let attr_name = stringify!([<$($attr __ )+>]).to_string();
+                                attributes.insert(attr_name, "false".to_string());
+                            )+
+                            (0, attributes)
+                        }
                     }
                 });
 
                 // Now log the metric
-                // Note the use of `Empty` to prevent logging of attributes that have not been set.
                 paste!{
-                    tracing::info!($($metric).+ = metric.0, $($($attr).+ = metric.1.get(stringify!([<$($attr __ )+>])).map(|v|v as &dyn Value).unwrap_or(&tracing::field::Empty)),+);
+                    tracing::info!($($metric).+ = metric.0, $($($attr).+ = metric.1.get(stringify!([<$($attr __ )+>])).expect("attribute must be in map")),+);
                 }
             };
         }
