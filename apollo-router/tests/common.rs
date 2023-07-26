@@ -475,6 +475,11 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub async fn assert_no_reload_necessary(&mut self) {
+        self.assert_log_contains("no reload necessary").await;
+    }
+
+    #[allow(dead_code)]
     pub async fn assert_not_reloaded(&mut self) {
         self.assert_log_contains("continuing with previous configuration")
             .await;
@@ -515,6 +520,21 @@ impl IntegrationTest {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         panic!("'{text}' not detected in metrics\n{last_metrics}");
+    }
+
+    #[allow(dead_code)]
+    pub async fn assert_metrics_does_not_contain(&self, text: &str) {
+        if let Ok(metrics) = self
+            .get_metrics_response()
+            .await
+            .expect("failed to fetch metrics")
+            .text()
+            .await
+        {
+            if metrics.contains(text) {
+                panic!("'{text}' detected in metrics\n{metrics}");
+            }
+        }
     }
 
     #[allow(dead_code)]
