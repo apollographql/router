@@ -1,9 +1,8 @@
 ### Close the subscription when a new schema has been detected during hot reload ([Issue #3320](https://github.com/apollographql/router/issues/3320))
 
-+ The Router will close subscriptions when the hot-reload happens only if schema is different
-+ The Router will send a fatal error in subscription with an error code set to `SUBSCRIPTION_SCHEMA_RELOAD`.
+Router hot reloads on schema updates didn't close running subscriptions, which could imply out of date query plans.
+This changeset allows the router to signal clients that a `SUBSCRIPTION_SCHEMA_RELOAD` happened, and close the running subscription, so the clients can subscribe again:
 
-For example:
 
 ```json
 {
@@ -18,6 +17,5 @@ For example:
 }
 ```
 
-If a client receive that kind of error they should automatically reconnect the subscription.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3341
