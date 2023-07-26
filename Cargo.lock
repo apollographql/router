@@ -302,6 +302,7 @@ dependencies = [
  "flate2",
  "fred",
  "futures",
+ "futures-lite",
  "futures-test",
  "graphql_client 0.11.0",
  "heck 0.4.1",

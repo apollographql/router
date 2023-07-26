@@ -13,13 +13,87 @@ use std::marker::PhantomData;
 use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::task::Poll;
 
 use futures::future::BoxFuture;
 use futures::Future;
+use futures_lite::future::FutureExt;
+use pin_project_lite::pin_project;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 use tower::ServiceExt;
+
+enum AsyncCheckpointState<S, Fut, Request>
+where
+    Fut: Future<Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>>,
+    S: Service<Request>,
+{
+    AwaitingCheckpoint(Pin<Box<Fut>>),
+    AwaitingService(Pin<Box<S::Future>>),
+    Done(Option<Result<S::Response, S::Error>>),
+}
+
+pin_project! {
+    struct AsyncCheckpointFuture<Fut, S, Request>
+    where
+        Fut: Future<Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>>,
+        S: Service<Request, Error = BoxError>,
+    {
+        state: AsyncCheckpointState<S, Fut, Request>,
+        inner: S,
+    }
+}
+
+impl<Fut, S, Request> AsyncCheckpointFuture<Fut, S, Request>
+where
+    Fut: Future<Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>>,
+    S: Service<Request, Error = BoxError>,
+{
+    pub fn new(checkpoint_fut: Fut, service: S, request: Request) -> Self {
+        Self {
+            state: AsyncCheckpointState::AwaitingCheckpoint(Box::pin(checkpoint_fut)),
+            inner: service,
+        }
+    }
+}
+
+impl<Fut, S, Request> Future for AsyncCheckpointFuture<Fut, S, Request>
+where
+    Fut: Future<Output = Result<ControlFlow<S::Response, Request>, BoxError>>,
+    S: Service<Request, Error = BoxError> + std::marker::Unpin,
+{
+    type Output = Result<S::Response, S::Error>;
+
+    fn poll(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let this = self.project();
+        loop {
+            match this.state {
+                AsyncCheckpointState::AwaitingCheckpoint(fut) => match fut.poll(cx) {
+                    Poll::Ready(Ok(ControlFlow::Break(res))) => {
+                        return Poll::Ready(Ok(res));
+                    }
+                    Poll::Ready(Ok(ControlFlow::Continue(req))) => {
+                        *this.state =
+                            AsyncCheckpointState::AwaitingService(Box::pin(this.inner.call(req)));
+                    }
+                    Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+                    Poll::Pending => return Poll::Pending,
+                },
+                AsyncCheckpointState::AwaitingService(fut) => match fut.poll(cx) {
+                    Poll::Ready(res) => {
+                        *this.state = AsyncCheckpointState::Done(Some(res));
+                    }
+                    Poll::Pending => return Poll::Pending,
+                },
+                AsyncCheckpointState::Done(res) => return Poll::Ready(res.take().unwrap()),
+            }
+        }
+    }
+}
 
 /// [`Layer`] for Asynchronous Checkpoints. See [`ServiceBuilderExt::checkpoint_async()`](crate::layers::ServiceBuilderExt::checkpoint_async()).
 #[allow(clippy::type_complexity)]
@@ -104,9 +178,9 @@ where
 impl<S, Fut, Request> Service<Request> for AsyncCheckpointService<S, Fut, Request>
 where
     Request: Send + 'static,
-    S: Service<Request, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Request, Error = BoxError> + Clone + Send + 'static + std::marker::Unpin,
     <S as Service<Request>>::Response: Send + 'static,
-    <S as Service<Request>>::Future: Send + 'static,
+    <S as Service<Request>>::Future: Send + 'static + std::marker::Unpin,
     Fut: Future<Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>>
         + Send
         + 'static,
@@ -125,15 +199,11 @@ where
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        let checkpoint_fn = Arc::clone(&self.checkpoint_fn);
-        let inner = self.inner.clone();
-        Box::pin(async move {
-            match (checkpoint_fn)(req).await {
-                Ok(ControlFlow::Break(response)) => Ok(response),
-                Ok(ControlFlow::Continue(request)) => inner.oneshot(request).await,
-                Err(error) => Err(error),
-            }
-        })
+        Box::pin(AsyncCheckpointFuture::new(
+            (self.checkpoint_fn)(req),
+            self.inner,
+            req,
+        ))
     }
 }
 

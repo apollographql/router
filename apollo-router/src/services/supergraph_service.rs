@@ -721,50 +721,52 @@ mod tests {
     use crate::Notify;
     use crate::TestHarness;
 
-    const SCHEMA: &str = r#"schema
+    const SCHEMA: &str = r#"
+        schema
         @core(feature: "https://specs.apollo.dev/core/v0.1")
         @core(feature: "https://specs.apollo.dev/join/v0.1")
         @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
          {
-        query: Query
-   }
-   directive @core(feature: String!) repeatable on SCHEMA
-   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-   directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-   directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
-   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-   directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
-   scalar join__FieldSet
-   enum join__Graph {
-       USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
-       ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
-   }
-   type Query {
-       currentUser: User @join__field(graph: USER)
-   }
-
-   type Subscription @join__type(graph: USER) {
-        userWasCreated: User
-   }
-   
-   type User
-   @join__owner(graph: USER)
-   @join__type(graph: ORGA, key: "id")
-   @join__type(graph: USER, key: "id"){
-       id: ID!
-       name: String
-       activeOrganization: Organization
-   }
-   type Organization
-   @join__owner(graph: ORGA)
-   @join__type(graph: ORGA, key: "id")
-   @join__type(graph: USER, key: "id") {
-       id: ID
-       creatorUser: User
-       name: String
-       nonNullId: ID!
-       suborga: [Organization]
-   }"#;
+              query: Query
+         }
+         directive @core(feature: String!) repeatable on SCHEMA
+         directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
+         directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+         directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+         directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+         scalar join__FieldSet
+         enum join__Graph {
+             USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+             ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+         }
+         type Query {
+             currentUser: User @join__field(graph: USER)
+         }
+      
+         type Subscription @join__type(graph: USER) {
+              userWasCreated: User
+         }
+         
+         type User
+         @join__owner(graph: USER)
+         @join__type(graph: ORGA, key: "id")
+         @join__type(graph: USER, key: "id"){
+             id: ID!
+             name: String
+             activeOrganization: Organization
+         }
+         type Organization
+         @join__owner(graph: ORGA)
+         @join__type(graph: ORGA, key: "id")
+         @join__type(graph: USER, key: "id") {
+             id: ID
+             creatorUser: User
+             name: String
+             nonNullId: ID!
+             suborga: [Organization]
+        }
+    "#;
 
     #[tokio::test]
     async fn nullability_formatting() {
@@ -2785,6 +2787,172 @@ mod tests {
         let request = supergraph::Request::fake_builder()
             .context(defer_context())
             .query("query { currentUser { id  activeOrganization{ id name } } }")
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    const REQUIRES_INACCESSIBLE_SCHEMA: &str = r#"
+    schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+    @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) {
+    query: Query
+  }
+  
+  directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+  
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+  
+  directive @join__field(
+    graph: join__Graph
+    requires: join__FieldSet
+    provides: join__FieldSet
+    type: String
+    external: Boolean
+    override: String
+    usedOverridden: Boolean
+  ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+  
+  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+  
+  directive @join__implements(
+    graph: join__Graph!
+    interface: String!
+  ) repeatable on OBJECT | INTERFACE
+  
+  directive @join__type(
+    graph: join__Graph!
+    key: join__FieldSet
+    extension: Boolean! = false
+    resolvable: Boolean! = true
+    isInterfaceObject: Boolean! = false
+  ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+  
+  directive @join__unionMember(
+    graph: join__Graph!
+    member: String!
+  ) repeatable on UNION
+  
+  directive @link(
+    url: String
+    as: String
+    for: link__Purpose
+    import: [link__Import]
+  ) repeatable on SCHEMA
+  
+  interface Bar implements Foo
+    @join__implements(graph: DATA, interface: "Foo")
+    @join__implements(graph: REQUIRER, interface: "Foo")
+    @join__type(graph: DATA)
+    @join__type(graph: REQUIRER) {
+    foo: String!
+    bar: String!
+  }
+  
+  type Baz implements Foo & Bar
+    @join__implements(graph: DATA, interface: "Foo")
+    @join__implements(graph: DATA, interface: "Bar")
+    @join__implements(graph: REQUIRER, interface: "Foo")
+    @join__implements(graph: REQUIRER, interface: "Bar")
+    @join__type(graph: DATA)
+    @join__type(graph: REQUIRER)
+    @inaccessible {
+    foo: String!
+    bar: String!
+    baz: String!
+  }
+  
+  type Entity
+    @join__type(graph: DATA, key: "id")
+    @join__type(graph: REQUIRER, key: "id") {
+    id: ID!
+    data: Foo
+      @join__field(graph: DATA)
+      @join__field(graph: REQUIRER, external: true)
+    requirer: String!
+      @join__field(
+        graph: REQUIRER
+        requires: "data { foo ... on Bar { bar } ... on Baz { baz } ... on Qux { qux } }"
+      )
+  }
+  
+  interface Foo @join__type(graph: DATA) @join__type(graph: REQUIRER) {
+    foo: String!
+  }
+  
+  scalar join__FieldSet
+  
+  enum join__Graph {
+    DATA @join__graph(name: "data", url: "http://localhost:4001")
+    REQUIRER @join__graph(name: "requirer", url: "http://localhost:4002")
+  }
+  
+  scalar link__Import
+  
+  enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
+  
+  type Query @join__type(graph: DATA) @join__type(graph: REQUIRER) {
+    dummy: Entity
+  }
+  
+  type Qux implements Foo & Bar
+    @join__implements(graph: DATA, interface: "Foo")
+    @join__implements(graph: DATA, interface: "Bar")
+    @join__implements(graph: REQUIRER, interface: "Foo")
+    @join__implements(graph: REQUIRER, interface: "Bar")
+    @join__type(graph: DATA)
+    @join__type(graph: REQUIRER) {
+    foo: String!
+    bar: String!
+    qux: String!
+  }
+    "#;
+
+    #[tokio::test]
+    async fn requires_inaccessible_selection_set() {
+        let subgraphs = MockedSubgraphs([
+            ("data", MockSubgraph::builder().with_json(
+                serde_json::json!{{
+                        "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Entity{data{__typename foo ...on Baz{bar baz}...on Qux{bar qux}}}}}",
+                        "variables":{"representations":[{"__typename":"Entity","id":"id"}]}
+                    }},
+                serde_json::json!{{"data":{"_entities":[{"data":{"__typename":"Baz","foo":"foo","bar":"bar","baz":"baz"}}]}}}
+            ).build()),
+            ("requirer", MockSubgraph::builder()
+            .with_json(
+                serde_json::json!{{"query":"{dummy{__typename id}}","variables":{}}},
+                serde_json::json!{{"data":{"dummy":{"__typename":"Entity","id":"id"}}}}
+            ).with_json(
+                serde_json::json!{{"query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Entity{requirer}}}","variables":{"representations":[{"__typename":"Entity","data":{"foo":"foo","bar":"bar","baz":"baz"},"id":"id"}]}}},
+                serde_json::json!{{"data":{"_entities":[{"requirer":"requirer"}]}}}
+            ).build())
+        ].into_iter().collect());
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(REQUIRES_INACCESSIBLE_SCHEMA)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .context(defer_context())
+            .query("query { dummy { requirer } }")
             .build()
             .unwrap();
 
