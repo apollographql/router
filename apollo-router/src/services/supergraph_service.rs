@@ -657,6 +657,7 @@ pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     subgraph_service_factory: Arc<SubgraphServiceFactory>,
     schema: Arc<Schema>,
+    config: Arc<Configuration>,
     plugins: Arc<Plugins>,
 }
 
@@ -677,6 +678,16 @@ pub(crate) trait HasSchema {
 impl HasSchema for SupergraphCreator {
     fn schema(&self) -> Arc<Schema> {
         Arc::clone(&self.schema)
+    }
+}
+
+pub(crate) trait HasConfig {
+    fn config(&self) -> Arc<Configuration>;
+}
+
+impl HasConfig for SupergraphCreator {
+    fn config(&self) -> Arc<Configuration> {
+        Arc::clone(&self.config)
     }
 }
 
