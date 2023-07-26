@@ -50,9 +50,6 @@ pub(crate) struct ListenAddresses {
     pub(crate) extra_listen_addresses: Vec<ListenAddr>,
 }
 
-#[allow(clippy::type_complexity)]
-pub(crate) static ROUTER_UPDATED: Lazy<RouterBroadcasts> = Lazy::new(RouterBroadcasts::new);
-
 /// This state maintains private information that is not exposed to the user via state listener.
 #[allow(clippy::large_enum_variant)]
 enum State<FA: RouterSuperServiceFactory> {
