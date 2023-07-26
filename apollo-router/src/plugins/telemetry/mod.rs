@@ -1171,17 +1171,19 @@ impl Telemetry {
                             if !matches!(sender, Sender::Noop) {
                                 if operation_kind == OperationKind::Subscription {
                                     // The first empty response is always a heartbeat except if it's an error
-                                    // Don't count for subscription-request if http status was in error because it has been counted before
-                                    if idx == 0 && http_status_is_success {
-                                        Self::update_apollo_metrics(
-                                            &ctx,
-                                            field_level_instrumentation_ratio,
-                                            sender.clone(),
-                                            has_errors,
-                                            start.elapsed(),
-                                            operation_kind,
-                                            Some(OperationSubType::SubscriptionRequest),
-                                        );
+                                    if idx == 0 {
+                                        // Don't count for subscription-request if http status was in error because it has been counted before
+                                        if http_status_is_success {
+                                            Self::update_apollo_metrics(
+                                                &ctx,
+                                                field_level_instrumentation_ratio,
+                                                sender.clone(),
+                                                has_errors,
+                                                start.elapsed(),
+                                                operation_kind,
+                                                Some(OperationSubType::SubscriptionRequest),
+                                            );
+                                        }
                                     } else {
                                         // Only for subscription events
                                         Self::update_apollo_metrics(
