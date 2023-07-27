@@ -54,7 +54,7 @@ impl FromStr for Version {
 pub struct Prepare {
     /// Skip the license check
     #[clap(long)]
-    skip_license_ckeck: bool,
+    skip_license_check: bool,
 
     /// The new version that is being created OR to bump (major|minor|patch|current).
     version: Version,
@@ -388,7 +388,7 @@ impl Prepare {
     fn check_compliance(&self) -> Result<()> {
         println!("checking compliance");
         cargo!(["xtask", "check-compliance"]);
-        if !self.skip_license_ckeck {
+        if !self.skip_license_check {
             println!("updating licenses.html");
             cargo!(["xtask", "licenses"]);
         }
