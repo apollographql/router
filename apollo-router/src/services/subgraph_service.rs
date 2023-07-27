@@ -6,6 +6,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use std::task::Poll;
+use std::time::Duration;
 
 use ::serde::Deserialize;
 use async_compression::tokio::write::BrotliEncoder;
@@ -86,6 +87,7 @@ const HASH_VERSION_KEY: &str = "version";
 const HASH_VERSION_VALUE: i32 = 1;
 const HASH_KEY: &str = "sha256Hash";
 const GRAPHQL_RESPONSE: mediatype::Name = mediatype::Name::new_unchecked("graphql-response");
+const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
@@ -181,10 +183,13 @@ impl SubgraphService {
             builder.wrap_connector(http_connector)
         };
 
+        let http_client = hyper::Client::builder()
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+            .build(connector);
         Self {
             client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
-                .service(hyper::Client::builder().build(connector)),
+                .service(http_client),
             service: Arc::new(service.into()),
             apq: Arc::new(<AtomicBool>::new(enable_apq)),
             subscription_config,
@@ -1665,6 +1670,7 @@ mod tests {
 
     fn subscription_config() -> SubscriptionConfig {
         SubscriptionConfig {
+            enabled: true,
             mode: SubscriptionModeConfig {
                 callback: Some(CallbackMode {
                     public_url: Url::parse("http://localhost:4000").unwrap(),

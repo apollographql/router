@@ -80,7 +80,7 @@ pub(crate) struct Metrics {
     pub(crate) prometheus: Option<metrics::prometheus::Config>,
 }
 
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct MetricsCommon {
     /// Configuration to add custom labels/attributes to metrics
@@ -100,6 +100,18 @@ fn default_buckets() -> Vec<f64> {
     vec![
         0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
     ]
+}
+
+impl Default for MetricsCommon {
+    fn default() -> Self {
+        Self {
+            attributes: None,
+            service_name: None,
+            service_namespace: None,
+            resources: HashMap::new(),
+            buckets: default_buckets(),
+        }
+    }
 }
 
 /// Tracing configuration
