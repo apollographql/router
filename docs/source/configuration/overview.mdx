@@ -521,9 +521,9 @@ Clients can connect to the router directly over HTTPS, without terminating TLS i
 ```yaml title="router.yaml"
 tls:
   supergraph:
-    certificate: ${{file.{cert_path}}}
-    certificate_chain: ${{file.{certificate_chain_path}}}
-    key: ${{file.{key_path}}}
+    certificate: ${file./path/to/certificate.pem}
+    certificate_chain: ${file./path/to/certificate_chain.pem}
+    key: ${file./path/to/key.pem}
 ```
 
 The file referenced in the `certificate_chain` value is expected to be the combination of several PEM certificates, concatenated together into a single file (as is commonplace with Apache TLS configuration).
