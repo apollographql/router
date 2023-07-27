@@ -43,14 +43,15 @@ You enable JWT authentication for your router with the following steps:
 
     ```yaml title="router.yaml"
     authentication:
-     jwt:
-       jwks: # This key is required.
-         - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
-           issuer: <optional name of issuer>
+      router:
+        jwt:
+          jwks: # This key is required.
+          - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+            issuer: <optional name of issuer>
 
-       # These keys are optional. Default values are shown.
-       header_name: Authorization
-       header_value_prefix: Bearer
+          # These keys are optional. Default values are shown.
+          header_name: Authorization
+          header_value_prefix: Bearer
     ```
 
     These options are documented [below](#configuration-options).
@@ -147,7 +148,8 @@ If unauthenticated requests should be rejected, the router can be configured lik
 
 ```yaml title="router.yaml"
 authorization:
-  require_authentication: true
+  router:
+    require_authentication: true
 ```
 
 **Claims** are the individual details of a JWT's scope. They might include details like the ID of the associated user, any roles assigned to that user, and the JWT's expiration time. [See the spec.](https://www.rfc-editor.org/rfc/rfc7519#section-4)
@@ -275,9 +277,10 @@ If the router is configured with:
 
 ```yaml title="router.yaml"
 authentication:
-  jwt:
-    jwks:
-      - url: "file:///etc/router/jwks.json"
+  router:
+    jwt:
+      jwks:
+        - url: "file:///etc/router/jwks.json"
 
 coprocessor:
   url: http://127.0.0.1:8081
