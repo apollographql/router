@@ -92,8 +92,8 @@ impl Prepare {
                 // Update the image repository to use the nightly location
                 replace_in_file!(
                     "./helm/chart/router/values.yaml",
-                    "  repository: ghcr.io/apollographql/router",
-                    format!("  repository: ghcr.io/apollographql/nightly/router$")
+                    "^  repository: ghcr.io/apollographql/router$",
+                    format!("  repository: ghcr.io/apollographql/nightly/router")
                 );
 
                 // Update the version string for nightly builds
