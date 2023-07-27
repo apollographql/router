@@ -89,6 +89,13 @@ impl Prepare {
             println!("Skipping various steps because this is a nightly build.");
             // Only update helm charts on specific arch/os/env
             if cfg!(target_arch = "x86_64") && cfg!(target_os = "linux") && cfg!(target_env = "gnu") {
+                // Update the image tag to avoid + complications
+                replace_in_file!(
+                    "./helm/chart/router/values.yaml",
+                    "^  tag:.*?$",
+                    format!("  tag: {version}")
+                );
+
                 // Update the version string for nightly builds
                 self.update_helm_charts(&version.replace("+", "-"))?;
             }
