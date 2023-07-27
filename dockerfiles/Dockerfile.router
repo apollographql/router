@@ -1,6 +1,7 @@
 FROM debian:bullseye-slim AS downloader
 ARG ROUTER_RELEASE=latest
 ARG ARTIFACT_URL=
+ARG CIRCLE_WORKFLOW_JOB_ID==
 
 # Install curl
 RUN \
@@ -12,12 +13,24 @@ WORKDIR /dist
 
 # Run the Router downloader which puts Router into current working directory
 RUN if [ -z "${ARTIFACT_URL}"]; then \
-    curl -sSL https://router.apollo.dev/download/nix/${ROUTER_RELEASE}/ | sh; \
+    if [ -z "${CIRCLE_WORKFLOW_JOB_ID}"]; then \
+        curl -sSL https://router.apollo.dev/download/nix/${ROUTER_RELEASE}/ | sh; \
+    else \
+        if [ "$(uname -m)" == "x86_64" ]; then \
+            NIGHTLY_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/router-${ROUTER_RELEASE}-x86_64-unknown-linux-gnu.tar.gz" \
+        else \
+            NIGHTLY_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/router-${ROUTER_RELEASE}-aarch64-unknown-linux-gnu.tar.gz" \
+        fi \
+        cd /; \
+        curl -sSL -o - ${NIGHTLY_URL} | tar -xzf -; \
+        cd -; \
+    fi \
   else \
     cd /; \
     curl -sSL -o - ${ARTIFACT_URL} | tar -xzf -; \
     cd -; \
   fi
+
 
 FROM debian:bullseye-slim AS distro
 ARG DEBUG_IMAGE=false
