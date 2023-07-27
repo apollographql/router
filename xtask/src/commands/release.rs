@@ -87,11 +87,11 @@ impl Prepare {
 
         if let Version::Nightly = &self.version {
             println!("Skipping various steps because this is a nightly build.");
-            if cfg!(target_arch = "x86_64") && cfg!(target_os = "linux") && cfg!(target_env = "gnu")
-            {
+            // if cfg!(target_arch = "x86_64") && cfg!(target_os = "linux") && cfg!(target_env = "gnu")
+            // {
                 // Update the version string for nightly builds
                 self.update_helm_charts(&version.replace("+", "_"))?;
-            }
+            // }
         } else {
             self.update_install_script(&version)?;
             self.update_helm_charts(&version)?;
