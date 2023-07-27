@@ -22,9 +22,22 @@ struct Migration {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Action {
-    Delete { path: String },
-    Copy { from: String, to: String },
-    Move { from: String, to: String },
+    Add {
+        path: String,
+        name: String,
+        value: Value,
+    },
+    Delete {
+        path: String,
+    },
+    Copy {
+        from: String,
+        to: String,
+    },
+    Move {
+        from: String,
+        to: String,
+    },
 }
 
 const REMOVAL_VALUE: &str = "__PLEASE_DELETE_ME";
@@ -69,6 +82,20 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
         transformer_builder.add_action(Parser::parse("", "").expect("migration must be valid"));
     for action in &migration.actions {
         match action {
+            Action::Add { path, name, value } => {
+                if !jsonpath_lib::select(config, &format!("$.{path}"))
+                    .unwrap_or_default()
+                    .is_empty()
+                    && jsonpath_lib::select(config, &format!("$.{path}.{name}"))
+                        .unwrap_or_default()
+                        .is_empty()
+                {
+                    transformer_builder = transformer_builder.add_action(
+                        Parser::parse(&format!(r#"const({value})"#), &format!("{path}.{name}"))
+                            .expect("migration must be valid"),
+                    );
+                }
+            }
             Action::Delete { path } => {
                 if !jsonpath_lib::select(config, &format!("$.{path}"))
                     .unwrap_or_default()
@@ -268,6 +295,50 @@ mod test {
                     to: "new.obj.field1".to_string()
                 })
                 .description("move field1")
+                .build(),
+        )
+        .expect("expected successful migration"));
+    }
+
+    #[test]
+    fn add_field() {
+        // This one won't add the field because `obj.field1` already exists
+        insta::assert_json_snapshot!(apply_migration(
+            &source_doc(),
+            &Migration::builder()
+                .action(Action::Add {
+                    path: "obj".to_string(),
+                    name: "field1".to_string(),
+                    value: 25.into()
+                })
+                .description("add field1")
+                .build(),
+        )
+        .expect("expected successful migration"));
+
+        insta::assert_json_snapshot!(apply_migration(
+            &source_doc(),
+            &Migration::builder()
+                .action(Action::Add {
+                    path: "obj".to_string(),
+                    name: "field3".to_string(),
+                    value: 42.into()
+                })
+                .description("add field3")
+                .build(),
+        )
+        .expect("expected successful migration"));
+
+        // This one won't add the field because `unexistent` doesn't exist, we don't add parent structure
+        insta::assert_json_snapshot!(apply_migration(
+            &source_doc(),
+            &Migration::builder()
+                .action(Action::Add {
+                    path: "unexistent".to_string(),
+                    name: "field".to_string(),
+                    value: 1.into()
+                })
+                .description("add field3")
                 .build(),
         )
         .expect("expected successful migration"));
