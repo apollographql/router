@@ -145,7 +145,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
             }
         }
 
-        let response = if let Some(response) = self.mocks.get(dbg!(&body)) {
+        let response = if let Some(response) = self.mocks.get(&body) {
             // Build an http Response
             let http_response = http::Response::builder()
                 .status(StatusCode::OK)
