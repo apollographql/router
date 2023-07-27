@@ -13,6 +13,7 @@ use std::marker::PhantomData;
 use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
@@ -22,7 +23,6 @@ use pin_project_lite::pin_project;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
-use tower::ServiceExt;
 
 enum AsyncCheckpointState<S, Fut, Request>
 where
@@ -41,7 +41,7 @@ pin_project! {
         S: Service<Request, Error = BoxError>,
     {
         state: AsyncCheckpointState<S, Fut, Request>,
-        inner: S,
+        inner: Arc<Mutex<S>>,
     }
 }
 
@@ -50,7 +50,7 @@ where
     Fut: Future<Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>>,
     S: Service<Request, Error = BoxError>,
 {
-    pub fn new(checkpoint_fut: Fut, service: S, request: Request) -> Self {
+    fn new(checkpoint_fut: Fut, service: Arc<Mutex<S>>) -> Self {
         Self {
             state: AsyncCheckpointState::AwaitingCheckpoint(Box::pin(checkpoint_fut)),
             inner: service,
@@ -61,7 +61,7 @@ where
 impl<Fut, S, Request> Future for AsyncCheckpointFuture<Fut, S, Request>
 where
     Fut: Future<Output = Result<ControlFlow<S::Response, Request>, BoxError>>,
-    S: Service<Request, Error = BoxError> + std::marker::Unpin,
+    S: Service<Request, Error = BoxError>,
 {
     type Output = Result<S::Response, S::Error>;
 
@@ -77,8 +77,8 @@ where
                         return Poll::Ready(Ok(res));
                     }
                     Poll::Ready(Ok(ControlFlow::Continue(req))) => {
-                        *this.state =
-                            AsyncCheckpointState::AwaitingService(Box::pin(this.inner.call(req)));
+                        let inner_fut = this.inner.lock().unwrap().call(req);
+                        *this.state = AsyncCheckpointState::AwaitingService(Box::pin(inner_fut));
                     }
                     Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
                     Poll::Pending => return Poll::Pending,
@@ -97,9 +97,10 @@ where
 
 /// [`Layer`] for Asynchronous Checkpoints. See [`ServiceBuilderExt::checkpoint_async()`](crate::layers::ServiceBuilderExt::checkpoint_async()).
 #[allow(clippy::type_complexity)]
+#[derive(Clone)]
 pub struct AsyncCheckpointLayer<S, Fut, Request>
 where
-    S: Service<Request, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Request, Error = BoxError> + Send + 'static,
     Fut: Future<Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>>,
 {
     checkpoint_fn: Arc<Pin<Box<dyn Fn(Request) -> Fut + Send + Sync + 'static>>>,
@@ -108,7 +109,7 @@ where
 
 impl<S, Fut, Request> AsyncCheckpointLayer<S, Fut, Request>
 where
-    S: Service<Request, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Request, Error = BoxError> + Send + 'static,
     Fut: Future<Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>>,
 {
     /// Create an `AsyncCheckpointLayer` from a function that takes a Service Request and returns a `ControlFlow`
@@ -125,7 +126,7 @@ where
 
 impl<S, Fut, Request> Layer<S> for AsyncCheckpointLayer<S, Fut, Request>
 where
-    S: Service<Request, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Request, Error = BoxError> + Send + 'static,
     <S as Service<Request>>::Future: Send,
     Request: Send + 'static,
     <S as Service<Request>>::Response: Send + 'static,
@@ -136,29 +137,30 @@ where
     fn layer(&self, service: S) -> Self::Service {
         AsyncCheckpointService {
             checkpoint_fn: Arc::clone(&self.checkpoint_fn),
-            inner: service,
+            inner: Arc::new(Mutex::new(service)),
         }
     }
 }
 
 /// [`Service`] for Asynchronous Checkpoints. See [`ServiceBuilderExt::checkpoint_async()`](crate::layers::ServiceBuilderExt::checkpoint_async()).
 #[allow(clippy::type_complexity)]
+#[derive(Clone)]
 pub struct AsyncCheckpointService<S, Fut, Request>
 where
     Request: Send + 'static,
-    S: Service<Request, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Request, Error = BoxError> + Send + 'static,
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
     Fut: Future<Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>>,
 {
-    inner: S,
+    inner: Arc<Mutex<S>>,
     checkpoint_fn: Arc<Pin<Box<dyn Fn(Request) -> Fut + Send + Sync + 'static>>>,
 }
 
 impl<S, Fut, Request> AsyncCheckpointService<S, Fut, Request>
 where
     Request: Send + 'static,
-    S: Service<Request, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Request, Error = BoxError> + Send + 'static,
     <S as Service<Request>>::Response: Send + 'static,
     <S as Service<Request>>::Future: Send + 'static,
     Fut: Future<Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>>,
@@ -170,7 +172,7 @@ where
     {
         Self {
             checkpoint_fn: Arc::new(Box::pin(checkpoint_fn)),
-            inner: service,
+            inner: Arc::new(Mutex::new(service)),
         }
     }
 }
@@ -178,9 +180,9 @@ where
 impl<S, Fut, Request> Service<Request> for AsyncCheckpointService<S, Fut, Request>
 where
     Request: Send + 'static,
-    S: Service<Request, Error = BoxError> + Clone + Send + 'static + std::marker::Unpin,
+    S: Service<Request, Error = BoxError> + Send + 'static,
     <S as Service<Request>>::Response: Send + 'static,
-    <S as Service<Request>>::Future: Send + 'static + std::marker::Unpin,
+    <S as Service<Request>>::Future: Send + 'static,
     Fut: Future<Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>>
         + Send
         + 'static,
@@ -195,14 +197,13 @@ where
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
+        self.inner.lock().unwrap().poll_ready(cx)
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
         Box::pin(AsyncCheckpointFuture::new(
             (self.checkpoint_fn)(req),
-            self.inner,
-            req,
+            Arc::clone(&self.inner),
         ))
     }
 }
@@ -225,21 +226,16 @@ mod async_checkpoint_tests {
         let expected_label = "from_mock_service";
 
         let mut execution_service = MockExecutionService::new();
-        execution_service.expect_clone().return_once(move || {
-            let mut execution_service = MockExecutionService::new();
-            execution_service
-                .expect_call()
-                .times(1)
-                .returning(move |req: ExecutionRequest| {
-                    Ok(ExecutionResponse::fake_builder()
-                        .label(expected_label.to_string())
-                        .context(req.context)
-                        .build()
-                        .unwrap())
-                });
-
-            execution_service
-        });
+        execution_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: ExecutionRequest| {
+                Ok(ExecutionResponse::fake_builder()
+                    .label(expected_label.to_string())
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
 
         let service_stack = ServiceBuilder::new()
             .checkpoint_async(|req: ExecutionRequest| async { Ok(ControlFlow::Continue(req)) })
@@ -264,20 +260,15 @@ mod async_checkpoint_tests {
     async fn test_continue() {
         let expected_label = "from_mock_service";
         let mut router_service = MockExecutionService::new();
-
-        router_service.expect_clone().return_once(move || {
-            let mut router_service = MockExecutionService::new();
-            router_service
-                .expect_call()
-                .times(1)
-                .returning(move |_req| {
-                    Ok(ExecutionResponse::fake_builder()
-                        .label(expected_label.to_string())
-                        .build()
-                        .unwrap())
-                });
-            router_service
-        });
+        router_service
+            .expect_call()
+            .times(1)
+            .returning(move |_req| {
+                Ok(ExecutionResponse::fake_builder()
+                    .label(expected_label.to_string())
+                    .build()
+                    .unwrap())
+            });
 
         let service_stack =
             AsyncCheckpointLayer::new(|req| async { Ok(ControlFlow::Continue(req)) })
@@ -334,10 +325,7 @@ mod async_checkpoint_tests {
     #[tokio::test]
     async fn test_error() {
         let expected_error = "checkpoint_error";
-        let mut router_service = MockExecutionService::new();
-        router_service
-            .expect_clone()
-            .return_once(MockExecutionService::new);
+        let router_service = MockExecutionService::new();
 
         let service_stack =
             AsyncCheckpointLayer::new(
