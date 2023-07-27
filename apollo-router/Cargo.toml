@@ -134,6 +134,7 @@ opentelemetry = { version = "0.19.0", features = [
     "rt-tokio",
     "metrics",
 ] }
+opentelemetry-aws = "0.7.0"
 opentelemetry-datadog = { version = "0.7.0", features = ["reqwest-client"] }
 opentelemetry-http = "0.8.0"
 opentelemetry-jaeger = { version = "0.18.0", features = [

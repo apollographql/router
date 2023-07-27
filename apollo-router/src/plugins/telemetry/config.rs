@@ -313,6 +313,8 @@ pub(crate) struct Propagation {
     pub(crate) datadog: bool,
     /// Propagate Zipkin
     pub(crate) zipkin: bool,
+    /// Propagate AWS X-Ray
+    pub(crate) awsxray: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
