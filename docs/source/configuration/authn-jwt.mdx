@@ -148,8 +148,7 @@ If unauthenticated requests should be rejected, the router can be configured lik
 
 ```yaml title="router.yaml"
 authorization:
-  router:
-    require_authentication: true
+  require_authentication: true
 ```
 
 **Claims** are the individual details of a JWT's scope. They might include details like the ID of the associated user, any roles assigned to that user, and the JWT's expiration time. [See the spec.](https://www.rfc-editor.org/rfc/rfc7519#section-4)
