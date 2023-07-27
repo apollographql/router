@@ -36,14 +36,15 @@ use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
+use crate::services::router;
 use crate::services::router_service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::transport;
+use crate::services::HasConfig;
 use crate::services::HasSchema;
 use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::SubgraphService;
 use crate::services::SupergraphCreator;
-use crate::services::{router, HasConfig, HasPlugins};
 use crate::spec::Schema;
 use crate::ListenAddr;
 
@@ -162,20 +163,23 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         };
 
         let schema_changed = previous_router
-            .map(|router| router.supergraph_creator.schema() == &schema)
+            .map(|router| router.supergraph_creator.schema().raw_sdl.as_ref() == &schema)
             .unwrap_or_default();
 
-        // TODO implement eq for configuration using validated_yaml field.
         let config_changed = previous_router
             .map(|router| router.supergraph_creator.config() == configuration)
             .unwrap_or_default();
 
-        if let Some(plugins) = router.supergraph_creator.plugins() {
-            // TODO find the subscription plugin and terminate subscriptions if appropriate.
-            // OR add a dedicated callback on Plugin to allow transfer of data from old to new.
+        if config_changed {
+            configuration
+                .notify
+                .broadcast_configuration(configuration.clone());
         }
 
         let schema = bridge_query_planner.schema();
+        if schema_changed {
+            configuration.notify.broadcast_schema(schema.clone());
+        }
 
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
@@ -570,7 +574,7 @@ pub(crate) async fn create_plugins(
 
         Err(BoxError::from(format!(
             "there were {} configuration errors",
-            errors.len()
+            dbg!(errors).len()
         )))
     } else {
         Ok(plugin_instances)

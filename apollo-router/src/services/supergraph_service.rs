@@ -66,9 +66,9 @@ use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
 use crate::spec::Schema;
-use crate::state_machine::ROUTER_UPDATED;
 use crate::Configuration;
 use crate::Context;
+use crate::Notify;
 
 pub(crate) const QUERY_PLANNING_SPAN_NAME: &str = "query_planning";
 
@@ -81,6 +81,7 @@ pub(crate) struct SupergraphService {
     execution_service_factory: ExecutionServiceFactory,
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     schema: Arc<Schema>,
+    notify: Notify<String, graphql::Response>,
 }
 
 #[buildstructor::buildstructor]
@@ -90,11 +91,13 @@ impl SupergraphService {
         query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
         execution_service_factory: ExecutionServiceFactory,
         schema: Arc<Schema>,
+        notify: Notify<String, graphql::Response>,
     ) -> Self {
         SupergraphService {
             query_planner_service,
             execution_service_factory,
             schema,
+            notify,
         }
     }
 }
@@ -124,6 +127,7 @@ impl Service<SupergraphRequest> for SupergraphService {
             self.execution_service_factory.clone(),
             schema,
             req,
+            self.notify.clone(),
         )
         .or_else(|error: BoxError| async move {
             let errors = vec![crate::error::Error {
@@ -154,6 +158,7 @@ async fn service_call(
     execution_service_factory: ExecutionServiceFactory,
     schema: Arc<Schema>,
     req: SupergraphRequest,
+    notify: Notify<String, graphql::Response>,
 ) -> Result<SupergraphResponse, BoxError> {
     let context = req.context;
     let body = req.supergraph_request.body();
@@ -270,6 +275,7 @@ async fn service_call(
                             ctx,
                             query_plan,
                             subs_rx,
+                            notify,
                         )
                         .await;
                     });
@@ -317,6 +323,7 @@ async fn subscription_task(
     context: Context,
     query_plan: Arc<QueryPlan>,
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
+    notify: Notify<String, graphql::Response>,
 ) {
     let sub_params = match rx.recv().await {
         Some(sub_params) => sub_params,
@@ -386,8 +393,8 @@ async fn subscription_task(
         OPENED_SUBSCRIPTIONS.fetch_add(1, Ordering::Relaxed);
     }
 
-    let mut configuration_updated_rx = ROUTER_UPDATED.subscribe_configuration();
-    let mut schema_updated_rx = ROUTER_UPDATED.subscribe_schema();
+    let mut configuration_updated_rx = notify.subscribe_configuration();
+    let mut schema_updated_rx = notify.subscribe_schema();
 
     loop {
         tokio::select! {
@@ -647,6 +654,7 @@ impl PluggableSupergraphServiceBuilder {
             subgraph_service_factory,
             schema,
             plugins,
+            config: configuration,
         })
     }
 }
@@ -715,6 +723,7 @@ impl SupergraphCreator {
                 subgraph_service_factory: self.subgraph_service_factory.clone(),
             })
             .schema(self.schema.clone())
+            .notify(self.config.notify.clone())
             .build();
 
         let shaping = self
@@ -766,7 +775,6 @@ mod tests {
     use super::*;
     use crate::plugin::test::MockSubgraph;
     use crate::services::supergraph;
-    use crate::state_machine::ROUTER_UPDATED;
     use crate::test_harness::MockedSubgraphs;
     use crate::Notify;
     use crate::TestHarness;
@@ -1390,7 +1398,7 @@ mod tests {
             ).build())
         ].into_iter().collect());
 
-        let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
+        let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
         configuration.notify = notify.clone();
         let configuration = Arc::new(configuration);
         let service = TestHarness::builder()
@@ -1418,8 +1426,14 @@ mod tests {
         let new_schema = format!("{SCHEMA}  ");
         // reload schema
         let schema = Schema::parse(&new_schema, &configuration).unwrap();
-        ROUTER_UPDATED.broadcast_schema(Arc::new(schema));
-        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+        notify.broadcast_schema(Arc::new(schema));
+        insta::assert_json_snapshot!(tokio::time::timeout(
+            Duration::from_secs(1),
+            stream.next_response()
+        )
+        .await
+        .unwrap()
+        .unwrap());
     }
 
     #[tokio::test]

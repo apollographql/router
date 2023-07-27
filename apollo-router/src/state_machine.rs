@@ -3,14 +3,11 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 
 use futures::prelude::*;
-use once_cell::sync::Lazy;
-use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 #[cfg(test)]
 use tokio::sync::Notify;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
-use tokio_stream::wrappers::BroadcastStream;
 use ApolloRouterError::ServiceCreationError;
 use Event::NoMoreConfiguration;
 use Event::NoMoreLicense;
@@ -356,7 +353,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         } else {
             license
         };
-        let is_reload = previous_router_service_factory.is_some();
+
         let router_service_factory = state_machine
             .router_configurator
             .create(
@@ -413,12 +410,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             let discussed = Discussed::new();
             discussed.log_experimental_used(yaml);
             discussed.log_preview_used(yaml);
-        }
-
-        if is_reload {
-            // Send the updates
-            ROUTER_UPDATED.configuration.0.send(configuration.clone()).expect("cannot send the configuration update to the static channel. Should not happen because the receiver will always live in static");
-            ROUTER_UPDATED.schema.0.send(parsed_schema).expect("cannot send the schema update to the static channel. Should not happen because the receiver will always live in static");
         }
 
         Ok(Running {
@@ -572,54 +563,6 @@ where
                 panic!("must finish on stopped or errored state")
             }
         }
-    }
-}
-
-pub(crate) struct RouterBroadcasts {
-    configuration: (
-        broadcast::Sender<Arc<Configuration>>,
-        broadcast::Receiver<Arc<Configuration>>,
-    ),
-    schema: (
-        broadcast::Sender<Arc<Schema>>,
-        broadcast::Receiver<Arc<Schema>>,
-    ),
-}
-
-impl RouterBroadcasts {
-    fn new() -> Self {
-        Self {
-            configuration: broadcast::channel(2),
-            schema: broadcast::channel(2),
-        }
-    }
-    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Arc<Configuration>> {
-        BroadcastStream::new(self.configuration.0.subscribe())
-            .filter_map(|cfg| futures::future::ready(cfg.ok()))
-    }
-
-    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> {
-        BroadcastStream::new(self.schema.0.subscribe())
-            .filter_map(|schema| futures::future::ready(schema.ok()))
-    }
-
-    #[allow(dead_code)]
-    #[cfg(test)]
-    pub(crate) fn broadcast_configuration(&self, configuration: Arc<Configuration>) {
-        let _ = self
-            .configuration
-            .0
-            .send(configuration)
-            .expect("cannot send a configuration update");
-    }
-
-    #[cfg(test)]
-    pub(crate) fn broadcast_schema(&self, schema: Arc<Schema>) {
-        let _ = self
-            .schema
-            .0
-            .send(schema)
-            .expect("cannot send a schema update");
     }
 }
 
