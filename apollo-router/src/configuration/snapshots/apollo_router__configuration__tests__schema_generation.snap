@@ -151,58 +151,351 @@ expression: "&schema"
     "authentication": {
       "description": "Authentication",
       "type": "object",
-      "required": [
-        "jwt"
-      ],
       "properties": {
-        "jwt": {
-          "description": "The JWT configuration",
+        "router": {
+          "description": "Router configuration",
           "type": "object",
           "required": [
-            "jwks"
+            "jwt"
           ],
           "properties": {
-            "header_name": {
-              "description": "HTTP header expected to contain JWT",
-              "default": "authorization",
-              "type": "string"
-            },
-            "header_value_prefix": {
-              "description": "Header value prefix",
-              "default": "Bearer",
-              "type": "string"
-            },
-            "jwks": {
-              "description": "List of JWKS used to verify tokens",
-              "type": "array",
-              "items": {
-                "type": "object",
-                "required": [
-                  "url"
-                ],
-                "properties": {
-                  "algorithms": {
-                    "description": "List of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`",
-                    "default": null,
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
-                    "nullable": true
-                  },
-                  "issuer": {
-                    "description": "Expected issuer for tokens verified by that JWKS",
-                    "type": "string",
-                    "nullable": true
-                  },
-                  "url": {
-                    "description": "Retrieve the JWK Set",
-                    "type": "string"
+            "jwt": {
+              "description": "The JWT configuration",
+              "type": "object",
+              "required": [
+                "jwks"
+              ],
+              "properties": {
+                "header_name": {
+                  "description": "HTTP header expected to contain JWT",
+                  "default": "authorization",
+                  "type": "string"
+                },
+                "header_value_prefix": {
+                  "description": "Header value prefix",
+                  "default": "Bearer",
+                  "type": "string"
+                },
+                "jwks": {
+                  "description": "List of JWKS used to verify tokens",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "url"
+                    ],
+                    "properties": {
+                      "algorithms": {
+                        "description": "List of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`",
+                        "default": null,
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "nullable": true
+                      },
+                      "issuer": {
+                        "description": "Expected issuer for tokens verified by that JWKS",
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "url": {
+                        "description": "Retrieve the JWK Set",
+                        "type": "string"
+                      }
+                    }
                   }
                 }
               }
             }
-          }
+          },
+          "nullable": true
+        },
+        "subgraph": {
+          "description": "Subgraph configuration",
+          "type": "object",
+          "properties": {
+            "all": {
+              "description": "Configuration that will apply to all subgraphs.",
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "aws_sig_v4"
+                  ],
+                  "properties": {
+                    "aws_sig_v4": {
+                      "description": "Configure AWS sigv4 auth.",
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "hardcoded"
+                          ],
+                          "properties": {
+                            "hardcoded": {
+                              "description": "Hardcoded Config using access_key and secret. Prefer using DefaultChain instead.",
+                              "type": "object",
+                              "required": [
+                                "access_key_id",
+                                "region",
+                                "secret_access_key",
+                                "service_name"
+                              ],
+                              "properties": {
+                                "access_key_id": {
+                                  "description": "The ID for this access key.",
+                                  "type": "string"
+                                },
+                                "assume_role": {
+                                  "description": "Specify assumed role configuration.",
+                                  "type": "object",
+                                  "required": [
+                                    "role_arn",
+                                    "session_name"
+                                  ],
+                                  "properties": {
+                                    "external_id": {
+                                      "description": "Unique identifier that might be required when you assume a role in another account.",
+                                      "type": "string",
+                                      "nullable": true
+                                    },
+                                    "role_arn": {
+                                      "description": "Amazon Resource Name (ARN) for the role assumed when making requests",
+                                      "type": "string"
+                                    },
+                                    "session_name": {
+                                      "description": "Uniquely identify a session when the same role is assumed by different principals or for different reasons.",
+                                      "type": "string"
+                                    }
+                                  },
+                                  "nullable": true
+                                },
+                                "region": {
+                                  "description": "The AWS region this chain applies to.",
+                                  "type": "string"
+                                },
+                                "secret_access_key": {
+                                  "description": "The secret key used to sign requests.",
+                                  "type": "string"
+                                },
+                                "service_name": {
+                                  "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "default_chain"
+                          ],
+                          "properties": {
+                            "default_chain": {
+                              "description": "Configuration of the DefaultChainProvider",
+                              "type": "object",
+                              "required": [
+                                "region",
+                                "service_name"
+                              ],
+                              "properties": {
+                                "assume_role": {
+                                  "description": "Specify assumed role configuration.",
+                                  "type": "object",
+                                  "required": [
+                                    "role_arn",
+                                    "session_name"
+                                  ],
+                                  "properties": {
+                                    "external_id": {
+                                      "description": "Unique identifier that might be required when you assume a role in another account.",
+                                      "type": "string",
+                                      "nullable": true
+                                    },
+                                    "role_arn": {
+                                      "description": "Amazon Resource Name (ARN) for the role assumed when making requests",
+                                      "type": "string"
+                                    },
+                                    "session_name": {
+                                      "description": "Uniquely identify a session when the same role is assumed by different principals or for different reasons.",
+                                      "type": "string"
+                                    }
+                                  },
+                                  "nullable": true
+                                },
+                                "profile_name": {
+                                  "description": "The profile name used by this provider",
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "region": {
+                                  "description": "The AWS region this chain applies to.",
+                                  "type": "string"
+                                },
+                                "service_name": {
+                                  "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ],
+              "nullable": true
+            },
+            "subgraphs": {
+              "description": "Create a configuration that will apply only to a specific subgraph.",
+              "type": "object",
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "aws_sig_v4"
+                    ],
+                    "properties": {
+                      "aws_sig_v4": {
+                        "description": "Configure AWS sigv4 auth.",
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "hardcoded"
+                            ],
+                            "properties": {
+                              "hardcoded": {
+                                "description": "Hardcoded Config using access_key and secret. Prefer using DefaultChain instead.",
+                                "type": "object",
+                                "required": [
+                                  "access_key_id",
+                                  "region",
+                                  "secret_access_key",
+                                  "service_name"
+                                ],
+                                "properties": {
+                                  "access_key_id": {
+                                    "description": "The ID for this access key.",
+                                    "type": "string"
+                                  },
+                                  "assume_role": {
+                                    "description": "Specify assumed role configuration.",
+                                    "type": "object",
+                                    "required": [
+                                      "role_arn",
+                                      "session_name"
+                                    ],
+                                    "properties": {
+                                      "external_id": {
+                                        "description": "Unique identifier that might be required when you assume a role in another account.",
+                                        "type": "string",
+                                        "nullable": true
+                                      },
+                                      "role_arn": {
+                                        "description": "Amazon Resource Name (ARN) for the role assumed when making requests",
+                                        "type": "string"
+                                      },
+                                      "session_name": {
+                                        "description": "Uniquely identify a session when the same role is assumed by different principals or for different reasons.",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "nullable": true
+                                  },
+                                  "region": {
+                                    "description": "The AWS region this chain applies to.",
+                                    "type": "string"
+                                  },
+                                  "secret_access_key": {
+                                    "description": "The secret key used to sign requests.",
+                                    "type": "string"
+                                  },
+                                  "service_name": {
+                                    "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
+                                    "type": "string"
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "default_chain"
+                            ],
+                            "properties": {
+                              "default_chain": {
+                                "description": "Configuration of the DefaultChainProvider",
+                                "type": "object",
+                                "required": [
+                                  "region",
+                                  "service_name"
+                                ],
+                                "properties": {
+                                  "assume_role": {
+                                    "description": "Specify assumed role configuration.",
+                                    "type": "object",
+                                    "required": [
+                                      "role_arn",
+                                      "session_name"
+                                    ],
+                                    "properties": {
+                                      "external_id": {
+                                        "description": "Unique identifier that might be required when you assume a role in another account.",
+                                        "type": "string",
+                                        "nullable": true
+                                      },
+                                      "role_arn": {
+                                        "description": "Amazon Resource Name (ARN) for the role assumed when making requests",
+                                        "type": "string"
+                                      },
+                                      "session_name": {
+                                        "description": "Uniquely identify a session when the same role is assumed by different principals or for different reasons.",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "nullable": true
+                                  },
+                                  "profile_name": {
+                                    "description": "The profile name used by this provider",
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "region": {
+                                    "description": "The AWS region this chain applies to.",
+                                    "type": "string"
+                                  },
+                                  "service_name": {
+                                    "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
+                                    "type": "string"
+                                  }
+                                }
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
         }
       }
     },
@@ -1322,291 +1615,6 @@ expression: "&schema"
           "description": "Set to true to enable sandbox",
           "default": false,
           "type": "boolean"
-        }
-      },
-      "additionalProperties": false
-    },
-    "subgraph_authentication": {
-      "description": "Configure subgraph authentication",
-      "type": "object",
-      "properties": {
-        "all": {
-          "description": "Configuration that will apply to all subgraphs.",
-          "oneOf": [
-            {
-              "type": "object",
-              "required": [
-                "aws_sig_v4"
-              ],
-              "properties": {
-                "aws_sig_v4": {
-                  "description": "Configure AWS sigv4 auth.",
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "required": [
-                        "hardcoded"
-                      ],
-                      "properties": {
-                        "hardcoded": {
-                          "description": "Hardcoded Config using access_key and secret. Prefer using DefaultChain instead.",
-                          "type": "object",
-                          "required": [
-                            "access_key_id",
-                            "region",
-                            "secret_access_key",
-                            "service_name"
-                          ],
-                          "properties": {
-                            "access_key_id": {
-                              "description": "The ID for this access key.",
-                              "type": "string"
-                            },
-                            "assume_role": {
-                              "description": "Specify assumed role configuration.",
-                              "type": "object",
-                              "required": [
-                                "role_arn",
-                                "session_name"
-                              ],
-                              "properties": {
-                                "external_id": {
-                                  "description": "Unique identifier that might be required when you assume a role in another account.",
-                                  "type": "string",
-                                  "nullable": true
-                                },
-                                "role_arn": {
-                                  "description": "Amazon Resource Name (ARN) for the role assumed when making requests",
-                                  "type": "string"
-                                },
-                                "session_name": {
-                                  "description": "Uniquely identify a session when the same role is assumed by different principals or for different reasons.",
-                                  "type": "string"
-                                }
-                              },
-                              "nullable": true
-                            },
-                            "region": {
-                              "description": "The AWS region this chain applies to.",
-                              "type": "string"
-                            },
-                            "secret_access_key": {
-                              "description": "The secret key used to sign requests.",
-                              "type": "string"
-                            },
-                            "service_name": {
-                              "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "required": [
-                        "default_chain"
-                      ],
-                      "properties": {
-                        "default_chain": {
-                          "description": "Configuration of the DefaultChainProvider",
-                          "type": "object",
-                          "required": [
-                            "region",
-                            "service_name"
-                          ],
-                          "properties": {
-                            "assume_role": {
-                              "description": "Specify assumed role configuration.",
-                              "type": "object",
-                              "required": [
-                                "role_arn",
-                                "session_name"
-                              ],
-                              "properties": {
-                                "external_id": {
-                                  "description": "Unique identifier that might be required when you assume a role in another account.",
-                                  "type": "string",
-                                  "nullable": true
-                                },
-                                "role_arn": {
-                                  "description": "Amazon Resource Name (ARN) for the role assumed when making requests",
-                                  "type": "string"
-                                },
-                                "session_name": {
-                                  "description": "Uniquely identify a session when the same role is assumed by different principals or for different reasons.",
-                                  "type": "string"
-                                }
-                              },
-                              "nullable": true
-                            },
-                            "profile_name": {
-                              "description": "The profile name used by this provider",
-                              "type": "string",
-                              "nullable": true
-                            },
-                            "region": {
-                              "description": "The AWS region this chain applies to.",
-                              "type": "string"
-                            },
-                            "service_name": {
-                              "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
-                              "type": "string"
-                            }
-                          }
-                        }
-                      },
-                      "additionalProperties": false
-                    }
-                  ]
-                }
-              },
-              "additionalProperties": false
-            }
-          ],
-          "nullable": true
-        },
-        "subgraphs": {
-          "description": "Create a configuration that will apply only to a specific subgraph.",
-          "type": "object",
-          "additionalProperties": {
-            "oneOf": [
-              {
-                "type": "object",
-                "required": [
-                  "aws_sig_v4"
-                ],
-                "properties": {
-                  "aws_sig_v4": {
-                    "description": "Configure AWS sigv4 auth.",
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "required": [
-                          "hardcoded"
-                        ],
-                        "properties": {
-                          "hardcoded": {
-                            "description": "Hardcoded Config using access_key and secret. Prefer using DefaultChain instead.",
-                            "type": "object",
-                            "required": [
-                              "access_key_id",
-                              "region",
-                              "secret_access_key",
-                              "service_name"
-                            ],
-                            "properties": {
-                              "access_key_id": {
-                                "description": "The ID for this access key.",
-                                "type": "string"
-                              },
-                              "assume_role": {
-                                "description": "Specify assumed role configuration.",
-                                "type": "object",
-                                "required": [
-                                  "role_arn",
-                                  "session_name"
-                                ],
-                                "properties": {
-                                  "external_id": {
-                                    "description": "Unique identifier that might be required when you assume a role in another account.",
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "role_arn": {
-                                    "description": "Amazon Resource Name (ARN) for the role assumed when making requests",
-                                    "type": "string"
-                                  },
-                                  "session_name": {
-                                    "description": "Uniquely identify a session when the same role is assumed by different principals or for different reasons.",
-                                    "type": "string"
-                                  }
-                                },
-                                "nullable": true
-                              },
-                              "region": {
-                                "description": "The AWS region this chain applies to.",
-                                "type": "string"
-                              },
-                              "secret_access_key": {
-                                "description": "The secret key used to sign requests.",
-                                "type": "string"
-                              },
-                              "service_name": {
-                                "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "required": [
-                          "default_chain"
-                        ],
-                        "properties": {
-                          "default_chain": {
-                            "description": "Configuration of the DefaultChainProvider",
-                            "type": "object",
-                            "required": [
-                              "region",
-                              "service_name"
-                            ],
-                            "properties": {
-                              "assume_role": {
-                                "description": "Specify assumed role configuration.",
-                                "type": "object",
-                                "required": [
-                                  "role_arn",
-                                  "session_name"
-                                ],
-                                "properties": {
-                                  "external_id": {
-                                    "description": "Unique identifier that might be required when you assume a role in another account.",
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "role_arn": {
-                                    "description": "Amazon Resource Name (ARN) for the role assumed when making requests",
-                                    "type": "string"
-                                  },
-                                  "session_name": {
-                                    "description": "Uniquely identify a session when the same role is assumed by different principals or for different reasons.",
-                                    "type": "string"
-                                  }
-                                },
-                                "nullable": true
-                              },
-                              "profile_name": {
-                                "description": "The profile name used by this provider",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "region": {
-                                "description": "The AWS region this chain applies to.",
-                                "type": "string"
-                              },
-                              "service_name": {
-                                "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
-                                "type": "string"
-                              }
-                            }
-                          }
-                        },
-                        "additionalProperties": false
-                      }
-                    ]
-                  }
-                },
-                "additionalProperties": false
-              }
-            ]
-          }
         }
       },
       "additionalProperties": false

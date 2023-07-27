@@ -1,5 +1,5 @@
+use core::ops::ControlFlow;
 use std::collections::HashMap;
-use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -19,19 +19,13 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
-use crate::plugin::PluginInit;
-use crate::register_plugin;
-use crate::services::subgraph;
 use crate::services::SubgraphRequest;
-
-register_plugin!("apollo", "subgraph_authentication", SubgraphAuth);
 
 /// Hardcoded Config using access_key and secret.
 /// Prefer using DefaultChain instead.
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct AWSSigV4HardcodedConfig {
+pub(crate) struct AWSSigV4HardcodedConfig {
     /// The ID for this access key.
     access_key_id: String,
     /// The secret key used to sign requests.
@@ -63,7 +57,7 @@ impl ProvideCredentials for AWSSigV4HardcodedConfig {
 
 /// Configuration of the DefaultChainProvider
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
-struct DefaultChainConfig {
+pub(crate) struct DefaultChainConfig {
     /// The AWS region this chain applies to.
     region: String,
     /// The profile name used by this provider
@@ -76,7 +70,7 @@ struct DefaultChainConfig {
 
 /// Specify assumed role configuration.
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
-struct AssumeRoleProvider {
+pub(crate) struct AssumeRoleProvider {
     /// Amazon Resource Name (ARN)
     /// for the role assumed when making requests
     role_arn: String,
@@ -89,7 +83,7 @@ struct AssumeRoleProvider {
 /// Configure AWS sigv4 auth.
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
-enum AWSSigV4Config {
+pub(crate) enum AWSSigV4Config {
     Hardcoded(AWSSigV4HardcodedConfig),
     DefaultChain(DefaultChainConfig),
 }
@@ -166,73 +160,100 @@ impl AWSSigV4Config {
     }
 }
 
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(deny_unknown_fields)]
-enum AuthConfig {
+pub(crate) enum AuthConfig {
     #[serde(rename = "aws_sig_v4")]
     AWSSigV4(AWSSigV4Config),
 }
 
 /// Configure subgraph authentication
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-struct Config {
+pub(crate) struct Config {
     /// Configuration that will apply to all subgraphs.
     #[serde(default)]
-    all: Option<AuthConfig>,
+    pub(crate) all: Option<AuthConfig>,
     #[serde(default)]
     /// Create a configuration that will apply only to a specific subgraph.
-    subgraphs: HashMap<String, AuthConfig>,
+    pub(crate) subgraphs: HashMap<String, AuthConfig>,
 }
 
-struct SubgraphAuth {
-    signing_params: SigningParams,
-}
-
+#[allow(dead_code)]
 #[derive(Clone, Default)]
-struct SigningParams {
-    all: Option<SigningParamsConfig>,
-    subgraphs: HashMap<String, SigningParamsConfig>,
+pub(crate) struct SigningParams {
+    pub(crate) all: Option<SigningParamsConfig>,
+    pub(crate) subgraphs: HashMap<String, SigningParamsConfig>,
 }
 
 #[derive(Clone)]
-struct SigningParamsConfig {
-    credentials_provider: Option<Arc<dyn ProvideCredentials>>,
+pub(crate) struct SigningParamsConfig {
+    credentials_provider: Arc<dyn ProvideCredentials>,
     region: Region,
     service_name: String,
 }
 
-#[async_trait::async_trait]
-impl Plugin for SubgraphAuth {
-    type Config = Config;
-    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let all = if let Some(config) = &init.config.all {
-            Some(make_signing_params(config, "all").await?)
-        } else {
-            None
-        };
+#[allow(dead_code)]
+fn increment_success_counter(_subgraph_name: &str) {}
+#[allow(dead_code)]
+fn increment_failure_counter(_subgraph_name: &str) {}
 
-        let mut subgraphs: HashMap<String, SigningParamsConfig> = Default::default();
-        for (subgraph_name, config) in &init.config.subgraphs {
-            subgraphs.insert(
-                subgraph_name.clone(),
-                make_signing_params(config, subgraph_name.as_str()).await?,
-            );
+pub(super) async fn make_signing_params(
+    config: &AuthConfig,
+    subgraph_name: &str,
+) -> Result<SigningParamsConfig, BoxError> {
+    match config {
+        AuthConfig::AWSSigV4(config) => {
+            let credentials_provider = config.get_credentials_provider().await;
+            if let Err(e) = credentials_provider.provide_credentials().await {
+                let error_subgraph_name = if subgraph_name == "all" {
+                    "all subgraphs".to_string()
+                } else {
+                    format!("{} subgraph", subgraph_name)
+                };
+                return Err(format!(
+                    "auth: {}: couldn't get credentials from provider: {}",
+                    error_subgraph_name, e,
+                )
+                .into());
+            }
+
+            Ok(SigningParamsConfig {
+                region: config.region(),
+                service_name: config.service_name(),
+                credentials_provider,
+            })
         }
-
-        Ok(SubgraphAuth {
-            signing_params: { SigningParams { all, subgraphs } },
-        })
     }
+}
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+/// There are three possible cases
+/// https://github.com/awslabs/aws-sdk-rust/blob/9c3168dafa4fd8885ce4e1fd41cec55ce982a33c/sdk/aws-sigv4/src/http_request/sign.rs#L264C1-L271C6
+fn get_signing_settings(signing_params: &SigningParamsConfig) -> SigningSettings {
+    let mut settings = SigningSettings::default();
+    settings.payload_checksum_kind = match signing_params.service_name.as_str() {
+        "s3" | "vpc-lattice-svcs" => PayloadChecksumKind::XAmzSha256,
+        _ => PayloadChecksumKind::NoHeader,
+    };
+    settings
+}
+
+pub(super) struct SubgraphAuth {
+    pub(super) signing_params: SigningParams,
+}
+
+impl SubgraphAuth {
+    pub(super) fn subgraph_service(
+        &self,
+        name: &str,
+        service: crate::services::subgraph::BoxService,
+    ) -> crate::services::subgraph::BoxService {
         if let Some(signing_params) = self.params_for_service(name) {
             ServiceBuilder::new()
             .checkpoint_async(move |mut req: SubgraphRequest| {
                 let signing_params = signing_params.clone();
                 async move {
-                if let Some(credentials_provider) = &signing_params.credentials_provider {
-                    let credentials = match credentials_provider.provide_credentials().await {
+                    let credentials = match signing_params.credentials_provider.provide_credentials().await {
                         Ok(credentials) => credentials,
                         Err(err) => {
                             tracing::warn!(
@@ -240,7 +261,8 @@ impl Plugin for SubgraphAuth {
                                 err
                             );
                             return Ok(ControlFlow::Continue(req));
-                        }};
+                        }
+                    };
 
                     let settings = get_signing_settings(&signing_params);
                     let mut builder = http_request::SigningParams::builder()
@@ -283,44 +305,12 @@ impl Plugin for SubgraphAuth {
                     }.into_parts();
                     signing_instructions.apply_to_request(&mut req.subgraph_request);
                     Ok(ControlFlow::Continue(req))
-                } else {
-                    Ok(ControlFlow::Continue(req))
                 }
-            }
             }).buffered()
             .service(service)
             .boxed()
         } else {
             service
-        }
-    }
-}
-
-async fn make_signing_params(
-    config: &AuthConfig,
-    subgraph_name: &str,
-) -> Result<SigningParamsConfig, BoxError> {
-    match config {
-        AuthConfig::AWSSigV4(config) => {
-            let credentials_provider = config.get_credentials_provider().await;
-            if let Err(e) = credentials_provider.provide_credentials().await {
-                let error_subgraph_name = if subgraph_name == "all" {
-                    "all subgraphs".to_string()
-                } else {
-                    format!("{} subgraph", subgraph_name)
-                };
-                return Err(format!(
-                    "auth: {}: couldn't get credentials from provider: {}",
-                    error_subgraph_name, e,
-                )
-                .into());
-            }
-
-            Ok(SigningParamsConfig {
-                region: config.region(),
-                service_name: config.service_name(),
-                credentials_provider: Some(credentials_provider),
-            })
         }
     }
 }
@@ -333,17 +323,6 @@ impl SubgraphAuth {
             .cloned()
             .or_else(|| self.signing_params.all.clone())
     }
-}
-
-/// There are three possible cases
-/// https://github.com/awslabs/aws-sdk-rust/blob/9c3168dafa4fd8885ce4e1fd41cec55ce982a33c/sdk/aws-sigv4/src/http_request/sign.rs#L264C1-L271C6
-fn get_signing_settings(signing_params: &SigningParamsConfig) -> SigningSettings {
-    let mut settings = SigningSettings::default();
-    settings.payload_checksum_kind = match signing_params.service_name.as_str() {
-        "s3" | "vpc-lattice-svcs" => PayloadChecksumKind::XAmzSha256,
-        _ => PayloadChecksumKind::NoHeader,
-    };
-    settings
 }
 
 #[cfg(test)]
@@ -425,24 +404,23 @@ mod test {
             })
             .returning(example_response);
 
-        let mut service = SubgraphAuth::new(
-            PluginInit::fake_builder()
-                .config(Config {
-                    all: Some(AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(
-                        AWSSigV4HardcodedConfig {
-                            access_key_id: "id".to_string(),
-                            secret_access_key: "secret".to_string(),
-                            region: "us-east-1".to_string(),
-                            service_name: "s3".to_string(),
-                            assume_role: None,
-                        },
-                    ))),
-                    subgraphs: Default::default(),
-                })
-                .build(),
-        )
-        .await
-        .unwrap()
+        let mut service = SubgraphAuth {
+            signing_params: SigningParams {
+                all: super::make_signing_params(
+                    &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
+                        access_key_id: "id".to_string(),
+                        secret_access_key: "secret".to_string(),
+                        region: "us-east-1".to_string(),
+                        service_name: "s3".to_string(),
+                        assume_role: None,
+                    })),
+                    "all",
+                )
+                .await
+                .ok(),
+                subgraphs: Default::default(),
+            },
+        }
         .subgraph_service("test_subgraph", mock.boxed());
 
         service.ready().await?.call(subgraph_request).await?;
