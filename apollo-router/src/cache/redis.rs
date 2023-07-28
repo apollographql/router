@@ -119,7 +119,7 @@ impl RedisCacheStorage {
                 default_command_timeout_ms: 1,
                 ..Default::default()
             }),
-            Some(ReconnectPolicy::new_exponential(10, 1, 200, 5)),
+            Some(ReconnectPolicy::new_exponential(0, 1, 2000, 5)),
         );
         let _handle = client.connect();
 
