@@ -123,7 +123,7 @@ apq:
   enabled: false # APQ must be disabled
 ```
 
-Unregistered operations appear in your [router's logs](/router/configuration/logging).
+Unregistered operations appear in your [router's logs](./logging).
 
 #### Safelisting (operation strings allowed)
 
@@ -162,3 +162,17 @@ apq:
 ```
 
 If you want to use this security level, you should always _first_ set up [safelisting with operation strings allowed](#safelisting-operation-strings-allowed). This level requires modifying _all_ of your clients to execute operations via PQL-specified ID instead of an operation string. While making those necessary changes, you can use the less restrictive safelisting level in your router.
+
+## Router logs
+
+If a router instance is set to [audit mode](#audit-dry-run), its [logs](./logging) will include any operations it recieves that haven't been added to the PQL.
+
+For example:
+
+```
+To-do
+```
+
+If your router receives trusted operations, ....
+
+You can use these router logs to audit operations sent to your router and [add new ones](/graphos/operations/persisted-queries#1-preregister-trusted-operations) to your PQL if necessary.
