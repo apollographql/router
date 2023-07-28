@@ -943,7 +943,7 @@ mod tests {
             )
             .with_json(
                 serde_json::json!{{
-                    "query":"{computer(id:\"Computer1\"){errorField id}}",
+                    "query":"{computer(id:\"Computer1\"){id errorField}}",
                 }},
                 serde_json::json!{{
                     "data": {
@@ -2667,6 +2667,7 @@ mod tests {
           }
 
           type Query
+          @join__type(graph: S1)
           {
             foo: Foo! @join__field(graph: S1)
           }
