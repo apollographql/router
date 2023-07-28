@@ -16,7 +16,7 @@ You define and use these directives on subgraph schemas, and the router [compose
 
 ## Prequisites
 
-To use the router's authorization directives, you need to either configure [JWT authentication](./authn-jwt) or add a [router service coprocessor](../customizations/coprocessor) that includes **claims** in a request's context.
+To use the router's authorization directives, you need to either configure [JWT authentication](./authn-jwt) or add a [router service coprocessor](../customizations/coprocessor) that adds **claims** to a request's context.
 **Claims** are the individual details of a requests' scope. They might include details like the ID of the associated user and/or any scopes assigned to that user.
 
 If you configure [JWT authentication](./authn-jwt), the Apollo Router automatically adds a JWT token's claims to the request's context at the `apollo_authentication::JWT::claims` key.
