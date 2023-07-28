@@ -58,7 +58,7 @@ usage () {
    printf "\tExample 7: Building an amd64 image from a build artifact\n"
    printf "\t\tbuild_docker_image.sh -m amd64 -a https://github.com/apollographql/router/releases/download/v1.22.0/router-v1.22.0-x86_64-unknown-linux-gnu.tar.gz v1.22.0\n"
    printf "\tExample 8: Building an arm64 image from a build artifact with name my-test\n"
-   printf "\t\tbuild_docker_image.sh -m arm64 -n my-test -a https://github.com/apollographql/router/releases/download/v1.22.0/router-v1.22.0-aarch64-unknown-linux-gnu.tar.gz 1.22.0 v1.22.0\n"
+   printf "\t\tbuild_docker_image.sh -m arm64 -n my-test -a https://github.com/apollographql/router/releases/download/v1.22.0/router-v1.22.0-aarch64-unknown-linux-gnu.tar.gz v1.22.0\n"
    exit 2
 }
 #
