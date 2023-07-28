@@ -1,4 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
@@ -22,8 +21,9 @@ use uuid::Uuid;
 use crate::configuration::generate_config_schema;
 use crate::executable::Opt;
 use crate::plugin::DynPlugin;
-use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
+use crate::router_factory::YamlRouterFactory;
+use crate::services::router_service::RouterCreator;
 use crate::spec::Schema;
 use crate::Configuration;
 
@@ -53,8 +53,8 @@ struct UsageReport {
     usage: Map<String, Value>,
 }
 
-impl<T: RouterSuperServiceFactory> OrbiterRouterSuperServiceFactory<T> {
-    pub(crate) fn new(delegate: T) -> OrbiterRouterSuperServiceFactory<T> {
+impl OrbiterRouterSuperServiceFactory {
+    pub(crate) fn new(delegate: YamlRouterFactory) -> OrbiterRouterSuperServiceFactory {
         OrbiterRouterSuperServiceFactory { delegate }
     }
 }
@@ -85,16 +85,13 @@ impl<T: RouterSuperServiceFactory> OrbiterRouterSuperServiceFactory<T> {
 /// }
 /// ```
 #[derive(Default)]
-pub(crate) struct OrbiterRouterSuperServiceFactory<T: RouterSuperServiceFactory> {
-    delegate: T,
+pub(crate) struct OrbiterRouterSuperServiceFactory {
+    delegate: YamlRouterFactory,
 }
 
 #[async_trait]
-impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory<T>
-where
-    T::RouterFactory: RouterFactory,
-{
-    type RouterFactory = T::RouterFactory;
+impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
+    type RouterFactory = RouterCreator;
 
     async fn create<'a>(
         &'a mut self,
@@ -114,7 +111,7 @@ where
             .map(|factory| {
                 if env::var("APOLLO_TELEMETRY_DISABLED").unwrap_or_default() != "true" {
                     tokio::task::spawn(async move {
-                        let schema = Arc::new(Schema::parse(&schema, &configuration, None).expect(
+                        let schema = Arc::new(Schema::parse(&schema, &configuration).expect(
                             "if we get here the schema was already parsed successfully elsewhere",
                         ));
                         tracing::debug!("sending anonymous usage data to Apollo");
@@ -385,7 +382,7 @@ mod test {
         let config = Configuration::from_str(include_str!("testdata/redaction.router.yaml"))
             .expect("config must be valid");
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse(schema_string, &config, None).unwrap();
+        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
@@ -403,7 +400,7 @@ mod test {
             .expect("config must be valid");
         config.validated_yaml = Some(Value::Null);
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse(schema_string, &config, None).unwrap();
+        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
@@ -421,7 +418,7 @@ mod test {
             .expect("config must be valid");
         config.validated_yaml = Some(json!({"garbage": "garbage"}));
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse(schema_string, &config, None).unwrap();
+        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {

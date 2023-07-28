@@ -206,6 +206,19 @@ expression: "&schema"
         }
       }
     },
+    "authorization": {
+      "description": "Authorization plugin",
+      "type": "object",
+      "required": [
+        "require_authentication"
+      ],
+      "properties": {
+        "require_authentication": {
+          "description": "Reject unauthenticated requests",
+          "type": "boolean"
+        }
+      }
+    },
     "coprocessor": {
       "description": "Configures the externalization plugin",
       "type": "object",
@@ -581,11 +594,11 @@ expression: "&schema"
     "experimental_chaos": {
       "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions. You probably don’t want this in production!",
       "default": {
-        "force_hot_reload": null
+        "force_reload": null
       },
       "type": "object",
       "properties": {
-        "force_hot_reload": {
+        "force_reload": {
           "description": "Force a hot reload of the Router (as if the schema or configuration had changed) at a regular time interval.",
           "default": null,
           "type": "string",
@@ -593,6 +606,33 @@ expression: "&schema"
         }
       },
       "additionalProperties": false
+    },
+    "experimental_graphql_validation_mode": {
+      "description": "Set the GraphQL validation implementation to use.",
+      "default": "legacy",
+      "oneOf": [
+        {
+          "description": "Use the new Rust-based implementation.",
+          "type": "string",
+          "enum": [
+            "new"
+          ]
+        },
+        {
+          "description": "Use the old JavaScript-based implementation.",
+          "type": "string",
+          "enum": [
+            "legacy"
+          ]
+        },
+        {
+          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
+          "type": "string",
+          "enum": [
+            "both"
+          ]
+        }
+      ]
     },
     "forbid_mutations": {
       "description": "Forbid mutations configuration",
@@ -1057,58 +1097,8 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
-    "override_subgraph_url": {
-      "description": "Subgraph URL mappings",
-      "anyOf": [
-        {
-          "description": "Subgraph URL mappings",
-          "type": "object",
-          "additionalProperties": {
-            "type": "string",
-            "format": "uri"
-          }
-        }
-      ]
-    },
-    "plugins": {
-      "description": "Plugin configuration",
-      "default": null,
-      "properties": {
-        "experimental.broken": {
-          "description": "This is a broken plugin for testing purposes only.",
-          "type": "object",
-          "required": [
-            "enabled"
-          ],
-          "properties": {
-            "enabled": {
-              "description": "Enable the broken plugin.",
-              "type": "boolean"
-            }
-          }
-        },
-        "experimental.expose_query_plan": {
-          "description": "Expose query plan",
-          "type": "boolean"
-        },
-        "experimental.restricted": {
-          "description": "Restricted plugin (for testing purposes only)",
-          "type": "object",
-          "required": [
-            "enabled"
-          ],
-          "properties": {
-            "enabled": {
-              "description": "Enable the restricted plugin (for testing purposes only)",
-              "type": "boolean"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "preview_operation_limits": {
-      "description": "Operation limits",
+    "limits": {
+      "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
       "default": {
         "max_depth": null,
         "max_height": null,
@@ -1116,10 +1106,18 @@ expression: "&schema"
         "max_aliases": null,
         "warn_only": false,
         "parser_max_recursion": 4096,
-        "parser_max_tokens": 15000
+        "parser_max_tokens": 15000,
+        "experimental_http_max_request_bytes": 2000000
       },
       "type": "object",
       "properties": {
+        "experimental_http_max_request_bytes": {
+          "description": "Limit the size of incoming HTTP requests read from the network, to protect against running out of memory. Default: 2000000 (2 MB)",
+          "default": 2000000,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
         "max_aliases": {
           "description": "If set, requests with operations with more aliases than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
           "default": null,
@@ -1174,6 +1172,128 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "override_subgraph_url": {
+      "description": "Subgraph URL mappings",
+      "anyOf": [
+        {
+          "description": "Subgraph URL mappings",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      ]
+    },
+    "plugins": {
+      "description": "Plugin configuration",
+      "default": null,
+      "properties": {
+        "experimental.broken": {
+          "description": "This is a broken plugin for testing purposes only.",
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "Enable the broken plugin.",
+              "type": "boolean"
+            }
+          }
+        },
+        "experimental.expose_query_plan": {
+          "description": "Expose query plan",
+          "type": "boolean"
+        },
+        "experimental.restricted": {
+          "description": "Restricted plugin (for testing purposes only)",
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "Enable the restricted plugin (for testing purposes only)",
+              "type": "boolean"
+            }
+          }
+        },
+        "test.always_fails_to_start": {
+          "description": "Configuration for the test plugin",
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "description": "The name of the test",
+              "type": "string"
+            }
+          }
+        },
+        "test.always_starts_and_stops": {
+          "description": "Configuration for the test plugin",
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "description": "The name of the test",
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "preview_persisted_queries": {
+      "description": "Configures managed persisted queries",
+      "default": {
+        "enabled": false,
+        "log_unknown": false,
+        "safelist": {
+          "enabled": false,
+          "require_id": false
+        }
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Activates Persisted Queries (disabled by default)",
+          "default": false,
+          "type": "boolean"
+        },
+        "log_unknown": {
+          "description": "Enabling this field configures the router to log any freeform GraphQL request that is not in the persisted query list",
+          "default": false,
+          "type": "boolean"
+        },
+        "safelist": {
+          "description": "Restricts execution of operations that are not found in the Persisted Query List",
+          "default": {
+            "enabled": false,
+            "require_id": false
+          },
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "Enables using the peristed query list as a safelist (disabled by default)",
+              "default": false,
+              "type": "boolean"
+            },
+            "require_id": {
+              "description": "Enabling this field configures the router to reject any request that does not include the persisted query ID",
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "rhai": {
       "description": "Configuration for the Rhai Plugin",
       "type": "object",
@@ -1206,12 +1326,163 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "subscription": {
+      "description": "Subscriptions configuration",
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enable_deduplication": {
+          "description": "Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode) (default: true)",
+          "default": false,
+          "type": "boolean"
+        },
+        "enabled": {
+          "description": "Enable subscription",
+          "type": "boolean"
+        },
+        "max_opened_subscriptions": {
+          "description": "This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.",
+          "default": null,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true
+        },
+        "mode": {
+          "description": "Select a subscription mode (callback or passthrough)",
+          "default": {
+            "preview_callback": null,
+            "passthrough": null
+          },
+          "type": "object",
+          "properties": {
+            "passthrough": {
+              "description": "Enable passthrough mode for subgraph(s)",
+              "type": "object",
+              "properties": {
+                "all": {
+                  "description": "Configuration for all subgraphs",
+                  "default": null,
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "description": "Path on which WebSockets are listening",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "protocol": {
+                      "description": "Which WebSocket GraphQL protocol to use for this subgraph possible values are: 'graphql_ws' | 'graphql_transport_ws' (default: graphql_ws)",
+                      "default": "graphql_ws",
+                      "type": "string",
+                      "enum": [
+                        "graphql_ws",
+                        "graphql_transport_ws"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                },
+                "subgraphs": {
+                  "description": "Configuration for specific subgraphs",
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "description": "WebSocket configuration for a specific subgraph",
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "description": "Path on which WebSockets are listening",
+                        "default": null,
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "protocol": {
+                        "description": "Which WebSocket GraphQL protocol to use for this subgraph possible values are: 'graphql_ws' | 'graphql_transport_ws' (default: graphql_ws)",
+                        "default": "graphql_ws",
+                        "type": "string",
+                        "enum": [
+                          "graphql_ws",
+                          "graphql_transport_ws"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
+            "preview_callback": {
+              "description": "Enable callback mode for subgraph(s)",
+              "type": "object",
+              "required": [
+                "public_url"
+              ],
+              "properties": {
+                "listen": {
+                  "description": "Listen address on which the callback must listen (default: 127.0.0.1:4000)",
+                  "writeOnly": true,
+                  "anyOf": [
+                    {
+                      "description": "Socket address.",
+                      "type": "string"
+                    },
+                    {
+                      "description": "Unix socket.",
+                      "type": "string"
+                    }
+                  ],
+                  "nullable": true
+                },
+                "path": {
+                  "description": "Specify on which path you want to listen for callbacks (default: /callback)",
+                  "writeOnly": true,
+                  "type": "string",
+                  "nullable": true
+                },
+                "public_url": {
+                  "description": "URL used to access this router instance",
+                  "type": "string"
+                },
+                "subgraphs": {
+                  "description": "Specify on which subgraph we enable the callback mode for subscription If empty it applies to all subgraphs (passthrough mode takes precedence)",
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "uniqueItems": true
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "queue_capacity": {
+          "description": "It represent the capacity of the in memory queue to know how many events we can keep in a buffer",
+          "default": null,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true
+        }
+      },
+      "additionalProperties": false
+    },
     "supergraph": {
       "description": "Configuration for the supergraph",
       "default": {
         "listen": "127.0.0.1:4000",
         "path": "/",
         "introspection": false,
+        "experimental_reuse_query_fragments": null,
         "defer_support": true,
         "query_planning": {
           "experimental_cache": {
@@ -1229,6 +1500,12 @@ expression: "&schema"
           "description": "Set to false to disable defer support",
           "default": true,
           "type": "boolean"
+        },
+        "experimental_reuse_query_fragments": {
+          "description": "Enable reuse of query fragments Default: depends on the federation version",
+          "default": null,
+          "type": "boolean",
+          "nullable": true
         },
         "introspection": {
           "description": "Enable introspection Default: false",
@@ -3698,6 +3975,28 @@ expression: "&schema"
                   "additionalProperties": false,
                   "nullable": true
                 },
+                "buckets": {
+                  "description": "Custom buckets for histograms",
+                  "default": [
+                    0.001,
+                    0.005,
+                    0.015,
+                    0.05,
+                    0.1,
+                    0.2,
+                    0.3,
+                    0.4,
+                    0.5,
+                    1.0,
+                    5.0,
+                    10.0
+                  ],
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "double"
+                  }
+                },
                 "resources": {
                   "description": "Resources",
                   "default": {},
@@ -3708,11 +4007,13 @@ expression: "&schema"
                 },
                 "service_name": {
                   "description": "Set a service.name resource in your metrics",
+                  "default": null,
                   "type": "string",
                   "nullable": true
                 },
                 "service_namespace": {
                   "description": "Set a service.namespace attribute in your metrics",
+                  "default": null,
                   "type": "string",
                   "nullable": true
                 }
@@ -3856,6 +4157,26 @@ expression: "&schema"
                   "enum": [
                     "grpc",
                     "http"
+                  ]
+                },
+                "temporality": {
+                  "description": "Temporality for export (default: `Cumulative`). Note that when exporting to Datadog agent use `Delta`.",
+                  "default": "cumulative",
+                  "oneOf": [
+                    {
+                      "description": "Export cumulative metrics.",
+                      "type": "string",
+                      "enum": [
+                        "cumulative"
+                      ]
+                    },
+                    {
+                      "description": "Export delta metrics. `Delta` should be used when exporting to DataDog Agent.",
+                      "type": "string",
+                      "enum": [
+                        "delta"
+                      ]
+                    }
                   ]
                 }
               },
@@ -4311,6 +4632,26 @@ expression: "&schema"
                     "grpc",
                     "http"
                   ]
+                },
+                "temporality": {
+                  "description": "Temporality for export (default: `Cumulative`). Note that when exporting to Datadog agent use `Delta`.",
+                  "default": "cumulative",
+                  "oneOf": [
+                    {
+                      "description": "Export cumulative metrics.",
+                      "type": "string",
+                      "enum": [
+                        "cumulative"
+                      ]
+                    },
+                    {
+                      "description": "Export delta metrics. `Delta` should be used when exporting to DataDog Agent.",
+                      "type": "string",
+                      "enum": [
+                        "delta"
+                      ]
+                    }
+                  ]
                 }
               },
               "additionalProperties": false,
@@ -4586,32 +4927,6 @@ expression: "&schema"
         }
       },
       "additionalProperties": false
-    },
-    "test.always_fails_to_start": {
-      "description": "Configuration for the test plugin",
-      "type": "object",
-      "required": [
-        "name"
-      ],
-      "properties": {
-        "name": {
-          "description": "The name of the test",
-          "type": "string"
-        }
-      }
-    },
-    "test.always_starts_and_stops": {
-      "description": "Configuration for the test plugin",
-      "type": "object",
-      "required": [
-        "name"
-      ],
-      "properties": {
-        "name": {
-          "description": "The name of the test",
-          "type": "string"
-        }
-      }
     },
     "tls": {
       "description": "TLS related configuration options.",

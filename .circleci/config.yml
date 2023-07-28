@@ -4,7 +4,7 @@ version: 2.1
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
   gh: circleci/github-cli@2.2.0
-  slack: circleci/slack@4.12.1
+  slack: circleci/slack@4.12.5
 
 executors:
   amd_linux_build: &amd_linux_build_executor
@@ -21,8 +21,8 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
-      - image: cimg/redis:7.0.9
-      - image: jaegertracing/all-in-one:1.42.0
+      - image: cimg/redis:7.0.11
+      - image: jaegertracing/all-in-one:1.45.0
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -58,7 +58,7 @@ executors:
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:stable"
-    resource_class: windows.medium
+    resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
   windows_test: &windows_test_executor
     machine:
@@ -70,7 +70,7 @@ executors:
 parameters:
   toolchain_version:
     type: string
-    default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
+    default: '{{ checksum ".circleci/config.yml" }}-v2-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
   xtask_version:
     type: string
     default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}'
@@ -91,7 +91,7 @@ parameters:
 # forks of the project to run their own tests on their own CircleCI deployments with no
 # additional configuration.
 common_job_environment: &common_job_environment
-  CARGO_NET_GIT_FETCH_WITH_CLI: true
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   RUST_BACKTRACE: full
   CARGO_INCREMENTAL: 0
 commands:
@@ -107,7 +107,7 @@ commands:
       - restore_cache:
           keys:
             - "<< pipeline.parameters.toolchain_version >>"
-      - install_debian_packages:
+      - install_packages:
           platform: << parameters.platform >>
       - install_protoc:
           platform: << parameters.platform >>
@@ -205,7 +205,7 @@ commands:
             echo "${CIRCLE_PROJECT_REPONAME}-${COMMON_ANCESTOR_REF}" > ~/.merge_version
 
   # Linux specific step to install packages that are needed
-  install_debian_packages:
+  install_packages:
     parameters:
       platform:
         type: executor
@@ -222,11 +222,10 @@ commands:
                 name: Update and install dependencies
                 command: |
                   if [[ ! -d "$HOME/.deb" ]]; then
-                    mkdir ~/.deb
+                    mkdir $HOME/.deb
                     sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install libssl-dev libdw-dev cmake
                   fi
-                  sudo dpkg -i ~/.deb/*.deb
-
+                  sudo dpkg -i $HOME/.deb/*.deb
   install_protoc:
     parameters:
       platform:
@@ -507,7 +506,6 @@ jobs:
       RELEASE_BIN: router
       APPLE_TEAM_ID: "YQK948L752"
       APPLE_USERNAME: "opensource@apollographql.com"
-      MACOS_PRIMARY_BUNDLE_ID: com.apollographql.router
     steps:
       - checkout
       - setup_environment:
@@ -536,7 +534,6 @@ jobs:
                   --cert-bundle-password ${MACOS_CERT_BUNDLE_PASSWORD}
                   --keychain-password ${MACOS_KEYCHAIN_PASSWORD}
                   --notarization-password ${MACOS_NOTARIZATION_PASSWORD}
-                  --primary-bundle-id ${MACOS_PRIMARY_BUNDLE_ID}
                   --output artifacts/
       - when:
           condition:
@@ -677,7 +674,7 @@ jobs:
             # Note: GH Token owned by apollo-bot2, no expire
             echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
             # Build and push debug image
-            docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+            docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
             # Build and push release image
             docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
       - run:

@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 #![allow(missing_docs)] // FIXME
 
 use futures::future::ready;
@@ -118,12 +116,14 @@ impl Request {
         headers
             .entry(http::header::CONTENT_TYPE.into())
             .or_insert(HeaderValue::from_static(APPLICATION_JSON.essence_str()).into());
+        let context = context.unwrap_or_default();
+
         Request::new(
             query,
             operation_name,
             variables,
             extensions,
-            context.unwrap_or_default(),
+            context,
             headers,
             Uri::from_static("http://default"),
             method.unwrap_or(Method::POST),

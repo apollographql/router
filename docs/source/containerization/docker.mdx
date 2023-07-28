@@ -3,21 +3,21 @@ title: Docker and the router
 description: Using docker to run router images
 ---
 
-import { Link } from 'gatsby';
+import { Link } from "gatsby";
 
 The default behaviour of the router images is suitable for a quickstart or development scenario. You'll need to know how to customize this default behaviour if you wish to do any of the following.
 
-> Note: The Apollo Router is made available under the Elastic License v2.0 (ELv2).  Read [our licensing page](https://www.apollographql.com/docs/resources/elastic-license-v2-faq/) for more details.
+> Note: The Apollo Router is made available under the Elastic License v2.0 (ELv2). Read [our licensing page](https://www.apollographql.com/docs/resources/elastic-license-v2-faq/) for more details.
 
 Note: The [docker documentation](https://docs.docker.com/engine/reference/run/) for the run command may be helpful when reading through the examples.
 
-Note: The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace `<image version>` with your chosen version. e.g.: `v1.18.0`
+Note: The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace `<image version>` with your chosen version. e.g.: `v1.26.0`
 
 ## Override the configuration
 
-Our default Docker images include a basic configuration which can be seen [in our repository](https://github.com/apollographql/router/blob/main/dockerfiles/router.yaml).  Inside the container, this file is located at `/dist/config/router.yaml`.
+Our default Docker images include a basic configuration which can be seen [in our repository](https://github.com/apollographql/router/blob/main/dockerfiles/router.yaml). Inside the container, this file is located at `/dist/config/router.yaml`.
 
-If you wish to override the default configuration, it is important to consider and preserve aspects of the default configuration.  In particular, it is generally important for the Router to bind to the special "listening address" of `0.0.0.0` (i.e., "all interfaces") to ensure the Router is exposed on a the network interface accessible outside of the local container; without this configuration, the Router will only listen on `localhost`.
+If you wish to override the default configuration, it is important to consider and preserve aspects of the default configuration. In particular, it is generally important for the Router to bind to the special "listening address" of `0.0.0.0` (i.e., "all interfaces") to ensure the Router is exposed on a the network interface accessible outside of the local container; without this configuration, the Router will only listen on `localhost`.
 
 You can provide your own configuration from the host environment to the Router by mounting your configuration to `/dist/config/router.yaml`, as follows:
 
@@ -36,7 +36,7 @@ In this case we are mounting a file from the host system (`/home/user/router.yam
 
 ## Passing command-line arguments to the Router binary
 
-By default, the `router` command invoked inside the published container does run not set any of the [available command-line arguments](../configuration/overview#command-arguments).  If you want to set any of the available options, pass the desired options at end of the `docker run` command.  For example, to start the Router using the `--log debug` argument, you can use the following `docker run` command:
+By default, the `router` command invoked inside the published container does run not set any of the [available command-line options](../configuration/overview#command-line-options). If you want to set any of the available options, pass the desired options at end of the `docker run` command. For example, to start the Router using the `--log debug` argument, you can use the following `docker run` command:
 
 ```bash {5}
 docker run -p 4000:4000 \
@@ -122,4 +122,5 @@ Usage: build_docker_image.sh [-b [-r <repo>]] [-d] [<release>]
 	Example 6: Building a debug image with tag v0.9.1 from the released version
 		build_docker_image.sh -d v0.9.1
 ```
+
 Note: The script has to be run from the `dockerfiles/diy` directory because it makes assumptions about the relative availability of various files. The example uses [debian:bullseye-slim image](https://hub.docker.com/_/debian/) for the final image build. Feel free to modify the script to use images which better suit your own needs, but be careful if using the [-d] flag since it makes the assumption that there is a `heaptrack` package available to install.

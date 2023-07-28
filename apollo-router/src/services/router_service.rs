@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 //! Implements the router phase of the request lifecycle.
 
 use std::sync::Arc;
@@ -7,8 +5,6 @@ use std::task::Poll;
 
 use axum::body::StreamBody;
 use axum::response::*;
-use bytes::Buf;
-use bytes::Bytes;
 use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream;
@@ -34,22 +30,30 @@ use tracing::Instrument;
 
 use super::layers::apq::APQLayer;
 use super::layers::content_negociation;
+use super::layers::query_analysis::QueryAnalysisLayer;
 use super::layers::static_page::StaticPageLayer;
 use super::new_service::ServiceFactory;
 use super::router;
 use super::router::ClientRequestAccepts;
+#[cfg(test)]
 use super::supergraph;
 use super::HasPlugins;
 #[cfg(test)]
+use super::HasSchema;
 use super::SupergraphCreator;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
+use super::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
 use crate::cache::DeduplicatingCache;
 use crate::graphql;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
+use crate::protocols::multipart::Multipart;
+use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::QueryPlanResult;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
+use crate::services::layers::persisted_queries::PersistedQueryLayer;
+use crate::services::layers::persisted_queries::PersistedQueryManifestPoller;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphRequest;
@@ -60,22 +64,28 @@ use crate::ListenAddr;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
-pub(crate) struct RouterService<SF>
-where
-    SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
-{
-    supergraph_creator: Arc<SF>,
+pub(crate) struct RouterService {
+    supergraph_creator: Arc<SupergraphCreator>,
     apq_layer: APQLayer,
+    persisted_query_layer: Arc<PersistedQueryLayer>,
+    query_analysis_layer: QueryAnalysisLayer,
+    experimental_http_max_request_bytes: usize,
 }
 
-impl<SF> RouterService<SF>
-where
-    SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
-{
-    pub(crate) fn new(supergraph_creator: Arc<SF>, apq_layer: APQLayer) -> Self {
+impl RouterService {
+    pub(crate) fn new(
+        supergraph_creator: Arc<SupergraphCreator>,
+        apq_layer: APQLayer,
+        persisted_query_layer: Arc<PersistedQueryLayer>,
+        query_analysis_layer: QueryAnalysisLayer,
+        experimental_http_max_request_bytes: usize,
+    ) -> Self {
         RouterService {
             supergraph_creator,
             apq_layer,
+            persisted_query_layer,
+            query_analysis_layer,
+            experimental_http_max_request_bytes,
         }
     }
 }
@@ -103,11 +113,21 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
         supergraph_service
     });
 
+    let (_, supergraph_creator) = crate::TestHarness::builder()
+        .configuration(configuration.clone())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed())
+        .build_common()
+        .await
+        .unwrap();
+
     RouterCreator::new(
-        Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
-        &configuration,
+        QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
+        Arc::new(supergraph_creator),
+        configuration,
+        None,
     )
     .await
+    .unwrap()
     .make()
 }
 
@@ -143,22 +163,25 @@ pub(crate) async fn empty() -> impl Service<
         .expect_clone()
         .returning(MockSupergraphService::new);
 
+    let (_, supergraph_creator) = crate::TestHarness::builder()
+        .configuration(Default::default())
+        .supergraph_hook(move |_| supergraph_service.clone().boxed())
+        .build_common()
+        .await
+        .unwrap();
+
     RouterCreator::new(
-        Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
-        &Configuration::default(),
+        QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
+        Arc::new(supergraph_creator),
+        Arc::new(Configuration::default()),
+        None,
     )
     .await
+    .unwrap()
     .make()
 }
 
-impl<SF> Service<RouterRequest> for RouterService<SF>
-where
-    SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
-    <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
-    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
-        Send,
-{
+impl Service<RouterRequest> for RouterService {
     type Response = RouterResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -168,6 +191,170 @@ where
     }
 
     fn call(&mut self, req: RouterRequest) -> Self::Future {
+        let clone = self.clone();
+
+        let this = std::mem::replace(self, clone);
+
+        let fut = async move { this.call_inner(req).await };
+        Box::pin(fut)
+    }
+}
+
+impl RouterService {
+    async fn call_inner(&self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
+        let context = req.context.clone();
+
+        let supergraph_request = match self.translate_request(req).await {
+            Ok(request) => request,
+            Err((status_code, error, extension_details)) => {
+                ::tracing::error!(
+                    monotonic_counter.apollo_router_http_requests_total = 1u64,
+                    status = %status_code.as_u16(),
+                    error = %error,
+                    %error
+                );
+
+                return router::Response::error_builder()
+                    .error(
+                        graphql::Error::builder()
+                            .message(String::from("Invalid GraphQL request"))
+                            .extension_code("INVALID_GRAPHQL_REQUEST")
+                            .extension("details", extension_details)
+                            .build(),
+                    )
+                    .status_code(status_code)
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .context(context)
+                    .build();
+            }
+        };
+
+        let mut request_res = self
+            .persisted_query_layer
+            .supergraph_request(supergraph_request);
+
+        if let Ok(supergraph_request) = request_res {
+            request_res = self.apq_layer.supergraph_request(supergraph_request).await;
+        }
+
+        let SupergraphResponse { response, context } = match request_res {
+            Err(response) => response,
+            Ok(request) => match self.query_analysis_layer.supergraph_request(request).await {
+                Err(response) => response,
+                Ok(request) => self.supergraph_creator.create().oneshot(request).await?,
+            },
+        };
+
+        let ClientRequestAccepts {
+            wildcard: accepts_wildcard,
+            json: accepts_json,
+            multipart_defer: accepts_multipart_defer,
+            multipart_subscription: accepts_multipart_subscription,
+        } = context
+            .private_entries
+            .lock()
+            .get()
+            .cloned()
+            .unwrap_or_default();
+
+        let (mut parts, mut body) = response.into_parts();
+        process_vary_header(&mut parts.headers);
+
+        match body.next().await {
+            None => {
+                tracing::error!("router service is not available to process request",);
+                Ok(router::Response {
+                    response: http::Response::builder()
+                        .status(StatusCode::SERVICE_UNAVAILABLE)
+                        .body(Body::from(
+                            "router service is not available to process request",
+                        ))
+                        .expect("cannot fail"),
+                    context,
+                })
+            }
+            Some(response) => {
+                if !response.has_next.unwrap_or(false)
+                    && !response.subscribed.unwrap_or(false)
+                    && (accepts_json || accepts_wildcard)
+                {
+                    parts.headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+                    );
+                    tracing::trace_span!("serialize_response").in_scope(|| {
+                        let body = serde_json::to_string(&response)?;
+                        Ok(router::Response {
+                            response: http::Response::from_parts(parts, Body::from(body)),
+                            context,
+                        })
+                    })
+                } else if accepts_multipart_defer || accepts_multipart_subscription {
+                    if accepts_multipart_defer {
+                        parts.headers.insert(
+                            CONTENT_TYPE,
+                            HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
+                        );
+                    } else if accepts_multipart_subscription {
+                        parts.headers.insert(
+                            CONTENT_TYPE,
+                            HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE),
+                        );
+                    }
+                    let multipart_stream = match response.subscribed {
+                        Some(true) => {
+                            StreamBody::new(Multipart::new(body, ProtocolMode::Subscription))
+                        }
+                        _ => StreamBody::new(Multipart::new(
+                            once(ready(response)).chain(body),
+                            ProtocolMode::Defer,
+                        )),
+                    };
+
+                    let response = (parts, multipart_stream).into_response().map(|body| {
+                        // Axum makes this `body` have type:
+                        // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
+                        let mut body = Box::pin(body);
+                        // We make a stream based on its `poll_data` method
+                        // in order to create a `hyper::Body`.
+                        Body::wrap_stream(stream::poll_fn(move |ctx| body.as_mut().poll_data(ctx)))
+                        // … but we ignore the `poll_trailers` method:
+                        // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
+                        // Apparently HTTP/2 trailers are like headers, except after the response body.
+                        // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
+                        // so ignoring `poll_trailers` is fine.
+                        // If we want to use trailers, we may need remove this convertion to `hyper::Body`
+                        // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
+                    });
+
+                    Ok(RouterResponse { response, context })
+                } else {
+                    // this should be unreachable due to a previous check, but just to be sure...
+                    router::Response::error_builder()
+                                .error(
+                                    graphql::Error::builder()
+                                        .message(format!(
+                                            r#"'accept' header must be one of: \"*/*\", {:?}, {:?} or {:?}"#,
+                                            APPLICATION_JSON.essence_str(),
+                                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                            MULTIPART_DEFER_CONTENT_TYPE
+                                        ))
+                                        .extension_code("INVALID_ACCEPT_HEADER")
+                                        .build(),
+                                )
+                                .status_code(StatusCode::NOT_ACCEPTABLE)
+                                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                                .context(context)
+                                .build()
+                }
+            }
+        }
+    }
+
+    async fn translate_request(
+        &self,
+        req: RouterRequest,
+    ) -> Result<SupergraphRequest, (StatusCode, &str, String)> {
         let RouterRequest {
             router_request,
             context,
@@ -175,234 +362,81 @@ where
 
         let (parts, body) = router_request.into_parts();
 
-        let supergraph_creator = self.supergraph_creator.clone();
-        let apq = self.apq_layer.clone();
-
-        let fut = async move {
-            let graphql_request: Result<graphql::Request, (&str, String)> = if parts.method
-                == Method::GET
-            {
+        let graphql_request = if parts.method == Method::GET {
+            parts
+                .uri
+                .query()
+                .map(|q| {
+                    graphql::Request::from_urlencoded_query(q.to_string()).map_err(|e| {
+                        (
+                            StatusCode::BAD_REQUEST,
+                            "failed to decode a valid GraphQL request from path",
+                            format!("failed to decode a valid GraphQL request from path {e}"),
+                        )
+                    })
+                })
+                .unwrap_or_else(|| {
+                    Err((
+                        StatusCode::BAD_REQUEST,
+                        "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.", 
+                        "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.".to_string()
+                    ))
+                })
+        } else {
+            // FIXME: use a try block when available: https://github.com/rust-lang/rust/issues/31436
+            let content_length = (|| {
                 parts
-                    .uri
-                    .query()
-                    .map(|q| {
-                        graphql::Request::from_urlencoded_query(q.to_string()).map_err(|e| {
-                            (
-                                "failed to decode a valid GraphQL request from path",
-                                format!("failed to decode a valid GraphQL request from path {e}"),
-                            )
-                        })
-                    })
-                    .unwrap_or_else(|| {
-                        Err(("There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.", "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.".to_string()))
-                    })
+                    .headers
+                    .get(http::header::CONTENT_LENGTH)?
+                    .to_str()
+                    .ok()?
+                    .parse()
+                    .ok()
+            })();
+            if content_length.unwrap_or(0) > self.experimental_http_max_request_bytes {
+                Err((
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "payload too large for the `experimental_http_max_request_bytes` configuration",
+                    "payload too large".to_string(),
+                ))
             } else {
+                let body = http_body::Limited::new(body, self.experimental_http_max_request_bytes);
                 hyper::body::to_bytes(body)
                     .instrument(tracing::debug_span!("receive_body"))
                     .await
                     .map_err(|e| {
-                        (
-                            "failed to get the request body",
-                            format!("failed to get the request body: {e}"),
-                        )
+                        if e.is::<http_body::LengthLimitError>() {
+                            (
+                                StatusCode::PAYLOAD_TOO_LARGE,
+                                "payload too large for the `experimental_http_max_request_bytes` configuration",
+                                "payload too large".to_string(),
+                            )
+                        } else {
+                            (
+                                StatusCode::BAD_REQUEST,
+                                "failed to get the request body",
+                                format!("failed to get the request body: {e}"),
+                            )
+                        }
                     })
                     .and_then(|bytes| {
-                        serde_json::from_reader(bytes.reader()).map_err(|err| {
+                        graphql::Request::deserialize_from_bytes(&bytes).map_err(|err| {
                             (
+                                StatusCode::BAD_REQUEST,
                                 "failed to deserialize the request body into JSON",
-                                format!("failed to deserialize the request body into JSON: {err}"),
+                                format!(
+                                    "failed to deserialize the request body into JSON: {err}"
+                                ),
                             )
                         })
                     })
-            };
-
-            match graphql_request {
-                Ok(graphql_request) => {
-                    let request = SupergraphRequest {
-                        supergraph_request: http::Request::from_parts(parts, graphql_request),
-                        context,
-                    };
-
-                    let request_res = apq.supergraph_request(request).await;
-
-                    let SupergraphResponse { response, context } =
-                        match request_res.and_then(|request| {
-                            let query = request.supergraph_request.body().query.as_ref();
-
-                            if query.is_none() || query.unwrap().trim().is_empty() {
-                                let errors = vec![crate::error::Error::builder()
-                                    .message("Must provide query string.".to_string())
-                                    .extension_code("MISSING_QUERY_STRING")
-                                    .build()];
-                                tracing::error!(
-                                    monotonic_counter.apollo_router_http_requests_total = 1u64,
-                                    status = %StatusCode::BAD_REQUEST.as_u16(),
-                                    error = "Must provide query string",
-                                    "Must provide query string"
-                                );
-
-                                Err(SupergraphResponse::builder()
-                                    .errors(errors)
-                                    .status_code(StatusCode::BAD_REQUEST)
-                                    .context(request.context)
-                                    .build()
-                                    .expect("response is valid"))
-                            } else {
-                                Ok(request)
-                            }
-                        }) {
-                            Err(response) => response,
-                            Ok(request) => supergraph_creator.create().oneshot(request).await?,
-                        };
-
-                    let ClientRequestAccepts {
-                        wildcard: accepts_wildcard,
-                        json: accepts_json,
-                        multipart: accepts_multipart,
-                    } = context
-                        .private_entries
-                        .lock()
-                        .get()
-                        .cloned()
-                        .unwrap_or_default();
-
-                    let (mut parts, mut body) = response.into_parts();
-                    process_vary_header(&mut parts.headers);
-
-                    match body.next().await {
-                        None => {
-                            tracing::error!("router service is not available to process request",);
-                            Ok(router::Response {
-                                response: http::Response::builder()
-                                    .status(StatusCode::SERVICE_UNAVAILABLE)
-                                    .body(Body::from(
-                                        "router service is not available to process request",
-                                    ))
-                                    .expect("cannot fail"),
-                                context,
-                            })
-                        }
-                        Some(response) => {
-                            if !response.has_next.unwrap_or(false)
-                                && (accepts_json || accepts_wildcard)
-                            {
-                                parts.headers.insert(
-                                    CONTENT_TYPE,
-                                    HeaderValue::from_static(APPLICATION_JSON.essence_str()),
-                                );
-                                tracing::trace_span!("serialize_response").in_scope(|| {
-                                    let body = serde_json::to_string(&response)?;
-                                    Ok(router::Response {
-                                        response: http::Response::from_parts(
-                                            parts,
-                                            Body::from(body),
-                                        ),
-                                        context,
-                                    })
-                                })
-                            } else if accepts_multipart {
-                                parts.headers.insert(
-                                    CONTENT_TYPE,
-                                    HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
-                                );
-
-                                // each chunk contains a response and the next delimiter, to let client parsers
-                                // know that they can process the response right away
-                                let mut first_buf = Vec::from(
-                                    &b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"[..],
-                                );
-                                serde_json::to_writer(&mut first_buf, &response)?;
-                                if response.has_next.unwrap_or(false) {
-                                    first_buf.extend_from_slice(b"\r\n--graphql\r\n");
-                                } else {
-                                    first_buf.extend_from_slice(b"\r\n--graphql--\r\n");
-                                }
-
-                                let body = once(ready(Ok(Bytes::from(first_buf)))).chain(body.map(
-                                    |res| {
-                                        let mut buf = Vec::from(
-                                            &b"content-type: application/json\r\n\r\n"[..],
-                                        );
-                                        serde_json::to_writer(&mut buf, &res)?;
-
-                                        // the last chunk has a different end delimiter
-                                        if res.has_next.unwrap_or(false) {
-                                            buf.extend_from_slice(b"\r\n--graphql\r\n");
-                                        } else {
-                                            buf.extend_from_slice(b"\r\n--graphql--\r\n");
-                                        }
-
-                                        Ok::<_, BoxError>(buf.into())
-                                    },
-                                ));
-
-                                let response =
-                                    (parts, StreamBody::new(body)).into_response().map(|body| {
-                                        // Axum makes this `body` have type:
-                                        // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
-                                        let mut body = Box::pin(body);
-                                        // We make a stream based on its `poll_data` method
-                                        // in order to create a `hyper::Body`.
-                                        Body::wrap_stream(stream::poll_fn(move |ctx| {
-                                            body.as_mut().poll_data(ctx)
-                                        }))
-                                        // … but we ignore the `poll_trailers` method:
-                                        // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
-                                        // Apparently HTTP/2 trailers are like headers, except after the response body.
-                                        // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
-                                        // so ignoring `poll_trailers` is fine.
-                                        // If we want to use trailers, we may need remove this convertion to `hyper::Body`
-                                        // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
-                                    });
-
-                                Ok(RouterResponse { response, context })
-                            } else {
-                                // this should be unreachable due to a previous check, but just to be sure...
-                                router::Response::error_builder()
-                                    .error(
-                                        graphql::Error::builder()
-                                            .message(format!(
-                                                r#"'accept' header must be one of: \"*/*\", {:?}, {:?} or {:?}"#,
-                                                APPLICATION_JSON.essence_str(),
-                                                GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                                MULTIPART_DEFER_CONTENT_TYPE
-                                            ))
-                                            .extension_code("INVALID_ACCEPT_HEADER")
-                                            .build(),
-                                    )
-                                    .status_code(StatusCode::NOT_ACCEPTABLE)
-                                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                                    .context(context)
-                                    .build()
-                            }
-                        }
-                    }
-                }
-                Err((error, extension_details)) => {
-                    // BAD REQUEST
-                    ::tracing::error!(
-                        monotonic_counter.apollo_router_http_requests_total = 1u64,
-                        status = %400,
-                        error = %error,
-                        %error
-                    );
-
-                    router::Response::error_builder()
-                        .error(
-                            graphql::Error::builder()
-                                .message(String::from("Invalid GraphQL request"))
-                                .extension_code("INVALID_GRAPHQL_REQUEST")
-                                .extension("details", extension_details)
-                                .build(),
-                        )
-                        .status_code(StatusCode::BAD_REQUEST)
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .context(context)
-                        .build()
-                }
             }
         };
-        Box::pin(fut)
+
+        Ok(SupergraphRequest {
+            supergraph_request: http::Request::from_parts(parts, graphql_request?),
+            context,
+        })
     }
 }
 
@@ -416,40 +450,26 @@ fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
-pub(crate) struct RouterCreator<SF>
-where
-    SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
-{
-    supergraph_creator: Arc<SF>,
+pub(crate) struct RouterCreator {
+    supergraph_creator: Arc<SupergraphCreator>,
     static_page: StaticPageLayer,
     apq_layer: APQLayer,
+    pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
+    query_analysis_layer: QueryAnalysisLayer,
+    experimental_http_max_request_bytes: usize,
 }
 
-impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
-where
-    SF: HasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
-    <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
-    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
-        Send,
-{
+impl ServiceFactory<router::Request> for RouterCreator {
     type Service = router::BoxService;
     fn create(&self) -> Self::Service {
         self.make().boxed()
     }
 }
 
-impl<SF> RouterFactory for RouterCreator<SF>
-where
-    SF: HasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
-    <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
-    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
-        Send,
-{
+impl RouterFactory for RouterCreator {
     type RouterService = router::BoxService;
 
-    type Future = <<RouterCreator<SF> as ServiceFactory<router::Request>>::Service as Service<
+    type Future = <<RouterCreator as ServiceFactory<router::Request>>::Service as Service<
         router::Request,
     >>::Future;
 
@@ -463,16 +483,14 @@ where
     }
 }
 
-impl<SF> RouterCreator<SF>
-where
-    SF: HasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
-    <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
-    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
-        Send,
-{
-    pub(crate) async fn new(supergraph_creator: Arc<SF>, configuration: &Configuration) -> Self {
-        let static_page = StaticPageLayer::new(configuration);
+impl RouterCreator {
+    pub(crate) async fn new(
+        query_analysis_layer: QueryAnalysisLayer,
+        supergraph_creator: Arc<SupergraphCreator>,
+        configuration: Arc<Configuration>,
+        persisted_query_manifest_poller: Option<Arc<PersistedQueryManifestPoller>>,
+    ) -> Result<Self, BoxError> {
+        let static_page = StaticPageLayer::new(&configuration);
         let apq_layer = if configuration.apq.enabled {
             APQLayer::with_cache(
                 DeduplicatingCache::from_configuration(&configuration.apq.router.cache, "APQ")
@@ -482,11 +500,20 @@ where
             APQLayer::disabled()
         };
 
-        Self {
+        let persisted_query_layer = Arc::new(
+            PersistedQueryLayer::new(&configuration, persisted_query_manifest_poller).await?,
+        );
+
+        Ok(Self {
             supergraph_creator,
             static_page,
             apq_layer,
-        }
+            query_analysis_layer,
+            experimental_http_max_request_bytes: configuration
+                .limits
+                .experimental_http_max_request_bytes,
+            persisted_query_layer,
+        })
     }
 
     pub(crate) fn make(
@@ -500,6 +527,9 @@ where
         let router_service = content_negociation::RouterLayer::default().layer(RouterService::new(
             self.supergraph_creator.clone(),
             self.apq_layer.clone(),
+            self.persisted_query_layer.clone(),
+            self.query_analysis_layer.clone(),
+            self.experimental_http_max_request_bytes,
         ));
 
         ServiceBuilder::new()
@@ -514,7 +544,7 @@ where
     }
 }
 
-impl RouterCreator<crate::services::supergraph_service::SupergraphCreator> {
+impl RouterCreator {
     pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
         self.supergraph_creator.cache_keys(count).await
     }
@@ -690,5 +720,51 @@ mod tests {
         let actual_error = response.errors[0].message.clone();
         assert_eq!(expected_error, actual_error);
         assert!(response.errors[0].extensions.contains_key("code"));
+    }
+
+    #[tokio::test]
+    async fn test_experimental_http_max_request_bytes() {
+        /// Size of the JSON serialization of the request created by `fn canned_new`
+        /// in `apollo-router/src/services/supergraph.rs`
+        const CANNED_REQUEST_LEN: usize = 391;
+
+        async fn with_config(experimental_http_max_request_bytes: usize) -> router::Response {
+            let http_request = supergraph::Request::canned_builder()
+                .build()
+                .unwrap()
+                .supergraph_request
+                .map(|body| {
+                    let json_bytes = serde_json::to_vec(&body).unwrap();
+                    assert_eq!(
+                        json_bytes.len(),
+                        CANNED_REQUEST_LEN,
+                        "The request generated by `fn canned_new` \
+                         in `apollo-router/src/services/supergraph.rs` has changed. \
+                         Please update `CANNED_REQUEST_LEN` accordingly."
+                    );
+                    hyper::Body::from(json_bytes)
+                });
+            let config = serde_json::json!({
+                "limits": {
+                    "experimental_http_max_request_bytes": experimental_http_max_request_bytes
+                }
+            });
+            crate::TestHarness::builder()
+                .configuration_json(config)
+                .unwrap()
+                .build_router()
+                .await
+                .unwrap()
+                .oneshot(router::Request::from(http_request))
+                .await
+                .unwrap()
+        }
+        // Send a request just at (under) the limit
+        let response = with_config(CANNED_REQUEST_LEN).await.response;
+        assert_eq!(response.status(), http::StatusCode::OK);
+
+        // Send a request just over the limit
+        let response = with_config(CANNED_REQUEST_LEN - 1).await.response;
+        assert_eq!(response.status(), http::StatusCode::PAYLOAD_TOO_LARGE);
     }
 }

@@ -9,7 +9,7 @@ expression: get_spans()
     "metadata": {
       "name": "root",
       "target": "tracing_tests",
-      "level": "INFO",
+      "level": "ERROR",
       "module_path": "tracing_tests",
       "fields": {
         "names": []
@@ -36,6 +36,18 @@ expression: get_spans()
           [
             "otel.kind",
             "SERVER"
+          ],
+          [
+            "apollo_private.request",
+            true
+          ],
+          [
+            "graphql.operation.name",
+            "ExampleQuery"
+          ],
+          [
+            "otel.name",
+            "GraphQL Operation"
           ]
         ],
         "metadata": {
@@ -48,7 +60,11 @@ expression: get_spans()
               "http.method",
               "http.route",
               "http.flavor",
-              "otel.kind"
+              "otel.name",
+              "otel.kind",
+              "graphql.operation.name",
+              "graphql.operation.type",
+              "apollo_private.request"
             ]
           }
         }
@@ -95,10 +111,6 @@ expression: get_spans()
                 0
               ],
               [
-                "apollo_private.http.response_headers",
-                "{}"
-              ],
-              [
                 "otel.status_code",
                 "Error"
               ]
@@ -126,6 +138,29 @@ expression: get_spans()
             }
           },
           "children": {
+            "apollo_router::services::layers::query_analysis::parse_query": {
+              "name": "apollo_router::services::layers::query_analysis::parse_query",
+              "record": {
+                "entries": [
+                  [
+                    "otel.kind",
+                    "INTERNAL"
+                  ]
+                ],
+                "metadata": {
+                  "name": "parse_query",
+                  "target": "apollo_router::services::layers::query_analysis",
+                  "level": "INFO",
+                  "module_path": "apollo_router::services::layers::query_analysis",
+                  "fields": {
+                    "names": [
+                      "otel.kind"
+                    ]
+                  }
+                }
+              },
+              "children": {}
+            },
             "apollo_router::plugins::telemetry::supergraph": {
               "name": "apollo_router::plugins::telemetry::supergraph",
               "record": {
@@ -133,10 +168,6 @@ expression: get_spans()
                   [
                     "graphql.document",
                     "query ExampleQuery($topProductsFirst: Int, $reviewsForAuthorAuthorId: ID!) {\n                topProducts(first: $topProductsFirst) {\n                    name\n                    reviewsForAuthor(authorID: $reviewsForAuthorAuthorId) {\n                        body\n                        author {\n                            id\n                            name\n                        }\n                    }\n                }\n            }"
-                  ],
-                  [
-                    "graphql.operation.name",
-                    ""
                   ],
                   [
                     "otel.kind",
@@ -149,6 +180,10 @@ expression: get_spans()
                   [
                     "apollo_private.graphql.variables",
                     "{}"
+                  ],
+                  [
+                    "graphql.operation.name",
+                    "ExampleQuery"
                   ],
                   [
                     "apollo_private.operation_signature",
@@ -234,31 +269,7 @@ expression: get_spans()
                       }
                     }
                   },
-                  "children": {
-                    "apollo_router::query_planner::bridge_query_planner::parse_query": {
-                      "name": "apollo_router::query_planner::bridge_query_planner::parse_query",
-                      "record": {
-                        "entries": [
-                          [
-                            "otel.kind",
-                            "INTERNAL"
-                          ]
-                        ],
-                        "metadata": {
-                          "name": "parse_query",
-                          "target": "apollo_router::query_planner::bridge_query_planner",
-                          "level": "INFO",
-                          "module_path": "apollo_router::query_planner::bridge_query_planner",
-                          "fields": {
-                            "names": [
-                              "otel.kind"
-                            ]
-                          }
-                        }
-                      },
-                      "children": {}
-                    }
-                  }
+                  "children": {}
                 }
               }
             }

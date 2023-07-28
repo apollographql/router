@@ -1,5 +1,4 @@
 //! Apollo metrics
-// With regards to ELv2 licensing, this entire file is license key functionality
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
@@ -74,7 +73,9 @@ mod test {
     use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::plugins::telemetry::Telemetry;
+    use crate::plugins::telemetry::OPERATION_KIND;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
+    use crate::query_planner::OperationKind;
     use crate::services::SupergraphRequest;
     use crate::Context;
     use crate::TestHarness;
@@ -107,6 +108,23 @@ mod test {
     async fn apollo_metrics_single_operation() -> Result<(), BoxError> {
         let query = "query {topProducts{name}}";
         let results = get_metrics_for_request(query, None, None).await?;
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| {
+            insta::assert_json_snapshot!(results);
+        });
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_for_subscription() -> Result<(), BoxError> {
+        let query = "subscription {userWasCreated{name}}";
+        let context = Context::new();
+        let _ = context
+            .insert(OPERATION_KIND, OperationKind::Subscription)
+            .unwrap();
+        let results = get_metrics_for_request(query, None, Some(context)).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -249,7 +267,7 @@ mod test {
     async fn create_plugin_with_apollo_config(
         apollo_config: apollo::Config,
     ) -> Result<Telemetry, BoxError> {
-        Telemetry::new(PluginInit::new(
+        Telemetry::new(PluginInit::fake_new(
             config::Conf {
                 logging: Default::default(),
                 metrics: None,

@@ -6,7 +6,6 @@
 //! * Compression
 //! * Rate limiting
 //!
-// With regards to ELv2 licensing, this entire file is license key functionality
 mod cache;
 mod deduplication;
 mod rate;
@@ -480,8 +479,10 @@ mod test {
     use crate::plugin::DynPlugin;
     use crate::query_planner::BridgeQueryPlanner;
     use crate::router_factory::create_plugins;
+    use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::services::router;
     use crate::services::router_service::RouterCreator;
+    use crate::services::HasSchema;
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
@@ -594,11 +595,16 @@ mod test {
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
+        let supergraph_creator = builder.build().await.expect("should build");
+
         RouterCreator::new(
-            Arc::new(builder.build().await.expect("should build")),
-            &Configuration::default(),
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
+            Arc::new(supergraph_creator),
+            Arc::new(Configuration::default()),
+            Default::default(),
         )
         .await
+        .unwrap()
         .make()
         .boxed()
     }
@@ -750,7 +756,7 @@ mod test {
         )
         .unwrap();
 
-        let shaping_config = TrafficShaping::new(PluginInit::new(config, Default::default()))
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
             .await
             .unwrap();
 

@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 // tonic does not derive `Eq` for the gRPC message types, which causes a warning from Clippy. The
 // current suggestion is to explicitly allow the lint in the module that imports the protos.
 // Read more: https://github.com/hyperium/tonic/issues/1056
@@ -54,6 +52,9 @@ impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<String> {
                     FetchErrorCode::ACCESS_DENIED => "ACCESS_DENIED".to_string(),
                     FetchErrorCode::UNKNOWN_REF => "UNKNOWN_REF".to_string(),
                     FetchErrorCode::RETRY_LATER => "RETRY_LATER".to_string(),
+                    FetchErrorCode::NOT_IMPLEMENTED_ON_THIS_INSTANCE => {
+                        "NOT_IMPLEMENTED_ON_THIS_INSTANCE".to_string()
+                    }
                     FetchErrorCode::Other(other) => other,
                 },
                 message: err.message,
@@ -73,6 +74,7 @@ mod test {
     use crate::uplink::schema_stream::SupergraphSdlQuery;
     use crate::uplink::stream_from_uplink;
     use crate::uplink::Endpoints;
+    use crate::uplink::UplinkConfig;
     use crate::uplink::AWS_URL;
     use crate::uplink::GCP_URL;
 
@@ -83,15 +85,15 @@ mod test {
                 std::env::var("TEST_APOLLO_KEY"),
                 std::env::var("TEST_APOLLO_GRAPH_REF"),
             ) {
-                let results = stream_from_uplink::<SupergraphSdlQuery, String>(
+                let results = stream_from_uplink::<SupergraphSdlQuery, String>(UplinkConfig {
                     apollo_key,
                     apollo_graph_ref,
-                    Some(Endpoints::fallback(vec![
+                    endpoints: Some(Endpoints::fallback(vec![
                         Url::from_str(url).expect("url must be valid")
                     ])),
-                    Duration::from_secs(1),
-                    Duration::from_secs(5),
-                )
+                    poll_interval: Duration::from_secs(1),
+                    timeout: Duration::from_secs(5),
+                })
                 .take(1)
                 .collect::<Vec<_>>()
                 .await;

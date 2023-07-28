@@ -27,12 +27,13 @@ use serde::de::DeserializeOwned;
 use thiserror::Error;
 use url::Url;
 
-use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry;
 use crate::plugins::telemetry::apollo::ErrorConfiguration;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
+use crate::plugins::telemetry::apollo::OperationSubType;
 use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::apollo_exporter::proto;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Method;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Values;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ConditionNode;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::DeferNode;
@@ -58,6 +59,8 @@ use crate::plugins::telemetry::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
+use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
+use crate::query_planner::OperationKind;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
 use crate::query_planner::CONDITION_IF_SPAN_NAME;
 use crate::query_planner::CONDITION_SPAN_NAME;
@@ -69,7 +72,9 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 
-const APOLLO_PRIVATE_DURATION_NS: Key = Key::from_static_str("apollo_private.duration_ns");
+const APOLLO_PRIVATE_REQUEST: Key = Key::from_static_str("apollo_private.request");
+pub(crate) const APOLLO_PRIVATE_DURATION_NS: &str = "apollo_private.duration_ns";
+const APOLLO_PRIVATE_DURATION_NS_KEY: Key = Key::from_static_str(APOLLO_PRIVATE_DURATION_NS);
 const APOLLO_PRIVATE_SENT_TIME_OFFSET: Key =
     Key::from_static_str("apollo_private.sent_time_offset");
 const APOLLO_PRIVATE_GRAPHQL_VARIABLES: Key =
@@ -144,8 +149,10 @@ pub(crate) struct Exporter {
     errors_configuration: ErrorsConfiguration,
 }
 
+#[derive(Debug)]
 enum TreeData {
     Request(Result<Box<proto::reports::Trace>, Error>),
+    SubscriptionEvent(Result<Box<proto::reports::Trace>, Error>),
     Router {
         http: Box<Http>,
         client_name: Option<String>,
@@ -211,7 +218,7 @@ impl Exporter {
             duration_ns: 0,
             root: None,
             details: None,
-            http: Some(http),
+            http: (http.method != Method::Unknown as i32).then_some(http),
             ..Default::default()
         };
 
@@ -226,12 +233,14 @@ impl Exporter {
                     client_version,
                     duration_ns,
                 } => {
-                    let root_http = root_trace
-                        .http
-                        .as_mut()
-                        .expect("http was extracted earlier, qed");
-                    root_http.request_headers = http.request_headers;
-                    root_http.response_headers = http.response_headers;
+                    if http.method != Method::Unknown as i32 {
+                        let root_http = root_trace
+                            .http
+                            .as_mut()
+                            .expect("http was extracted earlier, qed");
+                        root_http.request_headers = http.request_headers;
+                        root_http.response_headers = http.response_headers;
+                    }
                     root_trace.client_name = client_name.unwrap_or_default();
                     root_trace.client_version = client_version.unwrap_or_default();
                     root_trace.duration_ns = duration_ns;
@@ -249,9 +258,24 @@ impl Exporter {
                     });
                 }
                 TreeData::Execution(operation_type) => {
+                    if operation_type == OperationKind::Subscription.as_apollo_operation_type() {
+                        root_trace.operation_subtype = if root_trace.http.is_some() {
+                            OperationSubType::SubscriptionRequest.to_string()
+                        } else {
+                            OperationSubType::SubscriptionEvent.to_string()
+                        };
+                    }
                     root_trace.operation_type = operation_type;
                 }
-                _ => panic!("should never have had other node types"),
+                TreeData::Trace(_) => {
+                    continue;
+                }
+                other => {
+                    tracing::error!(
+                        "should never have had other node types, current type is: {other:?}"
+                    );
+                    return Err(Error::TraceParsingFailed);
+                }
             }
         }
 
@@ -262,13 +286,14 @@ impl Exporter {
         self.extract_data_from_spans(&span)?
             .pop()
             .and_then(|node| {
-                if let TreeData::Request(trace) = node {
-                    Some(trace)
-                } else {
-                    None
+                match node {
+                    TreeData::Request(trace) | TreeData::SubscriptionEvent(trace) => {
+                        Some(trace)
+                    }
+                    _ => None
                 }
             })
-            .expect("root trace must exist because it is constructed on the request span, qed")
+            .expect("root trace must exist because it is constructed on the request or subscription_event span, qed")
     }
 
     fn extract_data_from_spans(&mut self, span: &LightSpanData) -> Result<Vec<TreeData>, Error> {
@@ -335,6 +360,9 @@ impl Exporter {
                     )),
                 })]
             }
+            // SUBSCRIBE_SPAN_NAME => {
+            // TODO: in the future we could add a subscription node in the report.proto and do exactly the same logic than in FETCH_SPAN_NAME branch
+            // }
             FLATTEN_SPAN_NAME => {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
                     node: Some(proto::reports::trace::query_plan_node::Node::Flatten(
@@ -386,7 +414,7 @@ impl Exporter {
                 });
                 child_nodes
             }
-            REQUEST_SPAN_NAME => {
+            _ if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some() => {
                 vec![TreeData::Request(
                     self.extract_root_trace(span, child_nodes),
                 )]
@@ -401,7 +429,7 @@ impl Exporter {
                         .and_then(extract_string),
                     duration_ns: span
                         .attributes
-                        .get(&APOLLO_PRIVATE_DURATION_NS)
+                        .get(&APOLLO_PRIVATE_DURATION_NS_KEY)
                         .and_then(extract_i64)
                         .map(|e| e as u64)
                         .unwrap_or_default(),
@@ -481,6 +509,48 @@ impl Exporter {
                 ));
                 child_nodes
             }
+            SUBSCRIPTION_EVENT_SPAN_NAME => {
+                // To put the duration
+                child_nodes.push(TreeData::Router {
+                    http: Box::new(extract_http_data(span)),
+                    client_name: span.attributes.get(&CLIENT_NAME).and_then(extract_string),
+                    client_version: span
+                        .attributes
+                        .get(&CLIENT_VERSION)
+                        .and_then(extract_string),
+                    duration_ns: span
+                        .attributes
+                        .get(&APOLLO_PRIVATE_DURATION_NS_KEY)
+                        .and_then(extract_i64)
+                        .map(|e| e as u64)
+                        .unwrap_or_default(),
+                });
+
+                // To put the signature and operation name
+                child_nodes.push(TreeData::Supergraph {
+                    operation_signature: span
+                        .attributes
+                        .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
+                        .and_then(extract_string)
+                        .unwrap_or_default(),
+                    operation_name: span
+                        .attributes
+                        .get(&OPERATION_NAME)
+                        .and_then(extract_string)
+                        .unwrap_or_default(),
+                    variables_json: HashMap::new(),
+                });
+
+                child_nodes.push(TreeData::Execution(
+                    OperationKind::Subscription
+                        .as_apollo_operation_type()
+                        .to_string(),
+                ));
+
+                vec![TreeData::SubscriptionEvent(
+                    self.extract_root_trace(span, child_nodes),
+                )]
+            }
             _ => child_nodes,
         })
     }
@@ -556,11 +626,13 @@ fn extract_ftv1_trace(
 
 fn preprocess_errors(t: &mut proto::reports::trace::Node, error_config: &ErrorConfiguration) {
     if error_config.send {
-        t.error.iter_mut().for_each(|err| {
-            err.message = String::from("<redacted>");
-            err.location = Vec::new();
-            err.json = String::new();
-        });
+        if error_config.redact {
+            t.error.iter_mut().for_each(|err| {
+                err.message = String::from("<redacted>");
+                err.location = Vec::new();
+                err.json = String::new();
+            });
+        }
     } else {
         t.error = Vec::new();
     }
@@ -627,7 +699,9 @@ impl SpanExporter for Exporter {
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
         for span in batch {
-            if span.name == REQUEST_SPAN_NAME {
+            if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
+                || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
+            {
                 match self.extract_trace(span.into()) {
                     Ok(mut trace) => {
                         let mut operation_signature = Default::default();
@@ -663,6 +737,7 @@ impl SpanExporter for Exporter {
                     .push(len, span.into());
             }
         }
+        tracing::info!(value.apollo_router_span_lru_size = self.spans_by_parent_id.len() as u64,);
         let mut report = telemetry::apollo::Report::default();
         report += SingleReport::Traces(TracesReport { traces });
         let exporter = self.report_exporter.clone();
@@ -780,6 +855,7 @@ mod test {
         for t in tree_data {
             match t {
                 TreeData::Request(_) => elements.push("request"),
+                TreeData::SubscriptionEvent(_) => elements.push("subscription_event"),
                 TreeData::Supergraph { .. } => elements.push("supergraph"),
                 TreeData::QueryPlanNode(_) => elements.push("query_plan_node"),
                 TreeData::DeferPrimary(_) => elements.push("defer_primary"),
@@ -983,6 +1059,48 @@ mod test {
         assert!(node.child[0].error[0].json.is_empty());
         assert!(node.child[0].error[0].location.is_empty());
         assert_eq!(node.child[0].error[0].message.as_str(), "<redacted>");
+        assert_eq!(node.child[0].error[0].time_ns, 5u64);
+
+        let sub_node = Node {
+            error: vec![Error {
+                message: "this is my error".to_string(),
+                location: Vec::new(),
+                time_ns: 5,
+                json: String::from(r#"{"foo": "bar"}"#),
+            }],
+            ..Default::default()
+        };
+        let mut node = Node {
+            error: vec![
+                Error {
+                    message: "this is my error".to_string(),
+                    location: Vec::new(),
+                    time_ns: 5,
+                    json: String::from(r#"{"foo": "bar"}"#),
+                },
+                Error {
+                    message: "this is my other error".to_string(),
+                    location: Vec::new(),
+                    time_ns: 5,
+                    json: String::from(r#"{"foo": "bar"}"#),
+                },
+            ],
+            ..Default::default()
+        };
+        node.child.push(sub_node);
+        let error_config = ErrorConfiguration {
+            send: true,
+            redact: false,
+        };
+        preprocess_errors(&mut node, &error_config);
+        assert_eq!(node.error[0].message.as_str(), "this is my error");
+        assert_eq!(node.error[0].time_ns, 5u64);
+        assert!(!node.error[1].json.is_empty());
+        assert_eq!(node.error[1].message.as_str(), "this is my other error");
+        assert_eq!(node.error[1].time_ns, 5u64);
+
+        assert!(!node.child[0].error[0].json.is_empty());
+        assert_eq!(node.child[0].error[0].message.as_str(), "this is my error");
         assert_eq!(node.child[0].error[0].time_ns, 5u64);
     }
 
