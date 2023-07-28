@@ -574,7 +574,7 @@ pub(crate) async fn create_plugins(
 
         Err(BoxError::from(format!(
             "there were {} configuration errors",
-            dbg!(errors).len()
+            errors.len()
         )))
     } else {
         Ok(plugin_instances)
