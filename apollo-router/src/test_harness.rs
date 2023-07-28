@@ -1,4 +1,7 @@
+//! Test harness and mocks for the Apollo Router.
+
 use std::collections::HashMap;
+use std::default::Default;
 use std::sync::Arc;
 
 use tower::BoxError;
@@ -24,6 +27,9 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::HasSchema;
 use crate::services::SupergraphCreator;
+
+/// Mocks for services the Apollo Router must integrate with.
+pub mod mocks;
 
 #[cfg(test)]
 pub(crate) mod http_client;
@@ -135,7 +141,8 @@ impl<'a> TestHarness<'a> {
         self,
         configuration: serde_json::Value,
     ) -> Result<Self, serde_json::Error> {
-        Ok(self.configuration(serde_json::from_value(configuration)?))
+        let configuration: Configuration = serde_json::from_value(configuration)?;
+        Ok(self.configuration(Arc::new(configuration)))
     }
 
     /// Adds an extra, already instanciated plugin.
@@ -267,8 +274,10 @@ impl<'a> TestHarness<'a> {
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
             Arc::new(supergraph_creator),
             config,
+            None,
         )
-        .await;
+        .await
+        .unwrap();
 
         Ok(tower::service_fn(move |request: router::Request| {
             let router = ServiceBuilder::new().service(router_creator.make()).boxed();
@@ -289,9 +298,11 @@ impl<'a> TestHarness<'a> {
         let router_creator = RouterCreator::new(
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
             Arc::new(supergraph_creator),
-            Arc::clone(&config),
+            config.clone(),
+            None,
         )
-        .await;
+        .await?;
+
         let web_endpoints = router_creator.web_endpoints();
 
         let live = Arc::new(std::sync::atomic::AtomicBool::new(false));

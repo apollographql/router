@@ -943,7 +943,7 @@ mod tests {
             )
             .with_json(
                 serde_json::json!{{
-                    "query":"{computer(id:\"Computer1\"){id errorField}}",
+                    "query":"{computer(id:\"Computer1\"){errorField id}}",
                 }},
                 serde_json::json!{{
                     "data": {
@@ -1270,7 +1270,7 @@ mod tests {
             ).build())
         ].into_iter().collect());
 
-        let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
+        let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
         configuration.notify = notify.clone();
         let service = TestHarness::builder()
             .configuration(Arc::new(configuration))
@@ -1341,7 +1341,7 @@ mod tests {
             ).build())
         ].into_iter().collect());
 
-        let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "max_opened_subscriptions": 1, "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
+        let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "max_opened_subscriptions": 1, "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
         configuration.notify = notify.clone();
         let mut service = TestHarness::builder()
             .configuration(Arc::new(configuration))
@@ -1410,7 +1410,7 @@ mod tests {
     #[tokio::test]
     async fn subscription_without_header() {
         let subgraphs = MockedSubgraphs(HashMap::new());
-        let configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
+        let configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
         let service = TestHarness::builder()
             .configuration(Arc::new(configuration))
             .schema(SCHEMA)

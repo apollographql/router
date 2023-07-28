@@ -362,9 +362,9 @@ fn process_request(request) {
 fn process_response(response) {
     log_info("processing response"); // This will appear in the router log as an INFO log
     // Verify that x-custom-header is present and has the expected value
-    if request.context["x-custom-header"] != "CUSTOM_VALUE" {
+    if response.context["x-custom-header"] != "CUSTOM_VALUE" {
         log_error("Error: we lost our custom header from our context"); // This will appear in the router log as an ERROR log
-        throw "Error: we lost our custom header from our context"; // This will appear in the errors response and short-circuit the request
+        throw "Error: we lost our custom header from our context"; // This will appear in the errors response and short-circuit the response
     }
 }
 ```

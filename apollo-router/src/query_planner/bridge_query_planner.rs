@@ -62,6 +62,7 @@ impl BridgeQueryPlanner {
         let planner = Planner::new(
             sdl,
             QueryPlannerConfig {
+                reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
                 incremental_delivery: Some(IncrementalDeliverySupport {
                     enable_defer: Some(configuration.supergraph.defer_support),
                 }),
@@ -140,6 +141,7 @@ impl BridgeQueryPlanner {
                             configuration.experimental_graphql_validation_mode,
                             GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
                         ),
+                        reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
                     },
                 )
                 .await?,

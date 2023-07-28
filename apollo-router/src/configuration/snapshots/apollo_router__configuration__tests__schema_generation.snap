@@ -1251,6 +1251,52 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "preview_persisted_queries": {
+      "description": "Configures managed persisted queries",
+      "default": {
+        "enabled": false,
+        "log_unknown": false,
+        "safelist": {
+          "enabled": false,
+          "require_id": false
+        }
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Activates Persisted Queries (disabled by default)",
+          "default": false,
+          "type": "boolean"
+        },
+        "log_unknown": {
+          "description": "Enabling this field configures the router to log any freeform GraphQL request that is not in the persisted query list",
+          "default": false,
+          "type": "boolean"
+        },
+        "safelist": {
+          "description": "Restricts execution of operations that are not found in the Persisted Query List",
+          "default": {
+            "enabled": false,
+            "require_id": false
+          },
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "Enables using the peristed query list as a safelist (disabled by default)",
+              "default": false,
+              "type": "boolean"
+            },
+            "require_id": {
+              "description": "Enabling this field configures the router to reject any request that does not include the persisted query ID",
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "rhai": {
       "description": "Configuration for the Rhai Plugin",
       "type": "object",
@@ -1286,10 +1332,17 @@ expression: "&schema"
     "subscription": {
       "description": "Subscriptions configuration",
       "type": "object",
+      "required": [
+        "enabled"
+      ],
       "properties": {
         "enable_deduplication": {
           "description": "Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode) (default: true)",
-          "default": true,
+          "default": false,
+          "type": "boolean"
+        },
+        "enabled": {
+          "description": "Enable subscription",
           "type": "boolean"
         },
         "max_opened_subscriptions": {
@@ -1432,6 +1485,7 @@ expression: "&schema"
         "listen": "127.0.0.1:4000",
         "path": "/",
         "introspection": false,
+        "experimental_reuse_query_fragments": null,
         "defer_support": true,
         "query_planning": {
           "experimental_cache": {
@@ -1449,6 +1503,12 @@ expression: "&schema"
           "description": "Set to false to disable defer support",
           "default": true,
           "type": "boolean"
+        },
+        "experimental_reuse_query_fragments": {
+          "description": "Enable reuse of query fragments Default: depends on the federation version",
+          "default": null,
+          "type": "boolean",
+          "nullable": true
         },
         "introspection": {
           "description": "Enable introspection Default: false",

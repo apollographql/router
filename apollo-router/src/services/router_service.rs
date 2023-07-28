@@ -53,6 +53,8 @@ use crate::query_planner::QueryPlanResult;
 use crate::query_planner::WarmUpCachingQueryKey;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
+use crate::services::layers::persisted_queries::PersistedQueryLayer;
+use crate::services::layers::persisted_queries::PersistedQueryManifestPoller;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphRequest;
@@ -66,6 +68,7 @@ use crate::ListenAddr;
 pub(crate) struct RouterService {
     supergraph_creator: Arc<SupergraphCreator>,
     apq_layer: APQLayer,
+    persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     experimental_http_max_request_bytes: usize,
 }
@@ -74,12 +77,14 @@ impl RouterService {
     pub(crate) fn new(
         supergraph_creator: Arc<SupergraphCreator>,
         apq_layer: APQLayer,
+        persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         experimental_http_max_request_bytes: usize,
     ) -> Self {
         RouterService {
             supergraph_creator,
             apq_layer,
+            persisted_query_layer,
             query_analysis_layer,
             experimental_http_max_request_bytes,
         }
@@ -120,8 +125,10 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
         QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
         Arc::new(supergraph_creator),
         configuration,
+        None,
     )
     .await
+    .unwrap()
     .make()
 }
 
@@ -167,9 +174,11 @@ pub(crate) async fn empty() -> impl Service<
     RouterCreator::new(
         QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
         Arc::new(supergraph_creator),
-        Default::default(),
+        Arc::new(Configuration::default()),
+        None,
     )
     .await
+    .unwrap()
     .make()
 }
 
@@ -221,7 +230,14 @@ impl RouterService {
             }
         };
 
-        let request_res = self.apq_layer.supergraph_request(supergraph_request).await;
+        let mut request_res = self
+            .persisted_query_layer
+            .supergraph_request(supergraph_request);
+
+        if let Ok(supergraph_request) = request_res {
+            request_res = self.apq_layer.supergraph_request(supergraph_request).await;
+        }
+
         let SupergraphResponse { response, context } = match request_res {
             Err(response) => response,
             Ok(request) => match self.query_analysis_layer.supergraph_request(request).await {
@@ -439,6 +455,7 @@ pub(crate) struct RouterCreator {
     supergraph_creator: Arc<SupergraphCreator>,
     static_page: StaticPageLayer,
     apq_layer: APQLayer,
+    pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     experimental_http_max_request_bytes: usize,
 }
@@ -472,7 +489,8 @@ impl RouterCreator {
         query_analysis_layer: QueryAnalysisLayer,
         supergraph_creator: Arc<SupergraphCreator>,
         configuration: Arc<Configuration>,
-    ) -> Self {
+        persisted_query_manifest_poller: Option<Arc<PersistedQueryManifestPoller>>,
+    ) -> Result<Self, BoxError> {
         let static_page = StaticPageLayer::new(&configuration);
         let apq_layer = if configuration.apq.enabled {
             APQLayer::with_cache(
@@ -483,7 +501,11 @@ impl RouterCreator {
             APQLayer::disabled()
         };
 
-        Self {
+        let persisted_query_layer = Arc::new(
+            PersistedQueryLayer::new(&configuration, persisted_query_manifest_poller).await?,
+        );
+
+        Ok(Self {
             supergraph_creator,
             static_page,
             apq_layer,
@@ -491,7 +513,8 @@ impl RouterCreator {
             experimental_http_max_request_bytes: configuration
                 .limits
                 .experimental_http_max_request_bytes,
-        }
+            persisted_query_layer,
+        })
     }
 
     pub(crate) fn make(
@@ -505,6 +528,7 @@ impl RouterCreator {
         let router_service = content_negociation::RouterLayer::default().layer(RouterService::new(
             self.supergraph_creator.clone(),
             self.apq_layer.clone(),
+            self.persisted_query_layer.clone(),
             self.query_analysis_layer.clone(),
             self.experimental_http_max_request_bytes,
         ));

@@ -180,6 +180,10 @@ impl LicenseEnforcementReport {
                 .path("$.limits.max_aliases")
                 .name("Operation aliases limiting")
                 .build(),
+            ConfigurationRestriction::builder()
+                .path("$.preview_persisted_queries")
+                .name("Persisted queries")
+                .build(),
         ]
     }
 }
