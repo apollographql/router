@@ -74,7 +74,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Fix the prometheus descriptions as well as the metrics ([Issue #3491](https://github.com/apollographql/router/issues/3491))
 
-I didn't realise the descriptions on the prometheus stats were significant, so my prefious prometheus fix constrained itself to renaming the actual metrics.
+I didn't realise the descriptions on the prometheus stats were significant, so my previous prometheus fix constrained itself to renaming the actual metrics.
 
 This relaxes the regex pattern to include prom descriptions as well as metrics in the renaming.
 
