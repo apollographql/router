@@ -88,7 +88,8 @@ impl Prepare {
         if let Version::Nightly = &self.version {
             println!("Skipping various steps because this is a nightly build.");
             // Only update helm charts on specific arch/os/env
-            if cfg!(target_arch = "x86_64") && cfg!(target_os = "linux") && cfg!(target_env = "gnu") {
+            if cfg!(target_arch = "x86_64") && cfg!(target_os = "linux") && cfg!(target_env = "gnu")
+            {
                 // Update the image repository to use the nightly location
                 replace_in_file!(
                     "./helm/chart/router/values.yaml",
