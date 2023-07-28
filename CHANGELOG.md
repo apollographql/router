@@ -60,25 +60,11 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 
-### Fix the pdb template ([PR #3497](https://github.com/apollographql/router/pull/3497))
-
-Add the required `matchLabels:` attribute.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3497
-
 ### Don't hide `--dev` from `--help` ([Issue #2705](https://github.com/apollographql/router/issues/2705))
 
 Display documentation about `--dev` when launching the router with `--help` argument.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3479
-
-### Fix prometheus statistics issues with _total_total names([Issue #3443](https://github.com/apollographql/router/issues/3443))
-
-When producing prometheus statistics the otel crate (0.19.0) now automatically appends "_total" which is unhelpful.
-
-This fix remove duplicated "_total_total" from our statistics.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3471
 
 ### Fix default rhai script dir for Windows ([Issue #3401](https://github.com/apollographql/router/issues/3401))
 
