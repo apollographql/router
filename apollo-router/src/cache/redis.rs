@@ -9,6 +9,7 @@ use fred::prelude::RedisError;
 use fred::prelude::RedisErrorKind;
 use fred::types::Expiration;
 use fred::types::FromRedis;
+use fred::types::PerformanceConfig;
 use fred::types::ReconnectPolicy;
 use fred::types::RedisConfig;
 use url::Url;
@@ -114,8 +115,11 @@ impl RedisCacheStorage {
 
         let client = RedisClient::new(
             config,
-            None, //perf policy
-            Some(ReconnectPolicy::new_exponential(10, 1, 2000, 10)),
+            Some(PerformanceConfig {
+                default_command_timeout_ms: 1,
+                ..Default::default()
+            }),
+            Some(ReconnectPolicy::new_exponential(10, 1, 200, 5)),
         );
         let _handle = client.connect();
 
