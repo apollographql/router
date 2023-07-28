@@ -34,7 +34,32 @@ The default value is `info`.
 </tbody>
 </table>
 
-The router also accepts an `APOLLO_ROUTER_LOG` environment variable with the same possible values as the command-line argument. If you provide _both_, the command-line argument takes precedence.
+The router also accepts both `RUST_LOG` and `APOLLO_ROUTER_LOG` environment variables with the same possible values as the command-line argument. The precedence is as follows (top to bottom):
+ - RUST_LOG
+ - command-line argument
+ - APOLLO_ROUTER_LOG
+
+`RUST_LOG` is supported for advanced users with specific filtering requirements who may wish to see log messages from crates consumed by the router. Most users should use the command-line argument or APOLLO_ROUTER_LOG. Both of these options constrain log output to the router.
+
+To be clear:
+
+```
+RUST_LOG=apollo_router::debug
+APOLLO_ROUTER_LOG=debug
+--log=debug
+```
+
+are equivalent, as are:
+
+```
+RUST_LOG=hyper=debug,apollo_router::info,h2=trace
+APOLLO_ROUTER_LOG=hyper=debug,info,h2=trace
+--log=hyper=debug,info,h2=trace
+```
+
+In both examples, the actual filter used by the router is as defined in the RUST_LOG entry.
+
+For more information about specifying filters for more granular control over Apollo Router logging, see the [Env Logger documentation](https://docs.rs/env_logger/latest/env_logger/).
 
 ## Output formats
 
@@ -96,7 +121,3 @@ telemetry:
         match: ^Mozilla/5.0 (iPhone*
         headers: true
 ```
-
-## Advanced configuration
-
-For more granular control over Apollo Router logging, see the [Env Logger documentation](https://docs.rs/env_logger/latest/env_logger/).
