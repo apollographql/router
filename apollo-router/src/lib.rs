@@ -71,7 +71,7 @@ mod router_factory;
 pub mod services;
 pub(crate) mod spec;
 mod state_machine;
-mod test_harness;
+pub mod test_harness;
 pub mod tracer;
 mod uplink;
 
@@ -90,6 +90,7 @@ pub use crate::router::ShutdownSource;
 pub use crate::router_factory::Endpoint;
 pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;
+pub use crate::uplink::UplinkConfig;
 
 /// Not part of the public API
 #[doc(hidden)]

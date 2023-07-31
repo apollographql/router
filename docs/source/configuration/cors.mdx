@@ -70,6 +70,16 @@ cors:
   allow_credentials: true
 ```
 
+Additionally, you'll need to configure the router to forward the [`Cookie`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cookie) header to some (or all) of your subgraphs:
+
+```yaml title="router.yaml"
+headers:
+  all:
+    request:
+      - propagate:
+          named: cookie
+```
+
 For examples of sending cookies and authorization headers from Apollo Client, see [Authentication](/react/networking/authentication/).
 
 

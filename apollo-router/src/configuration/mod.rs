@@ -2,6 +2,7 @@
 pub(crate) mod cors;
 pub(crate) mod expansion;
 mod experimental;
+mod persisted_queries;
 mod schema;
 pub(crate) mod subgraph;
 #[cfg(test)]
@@ -25,6 +26,8 @@ use derivative::Derivative;
 use displaydoc::Display;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
+pub(crate) use persisted_queries::PersistedQueries;
+pub(crate) use persisted_queries::PersistedQueriesSafelist;
 use regex::Regex;
 use rustls::Certificate;
 use rustls::PrivateKey;
@@ -61,6 +64,7 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 #[cfg(not(test))]
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
+use crate::uplink::UplinkConfig;
 use crate::ApolloRouterError;
 
 // TODO: Talk it through with the teams
@@ -144,6 +148,12 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) apq: Apq,
 
+    // NOTE: when renaming this to move out of preview, also update paths
+    // in `uplink/license.rs`.
+    /// Configures managed persisted queries
+    #[serde(default)]
+    pub preview_persisted_queries: PersistedQueries,
+
     /// Configuration for operation limits, parser limits, HTTP limits, etc.
     #[serde(default)]
     pub(crate) limits: Limits,
@@ -165,6 +175,10 @@ pub struct Configuration {
     #[serde(default)]
     #[serde(flatten)]
     pub(crate) apollo_plugins: ApolloPlugins,
+
+    /// Uplink configuration.
+    #[serde(skip)]
+    pub uplink: Option<UplinkConfig>,
 
     #[serde(default, skip_serializing, skip_deserializing)]
     pub(crate) notify: Notify<String, graphql::Response>,
@@ -205,6 +219,9 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apollo_plugins: ApolloPlugins,
             tls: Tls,
             apq: Apq,
+            preview_persisted_queries: PersistedQueries,
+            #[serde(skip)]
+            uplink: UplinkConfig,
             limits: Limits,
             experimental_chaos: Chaos,
             experimental_graphql_validation_mode: GraphQLValidationMode,
@@ -221,8 +238,10 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .apollo_plugins(ad_hoc.apollo_plugins.plugins)
             .tls(ad_hoc.tls)
             .apq(ad_hoc.apq)
+            .persisted_query(ad_hoc.preview_persisted_queries)
             .operation_limits(ad_hoc.limits)
             .chaos(ad_hoc.experimental_chaos)
+            .uplink(ad_hoc.uplink)
             .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
@@ -255,8 +274,10 @@ impl Configuration {
         tls: Option<Tls>,
         notify: Option<Notify<String, graphql::Response>>,
         apq: Option<Apq>,
+        persisted_query: Option<PersistedQueries>,
         operation_limits: Option<Limits>,
         chaos: Option<Chaos>,
+        uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
@@ -280,6 +301,7 @@ impl Configuration {
             homepage: homepage.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
+            preview_persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
             experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
@@ -290,6 +312,7 @@ impl Configuration {
                 plugins: apollo_plugins,
             },
             tls: tls.unwrap_or_default(),
+            uplink,
             #[cfg(test)]
             notify: notify.unwrap_or_default(),
             #[cfg(not(test))]
@@ -323,8 +346,10 @@ impl Configuration {
         tls: Option<Tls>,
         notify: Option<Notify<String, graphql::Response>>,
         apq: Option<Apq>,
+        persisted_query: Option<PersistedQueries>,
         operation_limits: Option<Limits>,
         chaos: Option<Chaos>,
+        uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
@@ -346,6 +371,8 @@ impl Configuration {
             tls: tls.unwrap_or_default(),
             notify: notify.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
+            preview_persisted_queries: persisted_query.unwrap_or_default(),
+            uplink,
         };
 
         configuration.validate()
@@ -507,6 +534,11 @@ pub(crate) struct Supergraph {
     /// Default: false
     pub(crate) introspection: bool,
 
+    /// Enable reuse of query fragments
+    /// Default: depends on the federation version
+    #[serde(rename = "experimental_reuse_query_fragments")]
+    pub(crate) reuse_query_fragments: Option<bool>,
+
     /// Set to false to disable defer support
     pub(crate) defer_support: bool,
 
@@ -527,6 +559,7 @@ impl Supergraph {
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
+        reuse_query_fragments: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -534,6 +567,7 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
+            reuse_query_fragments,
         }
     }
 }
@@ -548,6 +582,7 @@ impl Supergraph {
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
+        reuse_query_fragments: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -555,6 +590,7 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
+            reuse_query_fragments,
         }
     }
 }
@@ -704,6 +740,18 @@ pub(crate) struct Apq {
 
     #[serde(default)]
     pub(crate) subgraph: SubgraphConfiguration<SubgraphApq>,
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Apq {
+    #[builder]
+    pub(crate) fn fake_new(enabled: Option<bool>) -> Self {
+        Self {
+            enabled: enabled.unwrap_or_else(default_apq),
+            ..Default::default()
+        }
+    }
 }
 
 /// Subgraph level Automatic Persisted Queries (APQ) configuration

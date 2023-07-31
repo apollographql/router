@@ -208,6 +208,9 @@ tolerations: []
 
 affinity: {}
 
+# -- Sets the [pod disruption budget](https://kubernetes.io/docs/tasks/run-application/configure-pdb/) for Deployment pods
+podDisruptionBudget: {}
+
 # -- Set to existing PriorityClass name to control pod preemption by the scheduler
 priorityClassName: ""
 
