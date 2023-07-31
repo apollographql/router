@@ -147,7 +147,6 @@ impl Default for JWTConf {
 }
 
 /// Authentication
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Conf {
@@ -161,6 +160,7 @@ struct Conf {
 // configuration (which is currently JWT specific) is isolated to the
 // JWTConf structure.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct RouterConf {
     /// The JWT configuration
     jwt: JWTConf,

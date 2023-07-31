@@ -57,6 +57,7 @@ impl ProvideCredentials for AWSSigV4HardcodedConfig {
 
 /// Configuration of the DefaultChainProvider
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct DefaultChainConfig {
     /// The AWS region this chain applies to.
     region: String,
@@ -70,6 +71,7 @@ pub(crate) struct DefaultChainConfig {
 
 /// Specify assumed role configuration.
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct AssumeRoleProvider {
     /// Amazon Resource Name (ARN)
     /// for the role assumed when making requests
