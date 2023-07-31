@@ -1,0 +1,77 @@
+---
+title: Subgraph Authentication in the Apollo Router
+---
+
+The Apollo Router supports subgraph request authentication and key rotation via [AWS Signature Version 4](https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html).
+
+**To use this feature:**
+
+- You must have properly set up your AWS hosted subgraphs with IAM, so they accept [signed requests](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_aws-signing.html).
+
+## How it works
+
+Subgraph requests are signed using [HTTP Authorization headers](https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-auth-using-authorization-header.html)
+
+1. Set configuration options for subgraph authentication in your router's [YAML config file](./overview/#yaml-config-file), under the `authentication` key:
+
+    ```yaml title="router.yaml"
+    authentication:
+      subgraph:
+        all: # configuration that will apply to all subgraphs
+          aws_sig_v4:
+            default_chain:
+              region: "us-east-1"
+              profile_name: "my-test-profile"
+              service_name: "s3"
+    ```
+
+2. Pass the configuration to the `router` executable on startup:
+
+    ```bash
+    ./router --config router.yaml
+    ```
+
+### Configuration options
+
+#### Default chain:
+
+The default chain authentication method will try to resolve credentials in the following order:
+  - Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` or `SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_ROLE_ARN`, `AWS_IAM_ROLE_SESSION_NAME`)
+  - Shared configuration (`~/.aws/config`, `~/.aws/credentials`, which can be configured with the `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` environment variables)
+  - Web Identity Tokens (which can be configured with the `AWS_WEB_IDENTITY_TOKEN_FILE` environment variable)
+  - ECS (which can be configured with the `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` `AWS_CONTAINER_CREDENTIALS_FULL_URI` and `AWS_CONTAINER_AUTHORIZATION_TOKEN` environment variables, in that order).
+
+#### Assume Role:
+
+Both authentication methods allow you to use the `assume_role` key to use [IAM Roles](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles.html) for given credentials (recommended).
+
+region: https://docs.aws.amazon.com/general/latest/gr/rande.html
+service_name: https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_aws-services-that-work-with-iam.html
+profile_name: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html#ec2-instance-profile
+
+### Full example
+
+Below is a full example with a default credentials chain for all subgraphs, and with hardcoded credentials for the `products` subgraph:
+
+    ```yaml title="router.yaml"
+    authentication:
+      subgraph:
+        all:
+          aws_sig_v4:
+            default_chain:
+              profile_name: "my-test-profile"
+              region: "us-east-1"
+              service_name: "lambda"
+              assume_role:
+                role_arn: "test-arn"
+                session_name: "test-session"
+                external_id: "test-id"
+        subgraphs:
+          products:
+            aws_sig_v4:
+              hardcoded: # Not recommended, prefer using default_chain as shown above
+                access_key_id: "test"
+                secret_access_key: "test"
+                region: "us-east-1"
+                service_name: "vpc-lattice-svcs"
+    ```

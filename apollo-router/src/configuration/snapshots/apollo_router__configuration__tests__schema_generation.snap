@@ -203,10 +203,12 @@ expression: "&schema"
                         "description": "Retrieve the JWK Set",
                         "type": "string"
                       }
-                    }
+                    },
+                    "additionalProperties": false
                   }
                 }
-              }
+              },
+              "additionalProperties": false
             }
           },
           "nullable": true
@@ -497,7 +499,8 @@ expression: "&schema"
           "additionalProperties": false,
           "nullable": true
         }
-      }
+      },
+      "additionalProperties": false
     },
     "authorization": {
       "description": "Authorization plugin",

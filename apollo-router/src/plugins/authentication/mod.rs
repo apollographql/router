@@ -111,6 +111,7 @@ struct AuthenticationPlugin {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct JWTConf {
     /// List of JWKS used to verify tokens
     jwks: Vec<JwksConf>,
@@ -123,6 +124,7 @@ struct JWTConf {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct JwksConf {
     /// Retrieve the JWK Set
     url: String,
@@ -147,6 +149,7 @@ impl Default for JWTConf {
 /// Authentication
 #[allow(dead_code)]
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct Conf {
     /// Router configuration
     router: Option<RouterConf>,
