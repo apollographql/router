@@ -155,7 +155,8 @@ impl LicenseEnforcementReport {
                 .name("Subgraph entity caching")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.subscription")
+                .path("$.subscription.enabled")
+                .value(true)
                 .name("Federated subscriptions")
                 .build(),
             // Per-operation limits are restricted but parser limits like `parser_max_recursion`
