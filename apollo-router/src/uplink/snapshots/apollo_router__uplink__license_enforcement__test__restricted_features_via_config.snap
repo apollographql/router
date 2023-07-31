@@ -25,7 +25,7 @@ Configuration yaml:
   .traffic_shaping..experimental_entity_caching
 
 * Federated subscriptions
-  .subscription
+  .subscription.enabled
 
 * Operation depth limiting
   .limits.max_depth

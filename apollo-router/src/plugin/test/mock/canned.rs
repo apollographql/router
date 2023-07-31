@@ -114,6 +114,16 @@ pub(crate) fn reviews_subgraph() -> MockSubgraph {
                         ]
                     }
                 }}
+        ),
+        (
+            json! {{
+                    "query": "subscription{reviewAdded{body}}",
+                }},
+            json! {{
+                "errors": [{
+                    "message": "subscription is not enabled"
+                }]
+            }}
         )
     ].into_iter().map(|(query, response)| (serde_json::from_value(query).unwrap(), serde_json::from_value(response).unwrap())).collect();
     MockSubgraph::new(review_mocks)
