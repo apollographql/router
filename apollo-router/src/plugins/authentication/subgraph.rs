@@ -199,14 +199,14 @@ fn increment_success_counter(subgraph_name: &str) {
     tracing::info!(
         monotonic_counter.apollo.router.operations.authentication.aws.sigv4 = 1u64,
         authentication.aws.sigv4.failed = false,
-        service_name = %subgraph_name,
+        subgraph.service.name = %subgraph_name,
     );
 }
 fn increment_failure_counter(subgraph_name: &str) {
     tracing::info!(
         monotonic_counter.apollo.router.operations.authentication.aws.sigv4 = 1u64,
         authentication.aws.sigv4.failed = true,
-        service_name = %subgraph_name,
+        subgraph.service.name = %subgraph_name,
     );
 }
 

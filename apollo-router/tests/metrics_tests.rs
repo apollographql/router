@@ -107,7 +107,7 @@ async fn test_subgraph_auth_metrics() -> Result<(), BoxError> {
                 .unwrap()
     );
 
-    router.assert_metrics_contains(r#"apollo_router_operations_authentication_aws_sigv4_total{authentication_aws_sigv4_failed="false",service_name="apollo-router",service_name="products",otel_scope_name="apollo/router",otel_scope_version=""} 2"#, None).await;
+    router.assert_metrics_contains(r#"apollo_router_operations_authentication_aws_sigv4_total{authentication_aws_sigv4_failed="false",service_name="apollo-router",subgraph_service_name="products",otel_scope_name="apollo/router",otel_scope_version=""} 2"#, None).await;
 
     Ok(())
 }
