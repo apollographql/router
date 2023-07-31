@@ -263,70 +263,77 @@ impl SubgraphAuth {
         if let Some(signing_params) = self.params_for_service(name) {
             let name = name.to_string();
             ServiceBuilder::new()
-            .checkpoint_async(move |mut req: SubgraphRequest| {
-                let signing_params = signing_params.clone();
-                let name = name.clone();
-                async move {
-                    let credentials = match signing_params.credentials_provider.provide_credentials().await {
-                        Ok(credentials) => credentials,
-                        Err(err) => {
-                            tracing::error!(
-                                "Failed to serialize GraphQL body for AWS SigV4 signing, skipping signing. Error: {}",
-                                err
-                            );
-                            increment_failure_counter(name.as_str());
-                            return Ok(ControlFlow::Continue(req));
-                        }
-                    };
+                .checkpoint_async(move |mut req: SubgraphRequest| {
+                    let signing_params = signing_params.clone();
+                    let name = name.clone();
+                    async move {
+                        let credentials = signing_params
+                            .credentials_provider
+                            .provide_credentials()
+                            .await
+                            .map_err(|err| {
+                                increment_failure_counter(name.as_str());
+                                let error = format!(
+                                    "failed to get credentials for AWS SigV4 signing: {}",
+                                    err
+                                );
+                                tracing::error!("{}", error);
+                                error
+                            })?;
 
-                    let settings = get_signing_settings(&signing_params);
-                    let mut builder = http_request::SigningParams::builder()
-                        .access_key(credentials.access_key_id())
-                        .secret_key(credentials.secret_access_key())
-                        .region(signing_params.region.as_ref())
-                        .service_name(&signing_params.service_name)
-                        .time(SystemTime::now())
-                        .settings(settings);
-                    builder.set_security_token(credentials.session_token());
-                    let body_bytes = match serde_json::to_vec(&req.subgraph_request.body()) {
-                        Ok(b) => b,
-                        Err(err) => {
-                            tracing::error!(
-                                "Failed to serialize GraphQL body for AWS SigV4 signing, skipping signing. Error: {}",
-                                err
-                            );
-                            increment_failure_counter(name.as_str());
-                            return Ok(ControlFlow::Continue(req));
-                        }
-                    };
-                    // UnsignedPayload only applies to lattice
-                    let signable_request = SignableRequest::new(
-                        req.subgraph_request.method(),
-                        req.subgraph_request.uri(),
-                        req.subgraph_request.headers(),
-                        match signing_params.service_name.as_str() {
-                            "vpc-lattice-svcs" => SignableBody::UnsignedPayload,
-                            _ => SignableBody::Bytes(&body_bytes),
-                        },
-                    );
+                        let settings = get_signing_settings(&signing_params);
+                        let mut builder = http_request::SigningParams::builder()
+                            .access_key(credentials.access_key_id())
+                            .secret_key(credentials.secret_access_key())
+                            .region(signing_params.region.as_ref())
+                            .service_name(&signing_params.service_name)
+                            .time(SystemTime::now())
+                            .settings(settings);
+                        builder.set_security_token(credentials.session_token());
+                        let body_bytes =
+                            serde_json::to_vec(&req.subgraph_request.body()).map_err(|err| {
+                                increment_failure_counter(name.as_str());
+                                let error = format!(
+                                    "failed to serialize GraphQL body for AWS SigV4 signing: {}",
+                                    err
+                                );
+                                tracing::error!("{}", error);
+                                error
+                            })?;
 
-                    let signing_params = builder.build().expect("all required fields set");
+                        // UnsignedPayload only applies to lattice
+                        let signable_request = SignableRequest::new(
+                            req.subgraph_request.method(),
+                            req.subgraph_request.uri(),
+                            req.subgraph_request.headers(),
+                            match signing_params.service_name.as_str() {
+                                "vpc-lattice-svcs" => SignableBody::UnsignedPayload,
+                                _ => SignableBody::Bytes(&body_bytes),
+                            },
+                        );
 
-                    let (signing_instructions, _signature) = match sign(signable_request, &signing_params) {
-                        Ok(output) => output,
-                        Err(err) => {
-                            tracing::error!("Failed to sign GraphQL request for AWS SigV4, skipping signing. Error: {}", err);
-                            increment_failure_counter(name.as_str());
-                            return Ok(ControlFlow::Continue(req));
-                        }
-                    }.into_parts();
-                    signing_instructions.apply_to_request(&mut req.subgraph_request);
-                    increment_success_counter(name.as_str());
-                    Ok(ControlFlow::Continue(req))
-                }
-            }).buffered()
-            .service(service)
-            .boxed()
+                        let signing_params = builder.build().expect("all required fields set");
+
+                        let (signing_instructions, _signature) =
+                            sign(signable_request, &signing_params)
+                                .map_err(|err| {
+                                    increment_failure_counter(name.as_str());
+                                    let error = format!(
+                                        "failed to sign GraphQL body for AWS SigV4: {}",
+                                        err
+                                    );
+                                    tracing::error!("{}", error);
+                                    error
+                                })?
+                                .into_parts();
+                        signing_instructions.apply_to_request(&mut req.subgraph_request);
+                        increment_success_counter(name.as_str());
+                        Ok(ControlFlow::Continue(req))
+                    }
+                })
+                .buffered()
+                .service(service)
+                .boxed()
         } else {
             service
         }
