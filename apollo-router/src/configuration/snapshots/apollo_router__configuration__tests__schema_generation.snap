@@ -211,6 +211,7 @@ expression: "&schema"
               "additionalProperties": false
             }
           },
+          "additionalProperties": false,
           "nullable": true
         },
         "subgraph": {
@@ -271,6 +272,7 @@ expression: "&schema"
                                       "type": "string"
                                     }
                                   },
+                                  "additionalProperties": false,
                                   "nullable": true
                                 },
                                 "region": {
@@ -327,6 +329,7 @@ expression: "&schema"
                                       "type": "string"
                                     }
                                   },
+                                  "additionalProperties": false,
                                   "nullable": true
                                 },
                                 "profile_name": {
@@ -342,7 +345,8 @@ expression: "&schema"
                                   "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
                                   "type": "string"
                                 }
-                              }
+                              },
+                              "additionalProperties": false
                             }
                           },
                           "additionalProperties": false
@@ -411,6 +415,7 @@ expression: "&schema"
                                         "type": "string"
                                       }
                                     },
+                                    "additionalProperties": false,
                                     "nullable": true
                                   },
                                   "region": {
@@ -467,6 +472,7 @@ expression: "&schema"
                                         "type": "string"
                                       }
                                     },
+                                    "additionalProperties": false,
                                     "nullable": true
                                   },
                                   "profile_name": {
@@ -482,7 +488,8 @@ expression: "&schema"
                                     "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
                                     "type": "string"
                                   }
-                                }
+                                },
+                                "additionalProperties": false
                               }
                             },
                             "additionalProperties": false

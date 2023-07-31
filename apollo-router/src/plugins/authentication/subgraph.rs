@@ -195,10 +195,20 @@ pub(crate) struct SigningParamsConfig {
     service_name: String,
 }
 
-#[allow(dead_code)]
-fn increment_success_counter(_subgraph_name: &str) {}
-#[allow(dead_code)]
-fn increment_failure_counter(_subgraph_name: &str) {}
+fn increment_success_counter(subgraph_name: &str) {
+    tracing::info!(
+        monotonic_counter.apollo.router.operations.authentication.aws.sigv4 = 1u64,
+        authentication.aws.sigv4.failed = false,
+        service_name = %subgraph_name,
+    );
+}
+fn increment_failure_counter(subgraph_name: &str) {
+    tracing::info!(
+        monotonic_counter.apollo.router.operations.authentication.aws.sigv4 = 1u64,
+        authentication.aws.sigv4.failed = true,
+        service_name = %subgraph_name,
+    );
+}
 
 pub(super) async fn make_signing_params(
     config: &AuthConfig,
@@ -251,9 +261,11 @@ impl SubgraphAuth {
         service: crate::services::subgraph::BoxService,
     ) -> crate::services::subgraph::BoxService {
         if let Some(signing_params) = self.params_for_service(name) {
+            let name = name.to_string();
             ServiceBuilder::new()
             .checkpoint_async(move |mut req: SubgraphRequest| {
                 let signing_params = signing_params.clone();
+                let name = name.clone();
                 async move {
                     let credentials = match signing_params.credentials_provider.provide_credentials().await {
                         Ok(credentials) => credentials,
@@ -262,6 +274,7 @@ impl SubgraphAuth {
                                 "Failed to serialize GraphQL body for AWS SigV4 signing, skipping signing. Error: {}",
                                 err
                             );
+                            increment_failure_counter(name.as_str());
                             return Ok(ControlFlow::Continue(req));
                         }
                     };
@@ -279,9 +292,10 @@ impl SubgraphAuth {
                         Ok(b) => b,
                         Err(err) => {
                             tracing::error!(
-                            "Failed to serialize GraphQL body for AWS SigV4 signing, skipping signing. Error: {}",
-                            err
-                        );
+                                "Failed to serialize GraphQL body for AWS SigV4 signing, skipping signing. Error: {}",
+                                err
+                            );
+                            increment_failure_counter(name.as_str());
                             return Ok(ControlFlow::Continue(req));
                         }
                     };
@@ -302,10 +316,12 @@ impl SubgraphAuth {
                         Ok(output) => output,
                         Err(err) => {
                             tracing::error!("Failed to sign GraphQL request for AWS SigV4, skipping signing. Error: {}", err);
+                            increment_failure_counter(name.as_str());
                             return Ok(ControlFlow::Continue(req));
                         }
                     }.into_parts();
                     signing_instructions.apply_to_request(&mut req.subgraph_request);
+                    increment_success_counter(name.as_str());
                     Ok(ControlFlow::Continue(req))
                 }
             }).buffered()
