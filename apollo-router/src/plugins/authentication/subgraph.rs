@@ -258,7 +258,7 @@ impl SubgraphAuth {
                     let credentials = match signing_params.credentials_provider.provide_credentials().await {
                         Ok(credentials) => credentials,
                         Err(err) => {
-                            tracing::warn!(
+                            tracing::error!(
                                 "Failed to serialize GraphQL body for AWS SigV4 signing, skipping signing. Error: {}",
                                 err
                             );
@@ -278,7 +278,7 @@ impl SubgraphAuth {
                     let body_bytes = match serde_json::to_vec(&req.subgraph_request.body()) {
                         Ok(b) => b,
                         Err(err) => {
-                            tracing::warn!(
+                            tracing::error!(
                             "Failed to serialize GraphQL body for AWS SigV4 signing, skipping signing. Error: {}",
                             err
                         );
@@ -301,7 +301,7 @@ impl SubgraphAuth {
                     let (signing_instructions, _signature) = match sign(signable_request, &signing_params) {
                         Ok(output) => output,
                         Err(err) => {
-                            tracing::warn!("Failed to sign GraphQL request for AWS SigV4, skipping signing. Error: {}", err);
+                            tracing::error!("Failed to sign GraphQL request for AWS SigV4, skipping signing. Error: {}", err);
                             return Ok(ControlFlow::Continue(req));
                         }
                     }.into_parts();
