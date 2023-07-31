@@ -1,7 +1,7 @@
-description: server.experimental_parser_recursion_limit moved to supergraph.limits.parser_max_recursion, not experimental anymore. remove the server section, now empty
+description: server.experimental_parser_recursion_limit moved to limits.parser_max_recursion, not experimental anymore. remove the server section, now empty
 actions:
   - type: move
     from: server.experimental_parser_recursion_limit
-    to: preview_operation_limits.parser_max_recursion
+    to: limits.parser_max_recursion
   - type: delete
     path: server

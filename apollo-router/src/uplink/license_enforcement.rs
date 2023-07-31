@@ -154,23 +154,31 @@ impl LicenseEnforcementReport {
                 .path("$.traffic_shaping..experimental_entity_caching")
                 .name("Subgraph entity caching")
                 .build(),
+            ConfigurationRestriction::builder()
+                .path("$.subscription")
+                .name("Federated subscriptions")
+                .build(),
             // Per-operation limits are restricted but parser limits like `parser_max_recursion`
             // where the Router only configures apollo-rs are not.
             ConfigurationRestriction::builder()
-                .path("$.preview_operation_limits.max_depth")
+                .path("$.limits.max_depth")
                 .name("Operation depth limiting")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.preview_operation_limits.max_height")
+                .path("$.limits.max_height")
                 .name("Operation height limiting")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.preview_operation_limits.max_root_fields")
+                .path("$.limits.max_root_fields")
                 .name("Operation root fields limiting")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.preview_operation_limits.max_aliases")
+                .path("$.limits.max_aliases")
                 .name("Operation aliases limiting")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.preview_persisted_queries")
+                .name("Persisted queries")
                 .build(),
         ]
     }
@@ -298,8 +306,8 @@ mod test {
 
     fn check(router_yaml: &str, supergraph_schema: &str) -> LicenseEnforcementReport {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
-        let schema = Schema::parse(supergraph_schema, &config, None)
-            .expect("supergraph schema must be valid");
+        let schema =
+            Schema::parse(supergraph_schema, &config).expect("supergraph schema must be valid");
 
         LicenseEnforcementReport::build(&config, &schema)
     }

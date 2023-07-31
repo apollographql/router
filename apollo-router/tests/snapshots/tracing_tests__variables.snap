@@ -36,6 +36,18 @@ expression: get_spans()
           [
             "otel.kind",
             "SERVER"
+          ],
+          [
+            "apollo_private.request",
+            true
+          ],
+          [
+            "graphql.operation.name",
+            "ExampleQuery"
+          ],
+          [
+            "otel.name",
+            "GraphQL Operation"
           ]
         ],
         "metadata": {
@@ -48,7 +60,11 @@ expression: get_spans()
               "http.method",
               "http.route",
               "http.flavor",
-              "otel.kind"
+              "otel.name",
+              "otel.kind",
+              "graphql.operation.name",
+              "graphql.operation.type",
+              "apollo_private.request"
             ]
           }
         }
@@ -154,10 +170,6 @@ expression: get_spans()
                     "query ExampleQuery($topProductsFirst: Int, $reviewsForAuthorAuthorId: ID!) {\n                topProducts(first: $topProductsFirst) {\n                    name\n                    reviewsForAuthor(authorID: $reviewsForAuthorAuthorId) {\n                        body\n                        author {\n                            id\n                            name\n                        }\n                    }\n                }\n            }"
                   ],
                   [
-                    "graphql.operation.name",
-                    ""
-                  ],
-                  [
                     "otel.kind",
                     "INTERNAL"
                   ],
@@ -168,6 +180,10 @@ expression: get_spans()
                   [
                     "apollo_private.graphql.variables",
                     "{}"
+                  ],
+                  [
+                    "graphql.operation.name",
+                    "ExampleQuery"
                   ],
                   [
                     "apollo_private.operation_signature",

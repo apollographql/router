@@ -277,7 +277,6 @@ mod test {
         let metric_1 = create_test_metric("client_1", "version_1", "report_key_1");
         let metric_2 = create_test_metric("client_1", "version_1", "report_key_1");
         let aggregated_metrics = Report::new(vec![metric_1, metric_2]);
-
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(aggregated_metrics);
         });

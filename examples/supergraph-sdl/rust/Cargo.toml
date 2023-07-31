@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
-apollo-compiler = "0.8.0"
+apollo-compiler = "0.10.0"
 apollo-router = { path = "../../../apollo-router" }
 async-trait = "0.1"
 tower = { version = "0.4", features = ["full"] }

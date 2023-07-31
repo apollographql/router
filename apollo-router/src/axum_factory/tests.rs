@@ -1162,7 +1162,7 @@ async fn it_errors_on_bad_accept_header() -> Result<(), ApolloRouterError> {
     );
     assert_eq!(
         response.text().await.unwrap(),
-        r#"{"errors":[{"message":"'accept' header must be one of: \\\"*/*\\\", \"application/json\", \"application/graphql-response+json\" or \"multipart/mixed;boundary=\\\"graphql\\\";deferSpec=20220824\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}]}"#
+        r#"{"errors":[{"message":"'accept' header must be one of: \\\"*/*\\\", \"application/json\", \"application/graphql-response+json\", \"multipart/mixed;boundary=\\\"graphql\\\";subscriptionSpec=1.0\" or \"multipart/mixed;boundary=\\\"graphql\\\";deferSpec=20220824\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}]}"#
     );
 
     server.shutdown().await
@@ -2319,10 +2319,13 @@ async fn test_supergraph_timeout() {
     let service = RouterCreator::new(
         QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&conf)).await,
         Arc::new(supergraph_creator),
-        Arc::clone(&conf),
+        conf.clone(),
+        Default::default(),
     )
     .await
+    .unwrap()
     .make();
+
     // keep the server handle around otherwise it will immediately shutdown
     let (_server, client) = init_with_config(service, conf.clone(), MultiMap::new())
         .await

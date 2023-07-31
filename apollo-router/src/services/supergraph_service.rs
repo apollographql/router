@@ -1,25 +1,34 @@
 //! Implements the router phase of the request lifecycle.
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::Poll;
+use std::time::Instant;
 
-use apollo_compiler::ApolloCompiler;
+use futures::channel::mpsc::SendError;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
+use futures::SinkExt;
 use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
 use router_bridge::planner::Planner;
+use router_bridge::planner::UsageReporting;
+use tokio::sync::mpsc;
 use tokio::sync::Mutex;
-use tower::util::Either;
 use tower::BoxError;
+use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
+use tracing::field;
+use tracing::Span;
 use tracing_futures::Instrument;
 
-use super::execution;
+use super::execution::QueryPlan;
+use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use super::layers::content_negociation;
+use super::layers::query_analysis::Compiler;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
 use super::router::ClientRequestAccepts;
@@ -27,13 +36,22 @@ use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
+use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
+use crate::graphql::Response;
+use crate::notification::HandleStream;
 use crate::plugin::DynPlugin;
+use crate::plugins::subscription::SubscriptionConfig;
+use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::plugins::telemetry::Telemetry;
+use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
+use crate::query_planner::subscription::SubscriptionHandle;
+use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
+use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanResult;
@@ -44,6 +62,7 @@ use crate::services::ExecutionResponse;
 use crate::services::QueryPlannerResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
@@ -93,31 +112,35 @@ impl Service<SupergraphRequest> for SupergraphService {
         let clone = self.query_planner_service.clone();
 
         let planning = std::mem::replace(&mut self.query_planner_service, clone);
-        let execution = self.execution_service_factory.create();
 
         let schema = self.schema.clone();
 
         let context_cloned = req.context.clone();
-        let fut =
-            service_call(planning, execution, schema, req).or_else(|error: BoxError| async move {
-                let errors = vec![crate::error::Error {
-                    message: error.to_string(),
-                    extensions: serde_json_bytes::json!({
-                        "code": "INTERNAL_SERVER_ERROR",
-                    })
-                    .as_object()
-                    .unwrap()
-                    .to_owned(),
-                    ..Default::default()
-                }];
+        let fut = service_call(
+            planning,
+            self.execution_service_factory.clone(),
+            schema,
+            req,
+        )
+        .or_else(|error: BoxError| async move {
+            let errors = vec![crate::error::Error {
+                message: error.to_string(),
+                extensions: serde_json_bytes::json!({
+                    "code": "INTERNAL_SERVER_ERROR",
+                })
+                .as_object()
+                .unwrap()
+                .to_owned(),
+                ..Default::default()
+            }];
 
-                Ok(SupergraphResponse::builder()
-                    .errors(errors)
-                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
-                    .context(context_cloned)
-                    .build()
-                    .expect("building a response like this should not fail"))
-            });
+            Ok(SupergraphResponse::builder()
+                .errors(errors)
+                .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                .context(context_cloned)
+                .build()
+                .expect("building a response like this should not fail"))
+        });
 
         Box::pin(fut)
     }
@@ -125,20 +148,20 @@ impl Service<SupergraphRequest> for SupergraphService {
 
 async fn service_call(
     planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    execution: execution::BoxService,
+    execution_service_factory: ExecutionServiceFactory,
     schema: Arc<Schema>,
     req: SupergraphRequest,
 ) -> Result<SupergraphResponse, BoxError> {
     let context = req.context;
     let body = req.supergraph_request.body();
     let variables = body.variables.clone();
+
     let QueryPlannerResponse {
         content,
         context,
         errors,
     } = match plan_query(
         planning,
-        req.compiler,
         body.operation_name.clone(),
         context.clone(),
         schema.clone(),
@@ -194,9 +217,11 @@ async fn service_call(
         Some(QueryPlannerContent::Plan { plan }) => {
             let operation_name = body.operation_name.clone();
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
+            let is_subscription = plan.is_subscription(operation_name.as_deref());
 
             let ClientRequestAccepts {
-                multipart: accepts_multipart,
+                multipart_defer: accepts_multipart_defer,
+                multipart_subscription: accepts_multipart_subscription,
                 ..
             } = context
                 .private_entries
@@ -204,14 +229,25 @@ async fn service_call(
                 .get()
                 .cloned()
                 .unwrap_or_default();
-
-            if is_deferred && !accepts_multipart {
-                let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
-                    .errors(vec![crate::error::Error::builder()
-                        .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
-                        .extension_code("DEFER_BAD_HEADER")
-                        .build()])
-                    .build(), context);
+            let mut subscription_tx = None;
+            if (is_deferred || is_subscription)
+                && !accepts_multipart_defer
+                && !accepts_multipart_subscription
+            {
+                let (error_message, error_code) = if is_deferred {
+                    (String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"), "DEFER_BAD_HEADER")
+                } else {
+                    (String::from("the router received a query with a subscription but the client does not accept multipart/mixed HTTP responses. To enable subscription support, add the HTTP header 'Accept: multipart/mixed; boundary=graphql; subscriptionSpec=1.0'"), "SUBSCRIPTION_BAD_HEADER")
+                };
+                let mut response = SupergraphResponse::new_from_graphql_response(
+                    graphql::Response::builder()
+                        .errors(vec![crate::error::Error::builder()
+                            .message(error_message)
+                            .extension_code(error_code)
+                            .build()])
+                        .build(),
+                    context,
+                );
                 *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
                 Ok(response)
             } else if let Some(err) = plan.query.validate_variables(body, &schema).err() {
@@ -219,12 +255,32 @@ async fn service_call(
                 *res.response.status_mut() = StatusCode::BAD_REQUEST;
                 Ok(res)
             } else {
-                let execution_response = execution
+                if is_subscription {
+                    let ctx = context.clone();
+                    let (subs_tx, subs_rx) = mpsc::channel(1);
+                    let query_plan = plan.clone();
+                    let execution_service_factory_cloned = execution_service_factory.clone();
+                    // Spawn task for subscription
+                    tokio::spawn(async move {
+                        subscription_task(
+                            execution_service_factory_cloned,
+                            ctx,
+                            query_plan,
+                            subs_rx,
+                        )
+                        .await;
+                    });
+                    subscription_tx = subs_tx.into();
+                }
+
+                let execution_response = execution_service_factory
+                    .create()
                     .oneshot(
                         ExecutionRequest::internal_builder()
                             .supergraph_request(req.supergraph_request)
                             .query_plan(plan.clone())
                             .context(context)
+                            .and_subscription_tx(subscription_tx)
                             .build()
                             .await,
                     )
@@ -245,34 +301,219 @@ async fn service_call(
     }
 }
 
+pub struct SubscriptionTaskParams {
+    pub(crate) client_sender: futures::channel::mpsc::Sender<Response>,
+    pub(crate) subscription_handle: SubscriptionHandle,
+    pub(crate) subscription_config: SubscriptionConfig,
+    pub(crate) stream_rx: futures::channel::mpsc::Receiver<HandleStream<String, graphql::Response>>,
+    pub(crate) service_name: String,
+}
+
+async fn subscription_task(
+    execution_service_factory: ExecutionServiceFactory,
+    context: Context,
+    query_plan: Arc<QueryPlan>,
+    mut rx: mpsc::Receiver<SubscriptionTaskParams>,
+) {
+    let sub_params = match rx.recv().await {
+        Some(sub_params) => sub_params,
+        None => {
+            return;
+        }
+    };
+    let subscription_config = sub_params.subscription_config;
+    let subscription_handle = sub_params.subscription_handle;
+    let service_name = sub_params.service_name;
+    let mut receiver = sub_params.stream_rx;
+    let mut sender = sub_params.client_sender;
+
+    let graphql_document = &query_plan.query.string;
+    // Get the rest of the query_plan to execute for subscription events
+    let query_plan = match &query_plan.root {
+        crate::query_planner::PlanNode::Subscription { rest, .. } => rest.clone().map(|r| {
+            Arc::new(QueryPlan {
+                usage_reporting: query_plan.usage_reporting.clone(),
+                root: *r,
+                formatted_query_plan: query_plan.formatted_query_plan.clone(),
+                query: query_plan.query.clone(),
+            })
+        }),
+        _ => {
+            let _ = sender
+                .send(
+                    graphql::Response::builder()
+                        .error(
+                            graphql::Error::builder()
+                                .message("cannot execute the subscription event")
+                                .extension_code("SUBSCRIPTION_EXECUTION_ERROR")
+                                .build(),
+                        )
+                        .build(),
+                )
+                .await;
+            return;
+        }
+    };
+
+    let limit_is_set = subscription_config.max_opened_subscriptions.is_some();
+    let mut subscription_handle = subscription_handle.clone();
+    let operation_signature =
+        if let Some(usage_reporting) = context.private_entries.lock().get::<UsageReporting>() {
+            usage_reporting.stats_report_key.clone()
+        } else {
+            String::new()
+        };
+
+    let operation_name = context
+        .get::<_, String>(OPERATION_NAME)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
+
+    let mut receiver = match receiver.next().await {
+        Some(receiver) => receiver,
+        None => {
+            tracing::trace!("receiver channel closed");
+            return;
+        }
+    };
+
+    if limit_is_set {
+        OPENED_SUBSCRIPTIONS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    loop {
+        tokio::select! {
+            _ = subscription_handle.closed_signal.recv() => {
+                break;
+            }
+            message = receiver.next() => {
+                match message {
+                    Some(mut val) => {
+                        if display_body {
+                            tracing::info!(http.request.body = ?val, apollo.subgraph.name = %service_name, "Subscription event body from subgraph {service_name:?}");
+                        }
+                        val.created_at = Some(Instant::now());
+                        let res = dispatch_event(&execution_service_factory, query_plan.as_ref(), context.clone(), val, sender.clone())
+                            .instrument(tracing::info_span!(SUBSCRIPTION_EVENT_SPAN_NAME,
+                                graphql.document = graphql_document,
+                                graphql.operation.name = %operation_name,
+                                otel.kind = "INTERNAL",
+                                apollo_private.operation_signature = %operation_signature,
+                                apollo_private.duration_ns = field::Empty,)
+                            ).await;
+                        if let Err(err) = res {
+                             if !err.is_disconnected() {
+                                tracing::error!("cannot send the subscription to the client: {err:?}");
+                            }
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+    if let Err(err) = sender.close().await {
+        tracing::trace!("cannot close the sender {err:?}");
+    }
+
+    tracing::trace!("Leaving the task for subscription");
+    if limit_is_set {
+        OPENED_SUBSCRIPTIONS.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+async fn dispatch_event(
+    execution_service_factory: &ExecutionServiceFactory,
+    query_plan: Option<&Arc<QueryPlan>>,
+    context: Context,
+    mut val: graphql::Response,
+    mut sender: futures::channel::mpsc::Sender<Response>,
+) -> Result<(), SendError> {
+    let start = Instant::now();
+    let span = Span::current();
+    let res = match query_plan {
+        Some(query_plan) => {
+            let execution_request = ExecutionRequest::internal_builder()
+                .supergraph_request(http::Request::default())
+                .query_plan(query_plan.clone())
+                .context(context)
+                .source_stream_value(val.data.take().unwrap_or_default())
+                .build()
+                .await;
+
+            let execution_service = execution_service_factory.create();
+            let execution_response = execution_service.oneshot(execution_request).await;
+            let next_response = match execution_response {
+                Ok(mut execution_response) => execution_response.next_response().await,
+                Err(err) => {
+                    tracing::error!("cannot execute the subscription event: {err:?}");
+                    let _ = sender
+                        .send(
+                            graphql::Response::builder()
+                                .error(
+                                    graphql::Error::builder()
+                                        .message("cannot execute the subscription event")
+                                        .extension_code("SUBSCRIPTION_EXECUTION_ERROR")
+                                        .build(),
+                                )
+                                .build(),
+                        )
+                        .await;
+                    return Ok(());
+                }
+            };
+
+            if let Some(mut next_response) = next_response {
+                next_response.created_at = val.created_at;
+                next_response.subscribed = val.subscribed;
+                val.errors.append(&mut next_response.errors);
+                next_response.errors = val.errors;
+
+                sender.send(next_response).await
+            } else {
+                Ok(())
+            }
+        }
+        None => sender.send(val).await,
+    };
+    span.record(
+        APOLLO_PRIVATE_DURATION_NS,
+        start.elapsed().as_nanos() as i64,
+    );
+
+    res
+}
+
 async fn plan_query(
     mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    compiler: Option<Arc<Mutex<ApolloCompiler>>>,
     operation_name: Option<String>,
     context: Context,
     schema: Arc<Schema>,
     query_str: String,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
-    let compiler = match compiler {
-        None =>
-        // TODO[igni]: no
-        {
-            Arc::new(Mutex::new(
-                QueryAnalysisLayer::new(schema, Default::default())
-                    .await
-                    .make_compiler(&query_str)
-                    .0,
-            ))
+    // FIXME: we have about 80 tests creating a supergraph service and crafting a supergraph request for it
+    // none of those tests create a compiler to put it in the context, and the compiler cannot be created
+    // from inside the supergraph request fake builder, because it needs a schema matching the query.
+    // So while we are updating the tests to create a compiler manually, this here will make sure current
+    // tests will pass
+    {
+        let mut entries = context.private_entries.lock();
+        if !entries.contains_key::<Compiler>() {
+            let (compiler, _) =
+                Query::make_compiler(&query_str, &schema, &Configuration::default());
+            entries.insert(Compiler(Arc::new(Mutex::new(compiler))));
         }
-        Some(c) => c,
-    };
+        drop(entries);
+    }
 
     planning
         .call(
             query_planner::CachingRequest::builder()
                 .query(query_str)
                 .and_operation_name(operation_name)
-                .compiler(compiler)
                 .context(context)
                 .build(),
         )
@@ -427,15 +668,15 @@ impl SupergraphCreator {
             .schema(self.schema.clone())
             .build();
 
-        let supergraph_service = match self
+        let shaping = self
             .plugins
             .iter()
             .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
             .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
-        {
-            Some(shaping) => Either::A(shaping.supergraph_service_internal(supergraph_service)),
-            None => Either::B(supergraph_service),
-        };
+            .expect("traffic shaping should always be part of the plugin list");
+
+        let supergraph_service = AllowOnlyHttpPostMutationsLayer::default()
+            .layer(shaping.supergraph_service_internal(supergraph_service));
 
         ServiceBuilder::new()
             .layer(content_negociation::SupergraphLayer::default())
@@ -470,11 +711,14 @@ impl SupergraphCreator {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::time::Duration;
 
     use super::*;
     use crate::plugin::test::MockSubgraph;
     use crate::services::supergraph;
     use crate::test_harness::MockedSubgraphs;
+    use crate::Notify;
     use crate::TestHarness;
 
     const SCHEMA: &str = r#"schema
@@ -498,6 +742,11 @@ mod tests {
    type Query {
        currentUser: User @join__field(graph: USER)
    }
+
+   type Subscription @join__type(graph: USER) {
+        userWasCreated: User
+   }
+   
    type User
    @join__owner(graph: USER)
    @join__type(graph: ORGA, key: "id")
@@ -715,7 +964,7 @@ mod tests {
                     ]
                     }}
             ).build()),
-    ].into_iter().collect());
+        ].into_iter().collect());
 
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -990,6 +1239,198 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn subscription_with_callback() {
+        let mut notify = Notify::builder().build();
+        let (handle, _) = notify
+            .create_or_subscribe("TEST_TOPIC".to_string(), false)
+            .await
+            .unwrap();
+        let subgraphs = MockedSubgraphs([
+            ("user", MockSubgraph::builder().with_json(
+                    serde_json::json!{{"query":"subscription{userWasCreated{name activeOrganization{__typename id}}}"}},
+                    serde_json::json!{{"data": {"userWasCreated": { "__typename": "User", "id": "1", "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
+                ).with_subscription_stream(handle.clone()).build()),
+            ("orga", MockSubgraph::builder().with_json(
+                serde_json::json!{{
+                    "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{id name}}}}",
+                    "variables": {
+                        "representations":[{"__typename": "Organization", "id":"0"}]
+                    }
+                }},
+                serde_json::json!{{
+                    "data": {
+                        "_entities": [{ "suborga": [
+                        { "__typename": "Organization", "id": "1", "name": "A"},
+                        { "__typename": "Organization", "id": "2", "name": "B"},
+                        { "__typename": "Organization", "id": "3", "name": "C"},
+                        ] }]
+                    },
+                    }}
+            ).build())
+        ].into_iter().collect());
+
+        let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
+        configuration.notify = notify.clone();
+        let service = TestHarness::builder()
+            .configuration(Arc::new(configuration))
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(
+                "subscription { userWasCreated { name activeOrganization { id  suborga { id name } } } }",
+            )
+            .context(subscription_context())
+            .build()
+            .unwrap();
+        let mut stream = service.oneshot(request).await.unwrap();
+        let res = stream.next_response().await.unwrap();
+        assert_eq!(&res.data, &Some(serde_json_bytes::Value::Null));
+        insta::assert_json_snapshot!(res);
+        notify.broadcast(graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": { "name": "test", "activeOrganization": { "__typename": "Organization", "id": "0" }}})).build()).await.unwrap();
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+        // error happened
+        notify
+            .broadcast(
+                graphql::Response::builder()
+                    .error(
+                        graphql::Error::builder()
+                            .message("cannot fetch the name")
+                            .extension_code("INVALID")
+                            .build(),
+                    )
+                    .build(),
+            )
+            .await
+            .unwrap();
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn subscription_with_callback_with_limit() {
+        let mut notify = Notify::builder().build();
+        let (handle, _) = notify
+            .create_or_subscribe("TEST_TOPIC".to_string(), false)
+            .await
+            .unwrap();
+        let subgraphs = MockedSubgraphs([
+            ("user", MockSubgraph::builder().with_json(
+                    serde_json::json!{{"query":"subscription{userWasCreated{name activeOrganization{__typename id}}}"}},
+                    serde_json::json!{{"data": {"userWasCreated": { "__typename": "User", "id": "1", "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
+                ).with_subscription_stream(handle.clone()).build()),
+            ("orga", MockSubgraph::builder().with_json(
+                serde_json::json!{{
+                    "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{id name}}}}",
+                    "variables": {
+                        "representations":[{"__typename": "Organization", "id":"0"}]
+                    }
+                }},
+                serde_json::json!{{
+                    "data": {
+                        "_entities": [{ "suborga": [
+                        { "__typename": "Organization", "id": "1", "name": "A"},
+                        { "__typename": "Organization", "id": "2", "name": "B"},
+                        { "__typename": "Organization", "id": "3", "name": "C"},
+                        ] }]
+                    },
+                    }}
+            ).build())
+        ].into_iter().collect());
+
+        let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "max_opened_subscriptions": 1, "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
+        configuration.notify = notify.clone();
+        let mut service = TestHarness::builder()
+            .configuration(Arc::new(configuration))
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(
+                "subscription { userWasCreated { name activeOrganization { id  suborga { id name } } } }",
+            )
+            .context(subscription_context())
+            .build()
+            .unwrap();
+        let mut stream = service.ready().await.unwrap().call(request).await.unwrap();
+        let res = stream.next_response().await.unwrap();
+        assert_eq!(&res.data, &Some(serde_json_bytes::Value::Null));
+        assert!(res.errors.is_empty());
+        insta::assert_json_snapshot!(res);
+        notify.broadcast(graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": { "name": "test", "activeOrganization": { "__typename": "Organization", "id": "0" }}})).build()).await.unwrap();
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+        // error happened
+        notify
+            .broadcast(
+                graphql::Response::builder()
+                    .error(
+                        graphql::Error::builder()
+                            .message("cannot fetch the name")
+                            .extension_code("INVALID")
+                            .build(),
+                    )
+                    .build(),
+            )
+            .await
+            .unwrap();
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+        let request = supergraph::Request::fake_builder()
+            .query(
+                "subscription { userWasCreated { name activeOrganization { id  suborga { id name } } } }",
+            )
+            .context(subscription_context())
+            .build()
+            .unwrap();
+        let mut stream_2 = service.ready().await.unwrap().call(request).await.unwrap();
+        let res = stream_2.next_response().await.unwrap();
+        assert!(!res.errors.is_empty());
+        insta::assert_json_snapshot!(res);
+        drop(stream);
+        drop(stream_2);
+        let request = supergraph::Request::fake_builder()
+            .query(
+                "subscription { userWasCreated { name activeOrganization { id  suborga { id name } } } }",
+            )
+            .context(subscription_context())
+            .build()
+            .unwrap();
+        // Wait a bit to ensure all the closed signals has been triggered
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut stream_2 = service.ready().await.unwrap().call(request).await.unwrap();
+        let res = stream_2.next_response().await.unwrap();
+        assert!(res.errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn subscription_without_header() {
+        let subgraphs = MockedSubgraphs(HashMap::new());
+        let configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
+        let service = TestHarness::builder()
+            .configuration(Arc::new(configuration))
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(
+                "subscription { userWasCreated { name activeOrganization { id  suborga { id name } } } }",
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+        let res = stream.next_response().await.unwrap();
+        insta::assert_json_snapshot!(res);
+    }
+
+    #[tokio::test]
     async fn root_typename_with_defer_and_empty_first_response() {
         let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
@@ -1235,7 +1676,7 @@ mod tests {
         )
         .with_json(
             serde_json::json!{{
-                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on User{activeOrganization{__typename id}}}}",
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on User{org:activeOrganization{__typename id}}}}",
                 "variables": {
                     "representations":[{"__typename": "User", "id":"1"}]
                 }
@@ -1244,7 +1685,7 @@ mod tests {
                 "data": {
                     "_entities": [
                         {
-                            "activeOrganization": {
+                            "org": {
                                 "__typename": "Organization", "id": "2"
                             }
                         }
@@ -1320,7 +1761,7 @@ mod tests {
                 currentUser {
                     name
                     ... @defer {
-                        activeOrganization {
+                        org: activeOrganization {
                             id
                             nonNullId
                             ... @defer {
@@ -1494,10 +1935,20 @@ mod tests {
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
     }
 
+    fn subscription_context() -> Context {
+        let context = Context::new();
+        context.private_entries.lock().insert(ClientRequestAccepts {
+            multipart_subscription: true,
+            ..Default::default()
+        });
+
+        context
+    }
+
     fn defer_context() -> Context {
         let context = Context::new();
         context.private_entries.lock().insert(ClientRequestAccepts {
-            multipart: true,
+            multipart_defer: true,
             ..Default::default()
         });
 
@@ -1765,7 +2216,6 @@ mod tests {
 
         let mut stream = service.oneshot(request).await.unwrap();
         let response = stream.next_response().await.unwrap();
-        println!("{response:?}");
 
         assert_eq!(
             serde_json::to_value(&response.data).unwrap(),
@@ -2304,6 +2754,37 @@ mod tests {
         let request = supergraph::Request::fake_builder()
             .context(defer_context())
             .query(query)
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn missing_entities() {
+        let subgraphs = MockedSubgraphs([
+            ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{id activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "__typename": "User", "id": "0", "activeOrganization": { "__typename": "Organization", "id": "1" } } } }}
+            ).build()),
+            ("orga", MockSubgraph::builder().with_json(serde_json::json!{{"query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}","variables":{"representations":[{"__typename":"Organization","id":"1"}]}}},
+                                                       serde_json::json!{{"data": {}, "errors":[{"message":"error"}]}}).build())
+        ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .context(defer_context())
+            .query("query { currentUser { id  activeOrganization{ id name } } }")
             .build()
             .unwrap();
 
