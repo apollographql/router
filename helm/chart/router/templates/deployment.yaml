@@ -130,6 +130,7 @@ spec:
           {{- include "common.tplvalues.render" (dict "value" .Values.extraContainers "context" $) | nindent 8 }}
         {{- end }}
         {{- if .Values.initContainers }}
+        initContainers:
           {{- include "common.tplvalues.render" (dict "value" .Values.initContainers "context" $) | nindent 8 }}
         {{- end }}
       {{- if or .Values.router.configuration .Values.extraVolumes }}
