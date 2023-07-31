@@ -1161,13 +1161,15 @@ impl Telemetry {
                 Err(e)
             }
             Ok(router_response) => {
-                let mut has_errors = !router_response.response.status().is_success();
-                if operation_kind == OperationKind::Subscription {
+                let http_status_is_success = router_response.response.status().is_success();
+
+                // Only send the subscription-request metric if it's an http status in error because we won't always enter the stream after.
+                if operation_kind == OperationKind::Subscription && !http_status_is_success {
                     Self::update_apollo_metrics(
                         ctx,
                         field_level_instrumentation_ratio,
                         sender.clone(),
-                        has_errors,
+                        true,
                         start.elapsed(),
                         operation_kind,
                         Some(OperationSubType::SubscriptionRequest),
@@ -1180,14 +1182,25 @@ impl Telemetry {
                     response_stream
                         .enumerate()
                         .map(move |(idx, response)| {
-                            if !response.errors.is_empty() {
-                                has_errors = true;
-                            }
+                            let has_errors = !response.errors.is_empty();
 
                             if !matches!(sender, Sender::Noop) {
                                 if operation_kind == OperationKind::Subscription {
-                                    // Don't send for the first empty response because it's a heartbeat
-                                    if idx != 0 {
+                                    // The first empty response is always a heartbeat except if it's an error
+                                    if idx == 0 {
+                                        // Don't count for subscription-request if http status was in error because it has been counted before
+                                        if http_status_is_success {
+                                            Self::update_apollo_metrics(
+                                                &ctx,
+                                                field_level_instrumentation_ratio,
+                                                sender.clone(),
+                                                has_errors,
+                                                start.elapsed(),
+                                                operation_kind,
+                                                Some(OperationSubType::SubscriptionRequest),
+                                            );
+                                        }
+                                    } else {
                                         // Only for subscription events
                                         Self::update_apollo_metrics(
                                             &ctx,

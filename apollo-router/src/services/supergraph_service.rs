@@ -236,9 +236,8 @@ async fn service_call(
                 .cloned()
                 .unwrap_or_default();
             let mut subscription_tx = None;
-            if (is_deferred || is_subscription)
-                && !accepts_multipart_defer
-                && !accepts_multipart_subscription
+            if (is_deferred && !accepts_multipart_defer)
+                || (is_subscription && !accepts_multipart_subscription)
             {
                 let (error_message, error_code) = if is_deferred {
                     (String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"), "DEFER_BAD_HEADER")

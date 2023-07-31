@@ -157,6 +157,7 @@ mod test {
     use super::*;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
+    use crate::plugins::subscription;
     use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::apollo::default_buffer_size;
     use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
@@ -196,7 +197,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_single_operation() -> Result<(), BoxError> {
         let query = "query {topProducts{name}}";
-        let results = get_metrics_for_request(query, None, None).await?;
+        let results = get_metrics_for_request(query, None, None, false).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -213,7 +214,24 @@ mod test {
         let _ = context
             .insert(OPERATION_KIND, OperationKind::Subscription)
             .unwrap();
-        let results = get_metrics_for_request(query, None, Some(context)).await?;
+        let results = get_metrics_for_request(query, None, Some(context), true).await?;
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.add_redaction("[].request_id", "[REDACTED]");
+        settings.bind(|| {
+            insta::assert_json_snapshot!(results);
+        });
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apollo_metrics_for_subscription_error() -> Result<(), BoxError> {
+        let query = "subscription{reviewAdded{body}}";
+        let context = Context::new();
+        let _ = context
+            .insert(OPERATION_KIND, OperationKind::Subscription)
+            .unwrap();
+        let results = get_metrics_for_request(query, None, Some(context), true).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -226,7 +244,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_multiple_operations() -> Result<(), BoxError> {
         let query = "query {topProducts{name}} query {topProducts{name}}";
-        let results = get_metrics_for_request(query, None, None).await?;
+        let results = get_metrics_for_request(query, None, None, false).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -239,7 +257,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_parse_failure() -> Result<(), BoxError> {
         let query = "garbage";
-        let results = get_metrics_for_request(query, None, None).await?;
+        let results = get_metrics_for_request(query, None, None, false).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -252,7 +270,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_unknown_operation() -> Result<(), BoxError> {
         let query = "query {topProducts{name}}";
-        let results = get_metrics_for_request(query, Some("UNKNOWN"), None).await?;
+        let results = get_metrics_for_request(query, Some("UNKNOWN"), None, false).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -263,7 +281,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_validation_failure() -> Result<(), BoxError> {
         let query = "query {topProducts{unknown}}";
-        let results = get_metrics_for_request(query, None, None).await?;
+        let results = get_metrics_for_request(query, None, None, false).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -279,7 +297,7 @@ mod test {
         let query = "query {topProducts{name}}";
         let context = Context::new();
         context.insert(STUDIO_EXCLUDE, true)?;
-        let results = get_metrics_for_request(query, None, Some(context)).await?;
+        let results = get_metrics_for_request(query, None, Some(context), false).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
@@ -294,27 +312,31 @@ mod test {
         query: &str,
         operation_name: Option<&str>,
         context: Option<Context>,
+        is_subscription: bool,
     ) -> Result<Vec<SingleStatsReport>, BoxError> {
         let _ = tracing_subscriber::fmt::try_init();
         let mut plugin = create_plugin().await?;
         // Replace the apollo metrics sender so we can test metrics collection.
         let (tx, rx) = futures::channel::mpsc::channel(100);
         plugin.apollo_metrics_sender = Sender::Apollo(tx);
+        let mut request_builder = SupergraphRequest::fake_builder()
+            .header("name_header", "test_client")
+            .header("version_header", "1.0-test")
+            .query(query)
+            .and_operation_name(operation_name)
+            .and_context(context);
+        if is_subscription {
+            request_builder = request_builder.header(
+                "accept",
+                "multipart/mixed; boundary=graphql; subscriptionSpec=1.0",
+            );
+        }
         TestHarness::builder()
             .extra_plugin(plugin)
+            .extra_plugin(create_subscription_plugin().await?)
             .build_router()
             .await?
-            .oneshot(
-                SupergraphRequest::fake_builder()
-                    .header("name_header", "test_client")
-                    .header("version_header", "1.0-test")
-                    .query(query)
-                    .and_operation_name(operation_name)
-                    .and_context(context)
-                    .build()?
-                    .try_into()
-                    .unwrap(),
-            )
+            .oneshot(request_builder.build()?.try_into().unwrap())
             .await
             .unwrap()
             .next_response()
@@ -363,6 +385,14 @@ mod test {
                 tracing: None,
                 apollo: Some(apollo_config),
             },
+            Default::default(),
+        ))
+        .await
+    }
+
+    async fn create_subscription_plugin() -> Result<subscription::Subscription, BoxError> {
+        subscription::Subscription::new(PluginInit::fake_new(
+            subscription::SubscriptionConfig::default(),
             Default::default(),
         ))
         .await

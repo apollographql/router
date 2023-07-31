@@ -20,6 +20,8 @@ use clap::Subcommand;
 use directories::ProjectDirs;
 #[cfg(any(feature = "dhat-heap", feature = "dhat-ad-hoc"))]
 use once_cell::sync::OnceCell;
+use regex::Captures;
+use regex::Regex;
 use url::ParseError;
 use url::Url;
 
@@ -151,6 +153,7 @@ pub struct Opt {
         long = "log",
         default_value = "info",
         alias = "log-level",
+        value_parser = add_log_filter,
         env = "APOLLO_ROUTER_LOG"
     )]
     log_level: String,
@@ -177,7 +180,6 @@ pub struct Opt {
     #[clap(
         env = APOLLO_ROUTER_DEV_ENV,
         long = "dev",
-        hide(true),
         action(ArgAction::SetTrue)
     )]
     dev: bool,
@@ -240,6 +242,27 @@ pub struct Opt {
     /// Display version and exit.
     #[clap(action = ArgAction::SetTrue, long, short = 'V')]
     pub(crate) version: bool,
+}
+
+// Add a filter to global log level settings so that the level only applies to the router.
+//
+// If you want to set a complex logging filter which isn't modified in this way, use RUST_LOG.
+fn add_log_filter(raw: &str) -> Result<String, String> {
+    match std::env::var("RUST_LOG") {
+        Ok(filter) => Ok(filter),
+        Err(_e) => {
+            // Directives are case-insensitive. Convert to lowercase before processing.
+            let lowered = raw.to_lowercase();
+            // Find "global" directives and limit them to apollo_router
+            let rgx =
+                Regex::new(r"(^|,)(off|error|warn|info|debug|trace)").expect("regex must be valid");
+            let res = rgx.replace_all(&lowered, |caps: &Captures| {
+                // If the pattern matches, we must have caps 1 and 2
+                format!("{}apollo_router={}", &caps[1], &caps[2])
+            });
+            Ok(res.into_owned())
+        }
+    }
 }
 
 impl Opt {
@@ -651,4 +674,71 @@ fn copy_args_to_env() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::executable::add_log_filter;
+
+    #[test]
+    fn simplest_logging_modifications() {
+        for level in ["off", "error", "warn", "info", "debug", "trace"] {
+            assert_eq!(
+                add_log_filter(level).expect("conversion works"),
+                format!("apollo_router={level}")
+            );
+        }
+    }
+
+    // It's hard to have comprehensive tests for this kind of functionality,
+    // so this set is derived from the examples at:
+    // https://docs.rs/env_logger/latest/env_logger/#filtering-results
+    // which is a reasonably corpus of things to test.
+    #[test]
+    fn complex_logging_modifications() {
+        assert_eq!(add_log_filter("hello").unwrap(), "hello");
+        assert_eq!(add_log_filter("trace").unwrap(), "apollo_router=trace");
+        assert_eq!(add_log_filter("TRACE").unwrap(), "apollo_router=trace");
+        assert_eq!(add_log_filter("info").unwrap(), "apollo_router=info");
+        assert_eq!(add_log_filter("INFO").unwrap(), "apollo_router=info");
+        assert_eq!(add_log_filter("hello=debug").unwrap(), "hello=debug");
+        assert_eq!(add_log_filter("hello=DEBUG").unwrap(), "hello=debug");
+        assert_eq!(
+            add_log_filter("hello,std::option").unwrap(),
+            "hello,std::option"
+        );
+        assert_eq!(
+            add_log_filter("error,hello=warn").unwrap(),
+            "apollo_router=error,hello=warn"
+        );
+        assert_eq!(
+            add_log_filter("error,hello=off").unwrap(),
+            "apollo_router=error,hello=off"
+        );
+        assert_eq!(add_log_filter("off").unwrap(), "apollo_router=off");
+        assert_eq!(add_log_filter("OFF").unwrap(), "apollo_router=off");
+        assert_eq!(add_log_filter("hello/foo").unwrap(), "hello/foo");
+        assert_eq!(add_log_filter("hello/f.o").unwrap(), "hello/f.o");
+        assert_eq!(
+            add_log_filter("hello=debug/foo*foo").unwrap(),
+            "hello=debug/foo*foo"
+        );
+        assert_eq!(
+            add_log_filter("error,hello=warn/[0-9]scopes").unwrap(),
+            "apollo_router=error,hello=warn/[0-9]scopes"
+        );
+        // Add some hard ones
+        assert_eq!(
+            add_log_filter("hyper=debug,warn,regex=warn,h2=off").unwrap(),
+            "hyper=debug,apollo_router=warn,regex=warn,h2=off"
+        );
+        assert_eq!(
+            add_log_filter("hyper=debug,apollo_router=off,regex=info,h2=off").unwrap(),
+            "hyper=debug,apollo_router=off,regex=info,h2=off"
+        );
+        assert_eq!(
+            add_log_filter("apollo_router::plugins=debug").unwrap(),
+            "apollo_router::plugins=debug"
+        );
+    }
 }
