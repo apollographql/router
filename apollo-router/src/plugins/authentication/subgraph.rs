@@ -343,8 +343,44 @@ mod test {
     use crate::services::SubgraphResponse;
     use crate::Context;
 
+    async fn test_signing_settings(service_name: &str) -> SigningSettings {
+        let params: SigningParamsConfig = make_signing_params(
+            &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
+                access_key_id: "id".to_string(),
+                secret_access_key: "secret".to_string(),
+                region: "us-east-1".to_string(),
+                service_name: service_name.to_string(),
+                assume_role: None,
+            })),
+            "all",
+        )
+        .await
+        .unwrap();
+        get_signing_settings(&params)
+    }
+
+    #[tokio::test]
+    async fn test_get_signing_settings() {
+        assert_eq!(
+            PayloadChecksumKind::XAmzSha256,
+            test_signing_settings("s3").await.payload_checksum_kind
+        );
+        assert_eq!(
+            PayloadChecksumKind::XAmzSha256,
+            test_signing_settings("vpc-lattice-svcs")
+                .await
+                .payload_checksum_kind
+        );
+        assert_eq!(
+            PayloadChecksumKind::NoHeader,
+            test_signing_settings("something-else")
+                .await
+                .payload_checksum_kind
+        );
+    }
+
     #[test]
-    fn test_all_aws_sig_v4_config() {
+    fn test_all_aws_sig_v4_hardcoded_config() {
         serde_yaml::from_str::<Config>(
             r#"
         all:
@@ -360,7 +396,7 @@ mod test {
     }
 
     #[test]
-    fn test_subgraph_aws_sig_v4_config() {
+    fn test_subgraph_aws_sig_v4_hardcoded_config() {
         serde_yaml::from_str::<Config>(
             r#"
         subgraphs:
@@ -370,10 +406,74 @@ mod test {
                 access_key_id: "test"
                 secret_access_key: "test"
                 region: "us-east-1"
-                service_name: "lambda"
+                service_name: "test_service"
         "#,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn test_aws_sig_v4_default_chain_assume_role_config() {
+        serde_yaml::from_str::<Config>(
+            r#"
+        all:
+            aws_sig_v4:
+                default_chain:
+                    profile_name: "my-test-profile"
+                    region: "us-east-1"
+                    service_name: "lambda"
+                    assume_role:
+                        role_arn: "test-arn"
+                        session_name: "test-session"
+                        external_id: "test-id"
+        "#,
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_lattice_body_payload_should_be_unsigned() -> Result<(), BoxError> {
+        let subgraph_request = example_request();
+
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                assert_eq!(
+                    "UNSIGNED-PAYLOAD",
+                    request
+                        .subgraph_request
+                        .headers()
+                        .get("x-amz-content-sha256")
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                );
+                true
+            })
+            .returning(example_response);
+
+        let mut service = SubgraphAuth {
+            signing_params: SigningParams {
+                all: make_signing_params(
+                    &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
+                        access_key_id: "id".to_string(),
+                        secret_access_key: "secret".to_string(),
+                        region: "us-east-1".to_string(),
+                        service_name: "vpc-lattice-svcs".to_string(),
+                        assume_role: None,
+                    })),
+                    "all",
+                )
+                .await
+                .ok(),
+                subgraphs: Default::default(),
+            },
+        }
+        .subgraph_service("test_subgraph", mock.boxed());
+
+        service.ready().await?.call(subgraph_request).await?;
+        Ok(())
     }
 
     #[tokio::test]
@@ -406,7 +506,7 @@ mod test {
 
         let mut service = SubgraphAuth {
             signing_params: SigningParams {
-                all: super::make_signing_params(
+                all: make_signing_params(
                     &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
                         access_key_id: "id".to_string(),
                         secret_access_key: "secret".to_string(),
