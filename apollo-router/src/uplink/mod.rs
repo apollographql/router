@@ -269,8 +269,9 @@ where
     Response: Send + Debug + 'static,
 {
     let query = query_name::<Query>();
-    let last_url = urls.cloned().last();
-    for url in urls {
+    let collected_urls: Vec<_> = urls.collect();
+    let last_url = collected_urls.last();
+    for url in &collected_urls {
         let now = Instant::now();
         match http_request::<Query>(url.as_str(), request_body, timeout).await {
             Ok(response) => {
@@ -330,11 +331,7 @@ where
                     error = e.to_string(),
                     code = e.status().unwrap_or_default().as_str()
                 );
-                if url
-                    == last_url
-                        .as_ref()
-                        .expect("must be an url, or can't be here; qed")
-                {
+                if url == last_url.expect("must be an url, or can't be here; qed") {
                     tracing::warn!(
                     "failed to fetch from Uplink endpoint {}: {}. Other endpoints will be tried",
                     url,
