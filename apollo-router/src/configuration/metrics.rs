@@ -207,7 +207,7 @@ impl Metrics {
         );
 
         log_usage_metrics!(
-            value.apollo.router.config.subscriptions,
+            value.apollo.router.config.subscription,
             "$.subscription[?(@.enabled == true)]",
             opt.mode.passthrough,
             "$.mode.passthrough",
@@ -215,7 +215,7 @@ impl Metrics {
             "$.mode.callback",
             opt.deduplication,
             "$[?(@.enable_deduplication == true)]",
-            opt.max_opened_subscriptions,
+            opt.max_opened,
             "$[?(@.max_opened_subscriptions)]",
             opt.queue_capacity,
             "$[?(@.queue_capacity)]"
@@ -224,21 +224,21 @@ impl Metrics {
         log_usage_metrics!(
             value.apollo.router.config.limits,
             "$.limits",
-            opt.max_depth,
+            opt.operation.max_depth,
             "$[?(@.max_depth)]",
-            opt.max_aliases,
+            opt.operation.max_aliases,
             "$[?(@.max_aliases)]",
-            opt.max_height,
+            opt.operation.max_height,
             "$[?(@.max_height)]",
-            opt.max_root_fields,
+            opt.operation.max_root_fields,
             "$[?(@.max_root_fields)]",
-            opt.parse.max_recursion,
-            "$[?(@.parser_max_recursion)]",
-            opt.parse.max_tokens,
-            "$[?(@.parser_max_tokens)]",
-            opt.warn_only,
+            opt.operation.warn_only,
             "$[?(@.warn_only)]",
-            opt.http_max_request_bytes,
+            opt.parser.max_recursion,
+            "$[?(@.parser_max_recursion)]",
+            opt.parser.max_tokens,
+            "$[?(@.parser_max_tokens)]",
+            opt.request.max_size,
             "$[?(@.experimental_http_max_request_bytes)]"
         );
         log_usage_metrics!(
@@ -322,6 +322,7 @@ mod test {
                 metrics: Default::default(),
             };
             metrics.log_usage_metrics();
+            metrics.metrics.retain(|_, v| v.0 > 0);
             insta::with_settings!({sort_maps => true, snapshot_suffix => file_name}, {
                 assert_yaml_snapshot!(&metrics.metrics);
             });
