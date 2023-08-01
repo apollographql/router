@@ -433,8 +433,8 @@ where
                 .router
                 .operations
                 .subscriptions
-                .events
-                .websocket = 1u64,
+                .events = 1u64,
+            subscriptions.mode = "passthrough"
         );
         Pin::new(&mut this.stream)
             .start_send(this.protocol.subscribe(this.id.to_string(), item))
@@ -469,8 +469,8 @@ where
                 .router
                 .operations
                 .subscriptions
-                .events
-                .websocket = 1u64,
+                .events = 1u64,
+            subscriptions.mode = "passthrough",
             subscriptions.complete = true
         );
         let mut this = self.project();
