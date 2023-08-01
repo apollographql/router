@@ -4,7 +4,188 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.26.0] - 2023-07-28
+
+## 🚀 Features
+
+### Add coprocessor metrics ([PR #3483](https://github.com/apollographql/router/pull/3483))
+
+Introduces a new metric for the router:
+
+```
+apollo.router.operations.coprocessor
+```
+
+It has two attributes:
+
+```
+coprocessor.stage: string (RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse)
+coprocessor.succeeded: bool
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3483
+
+### Constrain APOLLO_ROUTER_LOG and --log global levels to the router ([Issue #3474](https://github.com/apollographql/router/issues/3474))
+
+`APOLLO_ROUTER_LOG` and `--log` now implicitly set a filter constraining the logging to the `apollo_router` module, simplifying the debugging experience for users.
+
+For advanced users `RUST_LOG` can be used for standard log filter behavior.
+
+Thus:
+
+```
+RUST_LOG=apollo_router=warn
+--log warn
+APOLLO_ROUTER_LOG=warn
+```
+
+are equivalent with all three statements resulting in `warn` level logging for the router.
+
+For more details, read the logging configuration documentation.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3477
+
+### Add support for PodDisruptionBudget to helm chart ([Issue #3345](https://github.com/apollographql/router/issues/3345))
+
+A [PodDisuptionBudget](https://kubernetes.io/docs/tasks/run-application/configure-pdb/) may now be specified for your router to limit the number of concurrent disruptions.
+
+Example Configuration:
+
+```yaml
+podDisruptionBudget:
+  minAvailable: 1
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3469
+
+## 🐛 Fixes
+
+### Don't hide `--dev` from `--help` ([Issue #2705](https://github.com/apollographql/router/issues/2705))
+
+Display documentation about `--dev` when launching the router with `--help` argument.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3479
+
+### Fix default rhai script dir for Windows ([Issue #3401](https://github.com/apollographql/router/issues/3401))
+
+Using default `rhai.scripts` field won't end up in an error.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3411
+
+### Fix the prometheus descriptions as well as the metrics ([Issue #3491](https://github.com/apollographql/router/issues/3491))
+
+I didn't realise the descriptions on the prometheus stats were significant, so my previous prometheus fix constrained itself to renaming the actual metrics.
+
+This relaxes the regex pattern to include prom descriptions as well as metrics in the renaming.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3492
+
+## 🛠 Maintenance
+
+### Add a pool idle timeout for subgraph HTTP connectors ([Issue #3435](https://github.com/apollographql/router/issues/3435))
+
+Having a high idle pool timeout duration can sometimes trigger situations in which an HTTP request cannot complete (see [this comment](https://github.com/hyperium/hyper/issues/2136#issuecomment-589488526) for more information).
+
+This changeset sets a default timeout duration of 5 seconds, which we may make configurable eventually.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3470
+
+### Don't reload the router if the schema/license hasn't changed ([Issue #3180](https://github.com/apollographql/router/issues/3180))
+
+The router is performing frequent schema reloads due to notifications from uplink. In the majority of cases a schema reload is not required, because the schema hasn't actually changed.
+
+We won't reload the router if the schema/license hasn't changed.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3478
+
+
+
+# [1.25.0] - 2023-07-19
+
+## 🚀 Features
+
+### Persisted Queries w/opt-in safelisting (preview) ([PR #3347](https://github.com/apollographql/router/pull/3347))
+
+Persisted Queries is an upcoming feature that helps you prevent unwanted traffic from reaching your graph. It's in private preview and isn't available unless your enterprise organization has been granted preview access by Apollo.
+
+Persisted Queries has two modes of operation:
+* **Unregistered operation monitoring**
+  * Your router allows all GraphQL operations, while emitting structured traces containing unregistered operation bodies.
+* **Operation safelisting**
+  * Your router rejects unregistered operations.
+  * Your router requires all operations to be sent as an ID.
+
+Unlike automatic persisted queries (APQ), an operation safelist lets you prevent malicious actors from constructing a free-format query that could overload your subgraph services.
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/3347
+
+## 🐛 Fixes
+
+### Fix issues around query fragment reuse
+
+[Federation 2.4.9](https://github.com/apollographql/federation/blob/main/gateway-js/CHANGELOG.md#249) contained a bug around query fragment reuse. The change was reverted in [2.4.10](https://github.com/apollographql/federation/blob/main/gateway-js/CHANGELOG.md#249)
+
+The version of federation used by the Router is now 2.4.10.
+
+By @BrynCooke in https://github.com/apollographql/router/pull/3453
+
+### Fix prometheus statistics issues with _total_total names([Issue #3443](https://github.com/apollographql/router/issues/3443))
+
+When producing prometheus statistics the otel crate (0.19.0) now automatically appends `_total` which is unhelpful.
+
+This fix removes `_total_total` from our statistics. However, counter metrics will still have `_total` appended to them if they did not so already.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3471
+
+### Enforce default buckets for metrics ([PR #3432](https://github.com/apollographql/router/pull/3432))
+
+When `telemetry.metrics.common` was not configured, no default metrics buckets were configured.
+With this fix the default buckets are: `[0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0]`
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3432
+
+## 📃 Configuration
+
+### Add `subscription.enabled` field to enable subscription support ([Issue #3428](https://github.com/apollographql/router/issues/3428))
+
+`enabled` is now required in `subscription` configuration. Example:
+
+```yaml
+subscription:
+  enabled: true
+  mode:
+    passthrough:
+      all:
+        path: /ws
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3450
+
+### Add option to disable reuse of query fragments  ([Issue #3452](https://github.com/apollographql/router/issues/3452))
+
+A new option has been added to the Router to allow disabling of the reuse of query fragments. This is useful for debugging purposes.
+```yaml
+supergraph:
+  experimental_reuse_query_fragments: false
+```
+
+The default value depends on the version of federation.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3453
+
+## 🛠 Maintenance
+
+### Coprocessor: Set a default pool idle timeout duration. ([PR #3434](https://github.com/apollographql/router/pull/3434))
+
+The default idle pool timeout duration in Hyper can sometimes trigger situations in which an HTTP request cannot complete (see [this comment](https://github.com/hyperium/hyper/issues/2136#issuecomment-589488526) for more information).
+
+This changeset sets a default timeout duration of 5 seconds.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3434
+
 # [1.24.0] - 2023-07-13
+
+***Note that this release contains a bug in query planning around query fragment reuse and should not be used. If upgrading, consider going straight to 1.25.0.*** 
 
 ## 🚀 Features
 
@@ -172,6 +353,10 @@ To maintain backwards compatibility; query parameters named "ready" and "live" h
 
 Sample queries:
 
+```
+curl -XPOST "http://localhost:8088/health?ready" OR curl  "http://localhost:8088/health?ready"
+curl -XPOST "http://localhost:8088/health?live" OR curl "http://localhost:8088/health?live"
+```
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3276
 

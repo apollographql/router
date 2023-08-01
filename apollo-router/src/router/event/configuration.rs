@@ -11,6 +11,7 @@ use futures::prelude::*;
 use crate::router::Event;
 use crate::router::Event::NoMoreConfiguration;
 use crate::router::Event::UpdateConfiguration;
+use crate::uplink::UplinkConfig;
 use crate::Configuration;
 
 type ConfigurationStream = Pin<Box<dyn Stream<Item = Configuration> + Send>>;
@@ -57,12 +58,21 @@ impl Default for ConfigurationSource {
 
 impl ConfigurationSource {
     /// Convert this config into a stream regardless of if is static or not. Allows for unified handling later.
-    pub(crate) fn into_stream(self) -> impl Stream<Item = Event> {
+    pub(crate) fn into_stream(
+        self,
+        uplink_config: Option<UplinkConfig>,
+    ) -> impl Stream<Item = Event> {
         match self {
-            ConfigurationSource::Static(instance) => {
+            ConfigurationSource::Static(mut instance) => {
+                instance.uplink = uplink_config;
                 stream::iter(vec![UpdateConfiguration(*instance)]).boxed()
             }
-            ConfigurationSource::Stream(stream) => stream.map(UpdateConfiguration).boxed(),
+            ConfigurationSource::Stream(stream) => stream
+                .map(move |mut c| {
+                    c.uplink = uplink_config.clone();
+                    UpdateConfiguration(c)
+                })
+                .boxed(),
             #[allow(deprecated)]
             ConfigurationSource::File {
                 path,
@@ -78,16 +88,18 @@ impl ConfigurationSource {
                     stream::empty().boxed()
                 } else {
                     match ConfigurationSource::read_config(&path) {
-                        Ok(configuration) => {
+                        Ok(mut configuration) => {
                             if watch {
                                 crate::files::watch(&path)
                                     .filter_map(move |_| {
                                         let path = path.clone();
+                                        let uplink_config = uplink_config.clone();
                                         async move {
                                             match ConfigurationSource::read_config_async(&path)
                                                 .await
                                             {
-                                                Ok(configuration) => {
+                                                Ok(mut configuration) => {
+                                                    configuration.uplink = uplink_config.clone();
                                                     Some(UpdateConfiguration(configuration))
                                                 }
                                                 Err(err) => {
@@ -99,6 +111,7 @@ impl ConfigurationSource {
                                     })
                                     .boxed()
                             } else {
+                                configuration.uplink = uplink_config.clone();
                                 stream::once(future::ready(UpdateConfiguration(configuration)))
                                     .boxed()
                             }
@@ -140,6 +153,7 @@ mod tests {
     use super::*;
     use crate::files::tests::create_temp_file;
     use crate::files::tests::write_and_flush;
+    use crate::uplink::UplinkConfig;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn config_by_file_watching() {
@@ -151,7 +165,7 @@ mod tests {
             watch: true,
             delay: None,
         }
-        .into_stream()
+        .into_stream(Some(UplinkConfig::default()))
         .boxed();
 
         // First update is guaranteed
@@ -182,7 +196,7 @@ mod tests {
             watch: true,
             delay: None,
         }
-        .into_stream();
+        .into_stream(Some(UplinkConfig::default()));
 
         // First update fails because the file is invalid.
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
@@ -197,7 +211,7 @@ mod tests {
             watch: true,
             delay: None,
         }
-        .into_stream();
+        .into_stream(Some(UplinkConfig::default()));
 
         // First update fails because the file is invalid.
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
@@ -214,7 +228,7 @@ mod tests {
             watch: false,
             delay: None,
         }
-        .into_stream();
+        .into_stream(Some(UplinkConfig::default()));
         assert!(matches!(
             stream.next().await.unwrap(),
             UpdateConfiguration(_)

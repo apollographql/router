@@ -86,6 +86,12 @@ flowchart LR;
 
 > [Walk through an example.](#example-execution)
 
+### Special considerations
+
+- Whenever your router updates its supergraph schema at runtime, **it terminates all active subscriptions.** Clients can detect this special-case termination via an error code and execute a new subscription.
+
+    See [Termination on schema update](#termination-on-schema-update).
+
 ## Prerequisites
 
 ⚠️ **Before you add `Subscription` fields to your subgraphs,** do _all_ of the following _in the order shown_ to prevent schema composition errors:
@@ -125,6 +131,7 @@ Here's an example router configuration snippet that sets up subgraph subscriptio
 
 ```yaml title="router.yaml"
 subscription:
+  enabled: true
   mode:
     passthrough:
       all: # The router uses these subscription settings UNLESS overridden per-subgraph
@@ -173,6 +180,7 @@ Here's an example configuration that sets up subgraph subscriptions in callback 
 
 ```yaml title="router.yaml"
 subscription:
+  enabled: true
   mode:
     preview_callback:
       public_url: https://example.com:4000 # The router's public URL
@@ -188,6 +196,7 @@ If some of your subgraphs require [passthrough mode](#websocket-setup) and other
 
 ```yaml title="router.yaml"
 subscription:
+  enabled: true
   mode:
     passthrough:
       subgraphs:
@@ -351,6 +360,7 @@ You can disable subscription deduplication by adding the following to your route
 
 ```yaml title="router.yaml"
 subscription:
+  enabled: true
 # highlight-start
   enable_deduplication: false # default: true
 # highlight-end
@@ -369,6 +379,36 @@ Disabling deduplication is useful if you _need_ to create a separate connection 
     - As a basic example, let's say a subscription should always fire events returning the integers `0` through `1000`, in order. If a new subscription reuses an existing subgraph connection, it starts by receiving whichever value is next for the original connection, which is almost definitely _not_ `0`.
 
 ## Advanced configuration
+
+### Termination on schema update
+
+Whenever your router's supergraph schema is updated, **the router terminates all active subscriptions.**
+
+<blockquote>
+
+Your router's supergraph schema is updated in the following cases:
+
+- Your router regularly polls GraphOS for its supergraph schema, and an updated schema becomes available.
+- Your router obtains its supergraph schema from a local file, which it watches for updates if the [`--hot-reload` option](../configuration/overview#--hr----hot-reload) is set.
+
+</blockquote>
+
+When the router terminates subscriptions this way, it sends the following as a final response payload to all active subscribing clients:
+
+```json
+{
+  "errors": [
+    {
+      "message": "subscription has been closed due to a schema reload",
+      "extensions": {
+        "code": "SUBSCRIPTION_SCHEMA_RELOAD"
+      }
+    }
+  ]
+}
+```
+
+A client that receives this `SUBSCRIPTION_SCHEMA_RELOAD` error code can reconnect by executing a new subscription operation.
 
 ### WebSocket auth support
 
@@ -411,6 +451,7 @@ You can configure the size of each event queue in your router's YAML config file
 
 ```yaml title="router.yaml"
 subscription:
+  enabled: true
   queue_capacity: 100000 # Default: 128
 ```
 
@@ -426,6 +467,7 @@ Client subscriptions are [long-lived HTTP connections](#how-it-works), which mea
 
 ```yaml title="router.yaml"
 subscription:
+  enabled: true
   #highlight-start
   max_opened_subscriptions: 150 # Only 150 simultaneous connections allowed
   #highlight-end
