@@ -269,6 +269,7 @@ where
     Response: Send + Debug + 'static,
 {
     let query = query_name::<Query>();
+    let last_url = urls.last();
     for url in urls {
         let now = Instant::now();
         match http_request::<Query>(url.as_str(), request_body, timeout).await {
@@ -329,11 +330,19 @@ where
                     error = e.to_string(),
                     code = e.status().unwrap_or_default().as_str()
                 );
-                tracing::debug!(
+                if url == last_url.expect("must be an url, or can't be here; qed") {
+                    tracing::warn!(
                     "failed to fetch from Uplink endpoint {}: {}. Other endpoints will be tried",
                     url,
                     e
                 );
+                } else {
+                    tracing::debug!(
+                    "failed to fetch from Uplink endpoint {}: {}. Other endpoints will be tried",
+                    url,
+                    e
+                );
+                }
             }
         };
     }
@@ -358,8 +367,22 @@ async fn http_request<Query>(
 where
     Query: graphql_client::GraphQLQuery,
 {
-    let client = reqwest::Client::builder().timeout(timeout).build()?;
-    let res = client.post(url).json(request_body).send().await?;
+    let client = reqwest::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(|e| {
+            tracing::warn!(error = %e, "could not create reqwest client");
+            e
+        })?;
+    let res = client
+        .post(url)
+        .json(request_body)
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::warn!(error = %e, "could not create post request");
+            e
+        })?;
     tracing::debug!("uplink response {:?}", res);
     let response_body: graphql_client::Response<Query::ResponseData> = res.json().await?;
     Ok(response_body)
