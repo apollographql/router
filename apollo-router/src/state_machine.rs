@@ -364,7 +364,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             )
             .await
             .map_err(ServiceCreationError)?;
-
         // used to track if there are still in flight connections when shutting down
         let (all_connections_stopped_sender, all_connections_stopped_signal) =
             mpsc::channel::<()>(1);

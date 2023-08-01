@@ -86,6 +86,14 @@ containerPorts:
 #       - containerPort: 4001
 extraContainers: []
 
+# -- An array of init containers to include in the router pod
+# Example:
+# initContainers:
+#   - name: init-myservice
+#     image: busybox:1.28
+#     command: ["sh"]
+initContainers: []
+
 # -- A map of extra labels to apply to the router deploment and containers
 # Example:
 # extraLabels:

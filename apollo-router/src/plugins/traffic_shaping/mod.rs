@@ -8,9 +8,9 @@
 //!
 mod cache;
 mod deduplication;
-mod rate;
+pub(crate) mod rate;
 mod retry;
-mod timeout;
+pub(crate) mod timeout;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
@@ -34,7 +34,7 @@ use self::cache::SubgraphCacheLayer;
 use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
 pub(crate) use self::rate::RateLimited;
-use self::retry::RetryPolicy;
+pub(crate) use self::retry::RetryPolicy;
 pub(crate) use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
 use crate::cache::redis::RedisCacheStorage;
