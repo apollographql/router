@@ -1,0 +1,193 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/tag/v0.3")
+  @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
+  @link(
+    url: "https://myspecs.dev/myDirective/v1.0"
+    import: ["@myDirective", { name: "@anotherDirective", as: "@hello" }]
+  ) {
+  query: Query
+  subscription: Subscription
+}
+
+directive @hello on FIELD_DEFINITION
+
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(
+  graph: join__Graph
+  requires: join__FieldSet
+  provides: join__FieldSet
+  type: String
+  external: Boolean
+  override: String
+  usedOverridden: Boolean
+) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(
+  graph: join__Graph!
+  interface: String!
+) repeatable on OBJECT | INTERFACE
+
+directive @join__type(
+  graph: join__Graph!
+  key: join__FieldSet
+  extension: Boolean! = false
+  resolvable: Boolean! = true
+  isInterfaceObject: Boolean! = false
+) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(
+  graph: join__Graph!
+  member: String!
+) repeatable on UNION
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
+
+directive @myDirective(a: String!) on FIELD_DEFINITION
+
+directive @tag(
+  name: String!
+) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+
+type AnewDieWasCreated @join__type(graph: DICEFACTORY) {
+  id: ID!
+  die: Die
+}
+
+type Die
+  @join__type(graph: DICEFACTORY, key: "id")
+  @join__type(graph: RNG, key: "id") {
+  id: ID!
+  sides: Int!
+    @join__field(graph: DICEFACTORY)
+    @join__field(graph: RNG, external: true)
+  color: String! @join__field(graph: DICEFACTORY)
+  roll: Int! @join__field(graph: RNG, requires: "sides")
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  DICEFACTORY @join__graph(name: "dicefactory", url: "http://localhost:4041")
+  PRODUCTS @join__graph(name: "products", url: "http://localhost:4001")
+  REVIEWS @join__graph(name: "reviews", url: "http://localhost:4005/graphql")
+  RNG @join__graph(name: "rng", url: "http://localhost:4042")
+  USERS @join__graph(name: "users", url: "http://localhost:4003")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Product implements ProductItf & SkuItf
+  @join__implements(graph: PRODUCTS, interface: "ProductItf")
+  @join__implements(graph: PRODUCTS, interface: "SkuItf")
+  @join__implements(graph: REVIEWS, interface: "ProductItf")
+  @join__type(graph: PRODUCTS, key: "id")
+  @join__type(graph: PRODUCTS, key: "sku package")
+  @join__type(graph: PRODUCTS, key: "sku variation { id }")
+  @join__type(graph: REVIEWS, key: "id") {
+  id: ID! @tag(name: "hi-from-products")
+  sku: String @join__field(graph: PRODUCTS)
+  name: String @join__field(graph: PRODUCTS) @hello
+  package: String @join__field(graph: PRODUCTS)
+  variation: ProductVariation @join__field(graph: PRODUCTS)
+  dimensions: ProductDimension @join__field(graph: PRODUCTS)
+  createdBy: User @join__field(graph: PRODUCTS)
+  hidden: String @join__field(graph: PRODUCTS)
+  reviewsScore: Float! @join__field(graph: REVIEWS, override: "products")
+  oldField: String @join__field(graph: PRODUCTS)
+  reviewsCount: Int! @join__field(graph: REVIEWS)
+  reviews: [Review!]! @join__field(graph: REVIEWS)
+}
+
+type ProductDimension @join__type(graph: PRODUCTS) {
+  size: String
+  weight: Float
+}
+
+interface ProductItf implements SkuItf
+  @join__implements(graph: PRODUCTS, interface: "SkuItf")
+  @join__type(graph: PRODUCTS)
+  @join__type(graph: REVIEWS) {
+  id: ID!
+  sku: String @join__field(graph: PRODUCTS)
+  name: String @join__field(graph: PRODUCTS)
+  package: String @join__field(graph: PRODUCTS)
+  variation: ProductVariation @join__field(graph: PRODUCTS)
+  dimensions: ProductDimension @join__field(graph: PRODUCTS)
+  createdBy: User @join__field(graph: PRODUCTS)
+  hidden: String @inaccessible @join__field(graph: PRODUCTS)
+  oldField: String
+    @join__field(graph: PRODUCTS)
+    @deprecated(reason: "refactored out")
+  reviewsCount: Int! @join__field(graph: REVIEWS)
+  reviewsScore: Float! @join__field(graph: REVIEWS)
+  reviews: [Review!]! @join__field(graph: REVIEWS)
+}
+
+type ProductVariation @join__type(graph: PRODUCTS) {
+  id: ID!
+  name: String
+}
+
+type Query
+  @join__type(graph: DICEFACTORY)
+  @join__type(graph: PRODUCTS)
+  @join__type(graph: REVIEWS)
+  @join__type(graph: RNG)
+  @join__type(graph: USERS) {
+  dice: [Die!]! @join__field(graph: DICEFACTORY)
+  allProducts: [ProductItf] @join__field(graph: PRODUCTS)
+  product(id: ID!): ProductItf @join__field(graph: PRODUCTS)
+  review(id: Int!): Review @join__field(graph: REVIEWS)
+}
+
+type Review @join__type(graph: REVIEWS) {
+  id: Int!
+  body: String!
+  product: Product!
+}
+
+enum ShippingClass @join__type(graph: PRODUCTS) {
+  STANDARD @join__enumValue(graph: PRODUCTS)
+  EXPRESS @join__enumValue(graph: PRODUCTS)
+}
+
+interface SkuItf @join__type(graph: PRODUCTS) {
+  sku: String
+}
+
+type Subscription @join__type(graph: DICEFACTORY) @join__type(graph: REVIEWS) {
+  aNewDieWasCreated: AnewDieWasCreated! @join__field(graph: DICEFACTORY)
+  aReviewWasAdded: Review @join__field(graph: REVIEWS)
+}
+
+type User
+  @join__type(graph: PRODUCTS, key: "email")
+  @join__type(graph: USERS, key: "email") {
+  email: ID! @tag(name: "test-from-users")
+  totalProductsCreated: Int
+  name: String @join__field(graph: USERS)
+}
