@@ -43,7 +43,6 @@ use itertools::Itertools;
 use matching_pull_request::matching_pull_request::ResponseData;
 use matching_pull_request::matching_pull_request::Variables;
 use matching_pull_request::MatchingPullRequest;
-use memorable_wordlist;
 use serde::Serialize;
 use tinytemplate::format_unescaped;
 use tinytemplate::TinyTemplate;
@@ -64,9 +63,9 @@ struct TemplateContext {
     author: String,
 }
 
-const REPO_WITH_OWNER: &'static str = "apollographql/router";
+const REPO_WITH_OWNER: &str = "apollographql/router";
 
-const EXAMPLE_TEMPLATE: &'static str = "### { title }
+const EXAMPLE_TEMPLATE: &str = "### { title }
 {{- if issues -}}
   {{- if issues }} {{ endif -}}
   {{- for issue in issues -}}
@@ -105,6 +104,7 @@ pub enum Command {
     Create(Create),
 }
 
+#[allow(clippy::derive_ord_xor_partial_ord)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord)]
 enum Classification {
     Breaking,
@@ -147,9 +147,9 @@ impl Classification {
 impl std::cmp::PartialOrd for Classification {
     fn partial_cmp(&self, other: &Classification) -> Option<std::cmp::Ordering> {
         Self::ORDERED_ALL
-            .into_iter()
+            .iter()
             .position(|item| item == self)
-            .partial_cmp(&Self::ORDERED_ALL.into_iter().position(|item| item == other))
+            .partial_cmp(&Self::ORDERED_ALL.iter().position(|item| item == other))
     }
 }
 
@@ -255,10 +255,10 @@ impl Create {
                 } else {
                     let selection = Select::with_theme(&ColorfulTheme::default())
                         .with_prompt("What is the classification?")
-                        .items(&items)
+                        .items(items)
                         .interact_on_opt(&Term::stderr())?
                         .expect("no classification was selected");
-                    items[selection].clone()
+                    items[selection]
                 };
 
                 let gh_cli_path = which::which("gh");
@@ -266,8 +266,7 @@ impl Create {
                     println!("{}", style("If you install and authorize the GitHub CLI, we can use information from the PR!").underlined().on_blue().yellow().bright().bold());
                     println!("  Find more details at: {}", style("https://cli.github.com/").bold());
                     false
-                } else {
-                    if Confirm::new()
+                } else if Confirm::new()
                         .default(true)
                         .with_prompt(format!(
                             "{}",
@@ -280,8 +279,7 @@ impl Create {
                     } else {
                         println!("Ok! We won't talk to GitHub, so you'll be on your own.");
                         false
-                    }
-                };
+                    };
 
                 let use_branch_name = if self.with_branch_name {
                     true
@@ -318,7 +316,7 @@ impl Create {
                 let initial_text = if use_branch_name && branch_name.is_some() {
                     let branch_regex = regex::Regex::new(r"[^a-z0-9]")?;
                     branch_regex.replace_all(
-                        &branch_name
+                        branch_name
                         .clone()
                         .unwrap()
                         .to_lowercase()
@@ -374,69 +372,71 @@ impl Create {
                             // There's only ever one query because the operation only asks for the `first: 1`.
                             let all_prs_info = pr_info_from_response(response.data.expect("no data"));
 
-                            let pr_info = all_prs_info.first();
+                            let pr_info_opt = all_prs_info.first();
 
-                            if pr_info.is_some() {
-                                let pr_info = pr_info.expect("some PR info expected");
-                                let issues= pr_info.closing_issues_references.as_ref().map(|i| {
-                                    i.nodes.as_ref().unwrap().into_iter().map(|j| {
-                                        j.as_ref().unwrap()
-                                    })
-                                }).unwrap().filter(|p| {
-                                    p.repository.name_with_owner == REPO_WITH_OWNER
-                                }).map(|p| {
-                                    TemplateResource {
-                                        number: p.number.to_string(),
-                                        url: p.url.to_string(),
+                            match pr_info_opt {
+                                Some(pr_info) => {
+                                    let issues= pr_info.closing_issues_references.as_ref().map(|i| {
+                                        i.nodes.as_ref().unwrap().iter().map(|j| {
+                                            j.as_ref().unwrap()
+                                        })
+                                    }).unwrap().filter(|p| {
+                                        p.repository.name_with_owner == REPO_WITH_OWNER
+                                    }).map(|p| {
+                                        TemplateResource {
+                                            number: p.number.to_string(),
+                                            url: p.url.to_string(),
+                                        }
+                                    });
+
+                                    let pr_body = pr_info.body.clone().replace("\r\n", "\n");
+
+                                    // Remove the trailing part of the checklist from the PR body.
+                                    // In the future, we will use the "start metadata" HTML tag, but for now,
+                                    // we support both.
+                                    let pr_body_trailer_regex = regex::Regex::new(
+                                    r"(?ms)(^<!-- start metadata -->\n$\n)?^\*\*Checklist\*\*$[\s\S]*",
+                                    )?;
+
+                                    // Remove all the "Fixes" references, since we're already going to reference
+                                    // those in the course of generating the template.
+                                    let pr_body_fixes_regex = regex::Regex::new(
+                                        r"(?m)^(- )?Fix(es)? #.*$",
+                                    )?;
+
+                                    // Run the above Regexes and trim the blurb.
+                                    let clean_pr_body = pr_body_fixes_regex
+                                        .replace_all(pr_body_trailer_regex
+                                        .replace(&pr_body, "")
+                                        .trim(), "")
+                                        .trim()
+                                        .to_string();
+
+                                    TemplateContext {
+                                        title: pr_info.title.clone(),
+                                        issues: issues.collect_vec(),
+                                        pulls: vec!(TemplateResource {
+                                            number: pr_info.number.to_string(),
+                                            url: pr_info.url.to_string(),
+                                        }),
+                                        body: clean_pr_body,
+                                        author: pr_info.author.as_ref().unwrap().login.to_string(),
                                     }
-                                });
-
-                                let pr_body = pr_info.body.clone().replace("\r\n", "\n");
-
-                                // Remove the trailing part of the checklist from the PR body.
-                                // In the future, we will use the "start metadata" HTML tag, but for now,
-                                // we support both.
-                                let pr_body_trailer_regex = regex::Regex::new(
-                                r"(?ms)(^<!-- start metadata -->\n$\n)?^\*\*Checklist\*\*$[\s\S]*",
-                                )?;
-
-                                // Remove all the "Fixes" references, since we're already going to reference
-                                // those in the course of generating the template.
-                                let pr_body_fixes_regex = regex::Regex::new(
-                                    r"(?m)^(- )?Fix(es)? #.*$",
-                                )?;
-
-                                // Run the above Regexes and trim the blurb.
-                                let clean_pr_body = pr_body_fixes_regex
-                                    .replace_all(pr_body_trailer_regex
-                                    .replace(&pr_body, "")
-                                    .trim(), "")
-                                    .trim()
-                                    .to_string();
-
-                                TemplateContext {
-                                    title: pr_info.title.clone(),
-                                    issues: issues.collect_vec(),
-                                    pulls: vec!(TemplateResource {
-                                        number: pr_info.number.to_string(),
-                                        url: pr_info.url.to_string(),
-                                    }),
-                                    body: clean_pr_body,
-                                    author: pr_info.author.as_ref().unwrap().login.to_string(),
+                                },
+                                None => {
+                                    // TODO In a follow-up we should figure out how forks work with the GitHub API.
+                                    println!(
+                                        "{} {} {} {} {}",
+                                        style("The changeset will be").magenta(),
+                                        style("generic").red().bold(),
+                                        style("as we didn't find any PRs on GitHub for").magenta(),
+                                        style(&branch_name.as_ref().unwrap()).green(),
+                                        style("! (We don't support forks right now.)")
+                                    );
+                                    default_context
                                 }
-                            } else {
-                                // TODO In a follow-up we should figure out how forks work with the GitHub API.
-                                println!(
-                                    "{} {} {} {} {}",
-                                    style("The changeset will be").magenta(),
-                                    style("generic").red().bold(),
-                                    style("as we didn't find any PRs on GitHub for").magenta(),
-                                    style(&branch_name.as_ref().unwrap()).green(),
-                                    style("! (We don't support forks right now.)")
-                                );
-                                default_context
                             }
-                        },
+                        }
                     }
                 } else {
                     default_context
@@ -537,7 +537,6 @@ fn pr_info_from_response(
 fn get_changeset_files() -> Vec<Changeset> {
     fs::read_dir(get_changesets_dir())
         .unwrap()
-        .into_iter()
         .collect::<std::io::Result<Vec<_>>>()
         .unwrap()
         .iter()
@@ -545,8 +544,8 @@ fn get_changeset_files() -> Vec<Changeset> {
         .collect::<Vec<Changeset>>()
 }
 
-fn generate_content_from_changeset_files(changelog_entries: &Vec<Changeset>) -> String {
-    let mut changelog_entries: Vec<Changeset> = changelog_entries.clone();
+fn generate_content_from_changeset_files(changelog_entries: &[Changeset]) -> String {
+    let mut changelog_entries = changelog_entries.to_owned();
     changelog_entries.sort();
 
     let mut output: String = String::from("");
@@ -558,13 +557,13 @@ fn generate_content_from_changeset_files(changelog_entries: &Vec<Changeset>) -> 
         // For each classification change, print the heading.
         if last_kind.is_none() || Some(entry.classification) != last_kind {
             let new_header = format!("## {}\n\n", entry.classification);
-            output = output + &*new_header;
+            output += &*new_header;
         }
         last_kind = Some(entry.classification);
 
         // Add the entry's content to the block of text!
         let entry = format!("{}\n\n", entry.content);
-        output = output + &*entry;
+        output += &*entry;
     }
     output
 }
@@ -589,6 +588,7 @@ pub fn slurp_and_remove_changesets() -> String {
     content
 }
 
+#[allow(clippy::derive_ord_xor_partial_ord)]
 #[derive(Clone, Debug, Eq, Ord)]
 struct Changeset {
     classification: Classification,
