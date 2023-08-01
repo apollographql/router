@@ -44,6 +44,7 @@ use crate::services::subgraph;
 use crate::tracer::TraceId;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
+const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
 
 type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
 
@@ -71,7 +72,11 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
 
         let http_client = ServiceBuilder::new()
             .layer(TimeoutLayer::new(init.config.timeout))
-            .service(hyper::Client::builder().build(connector));
+            .service(
+                hyper::Client::builder()
+                    .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+                    .build(connector),
+            );
 
         CoprocessorPlugin::new(http_client, init.config, init.supergraph_sdl)
     }
@@ -280,7 +285,8 @@ impl RouterStage {
                 let sdl = sdl.clone();
 
                 async move {
-                    process_router_request_stage(
+                    let mut succeeded = true;
+                    let result = process_router_request_stage(
                         http_client,
                         coprocessor_url,
                         sdl,
@@ -289,11 +295,19 @@ impl RouterStage {
                     )
                     .await
                     .map_err(|error| {
+                        succeeded = false;
                         tracing::error!(
                             "external extensibility: router request stage error: {error}"
                         );
                         error
-                    })
+                    });
+                    tracing::info!(
+                        monotonic_counter.apollo.router.operations.coprocessor = 1u64,
+                        coprocessor.stage = %PipelineStep::RouterRequest,
+                        coprocessor.succeeded = succeeded,
+                        "Total operations with co-processors enabled"
+                    );
+                    result
                 }
             })
         });
@@ -309,7 +323,8 @@ impl RouterStage {
                 async move {
                     let response: router::Response = fut.await?;
 
-                    process_router_response_stage(
+                    let mut succeeded = true;
+                    let result = process_router_response_stage(
                         http_client,
                         coprocessor_url,
                         sdl,
@@ -318,11 +333,19 @@ impl RouterStage {
                     )
                     .await
                     .map_err(|error| {
+                        succeeded = false;
                         tracing::error!(
                             "external extensibility: router response stage error: {error}"
                         );
                         error
-                    })
+                    });
+                    tracing::info!(
+                        monotonic_counter.apollo.router.operations.coprocessor = 1u64,
+                        coprocessor.stage = %PipelineStep::RouterResponse,
+                        coprocessor.succeeded = succeeded,
+                        "Total operations with co-processors enabled"
+                    );
+                    result
                 }
             })
         });
@@ -395,7 +418,8 @@ impl SubgraphStage {
                 let request_config = request_config.clone();
 
                 async move {
-                    process_subgraph_request_stage(
+                    let mut succeeded = true;
+                    let result = process_subgraph_request_stage(
                         http_client,
                         coprocessor_url,
                         service_name,
@@ -404,11 +428,19 @@ impl SubgraphStage {
                     )
                     .await
                     .map_err(|error| {
+                        succeeded = false;
                         tracing::error!(
                             "external extensibility: subgraph request stage error: {error}"
                         );
                         error
-                    })
+                    });
+                    tracing::info!(
+                        monotonic_counter.apollo.router.operations.coprocessor = 1u64,
+                        coprocessor.stage = %PipelineStep::SubgraphRequest,
+                        coprocessor.succeeded = succeeded,
+                        "Total operations with co-processors enabled"
+                    );
+                    result
                 }
             })
         });
@@ -425,7 +457,8 @@ impl SubgraphStage {
                 async move {
                     let response: subgraph::Response = fut.await?;
 
-                    process_subgraph_response_stage(
+                    let mut succeeded = true;
+                    let result = process_subgraph_response_stage(
                         http_client,
                         coprocessor_url,
                         service_name,
@@ -434,11 +467,19 @@ impl SubgraphStage {
                     )
                     .await
                     .map_err(|error| {
+                        succeeded = false;
                         tracing::error!(
                             "external extensibility: subgraph response stage error: {error}"
                         );
                         error
-                    })
+                    });
+                    tracing::info!(
+                        monotonic_counter.apollo.router.operations.coprocessor = 1u64,
+                        coprocessor.stage = %PipelineStep::SubgraphResponse,
+                        coprocessor.succeeded = succeeded,
+                        "Total operations with co-processors enabled"
+                    );
+                    result
                 }
             })
         });

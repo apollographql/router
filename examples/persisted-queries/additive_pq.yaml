@@ -1,0 +1,11 @@
+# this example demonstrates enabling additive persisted queries - enable running queries by ID if they
+# have been published to a Persisted Query List (PQL) that is linked to your GraphOS variant
+
+# usage:
+# 1) start the router with:
+#    APOLLO_KEY="my-api-key" APOLLO_GRAPH_REF="my-graph@my-variant" cargo run -- -c ./additive_pq.yaml
+# 2) make requests against the router:
+#    curl --get http://localhost:4000 --header 'content-type: application/json' --data-urlencode 'extensions={"persistedQuery":{"sha256Hash":"hash-of-operation", "version": 1}}'
+
+preview_persisted_queries:
+  enabled: true

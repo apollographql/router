@@ -54,7 +54,7 @@ impl FromStr for Version {
 pub struct Prepare {
     /// Skip the license check
     #[clap(long)]
-    skip_license_ckeck: bool,
+    skip_license_check: bool,
 
     /// The new version that is being created OR to bump (major|minor|patch|current).
     version: Version,
@@ -87,6 +87,19 @@ impl Prepare {
 
         if let Version::Nightly = &self.version {
             println!("Skipping various steps because this is a nightly build.");
+            // Only update helm charts on specific arch/os/env
+            if cfg!(target_arch = "x86_64") && cfg!(target_os = "linux") && cfg!(target_env = "gnu")
+            {
+                // Update the image repository to use the nightly location
+                replace_in_file!(
+                    "./helm/chart/router/values.yaml",
+                    "^  repository: ghcr.io/apollographql/router$",
+                    format!("  repository: ghcr.io/apollographql/nightly/router")
+                );
+
+                // Update the version string for nightly builds
+                self.update_helm_charts(&version.replace("+", "-"))?;
+            }
         } else {
             self.update_install_script(&version)?;
             self.update_helm_charts(&version)?;
@@ -118,9 +131,17 @@ impl Prepare {
                 "the 'git' executable could not be found in your PATH"
             ));
         }
-
         if let Version::Nightly = &self.version {
-            println!("Skipping requirement that helm and helm-docs is installed because we're building a nightly that doesn't require those tools.");
+            if cfg!(target_arch = "x86_64") && cfg!(target_os = "linux") && cfg!(target_env = "gnu")
+            {
+                if which::which("helm").is_err() {
+                    return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
+                }
+
+                if which::which("helm-docs").is_err() {
+                    return Err(anyhow!("the 'helm-docs' executable could not be found in your PATH.  Install it using the instructions at https://github.com/norwoodj/helm-docs#installation and try again."));
+                }
+            }
         } else {
             if which::which("helm").is_err() {
                 return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
@@ -375,7 +396,7 @@ impl Prepare {
     fn check_compliance(&self) -> Result<()> {
         println!("checking compliance");
         cargo!(["xtask", "check-compliance"]);
-        if !self.skip_license_ckeck {
+        if !self.skip_license_check {
             println!("updating licenses.html");
             cargo!(["xtask", "licenses"]);
         }
