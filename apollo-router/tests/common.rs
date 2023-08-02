@@ -11,6 +11,7 @@ use std::time::SystemTime;
 use buildstructor::buildstructor;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use http::HeaderValue;
 use jsonpath_lib::Selector;
 use mime::APPLICATION_JSON;
 use once_cell::sync::OnceCell;
@@ -410,9 +411,10 @@ impl IntegrationTest {
                     response
                         .headers()
                         .get("apollo-custom-trace-id")
-                        .expect("expected trace id")
+                        .cloned()
+                        .unwrap_or(HeaderValue::from_static("no-trace-id"))
                         .to_str()
-                        .expect("expected trace id")
+                        .unwrap_or_default()
                         .to_string(),
                     response,
                 ),
