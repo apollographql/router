@@ -35,7 +35,7 @@ use crate::orbiter::OrbiterRouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::state_machine::ListenAddresses;
 use crate::state_machine::StateMachine;
-
+use crate::uplink::UplinkConfig;
 /// The entry point for running the Router’s HTTP server.
 ///
 /// # Examples
@@ -99,6 +99,10 @@ impl RouterHttpServer {
     ///   Specifies where to find the router license which controls if commercial features are enabled or not.
     ///   If not provided then commercial features will not be enabled.
     ///
+    /// * `.uplink(impl Into<`[UplinkConfig]>`)`
+    ///   Optional.
+    ///   Specifies the Uplink configuration options.
+    ///
     /// * `.shutdown(impl Into<`[`ShutdownSource`]`>)`
     ///   Optional.
     ///   Specifies when the server should gracefully shut down.
@@ -124,12 +128,14 @@ impl RouterHttpServer {
         configuration: Option<ConfigurationSource>,
         license: Option<LicenseSource>,
         shutdown: Option<ShutdownSource>,
+        uplink: Option<UplinkConfig>,
     ) -> RouterHttpServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
         let event_stream = generate_event_stream(
             shutdown.unwrap_or(ShutdownSource::CtrlC),
             configuration.unwrap_or_default(),
             schema,
+            uplink,
             license.unwrap_or_default(),
             shutdown_receiver,
         );
@@ -218,6 +224,7 @@ fn generate_event_stream(
     shutdown: ShutdownSource,
     configuration: ConfigurationSource,
     schema: SchemaSource,
+    uplink_config: Option<UplinkConfig>,
     license: LicenseSource,
     shutdown_receiver: oneshot::Receiver<()>,
 ) -> impl Stream<Item = Event> {
@@ -229,7 +236,7 @@ fn generate_event_stream(
         license.into_stream().boxed(),
         reload_source.clone().into_stream().boxed(),
         configuration
-            .into_stream()
+            .into_stream(uplink_config)
             .map(move |config_event| {
                 if let Event::UpdateConfiguration(config) = &config_event {
                     reload_source.set_period(&config.experimental_chaos.force_reload)
