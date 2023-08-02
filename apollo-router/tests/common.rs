@@ -16,9 +16,9 @@ use mime::APPLICATION_JSON;
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::trace::Span;
 use opentelemetry::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry::trace::{Span, TraceContextExt};
 use serde_json::json;
 use serde_json::Value;
 use tokio::io::AsyncBufReadExt;
@@ -343,11 +343,11 @@ impl IntegrationTest {
         );
         let default_query = &json!({"query":"query {topProducts{name}}","variables":{}});
         let query = query.unwrap_or(default_query).clone();
-        let id = Uuid::new_v4().to_string();
         let dispatch = self.subscriber.clone();
 
         async move {
-            let span = info_span!("client_request", unit_test = id.as_str());
+            let span = info_span!("client_request");
+            let span_id = span.context().span().span_context().trace_id().to_string();
 
             async move {
                 let client = reqwest::Client::new();
@@ -368,7 +368,7 @@ impl IntegrationTest {
                 });
                 request.headers_mut().remove(ACCEPT);
                 match client.execute(request).await {
-                    Ok(response) => (id, response),
+                    Ok(response) => (span_id, response),
                     Err(err) => {
                         panic!("unable to send successful request to router, {err}")
                     }
@@ -390,7 +390,6 @@ impl IntegrationTest {
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
         let query = query.clone();
-        let id = Uuid::new_v4().to_string();
         let dispatch = self.subscriber.clone();
 
         async move {
@@ -407,7 +406,16 @@ impl IntegrationTest {
 
             request.headers_mut().remove(ACCEPT);
             match client.execute(request).await {
-                Ok(response) => (id, response),
+                Ok(response) => (
+                    response
+                        .headers()
+                        .get("apollo-custom-trace-id")
+                        .expect("expected trace id")
+                        .to_str()
+                        .expect("expected trace id")
+                        .to_string(),
+                    response,
+                ),
                 Err(err) => {
                     panic!("unable to send successful request to router, {err}")
                 }

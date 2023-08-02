@@ -229,13 +229,11 @@ async fn validate_trace(
     operation_name: Option<&str>,
     services: &[&'static str],
 ) -> Result<(), BoxError> {
-    let tags = json!({ "unit_test": id });
     let params = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("service", "router")
-        .append_pair("tags", &tags.to_string())
+        .append_pair("service", services.get(0).expect("expected root service"))
         .finish();
 
-    let url = format!("http://localhost:16686/api/traces?{params}");
+    let url = format!("http://localhost:16686/api/traces/{id}?{params}");
     for _ in 0..10 {
         if find_valid_trace(&url, query, operation_name, services)
             .await
@@ -266,8 +264,7 @@ async fn find_valid_trace(
         .map_err(|e| anyhow!("failed to contact jaeger; {}", e))?
         .json()
         .await?;
-    tracing::debug!("{}", serde_json::to_string_pretty(&trace)?);
-    dbg!(serde_json::to_string_pretty(&trace)?);
+    println!("{}", serde_json::to_string_pretty(&trace)?);
 
     // Verify that we got all the participants in the trace
     verify_trace_participants(&trace, services)?;
@@ -426,7 +423,6 @@ fn verify_spans_present(
             //"parse_query", Parse query will only happen once
             //"query_planning", query planning will only happen once
             "subgraph",
-            "client_request",
         ]
         .map(|s| s.into()),
     );
@@ -450,7 +446,7 @@ fn verify_span_parenting(trace: &Value, services: &[&'static str]) -> Result<(),
     let root_span = if services.contains(&"my_app") {
         trace.select_path("$..spans[?(@.operationName == 'client_request')]")?[0]
     } else {
-        trace.select_path("$..spans[?(@.operationName == 'request')]")?[0]
+        trace.select_path("$..spans[?(@.operationName == 'query ExampleQuery')]")?[0]
     };
     let spans = trace.select_path("$..spans[*]")?;
     for span in spans {
