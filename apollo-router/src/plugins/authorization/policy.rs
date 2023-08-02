@@ -35,11 +35,8 @@ impl<'a> PolicyExtractionVisitor<'a> {
     }
 
     fn get_policies_from_field(&mut self, field: &FieldDefinition) {
-        for directive in field.directives_by_name(POLICY_DIRECTIVE_NAME) {
-            if let Some(policy) = policy_argument(directive) {
-                self.extracted_policies.insert(policy.clone());
-            }
-        }
+        self.extracted_policies
+            .extend(policy_argument(field.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned());
 
         if let Some(ty) = field.ty().type_def(&self.compiler.db) {
             self.get_policies_from_type(&ty)
@@ -47,18 +44,21 @@ impl<'a> PolicyExtractionVisitor<'a> {
     }
 
     fn get_policies_from_type(&mut self, ty: &TypeDefinition) {
-        for directive in ty.directives_by_name(POLICY_DIRECTIVE_NAME) {
-            if let Some(policy) = policy_argument(directive) {
-                self.extracted_policies.insert(policy.clone());
-            }
-        }
+        self.extracted_policies
+            .extend(policy_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned());
     }
 }
 
-fn policy_argument(directive: &hir::Directive) -> Option<&String> {
-    directive
-        .argument_by_name("policy")
+fn policy_argument(opt_directive: Option<&hir::Directive>) -> impl Iterator<Item = &String> {
+    opt_directive
+        .and_then(|directive| directive.argument_by_name("policies"))
         .and_then(|value| match value {
+            Value::List { value, .. } => Some(value),
+            _ => None,
+        })
+        .into_iter()
+        .flatten()
+        .filter_map(|v| match v {
             Value::String { value, .. } => Some(value),
             _ => None,
         })
@@ -160,15 +160,11 @@ impl<'a> PolicyFilteringVisitor<'a> {
     }
 
     fn is_field_authorized(&mut self, field: &FieldDefinition) -> bool {
-        for directive in field.directives_by_name(POLICY_DIRECTIVE_NAME) {
-            match policy_argument(directive) {
-                None => return false,
-                Some(policy) => {
-                    if !self.request_policies.contains(policy) {
-                        return false;
-                    }
-                }
-            }
+        let field_policies = policy_argument(field.directive_by_name(POLICY_DIRECTIVE_NAME))
+            .cloned()
+            .collect::<HashSet<_>>();
+        if !self.request_policies.is_superset(&field_policies) {
+            return false;
         }
 
         if let Some(ty) = field.ty().type_def(&self.compiler.db) {
@@ -179,18 +175,10 @@ impl<'a> PolicyFilteringVisitor<'a> {
     }
 
     fn is_type_authorized(&self, ty: &TypeDefinition) -> bool {
-        for directive in ty.directives_by_name(POLICY_DIRECTIVE_NAME) {
-            match policy_argument(directive) {
-                None => return false,
-                Some(policy) => {
-                    if !self.request_policies.contains(policy) {
-                        return false;
-                    }
-                }
-            }
-        }
-
-        true
+        let type_policies = policy_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME))
+            .cloned()
+            .collect::<HashSet<_>>();
+        self.request_policies.is_superset(&type_policies)
     }
 }
 
@@ -351,17 +339,17 @@ mod tests {
     use crate::spec::query::traverse;
 
     static BASIC_SCHEMA: &str = r#"
-    directive @policy(policy: String!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 
     type Query {
       topProducts: Product
       customer: User
-      me: User @policy(policy: "profile")
+      me: User @policy(policies: ["profile"])
       itf: I
     }
 
     type Mutation {
-        ping: User @policy(policy: "ping")
+        ping: User @policy(policies: ["ping"])
     }
 
     interface I {
@@ -376,16 +364,16 @@ mod tests {
       publicReviews: [Review]
     }
 
-    scalar Internal @policy(policy: "internal") @specifiedBy(url: "http///example.com/test")
+    scalar Internal @policy(policies: ["internal"]) @specifiedBy(url: "http///example.com/test")
 
-    type Review @policy(policy: "review") {
+    type Review @policy(policies: ["review"]) {
         body: String
         author: User
     }
 
-    type User implements I @policy(policy: "read user") {
+    type User implements I @policy(policies: ["read user"]) {
       id: ID
-      name: String @policy(policy: "read username")
+      name: String @policy(policies: ["read username"])
     }
     "#;
 
