@@ -178,6 +178,8 @@ where
                 id: last_id.clone(),
             };
 
+            tracing::info!(?variables, "uplink request");
+
             let query_body = Query::build_query(variables.into());
 
             match fetch::<Query, Response>(
@@ -387,7 +389,7 @@ where
         if res_result.is_ok() {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
         res_result = client
             .post(url)
             .json(request_body)
