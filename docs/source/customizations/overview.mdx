@@ -23,7 +23,63 @@ The Apollo Router supports the following customization types:
 
 ## The request lifecycle
 
-Customizations intervene at specific points of the request lifecycle, depending on the task you want to perform. Each point is represented by a specific service with specific request and response objects, and each service can have a set of plugins. On the request side, the plugins are executed before the service, and on the response side, the plugins are executed after the service.
+Customizations intervene at specific points of the request lifecycle, depending on the task you want to perform. Each point is represented by a specific service with specific request and response objects.
+
+
+```mermaid
+flowchart RL
+    subgraph client["Client"]
+    end
+
+    subgraph router["Apollo Router"]
+        direction LR
+        routerService("Router <br/> Service")
+        supergraphService("Supergraph <br/> Service")
+        executionService("Execution <br/> Service")
+        subgraphService("Subgraph <br/> Service")
+        routerService -->|request| supergraphService -->|request| executionService -->|request| subgraphService
+        subgraphService -->|response| executionService -->|response| supergraphService -->|response| routerService
+
+    end
+
+    subgraph infra["Your infrastructure"]
+      direction TB
+      api1("subgraph A");
+      api2("subgraph B");
+      api3("subgraph C");
+      api1 --- api2 --- api3 
+
+    end
+
+client -->|request| router -->|request| infra
+
+infra -->|response| router -->|response| client
+```
+
+Each service can have a set of plugins. For requests, the plugins are executed before the service.
+
+```mermaid
+flowchart LR
+  subgraph Service
+    Plugin1["Plugin 1"] -->|request| Plugin2["Plugin 2"] -->|request| coreService["Core <br/>service"]
+    coreService
+  end
+
+Client -->|request| Plugin1
+coreService -->|request| NextService["Next service"]
+```
+
+For responses, the plugins are executed after the service.
+
+```mermaid
+flowchart RL
+  subgraph Service
+    coreService["Core <br/>service"] -->|response| Plugin2["Plugin 2"]  -->|response| Plugin1["Plugin 1"]   
+  end
+
+Plugin1["Plugin 1"] -->|response| Client
+NextService["Next service"] -->|response| coreService
+```
 
 Each request and response object contains a `Context` object, which is carried throughout the entire process. Each request's `Context` object is unique. You can use it to store plugin-specific information between the request and response or to communicate between different hook points. (A plugin can be called at multiple steps of the request lifecycle.)
 
