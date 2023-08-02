@@ -25,7 +25,6 @@ The Apollo Router supports the following customization types:
 
 Customizations intervene at specific points of the request lifecycle, depending on the task you want to perform. Each point is represented by a specific service with specific request and response objects.
 
-
 ```mermaid
 flowchart RL
     subgraph client["Client"]
@@ -85,71 +84,113 @@ Each request and response object contains a `Context` object, which is carried t
 
 ### Lifecycle flowchart
 
-The following flowchart diagrams the entire request lifecycle. Continue reading for details on what occurs in each service.
+The following flowcharts diagram the entire request lifecycle.
+The first details the path of a request from a client, through the parts of the Apollo Router, all the way to your subgraphs.
+The second details the path of a response from your subgraphs back to the client.
+Continue reading for details on what occurs in each service.
+
+#### Request path
 
 ```mermaid
 flowchart TB;
     client(Client);
-    subgraph " "
-    httpServer("<code>HTTP server</code>")
-    routerService("<code>RouterService</code><br/>");
-    supergraphService("<code>SupergraphService</code>");
-    queryPlanner("<code>QueryPlanner</code>");
-    executionService("<code>ExecutionService</code>");
-    subgraphService1("<code>SubgraphService(products)</code>");
-    subgraphService2("<code>SubgraphService(reviews)</code>");
-    routerPlugins[[Router plugins]];
-    supergraphPlugins[[Supergraph plugins]];
-    executionPlugins[[Execution plugins]];
-    subgraphPlugins1[[Subgraph plugins]];
-    subgraphPlugins2[[Subgraph plugins]];
-end;
-subgraph1[Subgraph 1];
-subgraph2[Subgraph 2];
+    subgraph router["Apollo Router"]
+        direction LR
+        httpServer("<code>HTTP server</code>")
+        subgraph routerService["<code>RouterService</code><br/>"]
+            routerPlugins[[Router plugins]];
+        end
+        subgraph " "
+            subgraph supergraphService["<code>SupergraphService</code>"]
+                supergraphPlugins[[Supergraph plugins]];
+            end
+            queryPlanner("<code>QueryPlanner</code>");
+        end
+        
+        
+        subgraph executionService["<code>ExecutionService</code>"]
+            executionPlugins[[Execution plugins]];
+        end
 
-client --"<b>1.</b> HTTP Request"--> httpServer;
+        subgraph subgraphService["<code>SubgraphServices</code>"]
+            subgraph service1["<code>SubgraphServiceA</code>"]
+            subgraphPlugins1[[Subgraph plugins]];
+            end
+            subgraph service2["<code>SubgraphServiceB</code>"]
+            subgraphPlugins2[[Subgraph plugins]];
+            end            
+        end
+    end;
+subgraphA[Subgraph A];
+subgraphB[Subgraph B];
 
-httpServer --"<b>2.</b> RouterRequest"--> routerPlugins;
-routerPlugins --"<b>3.</b> RouterRequest"--> routerService;
+client --"1. HTTP request"--> httpServer;
+httpServer --"2. Router request"--> routerService;
+routerService --"3. Supergraph request"--> supergraphService
+supergraphService --"4. Query"--> queryPlanner;
+queryPlanner --"5. Query plan"--> supergraphService;
+supergraphService --"6. Execution request"--> executionService;
 
-routerService -."<b>4.</b> SupergraphRequest"--> supergraphPlugins;
-supergraphPlugins --"<b>5.SupergraphRequest</b>"--> supergraphService;
-supergraphService --"<b>6. Query</b>"--> queryPlanner;
-queryPlanner --"<b>7.Query plan</b>"--> supergraphService;
+executionService --"7a. Subgraph request"--> service1;
+executionService --"7b. Subgraph request"--> service2;
 
-supergraphService --"<b>8.ExecutionRequest</b>"--> executionPlugins;
-executionPlugins --"<b>9.ExecutionRequest</b>"--> executionService;
-
-executionService --"<b>10.SubgraphRequest</b>"--> subgraphPlugins1;
-subgraphPlugins1 --"<b>11.SubgraphRequest</b>"--> subgraphService1;
-subgraphService1 --"<b>12.HTTP Request</b>"--> subgraph1;
-subgraph1 --"<b>13.HTTP Response</b>"--> subgraphService1;
-subgraphService1 --"<b>14.SubgraphResponse</b>"--> subgraphPlugins1;
-subgraphPlugins1 --"<b>15.SubgraphResponse</b>"--> executionService;
-
-executionService --"<b>16.SubgraphRequest</b>"--> subgraphPlugins2;
-subgraphPlugins2 --"<b>17.SubgraphRequest</b>"--> subgraphService2;
-subgraphService2 --"<b>18.HTTP Request</b>"--> subgraph2;
-subgraph2 --"<b>19.HTTP Response</b>"--> subgraphService2;
-subgraphService2 --"<b>20.SubgraphResponse</b>"--> subgraphPlugins2;
-subgraphPlugins2 --"<b>21.SubgraphResponse</b>"--> executionService;
-
-executionService --"<b>22.ExecutionResponse</b>"--> executionPlugins;
-executionPlugins --"<b>23.ExecutionResponse</b>"--> supergraphService;
-
-supergraphService --"<b>24.SupergraphResponse</b>"--> supergraphPlugins;
-supergraphPlugins --"<b>25.SupergraphResponse</b>"--> routerService;
-
-routerService --"<b>26.RouterResponse</b>"--> routerPlugins;
-routerPlugins --"<b>27.RouterResponse</b>"--> httpServer;
-
-httpServer --"<b>28.</b> HTTP response"--> client;
-
-
-class client,subgraph1,subgraph2 secondary;
+service1 --"8a. HTTP Request"--> subgraphA;
+service2 --"8b. HTTP Request"--> subgraphB;
 ```
 
 ---
+
+#### Request path
+
+```mermaid
+flowchart TB;
+    client(Client);
+    subgraph router["Apollo Router"]
+        direction LR
+        httpServer("<code>HTTP server</code>")
+        subgraph routerService["<code>RouterService</code><br/>"]
+            routerPlugins[[Router plugins]];
+        end
+        subgraph " "
+            subgraph supergraphService["<code>SupergraphService</code>"]
+                supergraphPlugins[[Supergraph plugins]];
+            end
+            queryPlanner("<code>QueryPlanner</code>");
+        end
+        
+        
+        subgraph executionService["<code>ExecutionService</code>"]
+            executionPlugins[[Execution plugins]];
+        end
+
+        subgraph subgraphService["<code>SubgraphServices</code>"]
+            subgraph service1["<code>SubgraphServiceA</code>"]
+            subgraphPlugins1[[Subgraph plugins]];
+            end
+            subgraph service2["<code>SubgraphServiceB</code>"]
+            subgraphPlugins2[[Subgraph plugins]];
+            end            
+        end
+    end;
+subgraphA[Subgraph A];
+subgraphB[Subgraph B];
+
+client --"1. HTTP request"--> httpServer;
+httpServer --"2. Router request"--> routerService;
+routerService --"3. Supergraph request"--> supergraphService
+supergraphService --"4. Query"--> queryPlanner;
+queryPlanner --"5. Query plan"--> supergraphService;
+supergraphService --"6. Execution request"--> executionService;
+
+executionService --"7a. Subgraph request"--> service1;
+executionService --"7b. Subgraph request"--> service2;
+
+service1 --"8a. HTTP Request"--> subgraphA;
+service2 --"8b. HTTP Request"--> subgraphB;
+```
+
+---
+
 
 ### Router service
 
