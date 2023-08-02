@@ -130,6 +130,16 @@ apq:
 
 Unregistered operations appear in your [router's logs](./logging).
 
+For example:
+
+```
+2023-08-02T11:51:59.833534Z  WARN [trace_id=5006cef73e985810eb086e5900945807] unknown operation operation_body="query ExampleQuery {\n  me {\n    id\n  }\n}\n"
+```
+
+If your router receives a trusted operation listed in the PQL then no log message will be output.
+
+You can use these router logs to audit operations sent to your router and ask client teams to [add new ones](/graphos/operations/persisted-queries#3-preregister-trusted-operations) to your PQL if necessary.
+
 #### Safelisting (operation strings allowed)
 
 > ⚠️ Before applying this configuration, ensure your PQL contains _all_ of the GraphQL operations that _all active versions_ of your clients execute. If you enable safelisting _without_ ensuring this, your router will reject any unpublished client operations.
@@ -171,18 +181,3 @@ apq:
 > **Note:** To enable safelisting, you _must_ disable [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq).
 
 If you want to use this security level, you should always _first_ set up [safelisting with operation strings allowed](#safelisting-operation-strings-allowed). This level requires modifying _all_ of your clients to execute operations via PQL-specified ID instead of an operation string. While making those necessary changes, you can use the less restrictive safelisting level in your router.
-
-
-## Router logs
-
-If a router instance is set to [audit mode](#audit-mode-dry-run), its [logs](./logging) will include any operations it receives that haven't been added to the PQL.
-
-For example:
-
-```
-2023-08-02T11:51:59.833534Z  WARN [trace_id=5006cef73e985810eb086e5900945807] unknown operation operation_body="query ExampleQuery {\n  me {\n    id\n  }\n}\n"
-```
-
-If your router receives a trusted operation listed in the PQL then no log message will be output.
-
-You can use these router logs to audit operations sent to your router and ask client teams to [add new ones](/graphos/operations/persisted-queries#3-preregister-trusted-operations) to your PQL if necessary.
