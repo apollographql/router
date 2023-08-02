@@ -104,7 +104,7 @@ flowchart TB;
             subgraph supergraphService["<code>SupergraphService</code>"]
                 supergraphPlugins[[Supergraph plugins]];
             end
-            queryPlanner("<code>QueryPlanner</code>");
+            queryPlanner("Query Planner");
         end
         
         
@@ -125,27 +125,25 @@ subgraphA[Subgraph A];
 subgraphB[Subgraph B];
 
 client --"1. HTTP request"--> httpServer;
-httpServer --"2. Router request"--> routerService;
-routerService --"3. Supergraph request"--> supergraphService
+httpServer --"2. <code>RouterRequest</code>"--> routerService;
+routerService --"3. <code>SupergraphRequest</code>"--> supergraphService
 supergraphService --"4. Query"--> queryPlanner;
 queryPlanner --"5. Query plan"--> supergraphService;
-supergraphService --"6. Execution request"--> executionService;
+supergraphService --"6. <code>ExecutionRequest</code>"--> executionService;
 
-executionService --"7a. Subgraph request"--> service1;
-executionService --"7b. Subgraph request"--> service2;
+executionService --"7a. <code>SubgraphRequest</code>"--> service1;
+executionService --"7b. <code>SubgraphRequest</code>"--> service2;
 
-service1 --"8a. HTTP Request"--> subgraphA;
-service2 --"8b. HTTP Request"--> subgraphB;
+service1 --"8a. HTTP request"--> subgraphA;
+service2 --"8b. HTTP request"--> subgraphB;
 ```
 
----
-
-#### Request path
+#### Response path
 
 ```mermaid
-flowchart TB;
+flowchart BT;
     client(Client);
-    subgraph router["Apollo Router"]
+    subgraph " "
         direction LR
         httpServer("<code>HTTP server</code>")
         subgraph routerService["<code>RouterService</code><br/>"]
@@ -172,25 +170,18 @@ flowchart TB;
             end            
         end
     end;
-subgraphA[Subgraph A];
-subgraphB[Subgraph B];
+subgraph1[Subgraph A];
+subgraph2[Subgraph B];
 
-client --"1. HTTP request"--> httpServer;
-httpServer --"2. Router request"--> routerService;
-routerService --"3. Supergraph request"--> supergraphService
-supergraphService --"4. Query"--> queryPlanner;
-queryPlanner --"5. Query plan"--> supergraphService;
-supergraphService --"6. Execution request"--> executionService;
-
-executionService --"7a. Subgraph request"--> service1;
-executionService --"7b. Subgraph request"--> service2;
-
-service1 --"8a. HTTP Request"--> subgraphA;
-service2 --"8b. HTTP Request"--> subgraphB;
+subgraph1 -- "9a. HTTP response"--> service1;
+subgraph2 -- "9b. HTTP response"--> service2;
+service1 --"10a. <code>SubgraphResponse</code>"--> executionService;
+service2 --"10b. <code>SubgraphResponse</code>"--> executionService;
+executionService --"11. <code>ExecutionResponse</code>"--> supergraphService;
+supergraphService --"12. <code>SupergraphResponse</code>"--> routerService;
+routerService --"13. <code>RouterResponse</code>"--> httpServer;
+httpServer --"HTTP response" --> client
 ```
-
----
-
 
 ### Router service
 
