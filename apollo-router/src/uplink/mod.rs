@@ -373,15 +373,36 @@ where
             tracing::warn!(error = %e, "could not create reqwest client");
             e
         })?;
-    let res = client
+    let counter = 0;
+    let mut res_result = client
         .post(url)
         .json(request_body)
         .send()
         .await
         .map_err(|e| {
-            tracing::warn!(error = %e, "could not create post request");
+            tracing::warn!(error = %e, counter, "could not create post request");
             e
-        })?;
+        });
+    for counter in 1..5 {
+        if res_result.is_ok() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        res_result = client
+            .post(url)
+            .json(request_body)
+            .send()
+            .await
+            .map_err(|e| {
+                tracing::warn!(error = %e, counter, "could not create post request");
+                e
+            });
+    }
+    if res_result.is_err() {
+        let err: reqwest::Error = res_result.unwrap_err();
+        return Err(err);
+    }
+    let res = res_result.unwrap();
     tracing::debug!("uplink response {:?}", res);
     let response_body: graphql_client::Response<Query::ResponseData> = res.json().await?;
     Ok(response_body)
