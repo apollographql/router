@@ -1,5 +1,5 @@
 ---
-title: Safelisting with peristed queries
+title: Safelisting with persisted queries
 description: Reject unrecognized operations while minimizing request latency
 minVersion: 1.25.0
 ---
@@ -102,7 +102,8 @@ To use persisted queries _only_ to reduce network bandwidth and latency (_not_ f
 ```yaml title="router.yaml"
 preview_persisted_queries:
   enabled: true
-enabled: true # APQ can be enabled
+apq:
+  enabled: true # APQ can be enabled
 ```
 
 > **Note:** You can use the performance-only security level with or without [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) enabled.
@@ -122,7 +123,8 @@ To enable logging for unregistered queries, enable the `log_unknown` property:
 preview_persisted_queries:
   enabled: true
   log_unknown: true
-enabled: true # APQ can be enabled
+apq:
+  enabled: true # APQ can be enabled
 ```
 > **Note:** You can use audit mode with or without [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) enabled.
 
@@ -173,14 +175,14 @@ If you want to use this security level, you should always _first_ set up [safeli
 
 ## Router logs
 
-If a router instance is set to [audit mode](#audit-mode-dry-run), its [logs](./logging) includes any operations it recieves that haven't been added to the PQL.
+If a router instance is set to [audit mode](#audit-mode-dry-run), its [logs](./logging) will include any operations it receives that haven't been added to the PQL.
 
 For example:
 
 ```
-To-do
+2023-08-02T11:51:59.833534Z  WARN [trace_id=5006cef73e985810eb086e5900945807] unknown operation operation_body="query ExampleQuery {\n  me {\n    id\n  }\n}\n"
 ```
 
-If your router receives trusted operations, they're logged normally.
+If your router receives a trusted operation listed in the PQL then no log message will be output.
 
 You can use these router logs to audit operations sent to your router and ask client teams to [add new ones](/graphos/operations/persisted-queries#3-preregister-trusted-operations) to your PQL if necessary.
