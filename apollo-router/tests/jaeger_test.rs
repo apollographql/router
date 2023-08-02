@@ -233,7 +233,7 @@ async fn validate_trace(
     services: &[&'static str],
 ) -> Result<(), BoxError> {
     let params = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("service", services.get(0).expect("expected root service"))
+        .append_pair("service", services.first().expect("expected root service"))
         .finish();
 
     let url = format!("http://localhost:16686/api/traces/{id}?{params}");
