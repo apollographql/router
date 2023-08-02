@@ -376,13 +376,18 @@ where
             e
         })?;
     let counter = 0;
+    // HACK IN A GET FIRST
+    let _ = client.get("apollographql.com").send().await.map_err(|e| {
+        tracing::warn!(error = %e, counter, "could not make get request");
+        e
+    });
     let mut res_result = client
         .post(url)
         .json(request_body)
         .send()
         .await
         .map_err(|e| {
-            tracing::warn!(error = %e, counter, "could not create post request");
+            tracing::warn!(error = %e, counter, "could not make post request");
             e
         });
     for counter in 1..5 {
@@ -396,7 +401,7 @@ where
             .send()
             .await
             .map_err(|e| {
-                tracing::warn!(error = %e, counter, "could not create post request");
+                tracing::warn!(error = %e, counter, "could not make post request");
                 e
             });
     }
