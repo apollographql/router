@@ -369,6 +369,7 @@ where
     Query: graphql_client::GraphQLQuery,
 {
     let client = reqwest::Client::builder()
+        .no_trust_dns()
         .timeout(timeout)
         .build()
         .map_err(|e| {
@@ -377,10 +378,14 @@ where
         })?;
     let counter = 0;
     // HACK IN A GET FIRST
-    let _ = client.get("apollographql.com").send().await.map_err(|e| {
-        tracing::warn!(error = %e, counter, "could not make get request");
-        e
-    });
+    let _ = client
+        .get("https://apollographql.com")
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::warn!(error = %e, counter, "could not make get request");
+            e
+        });
     let mut res_result = client
         .post(url)
         .json(request_body)
