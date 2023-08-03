@@ -3997,6 +3997,11 @@ expression: "&schema"
                     "format": "double"
                   }
                 },
+                "experimental_enable_cache_metrics": {
+                  "description": "Enable experimental metrics to know more about caching strategies",
+                  "default": false,
+                  "type": "boolean"
+                },
                 "resources": {
                   "description": "Resources",
                   "default": {},
