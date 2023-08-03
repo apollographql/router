@@ -122,7 +122,7 @@ pub(crate) struct Limited {
 impl Limited {
     pub(crate) fn request_size() -> Self {
         Limited {
-            request_size: false,
+            request_size: true,
             ..Default::default()
         }
     }
@@ -154,7 +154,7 @@ impl Plugin for Limits {
         service
             .map_future(|f| async {
                 let response = f.await;
-                if let Ok(response) = &response {
+                if let Ok(response) = response.as_ref() {
                     if let Some(limited) = response.context.private_entries.lock().get::<Limited>()
                     {
                         tracing::info!(
@@ -169,7 +169,11 @@ impl Plugin for Limits {
                                 limited.operational_limits.root_fields.or_empty(),
                             limits.failed.request.size = limited.request_size.or_empty(),
                         );
+                    } else {
+                        tracing::info!(monotonic_counter.apollo.router.operations.limits = 1u64,);
                     }
+                } else {
+                    tracing::info!(monotonic_counter.apollo.router.operations.limits = 1u64,);
                 }
 
                 response
