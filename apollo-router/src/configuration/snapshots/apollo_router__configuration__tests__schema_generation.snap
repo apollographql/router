@@ -1098,17 +1098,7 @@ expression: "&schema"
       "additionalProperties": false
     },
     "limits": {
-      "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
-      "default": {
-        "max_depth": null,
-        "max_height": null,
-        "max_root_fields": null,
-        "max_aliases": null,
-        "warn_only": false,
-        "parser_max_recursion": 4096,
-        "parser_max_tokens": 15000,
-        "experimental_http_max_request_bytes": 2000000
-      },
+      "description": "A plugin for limits. Configuration for operation limits, parser limits, HTTP limits, etc.",
       "type": "object",
       "properties": {
         "experimental_http_max_request_bytes": {
@@ -1776,6 +1766,11 @@ expression: "&schema"
                   ]
                 }
               ]
+            },
+            "otlp_endpoint": {
+              "description": "The Apollo Studio endpoint for exporting traces and metrics.",
+              "default": "http://0.0.0.0:4317/",
+              "type": "string"
             },
             "send_headers": {
               "description": "To configure which request header names and values are included in trace data that's sent to Apollo Studio.",
