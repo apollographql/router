@@ -42,6 +42,8 @@ inherits = "release"
 debug = 1
 
 [patch.crates-io]
+apollo-parser = {path = "../apollo-rs/crates/apollo-parser"}
+apollo-compiler = {path = "../apollo-rs/crates/apollo-compiler"}
 # TODO: to delete
 # opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
 # opentelemetry-http = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}

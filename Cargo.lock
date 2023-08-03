@@ -216,12 +216,10 @@ checksum = "3b13c32d80ecc7ab747b80c3784bce54ee8a7a0cc4fbda9bf4cda2cf6fe90854"
 [[package]]
 name = "apollo-compiler"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4593ed026f92c0e79bc11a050f060af72a4fadaccdfefd211263d85f9be8048b"
 dependencies = [
  "apollo-parser 0.5.3",
  "ariadne",
- "indexmap 1.9.3",
+ "indexmap 2.0.0",
  "ordered-float 3.7.0",
  "rowan",
  "salsa",
@@ -262,11 +260,10 @@ dependencies = [
 [[package]]
 name = "apollo-parser"
 version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec05c087cc9d21576b18337d9dbaadc87cea1b33c4f2b8d59e735ed90e880984"
 dependencies = [
  "rowan",
  "thiserror",
+ "triomphe",
 ]
 
 [[package]]
@@ -5680,6 +5677,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "stable_deref_trait"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
+
+[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6507,6 +6510,16 @@ dependencies = [
  "lazy_static",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "triomphe"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0eee8098afad3fb0c54a9007aab6804558410503ad676d4633f9c2559a00ac0f"
+dependencies = [
+ "serde",
+ "stable_deref_trait",
 ]
 
 [[package]]

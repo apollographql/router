@@ -1,16 +1,13 @@
 //! Query Transformer implementation adding labels to @defer directives to identify deferred responses
 //!
 
-use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
+use apollo_compiler::AstDatabase;
 use apollo_compiler::FileId;
-use tower::BoxError;
+use apollo_parser::mir;
+use apollo_parser::mir::Arc;
 
 use crate::spec::query::subselections::DEFER_DIRECTIVE_NAME;
-use crate::spec::query::transform;
-use crate::spec::query::transform::document;
-use crate::spec::query::transform::selection_set;
-use crate::spec::query::transform::Visitor;
 
 const LABEL_NAME: &str = "label";
 
@@ -20,98 +17,96 @@ const LABEL_NAME: &str = "label";
 pub(crate) fn add_defer_labels(
     file_id: FileId,
     compiler: &ApolloCompiler,
-) -> Result<String, BoxError> {
-    let mut visitor = Labeler {
-        compiler,
-        next_label: 0,
-    };
-    let encoder_document = document(&mut visitor, file_id)?;
-    Ok(encoder_document.to_string())
+) -> Result<String, &'static str> {
+    let mut labeler = Labeler { next_label: 0 };
+    let mut mir = compiler.db.ast(file_id).into_mir();
+    labeler.document(&mut mir)?;
+    Ok(mir.serialize().no_indent().to_string())
 }
-pub(crate) struct Labeler<'a> {
-    compiler: &'a ApolloCompiler,
+
+struct Labeler {
     next_label: u32,
 }
 
-impl<'a> Labeler<'a> {
+impl Labeler {
     fn generate_label(&mut self) -> String {
         let label = self.next_label.to_string();
         self.next_label += 1;
         label
     }
-}
 
-impl<'a> Visitor for Labeler<'a> {
-    fn compiler(&self) -> &apollo_compiler::ApolloCompiler {
-        self.compiler
-    }
-
-    fn fragment_spread(
-        &mut self,
-        hir: &hir::FragmentSpread,
-    ) -> Result<Option<apollo_encoder::FragmentSpread>, BoxError> {
-        let name = hir.name();
-        let mut encoder_node = apollo_encoder::FragmentSpread::new(name.into());
-        for hir in hir.directives() {
-            encoder_node.directive(directive(self, hir)?);
-        }
-        Ok(Some(encoder_node))
-    }
-
-    fn inline_fragment(
-        &mut self,
-        parent_type: &str,
-        hir: &hir::InlineFragment,
-    ) -> Result<Option<apollo_encoder::InlineFragment>, BoxError> {
-        let parent_type = hir.type_condition().unwrap_or(parent_type);
-
-        let Some(selection_set) = selection_set(self, hir.selection_set(), parent_type)?
-    else { return Ok(None) };
-
-        let mut encoder_node = apollo_encoder::InlineFragment::new(selection_set);
-
-        encoder_node.type_condition(
-            hir.type_condition()
-                .map(|name| apollo_encoder::TypeCondition::new(name.into())),
-        );
-
-        for hir in hir.directives() {
-            encoder_node.directive(directive(self, hir)?);
-        }
-        Ok(Some(encoder_node))
-    }
-}
-
-pub(crate) fn directive(
-    visitor: &mut Labeler<'_>,
-    hir: &hir::Directive,
-) -> Result<apollo_encoder::Directive, BoxError> {
-    let name = hir.name().into();
-    let is_defer = name == DEFER_DIRECTIVE_NAME;
-    let mut encoder_directive = apollo_encoder::Directive::new(name);
-
-    let mut has_label = false;
-    for arg in hir.arguments() {
-        // Add a prefix to existing labels
-        let value = if is_defer && arg.name() == LABEL_NAME {
-            has_label = true;
-            if let Some(label) = arg.value().as_str() {
-                apollo_encoder::Value::String(format!("_{label}"))
-            } else {
-                return Err("@defer with a non-string label".into());
+    fn document(&mut self, document: &mut mir::Document) -> Result<(), &'static str> {
+        for def in &mut document.definitions {
+            match def {
+                mir::Definition::OperationDefinition(operation) => {
+                    self.selection_set(&mut Arc::make_mut(operation).selection_set)?
+                }
+                mir::Definition::FragmentDefinition(fragment) => {
+                    self.selection_set(&mut Arc::make_mut(fragment).selection_set)?
+                }
+                _ => {}
             }
-        } else {
-            transform::value(arg.value())?
-        };
-        encoder_directive.arg(apollo_encoder::Argument::new(arg.name().into(), value));
-    }
-    // Add a generated label if there wasn’t one already
-    if is_defer && !has_label {
-        encoder_directive.arg(apollo_encoder::Argument::new(
-            LABEL_NAME.into(),
-            apollo_encoder::Value::String(visitor.generate_label()),
-        ));
+        }
+        Ok(())
     }
 
-    Ok(encoder_directive)
+    fn selection_set(
+        &mut self,
+        selection_set: &mut Vec<mir::Selection>,
+    ) -> Result<(), &'static str> {
+        for selection in selection_set {
+            match selection {
+                mir::Selection::Field(field) => {
+                    let field = Arc::make_mut(field);
+                    self.selection_set(&mut field.selection_set)?;
+                }
+                mir::Selection::InlineFragment(inline_fragment) => {
+                    let inline_fragment = Arc::make_mut(inline_fragment);
+                    self.selection_set(&mut inline_fragment.selection_set)?;
+                    // The @defer directive only applies to inline fragments and fragment spreads
+                    self.directives(&mut inline_fragment.directives)?
+                }
+                mir::Selection::FragmentSpread(fragment_spread) => {
+                    let fragment_spread = Arc::make_mut(fragment_spread);
+                    // The @defer directive only applies to inline fragments and fragment spreads
+                    self.directives(&mut fragment_spread.directives)?
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn directives(
+        &mut self,
+        directives: &mut Vec<Arc<mir::Directive>>,
+    ) -> Result<(), &'static str> {
+        for directive in directives {
+            if directive.name != DEFER_DIRECTIVE_NAME {
+                continue;
+            }
+            let directive = Arc::make_mut(directive);
+            let mut has_label = false;
+            for (name, value) in &mut directive.arguments {
+                if *name != LABEL_NAME {
+                    continue;
+                }
+                has_label = true;
+                // Add a prefix to existing labels
+                if let mir::Value::String(label) = value {
+                    let new_label = format!("_{label}");
+                    *label = new_label.into();
+                } else {
+                    return Err("@defer with a non-string label");
+                }
+            }
+            // Add a generated label if there wasn’t one already
+            if !has_label {
+                directive.arguments.push((
+                    LABEL_NAME.into(),
+                    mir::Value::String(self.generate_label().into()),
+                ));
+            }
+        }
+        Ok(())
+    }
 }
