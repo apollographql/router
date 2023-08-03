@@ -42,6 +42,8 @@ use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
+use sha2::Digest;
+use sha2::Sha256;
 use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -68,6 +70,9 @@ use self::reload::NullFieldFormatter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::reload::ReloadTracer;
+use super::traffic_shaping::cache::hash_request;
+use super::traffic_shaping::cache::hash_vary_headers;
+use super::traffic_shaping::cache::REPRESENTATIONS;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::OPERATION_NAME;
 use crate::layers::ServiceBuilderExt;
@@ -109,6 +114,7 @@ use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::spec::TYPENAME;
 use crate::tracer::TraceId;
 use crate::Context;
 use crate::ListenAddr;
@@ -445,7 +451,15 @@ impl Plugin for Telemetry {
         let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
         let subgraph_name = ByteString::from(name);
+        let cache_metrics_enabled = self
+            .config
+            .metrics
+            .as_ref()
+            .and_then(|m| m.common.as_ref())
+            .map(|c| c.experimental_enable_cache_metrics)
+            .unwrap_or_default();
         let name = name.to_owned();
+        let subgraph_name_arc = Arc::new(name.to_owned());
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| {
                 let query = req
@@ -478,9 +492,14 @@ impl Plugin for Telemetry {
                         subgraph_metrics_conf_req.clone(),
                         sub_request,
                     );
-                    sub_request.context.clone()
+
+                    let cache_attributes = cache_metrics_enabled
+                        .then(|| Self::get_cache_attributes(subgraph_name_arc.clone(), sub_request))
+                        .flatten();
+
+                    (sub_request.context.clone(), cache_attributes)
                 },
-                move |context: Context,
+                move |(context, cache_attributes): (Context, Option<CacheAttributes>),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let metrics = metrics.clone();
                     let subgraph_attribute = subgraph_attribute.clone();
@@ -494,6 +513,7 @@ impl Plugin for Telemetry {
                             subgraph_attribute,
                             subgraph_metrics_conf,
                             now,
+                            cache_attributes,
                             &result,
                         );
                         result
@@ -985,6 +1005,56 @@ impl Telemetry {
         )
     }
 
+    fn get_cache_attributes(
+        subgraph_name: Arc<String>,
+        sub_request: &Request,
+    ) -> Option<CacheAttributes> {
+        let body = sub_request.subgraph_request.body();
+        let hashed_query = hash_request(body);
+        let representations = body
+            .variables
+            .get(REPRESENTATIONS)
+            .and_then(|value| value.as_array())?;
+
+        let keys = extract_cache_attributes(representations).ok()?;
+
+        Some(CacheAttributes {
+            subgraph_name,
+            headers: sub_request.subgraph_request.headers().clone(),
+            hashed_query,
+            representations: keys,
+        })
+    }
+
+    fn update_cache_metrics(sub_response: &SubgraphResponse, cache_attributes: CacheAttributes) {
+        let vary_headers = sub_response
+            .response
+            .headers()
+            .get_all(header::VARY)
+            .into_iter()
+            .filter_map(|val| val.to_str().ok().map(|v| v.to_string()))
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        let hashed_headers = if vary_headers.is_empty() {
+            String::new()
+        } else {
+            hash_vary_headers(&cache_attributes.headers)
+        };
+
+        for (typename, hashed_representation) in cache_attributes.representations {
+            ::tracing::info!(
+                monotonic_counter.apollo_router_entity_cache_entry = 1u64,
+                %hashed_representation,
+                hashed_query = %cache_attributes.hashed_query,
+                %hashed_headers,
+                entity_type = %typename,
+                subgraph = %cache_attributes.subgraph_name,
+                vary = %vary_headers,
+            );
+        }
+    }
+
     fn store_subgraph_request_attributes(
         attribute_forward_config: Arc<Option<AttributesForwardConf>>,
         sub_request: &Request,
@@ -1011,6 +1081,7 @@ impl Telemetry {
         subgraph_attribute: KeyValue,
         attribute_forward_config: Arc<Option<AttributesForwardConf>>,
         now: Instant,
+        cache_attributes: Option<CacheAttributes>,
         result: &Result<Response, BoxError>,
     ) {
         let mut metric_attrs = {
@@ -1041,6 +1112,19 @@ impl Telemetry {
 
         match &result {
             Ok(response) => {
+                if let Some(cache_attributes) = cache_attributes {
+                    if let Ok(cache_control) = response
+                        .response
+                        .headers()
+                        .get(header::CACHE_CONTROL)
+                        .ok_or(())
+                        .and_then(|val| val.to_str().map(|v| v.to_string()).map_err(|_| ()))
+                    {
+                        metric_attrs.push(KeyValue::new("cache_control", cache_control));
+                    }
+
+                    Self::update_cache_metrics(response, cache_attributes)
+                }
                 metric_attrs.push(KeyValue::new(
                     "status",
                     response.response.status().as_u16().to_string(),
@@ -1454,6 +1538,36 @@ impl Telemetry {
         }
         root
     }
+}
+
+#[derive(Debug, Clone)]
+struct CacheAttributes {
+    subgraph_name: Arc<String>,
+    headers: http::HeaderMap,
+    hashed_query: String,
+    // Typename + hashed_representation
+    representations: Vec<(String, String)>,
+}
+
+// Get typename and hashed representation for each representations in the subgraph query
+fn extract_cache_attributes(representations: &[Value]) -> Result<Vec<(String, String)>, BoxError> {
+    let mut res = Vec::new();
+    for representation in representations {
+        let opt_type = representation
+            .as_object()
+            .and_then(|o| o.get(TYPENAME))
+            .ok_or("missing __typename in representation")?;
+
+        let typename = opt_type.as_str().unwrap_or("");
+
+        // We have to have representation because it can contains PII
+        let mut digest = Sha256::new();
+        digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
+        let hashed_repr = hex::encode(digest.finalize().as_slice());
+
+        res.push((typename.to_string(), hashed_repr));
+    }
+    Ok(res)
 }
 
 fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {

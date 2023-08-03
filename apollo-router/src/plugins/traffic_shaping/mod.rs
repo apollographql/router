@@ -6,7 +6,7 @@
 //! * Compression
 //! * Rate limiting
 //!
-mod cache;
+pub(crate) mod cache;
 mod deduplication;
 pub(crate) mod rate;
 mod retry;
@@ -379,10 +379,9 @@ impl TrafficShaping {
         let all_config = self.config.all.as_ref();
         let subgraph_config = self.config.subgraphs.get(name);
         let final_config = Self::merge_config(all_config, subgraph_config);
-
         let entity_caching = if let (Some(storage), Some(caching_config)) = (
             self.storage.clone(),
-            subgraph_config
+            final_config
                 .as_ref()
                 .and_then(|c| c.experimental_entity_caching.as_ref()),
         ) {
