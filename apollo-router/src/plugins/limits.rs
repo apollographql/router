@@ -1,7 +1,10 @@
 use crate::plugin::{Plugin, PluginInit};
+use crate::plugins::telemetry::utils::TracingUtils;
+use crate::services::router::BoxService;
+use crate::spec::operation_limits::OperationLimits;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tower::BoxError;
+use tower::{BoxError, ServiceExt};
 
 /// A plugin for limits.
 
@@ -110,6 +113,30 @@ struct Limits {
     _config: Config,
 }
 
+#[derive(Default)]
+pub(crate) struct Limited {
+    operational_limits: OperationLimits<bool>,
+    request_size: bool,
+}
+
+impl Limited {
+    pub(crate) fn request_size() -> Self {
+        Limited {
+            request_size: false,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<&OperationLimits<bool>> for Limited {
+    fn from(limits: &OperationLimits<bool>) -> Self {
+        Limited {
+            operational_limits: *limits,
+            ..Default::default()
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl Plugin for Limits {
     type Config = Config;
@@ -121,6 +148,33 @@ impl Plugin for Limits {
         Ok(Self {
             _config: init.config,
         })
+    }
+
+    fn router_service(&self, service: BoxService) -> BoxService {
+        service
+            .map_future(|f| async {
+                let response = f.await;
+                if let Ok(response) = &response {
+                    if let Some(limited) = response.context.private_entries.lock().get::<Limited>()
+                    {
+                        tracing::info!(
+                            monotonic_counter.apollo.router.operations.limits = 1u64,
+                            limits.failed.operation.aliases =
+                                limited.operational_limits.aliases.or_empty(),
+                            limits.failed.operation.depth =
+                                limited.operational_limits.depth.or_empty(),
+                            limits.failed.operation.height =
+                                limited.operational_limits.height.or_empty(),
+                            limits.failed.operation.root_fields =
+                                limited.operational_limits.root_fields.or_empty(),
+                            limits.failed.request.size = limited.request_size.or_empty(),
+                        );
+                    }
+                }
+
+                response
+            })
+            .boxed()
     }
 }
 

@@ -136,6 +136,7 @@ mod test {
 
     #[derive(Default, Clone)]
     struct MockInstrumentProvider {
+        #[allow(clippy::type_complexity)]
         counters_created: Arc<Mutex<HashSet<(String, Option<String>, Option<Unit>)>>>,
         callbacks_registered: Arc<AtomicU64>,
     }
@@ -151,7 +152,7 @@ mod test {
             self.counters_created
                 .lock()
                 .expect("lock should not be poisoned")
-                .insert((name.clone(), description, unit));
+                .insert((name, description, unit));
             Ok(Counter::new(Arc::new(noop::NoopSyncInstrument::new())))
         }
 

@@ -44,9 +44,9 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::notification::HandleStream;
 use crate::plugin::DynPlugin;
+use crate::plugins::limits::Limited;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
-use crate::plugins::telemetry::utils::TracingUtils;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::traffic_shaping::TrafficShaping;
@@ -520,7 +520,7 @@ async fn plan_query(
             query_planner::CachingRequest::builder()
                 .query(query_str)
                 .and_operation_name(operation_name)
-                .context(context)
+                .context(context.clone())
                 .build(),
         )
         .instrument(tracing::info_span!(
@@ -540,15 +540,7 @@ async fn plan_query(
             let CacheResolverError::RetrievalError(err) = err;
             err.deref()
         }) {
-            tracing::info!(
-                monotonic_counter.apollo.router.operations.limits = 1u64,
-                limits.failed.aliases = err.aliases.or_empty(),
-                limits.failed.depth = err.depth.or_empty(),
-                limits.failed.height = err.height.or_empty(),
-                limits.failed.root_fields = err.root_fields.or_empty(),
-            );
-        } else {
-            tracing::info!(monotonic_counter.apollo.router.operations.limits = 1u64,);
+            context.private_entries.lock().insert::<Limited>(err.into());
         }
     }
 

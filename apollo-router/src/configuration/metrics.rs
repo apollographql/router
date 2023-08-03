@@ -69,7 +69,7 @@ impl<'a> Deref for JsonPtr<'a, Value> {
 
     fn deref(&self) -> &Self::Target {
         match self {
-            JsonPtr::Slice(v) => *v,
+            JsonPtr::Slice(v) => v,
             JsonPtr::NewValue(v) => v,
         }
     }
@@ -83,7 +83,7 @@ trait JsonPathExt {
 impl JsonPathExt for JsonPath {
     fn find<'a>(&'a self, value: &'a Value) -> Vec<JsonPtr<'a, Value>> {
         json_path_instance(self, value)
-            .find((&(*value)).into())
+            .find(value.into())
             .into_iter()
             .filter(|v| v.has_value())
             .map(|v| match v {

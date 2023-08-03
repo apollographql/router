@@ -11,7 +11,7 @@ use serde::Serialize;
 
 use crate::Configuration;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Default, Clone, Copy, Debug, Serialize, Deserialize)]
 pub(crate) struct OperationLimits<T> {
     pub(crate) depth: T,
     pub(crate) height: T,

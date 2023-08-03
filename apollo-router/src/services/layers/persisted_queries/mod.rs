@@ -209,8 +209,7 @@ impl PersistedQueryLayer {
 
             let mut is_persisted = None;
 
-            let known =
-                is_operation_persisted(&mut is_persisted, manifest_poller.clone(), operation_body);
+            let known = is_operation_persisted(&mut is_persisted, manifest_poller, operation_body);
             let logged = self.log_unknown && !known;
             if logged {
                 tracing::warn!(message = "unknown operation", operation_body);

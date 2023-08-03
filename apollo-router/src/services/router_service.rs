@@ -47,6 +47,7 @@ use crate::cache::DeduplicatingCache;
 use crate::graphql;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
+use crate::plugins::limits::Limited;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::QueryPlanResult;
@@ -394,6 +395,10 @@ impl RouterService {
                     .ok()
             })();
             if content_length.unwrap_or(0) > self.experimental_http_max_request_bytes {
+                context
+                    .private_entries
+                    .lock()
+                    .insert(Limited::request_size());
                 Err((
                     StatusCode::PAYLOAD_TOO_LARGE,
                     "payload too large for the `experimental_http_max_request_bytes` configuration",
@@ -406,6 +411,7 @@ impl RouterService {
                     .await
                     .map_err(|e| {
                         if e.is::<http_body::LengthLimitError>() {
+                            context.private_entries.lock().insert(Limited::request_size());
                             (
                                 StatusCode::PAYLOAD_TOO_LARGE,
                                 "payload too large for the `experimental_http_max_request_bytes` configuration",
