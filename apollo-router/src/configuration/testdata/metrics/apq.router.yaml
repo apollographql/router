@@ -6,7 +6,7 @@ apq:
         limit: 10000
       redis:
         urls:
-          - "a"
+          - "http://example.com"
   subgraph:
     all:
       enabled: true
