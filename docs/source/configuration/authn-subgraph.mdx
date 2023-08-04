@@ -45,11 +45,14 @@ The example below shows how to use a default credentials chain for all subgraphs
 
 ### Default chain authentication
 
-The default chain authentication method will try to resolve credentials in the following order:
-  - Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` or `SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_ROLE_ARN`, `AWS_IAM_ROLE_SESSION_NAME`)
-  - Shared configuration (`~/.aws/config`, `~/.aws/credentials`, which can be configured with the `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` environment variables)
-  - Web Identity Tokens (which can be configured with the `AWS_WEB_IDENTITY_TOKEN_FILE` environment variable)
-  - ECS (which can be configured with the `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` `AWS_CONTAINER_CREDENTIALS_FULL_URI` and `AWS_CONTAINER_AUTHORIZATION_TOKEN` environment variables, in that order).
+The default chain authentication method tries to resolve credentials in the following order, starting with environment variables:
+
+| Credential Type                  | Examples                                                                                             |
+|----------------------------------|------------------------------------------------------------------------------------------------------|
+| Environment variables            | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` or `SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_ROLE_ARN`, `AWS_IAM_ROLE_SESSION_NAME`|
+| Shared configurations             | `~/.aws/config`, `~/.aws/credentials`, configured with `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` environment variables           |
+| Web identity tokens                           | Possibly configured with the `AWS_WEB_IDENTITY_TOKEN_FILE` environment variable            | `AWS_WEB_IDENTITY_TOKEN_FILE`
+| Elastic Container Service (ECS)                           | Configured with the `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` or `AWS_CONTAINER_CREDENTIALS_FULL_URI`, and `AWS_CONTAINER_AUTHORIZATION_TOKEN` environment variables |
 
 #### Assume Role:
 
