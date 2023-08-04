@@ -13,7 +13,6 @@ use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
 use bloom::CountingBloomFilter;
-use bloom::ASMS;
 use dashmap::DashMap;
 use futures::future::ready;
 use futures::future::BoxFuture;
@@ -490,7 +489,16 @@ impl Plugin for Telemetry {
                     "apollo_private.ftv1" = field::Empty
                 )
             })
-            .map_request(request_ftv1)
+            .map_request(move |mut req: SubgraphRequest| {
+                let cache_attributes = cache_metrics_enabled
+                    .then(|| Self::get_cache_attributes(subgraph_name_arc.clone(), &mut req))
+                    .flatten();
+                if let Some(cache_attributes) = cache_attributes {
+                    req.context.private_entries.lock().insert(cache_attributes);
+                }
+
+                request_ftv1(req)
+            })
             .map_response(move |resp| store_ftv1(&subgraph_name, resp))
             .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
@@ -498,10 +506,7 @@ impl Plugin for Telemetry {
                         subgraph_metrics_conf_req.clone(),
                         sub_request,
                     );
-
-                    let cache_attributes = cache_metrics_enabled
-                        .then(|| Self::get_cache_attributes(subgraph_name_arc.clone(), sub_request))
-                        .flatten();
+                    let cache_attributes = sub_request.context.private_entries.lock().remove();
 
                     (sub_request.context.clone(), cache_attributes)
                 },
@@ -1015,9 +1020,9 @@ impl Telemetry {
 
     fn get_cache_attributes(
         subgraph_name: Arc<String>,
-        sub_request: &Request,
+        sub_request: &mut Request,
     ) -> Option<CacheAttributes> {
-        let body = sub_request.subgraph_request.body();
+        let body = sub_request.subgraph_request.body_mut();
         let hashed_query = hash_request(body);
         let representations = body
             .variables
@@ -1071,16 +1076,16 @@ impl Telemetry {
                 subgraph_name: cache_attributes.subgraph_name.clone(),
                 hashed_headers: hashed_headers.clone(),
             };
-            let was_already_inserted = cbf.insert(&cache_key);
-            if was_already_inserted {
-                // Number of duplicated values we can find for an entity
-                ::tracing::info!(
-                    monotonic_counter.apollo_router_entity_cache_entry = 1,
-                    entity_type = %typename,
-                    subgraph = %cache_attributes.subgraph_name,
-                    vary = %vary_headers,
-                );
-            }
+            let mut count = cbf.insert_get_count(&cache_key);
+            // Because we had the previous count
+            count += 1;
+
+            ::tracing::info!(
+                histogram.apollo.router.operations.entity.cachable = count as u64,
+                entity_type = %typename,
+                subgraph = %cache_attributes.subgraph_name,
+                vary = %vary_headers,
+            );
         }
     }
 

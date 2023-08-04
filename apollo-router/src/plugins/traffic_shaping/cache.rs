@@ -8,6 +8,7 @@ use futures::FutureExt;
 use http::header;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use sha2::Digest;
 use sha2::Sha256;
@@ -207,14 +208,18 @@ pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
     hex::encode(digest.finalize().as_slice())
 }
 
-pub(crate) fn hash_request(body: &graphql::Request) -> String {
+pub(crate) fn hash_request(body: &mut graphql::Request) -> String {
     let mut digest = Sha256::new();
     digest.update(body.query.as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);
     digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);
+    let repr_key = ByteString::from(REPRESENTATIONS);
+    let representations = body.variables.remove(&repr_key);
     digest.update(&serde_json::to_vec(&body.variables).unwrap());
-
+    if let Some(representations) = representations {
+        body.variables.insert(repr_key, representations);
+    }
     hex::encode(digest.finalize().as_slice())
 }
 
@@ -303,13 +308,15 @@ fn filter_representations(
 
     for (ty, (hit, miss)) in cache_hit {
         tracing::info!(
-            monotonic_counter.apollo_router_cache_hit = hit as u64,
+            monotonic_counter.apollo.router.operations.entity.cache = hit as u64,
             entity_type = ty.as_str(),
+            hit = %true,
             %subgraph_name
         );
         tracing::info!(
-            monotonic_counter.apollo_router_cache_miss = miss as u64,
+            monotonic_counter.apollo.router.operations.entity.cache = miss as u64,
             entity_type = ty.as_str(),
+            miss = %true,
             %subgraph_name
         );
     }
