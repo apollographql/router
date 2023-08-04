@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
@@ -11,6 +12,7 @@ use ::tracing::field;
 use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
+use bloom::CountingBloomFilter;
 use dashmap::DashMap;
 use futures::future::ready;
 use futures::future::BoxFuture;
@@ -68,6 +70,9 @@ use self::reload::NullFieldFormatter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::reload::ReloadTracer;
+use super::traffic_shaping::cache::hash_request;
+use super::traffic_shaping::cache::hash_vary_headers;
+use super::traffic_shaping::cache::REPRESENTATIONS;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::OPERATION_NAME;
 use crate::layers::ServiceBuilderExt;
@@ -109,6 +114,7 @@ use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::spec::TYPENAME;
 use crate::tracer::TraceId;
 use crate::Context;
 use crate::ListenAddr;
@@ -151,6 +157,7 @@ pub(crate) struct Telemetry {
 
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
     meter_provider: AggregateMeterProvider,
+    counting_bloom_filter: Arc<Mutex<CountingBloomFilter>>,
 }
 
 #[derive(Debug)]
@@ -227,6 +234,9 @@ impl Plugin for Telemetry {
             tracer_provider: Some(Self::create_tracer_provider(&config)?),
             meter_provider,
             config: Arc::new(config),
+            counting_bloom_filter: Arc::new(Mutex::new(CountingBloomFilter::with_rate(
+                4, 0.01, 100,
+            ))),
         })
     }
 
@@ -445,7 +455,16 @@ impl Plugin for Telemetry {
         let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
         let subgraph_name = ByteString::from(name);
+        let cache_metrics_enabled = self
+            .config
+            .metrics
+            .as_ref()
+            .and_then(|m| m.common.as_ref())
+            .map(|c| c.experimental_enable_cache_metrics)
+            .unwrap_or_default();
+        let bloom_filter = self.counting_bloom_filter.clone();
         let name = name.to_owned();
+        let subgraph_name_arc = Arc::new(name.to_owned());
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| {
                 let query = req
@@ -470,7 +489,16 @@ impl Plugin for Telemetry {
                     "apollo_private.ftv1" = field::Empty
                 )
             })
-            .map_request(request_ftv1)
+            .map_request(move |mut req: SubgraphRequest| {
+                let cache_attributes = cache_metrics_enabled
+                    .then(|| Self::get_cache_attributes(subgraph_name_arc.clone(), &mut req))
+                    .flatten();
+                if let Some(cache_attributes) = cache_attributes {
+                    req.context.private_entries.lock().insert(cache_attributes);
+                }
+
+                request_ftv1(req)
+            })
             .map_response(move |resp| store_ftv1(&subgraph_name, resp))
             .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
@@ -478,13 +506,16 @@ impl Plugin for Telemetry {
                         subgraph_metrics_conf_req.clone(),
                         sub_request,
                     );
-                    sub_request.context.clone()
+                    let cache_attributes = sub_request.context.private_entries.lock().remove();
+
+                    (sub_request.context.clone(), cache_attributes)
                 },
-                move |context: Context,
+                move |(context, cache_attributes): (Context, Option<CacheAttributes>),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let metrics = metrics.clone();
                     let subgraph_attribute = subgraph_attribute.clone();
                     let subgraph_metrics_conf = subgraph_metrics_conf_resp.clone();
+                    let counting_bloom_filter = bloom_filter.clone();
                     // Using Instant because it is guaranteed to be monotonically increasing.
                     let now = Instant::now();
                     f.map(move |result: Result<SubgraphResponse, BoxError>| {
@@ -494,6 +525,8 @@ impl Plugin for Telemetry {
                             subgraph_attribute,
                             subgraph_metrics_conf,
                             now,
+                            counting_bloom_filter,
+                            cache_attributes,
                             &result,
                         );
                         result
@@ -985,6 +1018,77 @@ impl Telemetry {
         )
     }
 
+    fn get_cache_attributes(
+        subgraph_name: Arc<String>,
+        sub_request: &mut Request,
+    ) -> Option<CacheAttributes> {
+        let body = sub_request.subgraph_request.body_mut();
+        let hashed_query = hash_request(body);
+        let representations = body
+            .variables
+            .get(REPRESENTATIONS)
+            .and_then(|value| value.as_array())?;
+
+        let keys = extract_cache_attributes(representations).ok()?;
+
+        Some(CacheAttributes {
+            subgraph_name,
+            headers: sub_request.subgraph_request.headers().clone(),
+            hashed_query: Arc::new(hashed_query),
+            representations: keys,
+        })
+    }
+
+    fn update_cache_metrics(
+        bloom_filter: Arc<Mutex<CountingBloomFilter>>,
+        sub_response: &SubgraphResponse,
+        cache_attributes: CacheAttributes,
+    ) {
+        let mut vary_headers = sub_response
+            .response
+            .headers()
+            .get_all(header::VARY)
+            .into_iter()
+            .filter_map(|val| {
+                val.to_str().ok().map(|v| {
+                    v.to_string()
+                        .split(", ")
+                        .map(|s| s.to_string())
+                        .collect::<Vec<String>>()
+                })
+            })
+            .flatten()
+            .collect::<Vec<String>>();
+        vary_headers.sort();
+        let vary_headers = vary_headers.join(", ");
+
+        let hashed_headers = if vary_headers.is_empty() {
+            Arc::default()
+        } else {
+            Arc::new(hash_vary_headers(&cache_attributes.headers))
+        };
+        let mut cbf = bloom_filter.lock().unwrap();
+        for (typename, representation) in cache_attributes.representations {
+            let cache_key = CacheKey {
+                representation,
+                typename: typename.clone(),
+                query: cache_attributes.hashed_query.clone(),
+                subgraph_name: cache_attributes.subgraph_name.clone(),
+                hashed_headers: hashed_headers.clone(),
+            };
+            let mut count = cbf.insert_get_count(&cache_key);
+            // Because we had the previous count
+            count += 1;
+
+            ::tracing::info!(
+                histogram.apollo.router.operations.entity.cachable = count as u64,
+                entity_type = %typename,
+                subgraph = %cache_attributes.subgraph_name,
+                vary = %vary_headers,
+            );
+        }
+    }
+
     fn store_subgraph_request_attributes(
         attribute_forward_config: Arc<Option<AttributesForwardConf>>,
         sub_request: &Request,
@@ -1005,12 +1109,15 @@ impl Telemetry {
             .insert(SubgraphMetricsAttributes(attributes)); //.unwrap();
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn store_subgraph_response_attributes(
         context: &Context,
         metrics: BasicMetrics,
         subgraph_attribute: KeyValue,
         attribute_forward_config: Arc<Option<AttributesForwardConf>>,
         now: Instant,
+        bloom_filter: Arc<Mutex<CountingBloomFilter>>,
+        cache_attributes: Option<CacheAttributes>,
         result: &Result<Response, BoxError>,
     ) {
         let mut metric_attrs = {
@@ -1041,6 +1148,19 @@ impl Telemetry {
 
         match &result {
             Ok(response) => {
+                if let Some(cache_attributes) = cache_attributes {
+                    if let Ok(cache_control) = response
+                        .response
+                        .headers()
+                        .get(header::CACHE_CONTROL)
+                        .ok_or(())
+                        .and_then(|val| val.to_str().map(|v| v.to_string()).map_err(|_| ()))
+                    {
+                        metric_attrs.push(KeyValue::new("cache_control", cache_control));
+                    }
+
+                    Self::update_cache_metrics(bloom_filter, response, cache_attributes)
+                }
                 metric_attrs.push(KeyValue::new(
                     "status",
                     response.response.status().as_u16().to_string(),
@@ -1454,6 +1574,39 @@ impl Telemetry {
         }
         root
     }
+}
+
+#[derive(Debug, Clone)]
+struct CacheAttributes {
+    subgraph_name: Arc<String>,
+    headers: http::HeaderMap,
+    hashed_query: Arc<String>,
+    // Typename + hashed_representation
+    representations: Vec<(String, Value)>,
+}
+
+#[derive(Debug, Hash, Clone)]
+struct CacheKey {
+    representation: Value,
+    typename: String,
+    query: Arc<String>,
+    subgraph_name: Arc<String>,
+    hashed_headers: Arc<String>,
+}
+
+// Get typename and hashed representation for each representations in the subgraph query
+fn extract_cache_attributes(representations: &[Value]) -> Result<Vec<(String, Value)>, BoxError> {
+    let mut res = Vec::new();
+    for representation in representations {
+        let opt_type = representation
+            .as_object()
+            .and_then(|o| o.get(TYPENAME))
+            .ok_or("missing __typename in representation")?;
+        let typename = opt_type.as_str().unwrap_or("");
+
+        res.push((typename.to_string(), representation.clone()));
+    }
+    Ok(res)
 }
 
 fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
