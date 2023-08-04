@@ -1027,14 +1027,23 @@ impl Telemetry {
     }
 
     fn update_cache_metrics(sub_response: &SubgraphResponse, cache_attributes: CacheAttributes) {
-        let vary_headers = sub_response
+        let mut vary_headers = sub_response
             .response
             .headers()
             .get_all(header::VARY)
             .into_iter()
-            .filter_map(|val| val.to_str().ok().map(|v| v.to_string()))
-            .collect::<Vec<String>>()
-            .join(", ");
+            .filter_map(|val| {
+                val.to_str().ok().map(|v| {
+                    v.to_string()
+                        .split(", ")
+                        .map(|s| s.to_string())
+                        .collect::<Vec<String>>()
+                })
+            })
+            .flatten()
+            .collect::<Vec<String>>();
+        vary_headers.sort();
+        let vary_headers = vary_headers.join(", ");
 
         let hashed_headers = if vary_headers.is_empty() {
             String::new()
