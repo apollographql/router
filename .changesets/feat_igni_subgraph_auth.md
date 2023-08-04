@@ -1,8 +1,8 @@
 ### Configure AWS sigv4 authentication for subgraph requests ([PR #3365](https://github.com/apollographql/router/pull/3365))
 
-Secure your router to subgraph communication on AWS by using Sigv4!
-This changeset provides you with a way to set up Hardcoded credentials, as well as a Default provider chain.
-We recommend using the DefaultChain configuration.
+Secure your router to subgraph communication on AWS using [Signature Version 4](https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html) (Sigv4)!
+This changeset provides you with a way to set up hardcoded credentials, as well as a default provider chain.
+We recommend using the default provider chain configuration.
 
 Full use example:
 
@@ -29,6 +29,6 @@ Full use example:
                 service_name: "vpc-lattice-svcs" # "s3", "lambda" etc.
 ```
 
-The full documentation can be found in the [router documentation](https://www.apollographql.com/docs/router/configuration/authn-subgraph)
+The full documentation can be found in the [router documentation](https://www.apollographql.com/docs/router/configuration/authn-subgraph).
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) and [@BlenderDude](https://github.com/BlenderDude) in https://github.com/apollographql/router/pull/3365
