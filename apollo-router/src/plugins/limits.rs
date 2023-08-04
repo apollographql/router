@@ -109,9 +109,7 @@ impl Default for Config {
     }
 }
 
-struct Limits {
-    _config: Config,
-}
+struct Limits {}
 
 #[derive(Default)]
 pub(crate) struct Limited {
@@ -141,13 +139,11 @@ impl From<&OperationLimits<bool>> for Limited {
 impl Plugin for Limits {
     type Config = Config;
 
-    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
+    async fn new(_init: PluginInit<Self::Config>) -> Result<Self, BoxError>
     where
         Self: Sized,
     {
-        Ok(Self {
-            _config: init.config,
-        })
+        Ok(Self {})
     }
 
     fn router_service(&self, service: BoxService) -> BoxService {
