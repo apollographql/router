@@ -6,13 +6,13 @@ title: Authorization in the Apollo Router
 >
 > If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](/graphos/org/plans/#enterprise-trials).
 
-You may need to restrict sensitive information to authenticated users or enforce conditional access rules for particular fields.
-The Apollo Router lets you control access to specific fields and types through the `@authenticated` and `@requiresScopes` directives:
+Whether your graph is small or large, you may need to restrict sensitive information to authenticated users or enforce conditional access rules. It's more efficient to do this on the supergraph level, rather than in your underlying services.
+The Apollo Router lets you **control access to specific fields and types across your supergraph** through the `@authenticated` and `@requiresScopes` directives:
 
 - The `@authenticated` directive works in a binary way: authenticated requests can either access a specific field or type or they can't.
 - The `@requiresScopes` directive allows you granular access control through scopes you define.
 
-You define and use these directives on subgraph schemas, and the router [composes](#composition-and-federation) them on to the supergraph schema.
+You define and use these directives on subgraph schemas, and GraphOS [composes](#composition-and-federation) them on to the supergraph schema.
 
 ## Prequisites
 
@@ -21,6 +21,14 @@ To use the router's authorization directives, you need to either configure [JWT 
 
 If you configure [JWT authentication](./authn-jwt), the Apollo Router automatically adds a JWT token's claims to the request's context at the `apollo_authentication::JWT::claims` key.
 To participate in the authorization process, the coprocessor you add needs to set the key `apollo_authentication::JWT::claims` in request contexts.
+
+### JWT authentication configuration
+
+To-do: Recipe for JWT auth with these directives
+
+### Coprocessors for authorization
+
+To-do: Coprocessors specifications
 
 ## Authorization directives
 
@@ -269,7 +277,7 @@ The response would include an error at the `/me` path.
 
 ## Composition and federation
 
-Authorization directives are defined at the subgraph level and the router composes them in the supergraph schema. In other words, if subgraph fields or types include either `@authenticated` or `@requiresScopes` directives, they are set on the supergraph too.
+Authorization directives are defined at the subgraph level and the GraphOS composes them in the supergraph schema. In other words, if subgraph fields or types include either `@authenticated` or `@requiresScopes` directives, they are set on the supergraph too.
 
 If multiple shared subgraph fields include `@requiresScopes`, the supergraph schema merges the sets of scopes required by each subgraph. For example, imagine one subgraph requires the `profile:read` scope on the `users` query:
 
@@ -287,7 +295,7 @@ type Query {
 }
 ```
 
-Then the supergraph schema would require both scopes for it.
+Then the supergraph schema would require _both_ scopes for it.
 
 ```graphql title="Supergraph"
 type Query {
@@ -336,7 +344,9 @@ query {
 }
 ```
 
-But for the following query, an unauthenticated request would resolve `null` for `id`. And since `id` is a non-nullable field, `product` would return `null`.
+Specifically, under the hood, the router would use the `id` field to resolve the `Product` entity, but it wouldn't return it.
+
+For the following query, an unauthenticated request would resolve `null` for `id`. And since `id` is a non-nullable field, `product` would return `null`.
 
 ```graphql
 query {
