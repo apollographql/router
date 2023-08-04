@@ -1602,13 +1602,7 @@ fn extract_cache_attributes(representations: &[Value]) -> Result<Vec<(String, Va
             .as_object()
             .and_then(|o| o.get(TYPENAME))
             .ok_or("missing __typename in representation")?;
-
         let typename = opt_type.as_str().unwrap_or("");
-
-        // // We have to have representation because it can contains PII
-        // let mut digest = Sha256::new();
-        // digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
-        // let hashed_repr = hex::encode(digest.finalize().as_slice());
 
         res.push((typename.to_string(), representation.clone()));
     }

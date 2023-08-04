@@ -215,6 +215,7 @@ pub(crate) fn hash_request(body: &mut graphql::Request) -> String {
     digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);
     let repr_key = ByteString::from(REPRESENTATIONS);
+    // Removing the representations variable because it's already part of the cache key
     let representations = body.variables.remove(&repr_key);
     digest.update(&serde_json::to_vec(&body.variables).unwrap());
     if let Some(representations) = representations {
