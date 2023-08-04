@@ -226,6 +226,7 @@ brotli = "3.3.4"
 zstd = "0.12.3"
 zstd-safe = "6.0.5"
 rand_core = "0.6.4"
+bloom = "0.3.2"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"

@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
@@ -11,6 +12,8 @@ use ::tracing::field;
 use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
+use bloom::CountingBloomFilter;
+use bloom::ASMS;
 use dashmap::DashMap;
 use futures::future::ready;
 use futures::future::BoxFuture;
@@ -42,8 +45,6 @@ use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
-use sha2::Digest;
-use sha2::Sha256;
 use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -157,6 +158,7 @@ pub(crate) struct Telemetry {
 
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
     meter_provider: AggregateMeterProvider,
+    counting_bloom_filter: Arc<Mutex<CountingBloomFilter>>,
 }
 
 #[derive(Debug)]
@@ -233,6 +235,9 @@ impl Plugin for Telemetry {
             tracer_provider: Some(Self::create_tracer_provider(&config)?),
             meter_provider,
             config: Arc::new(config),
+            counting_bloom_filter: Arc::new(Mutex::new(CountingBloomFilter::with_rate(
+                4, 0.01, 100,
+            ))),
         })
     }
 
@@ -458,6 +463,7 @@ impl Plugin for Telemetry {
             .and_then(|m| m.common.as_ref())
             .map(|c| c.experimental_enable_cache_metrics)
             .unwrap_or_default();
+        let bloom_filter = self.counting_bloom_filter.clone();
         let name = name.to_owned();
         let subgraph_name_arc = Arc::new(name.to_owned());
         ServiceBuilder::new()
@@ -504,6 +510,7 @@ impl Plugin for Telemetry {
                     let metrics = metrics.clone();
                     let subgraph_attribute = subgraph_attribute.clone();
                     let subgraph_metrics_conf = subgraph_metrics_conf_resp.clone();
+                    let counting_bloom_filter = bloom_filter.clone();
                     // Using Instant because it is guaranteed to be monotonically increasing.
                     let now = Instant::now();
                     f.map(move |result: Result<SubgraphResponse, BoxError>| {
@@ -513,6 +520,7 @@ impl Plugin for Telemetry {
                             subgraph_attribute,
                             subgraph_metrics_conf,
                             now,
+                            counting_bloom_filter,
                             cache_attributes,
                             &result,
                         );
@@ -1021,12 +1029,16 @@ impl Telemetry {
         Some(CacheAttributes {
             subgraph_name,
             headers: sub_request.subgraph_request.headers().clone(),
-            hashed_query,
+            hashed_query: Arc::new(hashed_query),
             representations: keys,
         })
     }
 
-    fn update_cache_metrics(sub_response: &SubgraphResponse, cache_attributes: CacheAttributes) {
+    fn update_cache_metrics(
+        bloom_filter: Arc<Mutex<CountingBloomFilter>>,
+        sub_response: &SubgraphResponse,
+        cache_attributes: CacheAttributes,
+    ) {
         let mut vary_headers = sub_response
             .response
             .headers()
@@ -1046,21 +1058,29 @@ impl Telemetry {
         let vary_headers = vary_headers.join(", ");
 
         let hashed_headers = if vary_headers.is_empty() {
-            String::new()
+            Arc::default()
         } else {
-            hash_vary_headers(&cache_attributes.headers)
+            Arc::new(hash_vary_headers(&cache_attributes.headers))
         };
-
-        for (typename, hashed_representation) in cache_attributes.representations {
-            ::tracing::info!(
-                monotonic_counter.apollo_router_entity_cache_entry = 1u64,
-                %hashed_representation,
-                hashed_query = %cache_attributes.hashed_query,
-                %hashed_headers,
-                entity_type = %typename,
-                subgraph = %cache_attributes.subgraph_name,
-                vary = %vary_headers,
-            );
+        let mut cbf = bloom_filter.lock().unwrap();
+        for (typename, representation) in cache_attributes.representations {
+            let cache_key = CacheKey {
+                representation,
+                typename: typename.clone(),
+                query: cache_attributes.hashed_query.clone(),
+                subgraph_name: cache_attributes.subgraph_name.clone(),
+                hashed_headers: hashed_headers.clone(),
+            };
+            let was_already_inserted = cbf.insert(&cache_key);
+            if was_already_inserted {
+                // Number of duplicated values we can find for an entity
+                ::tracing::info!(
+                    monotonic_counter.apollo_router_entity_cache_entry = 1,
+                    entity_type = %typename,
+                    subgraph = %cache_attributes.subgraph_name,
+                    vary = %vary_headers,
+                );
+            }
         }
     }
 
@@ -1084,12 +1104,14 @@ impl Telemetry {
             .insert(SubgraphMetricsAttributes(attributes)); //.unwrap();
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn store_subgraph_response_attributes(
         context: &Context,
         metrics: BasicMetrics,
         subgraph_attribute: KeyValue,
         attribute_forward_config: Arc<Option<AttributesForwardConf>>,
         now: Instant,
+        bloom_filter: Arc<Mutex<CountingBloomFilter>>,
         cache_attributes: Option<CacheAttributes>,
         result: &Result<Response, BoxError>,
     ) {
@@ -1132,7 +1154,7 @@ impl Telemetry {
                         metric_attrs.push(KeyValue::new("cache_control", cache_control));
                     }
 
-                    Self::update_cache_metrics(response, cache_attributes)
+                    Self::update_cache_metrics(bloom_filter, response, cache_attributes)
                 }
                 metric_attrs.push(KeyValue::new(
                     "status",
@@ -1553,13 +1575,22 @@ impl Telemetry {
 struct CacheAttributes {
     subgraph_name: Arc<String>,
     headers: http::HeaderMap,
-    hashed_query: String,
+    hashed_query: Arc<String>,
     // Typename + hashed_representation
-    representations: Vec<(String, String)>,
+    representations: Vec<(String, Value)>,
+}
+
+#[derive(Debug, Hash, Clone)]
+struct CacheKey {
+    representation: Value,
+    typename: String,
+    query: Arc<String>,
+    subgraph_name: Arc<String>,
+    hashed_headers: Arc<String>,
 }
 
 // Get typename and hashed representation for each representations in the subgraph query
-fn extract_cache_attributes(representations: &[Value]) -> Result<Vec<(String, String)>, BoxError> {
+fn extract_cache_attributes(representations: &[Value]) -> Result<Vec<(String, Value)>, BoxError> {
     let mut res = Vec::new();
     for representation in representations {
         let opt_type = representation
@@ -1569,12 +1600,12 @@ fn extract_cache_attributes(representations: &[Value]) -> Result<Vec<(String, St
 
         let typename = opt_type.as_str().unwrap_or("");
 
-        // We have to have representation because it can contains PII
-        let mut digest = Sha256::new();
-        digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
-        let hashed_repr = hex::encode(digest.finalize().as_slice());
+        // // We have to have representation because it can contains PII
+        // let mut digest = Sha256::new();
+        // digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
+        // let hashed_repr = hex::encode(digest.finalize().as_slice());
 
-        res.push((typename.to_string(), hashed_repr));
+        res.push((typename.to_string(), representation.clone()));
     }
     Ok(res)
 }
