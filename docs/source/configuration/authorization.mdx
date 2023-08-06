@@ -63,6 +63,8 @@ extend schema
 directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
 
+To-do: Enable them in some other way? Warn that turning them on can break things since previously unauthenticated requests will start returning errors.
+
 #### Example `@authenticated` use case
 
 Suppose you are building a social media platform and you only want authenticated users to be able to view other users' emails.
@@ -193,6 +195,8 @@ extend schema
 ```graphql
 directive @requiresScopes(scopes: [String!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
+
+To-do: Enable them in some other way? Warn that turning them on can break things since previously unauthenticated requests will start returning errors.
 
 #### Example `@requiresScopes` use case
 
