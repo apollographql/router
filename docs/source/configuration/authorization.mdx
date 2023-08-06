@@ -1,5 +1,7 @@
 ---
 title: Authorization in the Apollo Router
+description: Strengthen your supergraph's security with advanced access controls
+minVersion: 1.27.0
 ---
 
 > ⚠️ **This is an [Enterprise feature](../enterprise-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
@@ -9,10 +11,11 @@ title: Authorization in the Apollo Router
 Whether your graph is small or large, you may need to restrict sensitive information to authenticated users or enforce conditional access rules. It's more efficient to do this on the supergraph level, rather than in your underlying services.
 The Apollo Router lets you **control access to specific fields and types across your supergraph** through the `@authenticated` and `@requiresScopes` directives:
 
-- The `@authenticated` directive works in a binary way: authenticated requests can either access a specific field or type or they can't.
-- The `@requiresScopes` directive allows you granular access control through scopes you define.
+- The `@authenticated` directive works in a binary way: authenticated requests can access the specified field or type and unauthenticated requests can't.
+- The `@requiresScopes` directive allows granular access control through scopes you define.
 
 You define and use these directives on subgraph schemas, and GraphOS [composes](#composition-and-federation) them on to the supergraph schema.
+The router then enforces these directives on all incoming requests.
 
 ## Prequisites
 
@@ -42,7 +45,19 @@ For unauthenticated requests, the router removes `@authenticated` fields before 
 The router filters out fields that require authentication and only executes the parts of the query that don't require it.
 If every field in a particular subgraph's query is marked as requiring authentication, this can eliminate entire subgraph requests.
 
-You can define the `@authenticated` directive on any subgraph schema like this:
+#### Prequisites
+
+To use the `@authenticated` directive in a subgraph you can either:
+- [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
+
+```graphql
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.5",
+    import: [..., "@authenticated"])
+```
+
+- or define the directive like this:
 
 ```graphql
 directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
@@ -70,7 +85,7 @@ type User {
 
 Consider the following query:
 
-```graphql
+```graphql title="Sample query"
 query {
   me {
     name
@@ -84,7 +99,7 @@ query {
 ```
 
 An authenticated request would execute the entire query.
-For an unauthenticated request, the router would remove the `@authenticated` fields before execution, and create a filtered query.
+For an unauthenticated request, the router would remove the `@authenticated` fields and execute the filtered query.
 
 <CodeColumns>
 
@@ -114,7 +129,7 @@ query {
 For an unauthenticated request, the router doesn't attempt to resolve the top-level `me` query, nor the email for the user with `id: "1234"`.
 The response retains the initial request's shape but returns `null` for unauthorized fields and applies the [standard GraphQL null propagation rules](https://www.apollographql.com/blog/graphql/basics/using-nullability-in-graphql/#what-happens-if-you-try-to-return-null-for-a-non-null-field).
 
-```json
+```json title="Unauthenticated request's response"
 {
   "data": {
     "me": null,
@@ -152,12 +167,6 @@ If _every_ requested field requires authentication and a request is unauthentica
 ### `@requiresScopes`
 
 The `@requiresScopes` directive marks fields and types as restricted based on the scopes you require.
-You can define the `@requiresScopes` directive on any subgraph schema like this:
-
-```graphql
-directive @requiresScopes(scopes: [String!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
-```
-
 The directive should include a `scopes` argument that expects an array of required scopes.
 
 The directive validates the required scopes by loading the object at the `apollo_authentication::JWT::claims` key in a request's context.
@@ -167,34 +176,53 @@ Depending on the scopes present on the request, the router filters out unauthori
 If a field's `scopes` array includes multiple scopes, the request must include _all_ required scopes to resolve it.
 If every field on a particular subgraph query requires scopes that aren't present, this can eliminate entire subgraph requests.
 
+#### Prequisites
+
+To use the `@requiresScopes` directive in a subgraph you can either:
+- [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
+
+```graphql
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.5",
+    import: [..., "@requiresScopes"])
+```
+
+- or define the directive like this:
+
+```graphql
+directive @requiresScopes(scopes: [String!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+```
+
 #### Example `@requiresScopes` use case
 
 Imagine your social media platform has an ecommerce component.
 You need to be able to query for the following:
 
 - An authenticated user's profile (`me`)
-- Other user's emails
-- Products and the users who have ordered it
+- Other users' emails
+- Products and the users who have ordered them
 
 Your schema may look something like this:
 
-```graphql
+```graphql title=""
 type Query {
   me: User @requiresScopes(scopes: ["profile:read"])
-  products: [Products]
+  products: [Product!]
 }
 
 type User {
   id: ID
   name: String
   email: @requiresScopes(["user:read"])
+  products: [Product!] @requiresScopes(["user:read", "inventory:read"])
 }
 
 type Product {
   id: ID
   name: String
   amount: Int @requiresScopes(["inventory:read"])
-  orders: [User] @requiresScopes(["user:read", "inventory:read"])
+  orders: [User!] @requiresScopes(["user:read", "inventory:read"])
 }
 ```
 
@@ -363,7 +391,7 @@ This behavior is similar to what you can create with [contracts](/graphos/delive
 
 If a type [implementing an interface](https://www.apollographql.com/docs/apollo-server/schema/unions-interfaces/#interface-type) requires authorization, unauthorized requests can query the interface, but not any parts of the type that require authorization.
 
-For example, consider this schema where the `User` interface  doesn't require authentication, but the `Admin` type which implements `User` does:
+For example, consider this schema where the `User` interface doesn't require authentication, but the `Admin` type which implements `User` does:
 
 ```graphql
 type Query {
@@ -408,6 +436,8 @@ query {
   }
 }
 ```
+
+The response would include an `"UNAUTHORIZED_FIELD_OR_TYPE"` error at the `/users/@/role` path.
 
 ## Introspection
 
