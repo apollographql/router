@@ -164,7 +164,7 @@ The response retains the initial request's shape but returns `null` for unauthor
 }
 ```
 
-If _every_ requested field requires authentication and a request is unauthenticated, the router generates a query planner error indicating that the query is unauthorized.
+If _every_ requested field requires authentication and a request is unauthenticated, the router generates an error indicating that the query is unauthorized.
 
 ### `@requiresScopes`
 
@@ -196,7 +196,7 @@ extend schema
 directive @requiresScopes(scopes: [String!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
 
-To-do: Enable them in some other way? Warn that turning them on can break things since previously unauthenticated requests will start returning errors.
+
 
 #### Example `@requiresScopes` use case
 
