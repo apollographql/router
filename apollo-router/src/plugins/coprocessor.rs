@@ -563,7 +563,7 @@ where
     let duration = start.elapsed().as_secs_f64();
     drop(guard);
     tracing::info!(
-        histogram.apollo.router.operations.coprocessor_request_time = duration,
+        histogram.apollo.router.operations.coprocessor.duration = duration,
         coprocessor.stage = %PipelineStep::RouterRequest,
     );
 
@@ -719,7 +719,7 @@ where
     let duration = start.elapsed().as_secs_f64();
     drop(guard);
     tracing::info!(
-        histogram.apollo.router.operations.coprocessor_request_time = duration,
+        histogram.apollo.router.operations.coprocessor.duration = duration,
         coprocessor.stage = %PipelineStep::RouterResponse,
     );
 
@@ -891,7 +891,7 @@ where
     let duration = start.elapsed().as_secs_f64();
     drop(guard);
     tracing::info!(
-        histogram.apollo.router.operations.coprocessor_request_time = duration,
+        histogram.apollo.router.operations.coprocessor.duration = duration,
         coprocessor.stage = %PipelineStep::SubgraphRequest,
     );
 
@@ -1030,7 +1030,7 @@ where
     let duration = start.elapsed().as_secs_f64();
     drop(guard);
     tracing::info!(
-        histogram.apollo.router.operations.coprocessor_request_time = duration,
+        histogram.apollo.router.operations.coprocessor.duration = duration,
         coprocessor.stage = %PipelineStep::SubgraphResponse,
     );
 

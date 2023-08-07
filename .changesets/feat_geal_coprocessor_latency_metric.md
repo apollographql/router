@@ -3,7 +3,7 @@
 Introduces a new metric for the router:
 
 ```
-apollo.router.operations.coprocessor_request_time
+apollo.router.operations.coprocessor.duration
 ```
 
 It has one attributes:
