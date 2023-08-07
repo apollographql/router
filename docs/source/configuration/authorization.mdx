@@ -45,7 +45,7 @@ For unauthenticated requests, the router removes `@authenticated` fields before 
 The router filters out fields that require authentication and only executes the parts of the query that don't require it.
 If every field in a particular subgraph's query is marked as requiring authentication, this can eliminate entire subgraph requests.
 
-#### Prequisites
+#### Prerequisites
 
 To use the `@authenticated` directive in a subgraph you can either:
 - [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
@@ -178,7 +178,7 @@ Depending on the scopes present on the request, the router filters out unauthori
 If a field's `scopes` array includes multiple scopes, the request must include _all_ required scopes to resolve it.
 If every field on a particular subgraph query requires scopes that aren't present, this can eliminate entire subgraph requests.
 
-#### Prequisites
+#### Prerequisites
 
 To use the `@requiresScopes` directive in a subgraph you can either:
 - [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
@@ -195,8 +195,6 @@ extend schema
 ```graphql
 directive @requiresScopes(scopes: [String!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
-
-
 
 #### Example `@requiresScopes` use case
 
