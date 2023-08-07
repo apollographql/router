@@ -46,7 +46,7 @@ pub(crate) struct Config {
 
     /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "String", default = "otlp_endpoint_default")]
-    pub(crate) otlp_endpoint: Url,
+    pub(crate) experimental_otlp_endpoint: Url,
 
     /// The Apollo Studio API key.
     #[schemars(skip)]
@@ -179,7 +179,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             endpoint: endpoint_default(),
-            otlp_endpoint: otlp_endpoint_default(),
+            experimental_otlp_endpoint: otlp_endpoint_default(),
             apollo_key: apollo_key(),
             apollo_graph_ref: apollo_graph_reference(),
             client_name_header: client_name_header_default(),

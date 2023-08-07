@@ -41,7 +41,7 @@ impl MetricsConfigurator for Config {
         Ok(match self {
             Config {
                 endpoint,
-                otlp_endpoint,
+                experimental_otlp_endpoint: otlp_endpoint,
                 apollo_key: Some(key),
                 apollo_graph_ref: Some(reference),
                 schema_id,
@@ -60,14 +60,21 @@ impl MetricsConfigurator for Config {
                     schema_id,
                     batch_processor,
                 )?;
-                Self::configure_apollo_otlp_metrics(
-                    builder,
-                    otlp_endpoint,
-                    key,
-                    reference,
-                    schema_id,
-                    batch_processor,
-                )?
+                // env variable EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED will disapper without warning in future
+                if let Some("true") = std::env::var("EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED")
+                    .ok()
+                    .as_deref()
+                {
+                    builder = Self::configure_apollo_otlp_metrics(
+                        builder,
+                        otlp_endpoint,
+                        key,
+                        reference,
+                        schema_id,
+                        batch_processor,
+                    )?;
+                }
+                builder
             }
             _ => {
                 ENABLED.swap(false, Ordering::Relaxed);
