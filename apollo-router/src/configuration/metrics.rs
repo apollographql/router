@@ -1,14 +1,16 @@
-use crate::Configuration;
+use std::collections::HashMap;
+use std::ops::Deref;
+use std::sync::Arc;
+use std::time::Duration;
+
 use jsonpath_rust::parser::model::JsonPath;
 use jsonpath_rust::path::json_path_instance;
 use jsonpath_rust::JsonPathValue;
 use paste::paste;
 use serde_json::Value;
-use std::collections::HashMap;
-use std::ops::Deref;
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::OwnedSemaphorePermit;
+
+use crate::Configuration;
 
 pub(crate) struct MetricsHandle {
     _guard: OwnedSemaphorePermit,
@@ -299,9 +301,10 @@ impl Metrics {
 
 #[cfg(test)]
 mod test {
-    use crate::configuration::metrics::Metrics;
     use insta::assert_yaml_snapshot;
     use rust_embed::RustEmbed;
+
+    use crate::configuration::metrics::Metrics;
 
     #[derive(RustEmbed)]
     #[folder = "src/configuration/testdata/metrics"]

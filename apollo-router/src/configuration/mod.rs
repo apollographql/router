@@ -56,10 +56,12 @@ pub(crate) use self::schema::generate_upgrade;
 use self::subgraph::SubgraphConfiguration;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
+use crate::graphql;
 use crate::notification::Notify;
 #[cfg(not(test))]
 use crate::notification::RouterBroadcasts;
 use crate::plugin::plugins;
+use crate::plugins;
 #[cfg(not(test))]
 use crate::plugins::subscription::SubscriptionConfig;
 #[cfg(not(test))]
@@ -68,7 +70,6 @@ use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
 use crate::uplink::UplinkConfig;
 use crate::ApolloRouterError;
-use crate::{graphql, plugins};
 
 // TODO: Talk it through with the teams
 #[cfg(not(test))]

@@ -1,12 +1,20 @@
+use std::sync::Arc;
+
 use buildstructor::buildstructor;
 use opentelemetry::metrics::noop::NoopMeterProvider;
-use opentelemetry::metrics::{
-    Counter, Histogram, InstrumentProvider, Meter, MeterProvider, ObservableCounter,
-    ObservableGauge, ObservableUpDownCounter, Unit, UpDownCounter,
-};
-use opentelemetry::{Context, InstrumentationLibrary};
+use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::Histogram;
+use opentelemetry::metrics::InstrumentProvider;
+use opentelemetry::metrics::Meter;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::ObservableCounter;
+use opentelemetry::metrics::ObservableGauge;
+use opentelemetry::metrics::ObservableUpDownCounter;
+use opentelemetry::metrics::Unit;
+use opentelemetry::metrics::UpDownCounter;
+use opentelemetry::Context;
+use opentelemetry::InstrumentationLibrary;
 use regex::Regex;
-use std::sync::Arc;
 
 pub(crate) struct FilterMeterProvider<T: MeterProvider> {
     delegate: T,
@@ -127,12 +135,22 @@ impl<T: MeterProvider> MeterProvider for FilterMeterProvider<T> {
 
 #[cfg(test)]
 mod test {
-    use crate::plugins::telemetry::metrics::filter::FilterMeterProvider;
-    use opentelemetry::metrics::{noop, Counter, InstrumentProvider, Meter, MeterProvider, Unit};
-    use opentelemetry::{Context, InstrumentationLibrary};
     use std::collections::HashSet;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    use opentelemetry::metrics::noop;
+    use opentelemetry::metrics::Counter;
+    use opentelemetry::metrics::InstrumentProvider;
+    use opentelemetry::metrics::Meter;
+    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry::metrics::Unit;
+    use opentelemetry::Context;
+    use opentelemetry::InstrumentationLibrary;
+
+    use crate::plugins::telemetry::metrics::filter::FilterMeterProvider;
 
     #[derive(Default, Clone)]
     struct MockInstrumentProvider {

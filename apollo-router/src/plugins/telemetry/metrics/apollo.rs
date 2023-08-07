@@ -1,20 +1,21 @@
 //! Apollo metrics
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+
 use opentelemetry::sdk::export::metrics::aggregation;
 use opentelemetry::sdk::metrics::selectors;
 use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
-
 use tower::BoxError;
 use url::Url;
 
 use crate::plugins::telemetry::apollo::Config;
-use crate::plugins::telemetry::apollo_exporter::{get_uname, ApolloExporter};
+use crate::plugins::telemetry::apollo_exporter::get_uname;
+use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
