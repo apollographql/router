@@ -250,7 +250,7 @@ impl Response {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub(crate) struct ClientRequestAccepts {
     pub(crate) multipart_defer: bool,
     pub(crate) multipart_subscription: bool,
