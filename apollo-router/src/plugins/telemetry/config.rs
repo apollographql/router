@@ -94,8 +94,6 @@ pub(crate) struct MetricsCommon {
     /// Custom buckets for histograms
     #[serde(default = "default_buckets")]
     pub(crate) buckets: Vec<f64>,
-    /// Enable experimental metrics to know more about caching strategies
-    pub(crate) experimental_enable_cache_metrics: bool,
 }
 
 fn default_buckets() -> Vec<f64> {
@@ -112,7 +110,6 @@ impl Default for MetricsCommon {
             service_namespace: None,
             resources: HashMap::new(),
             buckets: default_buckets(),
-            experimental_enable_cache_metrics: false,
         }
     }
 }
