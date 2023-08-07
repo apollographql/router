@@ -186,7 +186,6 @@ impl SubscriptionNode {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn subgraph_call<'a>(
         &'a self,
         parameters: &'a ExecutionParameters<'a>,

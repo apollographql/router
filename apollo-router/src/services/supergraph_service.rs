@@ -57,6 +57,8 @@ use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::router_factory::create_plugins;
+use crate::router_factory::create_subgraph_services;
 use crate::services::query_planner;
 use crate::services::supergraph;
 use crate::services::ExecutionRequest;
@@ -68,6 +70,7 @@ use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
+use crate::Notify;
 
 pub(crate) const QUERY_PLANNING_SPAN_NAME: &str = "query_planning";
 
@@ -81,6 +84,7 @@ pub(crate) struct SupergraphService {
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
+    notify: Notify<String, graphql::Response>,
 }
 
 #[buildstructor::buildstructor]
@@ -90,6 +94,7 @@ impl SupergraphService {
         query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
         execution_service_factory: ExecutionServiceFactory,
         schema: Arc<Schema>,
+        notify: Notify<String, graphql::Response>,
         configuration: Arc<Configuration>,
     ) -> Self {
         SupergraphService {
@@ -97,6 +102,7 @@ impl SupergraphService {
             execution_service_factory,
             schema,
             configuration,
+            notify,
         }
     }
 }
@@ -125,6 +131,7 @@ impl Service<SupergraphRequest> for SupergraphService {
             self.schema.clone(),
             self.configuration.clone(),
             req,
+            self.notify.clone(),
         )
         .or_else(|error: BoxError| async move {
             let errors = vec![crate::error::Error {
@@ -156,6 +163,7 @@ async fn service_call(
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
     req: SupergraphRequest,
+    notify: Notify<String, graphql::Response>,
 ) -> Result<SupergraphResponse, BoxError> {
     let context = req.context;
     let body = req.supergraph_request.body();
@@ -272,6 +280,7 @@ async fn service_call(
                             ctx,
                             query_plan,
                             subs_rx,
+                            notify,
                         )
                         .await;
                     });
@@ -315,10 +324,11 @@ pub struct SubscriptionTaskParams {
 }
 
 async fn subscription_task(
-    execution_service_factory: ExecutionServiceFactory,
+    mut execution_service_factory: ExecutionServiceFactory,
     context: Context,
     query_plan: Arc<QueryPlan>,
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
+    notify: Notify<String, graphql::Response>,
 ) {
     let sub_params = match rx.recv().await {
         Some(sub_params) => sub_params,
@@ -388,6 +398,9 @@ async fn subscription_task(
         OPENED_SUBSCRIPTIONS.fetch_add(1, Ordering::Relaxed);
     }
 
+    let mut configuration_updated_rx = notify.subscribe_configuration();
+    let mut schema_updated_rx = notify.subscribe_schema();
+
     loop {
         tokio::select! {
             _ = subscription_handle.closed_signal.recv() => {
@@ -416,6 +429,38 @@ async fn subscription_task(
                         }
                     }
                     None => break,
+                }
+            }
+            Some(new_configuration) = configuration_updated_rx.next() => {
+                let plugins = match create_plugins(&new_configuration, &execution_service_factory.schema, None).await {
+                    Ok(plugins) => plugins,
+                    Err(err) => {
+                        tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
+                        break;
+                    },
+                };
+                let subgraph_services = match create_subgraph_services(&plugins, &execution_service_factory.schema, &new_configuration).await {
+                    Ok(subgraph_services) => subgraph_services,
+                    Err(err) => {
+                        tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
+                        break;
+                    },
+                };
+                let plugins = Arc::new(IndexMap::from_iter(plugins));
+                execution_service_factory = ExecutionServiceFactory { schema: execution_service_factory.schema.clone(), plugins: plugins.clone(), subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone())) };
+            }
+            Some(new_schema) = schema_updated_rx.next() => {
+                if new_schema.raw_sdl != execution_service_factory.schema.raw_sdl {
+                    let _ = sender
+                        .send(
+                            Response::builder()
+                                .subscribed(false)
+                                .error(graphql::Error::builder().message("subscription has been closed due to a schema reload").extension_code("SUBSCRIPTION_SCHEMA_RELOAD").build())
+                                .build(),
+                        )
+                        .await;
+
+                    break;
                 }
             }
         }
@@ -667,6 +712,16 @@ impl HasSchema for SupergraphCreator {
     }
 }
 
+pub(crate) trait HasConfig {
+    fn config(&self) -> Arc<Configuration>;
+}
+
+impl HasConfig for SupergraphCreator {
+    fn config(&self) -> Arc<Configuration> {
+        Arc::clone(&self.configuration)
+    }
+}
+
 impl ServiceFactory<supergraph::Request> for SupergraphCreator {
     type Service = supergraph::BoxService;
     fn create(&self) -> Self::Service {
@@ -692,6 +747,7 @@ impl SupergraphCreator {
             })
             .schema(self.schema.clone())
             .configuration(self.configuration.clone())
+            .notify(self.configuration.notify.clone())
             .build();
 
         let shaping = self
@@ -1333,6 +1389,75 @@ mod tests {
             .await
             .unwrap();
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn subscription_callback_schema_reload() {
+        let mut notify = Notify::builder().build();
+        let (handle, _) = notify
+            .create_or_subscribe("TEST_TOPIC".to_string(), false)
+            .await
+            .unwrap();
+        let subgraphs = MockedSubgraphs([
+            ("user", MockSubgraph::builder().with_json(
+                    serde_json::json!{{"query":"subscription{userWasCreated{name activeOrganization{__typename id}}}"}},
+                    serde_json::json!{{"data": {"userWasCreated": { "__typename": "User", "id": "1", "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
+                ).with_subscription_stream(handle.clone()).build()),
+            ("orga", MockSubgraph::builder().with_json(
+                serde_json::json!{{
+                    "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{id name}}}}",
+                    "variables": {
+                        "representations":[{"__typename": "Organization", "id":"0"}]
+                    }
+                }},
+                serde_json::json!{{
+                    "data": {
+                        "_entities": [{ "suborga": [
+                        { "__typename": "Organization", "id": "1", "name": "A"},
+                        { "__typename": "Organization", "id": "2", "name": "B"},
+                        { "__typename": "Organization", "id": "3", "name": "C"},
+                        ] }]
+                    },
+                    }}
+            ).build())
+        ].into_iter().collect());
+
+        let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
+        configuration.notify = notify.clone();
+        let configuration = Arc::new(configuration);
+        let service = TestHarness::builder()
+            .configuration(configuration.clone())
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(
+                "subscription { userWasCreated { name activeOrganization { id  suborga { id name } } } }",
+            )
+            .context(subscription_context())
+            .build()
+            .unwrap();
+        let mut stream = service.oneshot(request).await.unwrap();
+        let res = stream.next_response().await.unwrap();
+        assert_eq!(&res.data, &Some(serde_json_bytes::Value::Null));
+        insta::assert_json_snapshot!(res);
+        notify.broadcast(graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": { "name": "test", "activeOrganization": { "__typename": "Organization", "id": "0" }}})).build()).await.unwrap();
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+
+        let new_schema = format!("{SCHEMA}  ");
+        // reload schema
+        let schema = Schema::parse(&new_schema, &configuration).unwrap();
+        notify.broadcast_schema(Arc::new(schema));
+        insta::assert_json_snapshot!(tokio::time::timeout(
+            Duration::from_secs(1),
+            stream.next_response()
+        )
+        .await
+        .unwrap()
+        .unwrap());
     }
 
     #[tokio::test]

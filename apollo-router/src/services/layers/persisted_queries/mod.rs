@@ -460,11 +460,10 @@ mod tests {
         assert!(incoming_request.supergraph_request.body().query.is_none());
 
         let result = pq_layer.supergraph_request(incoming_request);
-        if let Ok(request) = result {
-            assert_eq!(request.supergraph_request.body().query, Some(body));
-        } else {
-            panic!("pq layer returned response instead of putting the query on the request");
-        }
+        let request = result
+            .ok()
+            .expect("pq layer returned response instead of putting the query on the request");
+        assert_eq!(request.supergraph_request.body().query, Some(body));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -495,11 +494,10 @@ mod tests {
         assert!(incoming_request.supergraph_request.body().query.is_none());
 
         let result = pq_layer.supergraph_request(incoming_request);
-        if let Ok(request) = result {
-            assert!(request.supergraph_request.body().query.is_none());
-        } else {
-            panic!("pq layer returned response instead of continuing to APQ layer");
-        }
+        let request = result
+            .ok()
+            .expect("pq layer returned response instead of continuing to APQ layer");
+        assert!(request.supergraph_request.body().query.is_none());
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -530,19 +528,16 @@ mod tests {
 
         assert!(incoming_request.supergraph_request.body().query.is_none());
 
-        let result = pq_layer.supergraph_request(incoming_request);
-        if let Err(mut response) = result {
-            if let Some(response) = response.next_response().await {
-                assert_eq!(
-                    response.errors,
-                    vec![graphql_err_operation_not_found(invalid_id)]
-                );
-            } else {
-                panic!("could not get response from pq layer");
-            }
-        } else {
-            panic!("pq layer returned request instead of returning an error response");
-        }
+        let response = pq_layer
+            .supergraph_request(incoming_request)
+            .expect_err("pq layer returned request instead of returning an error response")
+            .next_response()
+            .await
+            .expect("could not get response from pq layer");
+        assert_eq!(
+            response.errors,
+            vec![graphql_err_operation_not_found(invalid_id)]
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -634,18 +629,15 @@ mod tests {
         assert!(incoming_request.supergraph_request.body().query.is_some());
 
         let result = pq_layer.supergraph_request(incoming_request);
-        if let Err(mut response) = result {
-            if let Some(response) = response.next_response().await {
-                assert_eq!(
-                    response.errors,
-                    vec![graphql_err_operation_not_in_safelist()]
-                );
-            } else {
-                panic!("could not get response from pq layer");
-            }
-        } else {
-            panic!("pq layer returned request instead of returning an error response");
-        }
+        let response = result
+            .expect_err("pq layer returned request instead of returning an error response")
+            .next_response()
+            .await
+            .expect("could not get response from pq layer");
+        assert_eq!(
+            response.errors,
+            vec![graphql_err_operation_not_in_safelist()]
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -683,18 +675,15 @@ mod tests {
         assert!(incoming_request.supergraph_request.body().query.is_none());
 
         let result = pq_layer.supergraph_request(incoming_request);
-        if let Err(mut response) = result {
-            if let Some(response) = response.next_response().await {
-                assert_eq!(
-                    response.errors,
-                    vec![graphql_err_operation_not_found(invalid_id)]
-                );
-            } else {
-                panic!("could not get response from pq layer");
-            }
-        } else {
-            panic!("pq layer returned request instead of returning an error response");
-        }
+        let response = result
+            .expect_err("pq layer returned request instead of returning an error response")
+            .next_response()
+            .await
+            .expect("could not get response from pq layer");
+        assert_eq!(
+            response.errors,
+            vec![graphql_err_operation_not_found(invalid_id)]
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -800,15 +789,12 @@ mod tests {
         assert!(incoming_request.supergraph_request.body().query.is_some());
 
         let result = pq_layer.supergraph_request(incoming_request);
-        if let Err(mut response) = result {
-            if let Some(response) = response.next_response().await {
-                assert_eq!(response.errors, vec![graphql_err_pq_id_required()]);
-            } else {
-                panic!("could not get response from pq layer");
-            }
-        } else {
-            panic!("pq layer returned request instead of returning an error response");
-        }
+        let response = result
+            .expect_err("pq layer returned request instead of returning an error response")
+            .next_response()
+            .await
+            .expect("could not get response from pq layer");
+        assert_eq!(response.errors, vec![graphql_err_pq_id_required()]);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -901,15 +887,12 @@ mod tests {
         assert!(incoming_request.supergraph_request.body().query.is_some());
 
         let result = pq_layer.supergraph_request(incoming_request);
-        if let Err(mut response) = result {
-            if let Some(response) = response.next_response().await {
-                assert_eq!(response.errors, vec![graphql_err_cannot_send_id_and_body()]);
-            } else {
-                panic!("could not get response from pq layer");
-            }
-        } else {
-            panic!("pq layer returned request instead of returning an error response");
-        }
+        let response = result
+            .expect_err("pq layer returned request instead of returning an error response")
+            .next_response()
+            .await
+            .expect("could not get response from pq layer");
+        assert_eq!(response.errors, vec![graphql_err_cannot_send_id_and_body()]);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -935,16 +918,13 @@ mod tests {
 
         assert!(incoming_request.supergraph_request.body().query.is_some());
 
-        let result = pq_layer.supergraph_request(incoming_request);
-        if let Err(mut response) = result {
-            if let Some(response) = response.next_response().await {
-                assert_eq!(response.errors, vec![graphql_err_cannot_send_id_and_body()]);
-            } else {
-                panic!("could not get response from pq layer");
-            }
-        } else {
-            panic!("pq layer returned request instead of returning an error response");
-        }
+        let response = pq_layer
+            .supergraph_request(incoming_request)
+            .expect_err("pq layer returned request instead of returning an error response")
+            .next_response()
+            .await
+            .expect("could not get response from pq layer");
+        assert_eq!(response.errors, vec![graphql_err_cannot_send_id_and_body()]);
     }
 
     #[tokio::test(flavor = "multi_thread")]
