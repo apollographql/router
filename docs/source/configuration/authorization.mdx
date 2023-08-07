@@ -17,7 +17,7 @@ The Apollo Router lets you **control access to specific fields and types across 
 You define and use these directives on subgraph schemas, and GraphOS [composes](#composition-and-federation) them on to the supergraph schema.
 The router then enforces these directives on all incoming requests.
 
-## Prequisites
+## Prerequisites
 
 To use the router's authorization directives, you need to either configure [JWT authentication](./authn-jwt) or add a [router service coprocessor](../customizations/coprocessor) that adds **claims** to a request's context.
 **Claims** are the individual details of a request's scope. They might include details like the ID of the associated user and/or any scopes assigned to that user.
