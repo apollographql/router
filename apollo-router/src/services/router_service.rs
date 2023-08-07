@@ -451,7 +451,7 @@ fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
-    supergraph_creator: Arc<SupergraphCreator>,
+    pub(crate) supergraph_creator: Arc<SupergraphCreator>,
     static_page: StaticPageLayer,
     apq_layer: APQLayer,
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,

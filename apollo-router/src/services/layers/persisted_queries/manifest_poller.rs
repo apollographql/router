@@ -92,16 +92,18 @@ impl PersistedQueryManifestPoller {
     }
 
     pub(crate) fn get_operation_body(&self, persisted_query_id: &str) -> Option<String> {
-        let persisted_query_manifest = self.persisted_query_manifest.read().unwrap_or_else(|e| {
-            panic!("could not acquire read lock on persisted query manifest: {e}")
-        });
+        let persisted_query_manifest = self
+            .persisted_query_manifest
+            .read()
+            .expect("could not acquire read lock on persisted query manifest");
         persisted_query_manifest.get(persisted_query_id).cloned()
     }
 
     pub(crate) fn is_operation_persisted(&self, query: &str) -> bool {
-        let persisted_query_bodies = self.persisted_query_bodies.read().unwrap_or_else(|e| {
-            panic!("could not acquire read lock on persisted query body se: {e}")
-        });
+        let persisted_query_bodies = self
+            .persisted_query_bodies
+            .read()
+            .expect("could not acquire read lock on persisted query body set");
         persisted_query_bodies.contains(query)
     }
 }
@@ -169,15 +171,9 @@ async fn poll_uplink(
                                 // update the set of pq bodies from the values in the new collection
                                 *existing_bodies = new_bodies;
                             })
-                            .unwrap_or_else(|e| {
-                                panic!(
-                                    "could not acquire write lock on persisted query body set: {e}"
-                                )
-                            });
+                            .expect("could not acquire write lock on persisted query body set");
                     })
-                    .unwrap_or_else(|e| {
-                        panic!("could not acquire write lock on persisted query manifest: {e}")
-                    });
+                    .expect("could not acquire write lock on persisted query manifest");
 
                 if !resolved_first_pq_manifest {
                     send_startup_event(
