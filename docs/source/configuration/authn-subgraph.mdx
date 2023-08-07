@@ -5,13 +5,15 @@ minVersion: 1.27.0
 
 The Apollo Router supports subgraph request authentication and key rotation via [AWS Signature Version 4](https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html) (SigV4).
 
+This allows you to secure communication to AWS subgraphs by making sure a subgraph request was made by the Apollo Router, and the payload hasn't been tampered with.
+
 **To use this feature:**
 
 To use this feature, your AWS hosted subgraphs must be configured with IAM to accept [signed requests](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_aws-signing.html).
 
 ## How it works
 
-Subgraph requests are signed using [HTTP Authorization headers](https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-auth-using-authorization-header.html)
+Subgraph requests are signed using [HTTP Authorization headers](https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-auth-using-authorization-header.html), refer to the upstream documentation for more details.
 
 ### Configuration example
 
