@@ -622,7 +622,7 @@ impl Executable {
         let apollo_router_log = std::env::var("APOLLO_ROUTER_LOG").unwrap_or_default();
         if user_plugins_present
             && !rust_log_set
-            && ["", "off", "trace", "debug", "warn", "info"].contains(&apollo_router_log.as_str())
+            && ["trace", "debug", "warn", "error", "info"].contains(&apollo_router_log.as_str())
         {
             tracing::info!("Custom plugins are present. To see log messages from your plugins you must configure `RUST_LOG` or `APOLLO_ROUTER_LOG` environment variables. See the Router logging documentation for more details");
         }
