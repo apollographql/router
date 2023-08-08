@@ -38,7 +38,7 @@ impl Metrics {
                 yaml,
                 metrics: HashMap::new(),
             };
-            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
@@ -106,6 +106,14 @@ impl Metrics {
         // The reason we use jsonpath_rust is that jsonpath_lib has correctness issues and looks abandoned.
         // We should consider converting the rest of the codebase to use jsonpath_rust.
         // The only issue is that jsonpath_rust's API takes ownership of the json Value. It has lower level APIs that don't but for some reason they don't get exposed.
+
+        // Example usage:
+        // log_usage_metrics!(
+        //             value.apollo.router.config.authorization, // The metric name
+        //             "$.authorization", // The path into the config
+        //             opt.require_authentication, // The name of the attribute
+        //             "$[?(@.require_authentication == true)]" // The path for the attribute relative to the metric
+        //         );
 
         macro_rules! log_usage_metrics {
             ($($metric:ident).+, $path:literal) => {
