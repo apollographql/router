@@ -264,12 +264,6 @@ The response would include errors at the `/users/@/email` path since that field 
 
 If the request includes the `read:others read:emails` scope set, then the router can successfully execute the entire query.
 
-<ExpansionPanel title="Want to see more examples?">
-
-Check out the [authorization demo](https://apollo-router-auth-demo.fly.dev/graphql)!
-
-</ExpansionPanel>
-
 ## Composition and federation
 
 Authorization directives are defined at the subgraph level and the GraphOS composes them in the supergraph schema. In other words, if subgraph fields or types include either `@authenticated` or `@requiresScopes` directives, they are set on the supergraph too.
@@ -416,12 +410,6 @@ query {
 ```
 
 The response would include an `"UNAUTHORIZED_FIELD_OR_TYPE"` error at the `/posts/@/allowedViewers` path.
-
-<ExpansionPanel title="Want to see more examples?">
-
-Check out the [authorization demo](https://apollo-router-auth-demo.fly.dev/graphql)!
-
-</ExpansionPanel>
 
 ## Introspection
 
