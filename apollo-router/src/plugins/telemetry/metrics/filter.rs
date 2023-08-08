@@ -50,6 +50,10 @@ impl<T: MeterProvider> FilterMeterProvider<T> {
                 Regex::new(r"apollo\.router\.(operations?|config)(\..*|$)")
                     .expect("regex should have been valid"),
             )
+            .allow(
+                Regex::new(r"apollo\.router\.operations\.authentication")
+                    .expect("regex should have been valid"),
+            )
             .build()
     }
 }
@@ -69,8 +73,11 @@ macro_rules! filter_meter_fn {
             unit: Option<Unit>,
         ) -> opentelemetry::metrics::Result<$wrapper<$ty>> {
             let mut builder = match (&self.deny, &self.allow) {
-                (Some(deny), _) if deny.is_match(&name) => self.noop.$name(name),
-                (_, Some(allow)) if !allow.is_match(&name) => self.noop.$name(name),
+                (Some(deny), Some(allow)) if deny.is_match(&name) && !allow.is_match(&name) => {
+                    self.noop.$name(name)
+                }
+                (Some(deny), None) if deny.is_match(&name) => self.noop.$name(name),
+                (None, Some(allow)) if !allow.is_match(&name) => self.noop.$name(name),
                 (_, _) => self.delegate.$name(name),
             };
             if let Some(description) = &description {
@@ -246,6 +253,9 @@ mod test {
         filtered.u64_counter("apollo.router.operation").init();
         filtered.u64_counter("apollo.router.operations.test").init();
         filtered.u64_counter("apollo.router.unknown.test").init();
+        filtered
+            .u64_counter("apollo.router.operations.authentication.aws.sigv4")
+            .init();
         assert!(!delegate
             .instrument_provider
             .counters_created
@@ -270,6 +280,16 @@ mod test {
             .lock()
             .unwrap()
             .contains(&("apollo.router.unknown.test".to_string(), None, None)));
+        assert!(delegate
+            .instrument_provider
+            .counters_created
+            .lock()
+            .unwrap()
+            .contains(&(
+                "apollo.router.operations.authentication.aws.sigv4".to_string(),
+                None,
+                None
+            )));
     }
 
     #[test]
