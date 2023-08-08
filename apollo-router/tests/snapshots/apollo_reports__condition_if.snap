@@ -11,7 +11,7 @@ header:
   uname: "[uname]"
   executable_schema_id: "[executable_schema_id]"
 traces_per_query:
-  "# -\nquery($if:Boolean!){topProducts{name...@defer(if:$if){reviews{author{name}}reviews{author{name}}}}}":
+  "# -\nquery($if:Boolean!){topProducts{name...@defer(if:$if,label:\"\"){reviews{author{name}}reviews{author{name}}}}}":
     trace:
       - start_time:
           seconds: "[seconds]"
@@ -31,9 +31,8 @@ traces_per_query:
           operation_name: ""
         client_name: ""
         client_version: ""
-        operation_type: ""
+        operation_type: query
         operation_subtype: ""
-        agent_version: "[agent_version]"
         http:
           method: 4
           request_headers: {}
@@ -181,7 +180,6 @@ traces_per_query:
                               client_version: ""
                               operation_type: ""
                               operation_subtype: ""
-                              agent_version: "[agent_version]"
                               http: ~
                               cache_policy: ~
                               query_plan: ~
@@ -202,7 +200,7 @@ traces_per_query:
                       - depends:
                           - id: "0"
                             defer_label: ""
-                        label: ""
+                        label: "0"
                         path:
                           - id:
                               FieldName: topProducts
@@ -437,7 +435,6 @@ traces_per_query:
                                               client_version: ""
                                               operation_type: ""
                                               operation_subtype: ""
-                                              agent_version: "[agent_version]"
                                               http: ~
                                               cache_policy: ~
                                               query_plan: ~
@@ -545,7 +542,6 @@ traces_per_query:
                                               client_version: ""
                                               operation_type: ""
                                               operation_subtype: ""
-                                              agent_version: "[agent_version]"
                                               http: ~
                                               cache_policy: ~
                                               query_plan: ~

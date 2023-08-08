@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 //! Plugin system for the router.
 //!
 //! Provides a customization mechanism for the router.
@@ -39,7 +37,9 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 
+use crate::graphql;
 use crate::layers::ServiceBuilderExt;
+use crate::notification::Notify;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
@@ -47,8 +47,11 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::ListenAddr;
 
-type InstanceFactory =
-    fn(&serde_json::Value, Arc<String>) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
+type InstanceFactory = fn(
+    &serde_json::Value,
+    Arc<String>,
+    Notify<String, graphql::Response>,
+) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
 
@@ -63,33 +66,102 @@ pub struct PluginInit<T> {
     pub config: T,
     /// Router Supergraph Schema (schema definition language)
     pub supergraph_sdl: Arc<String>,
+
+    pub(crate) notify: Notify<String, graphql::Response>,
 }
 
 impl<T> PluginInit<T>
 where
     T: for<'de> Deserialize<'de>,
 {
+    #[deprecated = "use PluginInit::builder() instead"]
     /// Create a new PluginInit for the supplied config and SDL.
     pub fn new(config: T, supergraph_sdl: Arc<String>) -> Self {
-        PluginInit {
-            config,
-            supergraph_sdl,
-        }
+        Self::builder()
+            .config(config)
+            .supergraph_sdl(supergraph_sdl)
+            .notify(Notify::builder().build())
+            .build()
     }
 
     /// Try to create a new PluginInit for the supplied JSON and SDL.
     ///
     /// This will fail if the supplied JSON cannot be deserialized into the configuration
     /// struct.
+    #[deprecated = "use PluginInit::try_builder() instead"]
     pub fn try_new(
         config: serde_json::Value,
         supergraph_sdl: Arc<String>,
+    ) -> Result<Self, BoxError> {
+        Self::try_builder()
+            .config(config)
+            .supergraph_sdl(supergraph_sdl)
+            .notify(Notify::builder().build())
+            .build()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fake_new(config: T, supergraph_sdl: Arc<String>) -> Self {
+        PluginInit {
+            config,
+            supergraph_sdl,
+            notify: Notify::for_tests(),
+        }
+    }
+}
+
+#[buildstructor::buildstructor]
+impl<T> PluginInit<T>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    /// Create a new PluginInit builder
+    #[builder(entry = "builder", exit = "build", visibility = "pub")]
+    /// Build a new PluginInit for the supplied configuration and SDL.
+    ///
+    /// You can reuse a notify instance, or Build your own.
+    pub(crate) fn new_builder(
+        config: T,
+        supergraph_sdl: Arc<String>,
+        notify: Notify<String, graphql::Response>,
+    ) -> Self {
+        PluginInit {
+            config,
+            supergraph_sdl,
+            notify,
+        }
+    }
+
+    #[builder(entry = "try_builder", exit = "build", visibility = "pub")]
+    /// Try to build a new PluginInit for the supplied json configuration and SDL.
+    ///
+    /// You can reuse a notify instance, or Build your own.
+    /// invoking build() will fail if the JSON doesn't comply with the configuration format.
+    pub(crate) fn try_new_builder(
+        config: serde_json::Value,
+        supergraph_sdl: Arc<String>,
+        notify: Notify<String, graphql::Response>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
         Ok(PluginInit {
             config,
             supergraph_sdl,
+            notify,
         })
+    }
+
+    /// Create a new PluginInit builder
+    #[builder(entry = "fake_builder", exit = "build", visibility = "pub")]
+    fn fake_new_builder(
+        config: T,
+        supergraph_sdl: Option<Arc<String>>,
+        notify: Option<Notify<String, graphql::Response>>,
+    ) -> Self {
+        PluginInit {
+            config,
+            supergraph_sdl: supergraph_sdl.unwrap_or_default(),
+            notify: notify.unwrap_or_else(Notify::for_tests),
+        }
     }
 }
 
@@ -112,6 +184,9 @@ impl fmt::Debug for PluginFactory {
 }
 
 impl PluginFactory {
+    pub(crate) fn is_apollo(&self) -> bool {
+        self.name.starts_with("apollo.") || self.name.starts_with("experimental.")
+    }
     /// Create a plugin factory.
     pub fn new<P: Plugin>(group: &str, name: &str) -> PluginFactory {
         let plugin_factory_name = if group.is_empty() {
@@ -122,9 +197,13 @@ impl PluginFactory {
         tracing::debug!(%plugin_factory_name, "creating plugin factory");
         PluginFactory {
             name: plugin_factory_name,
-            instance_factory: |configuration, schema| {
+            instance_factory: |configuration, schema, notify| {
                 Box::pin(async move {
-                    let init = PluginInit::try_new(configuration.clone(), schema)?;
+                    let init = PluginInit::try_builder()
+                        .config(configuration.clone())
+                        .supergraph_sdl(schema)
+                        .notify(notify)
+                        .build()?;
                     let plugin = P::new(init).await?;
                     Ok(Box::new(plugin) as Box<dyn DynPlugin>)
                 })
@@ -138,8 +217,9 @@ impl PluginFactory {
         &self,
         configuration: &serde_json::Value,
         supergraph_sdl: Arc<String>,
+        notify: Notify<String, graphql::Response>,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(configuration, supergraph_sdl).await
+        (self.instance_factory)(configuration, supergraph_sdl, notify).await
     }
 
     #[cfg(test)]
@@ -147,7 +227,7 @@ impl PluginFactory {
         &self,
         configuration: &serde_json::Value,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(configuration, Default::default()).await
+        (self.instance_factory)(configuration, Default::default(), Default::default()).await
     }
 
     pub(crate) fn create_schema(&self, gen: &mut SchemaGenerator) -> schemars::schema::Schema {

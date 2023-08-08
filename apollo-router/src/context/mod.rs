@@ -21,6 +21,9 @@ use crate::json_ext::Value;
 
 pub(crate) mod extensions;
 
+/// The key of the resolved operation name. This is subject to change and should not be relied on.
+pub(crate) const OPERATION_NAME: &str = "operation_name";
+
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
 
@@ -143,7 +146,7 @@ impl Context {
     ///    value updated).
     ///  - If the operation succeeds, the pair have either updated an existing value
     ///    or been inserted.
-    pub fn upsert<K, V>(&self, key: K, upsert: impl Fn(V) -> V) -> Result<(), BoxError>
+    pub fn upsert<K, V>(&self, key: K, upsert: impl FnOnce(V) -> V) -> Result<(), BoxError>
     where
         K: Into<String>,
         V: for<'de> serde::Deserialize<'de> + Serialize + Default,
@@ -176,13 +179,22 @@ impl Context {
     /// The resolving function must yield a value to be used in the context. It
     /// is provided with the current value to use in evaluating which value to
     /// yield.
-    pub(crate) fn upsert_json_value<K>(&self, key: K, upsert: impl Fn(Value) -> Value)
+    pub(crate) fn upsert_json_value<K>(&self, key: K, upsert: impl FnOnce(Value) -> Value)
     where
         K: Into<String>,
     {
         let key = key.into();
         self.entries.entry(key.clone()).or_insert(Value::Null);
         self.entries.alter(&key, |_, v| upsert(v));
+    }
+
+    /// Convert the context into an iterator.
+    pub(crate) fn try_into_iter(
+        self,
+    ) -> Result<impl IntoIterator<Item = (String, Value)>, BoxError> {
+        Ok(Arc::try_unwrap(self.entries)
+            .map_err(|_e| anyhow::anyhow!("cannot take ownership of dashmap"))?
+            .into_iter())
     }
 
     /// Iterate over the entries.
@@ -196,18 +208,32 @@ impl Context {
     }
 
     /// Notify the busy timer that we're waiting on a network request
-    pub(crate) fn enter_active_request(&self) {
-        self.busy_timer.lock().increment_active_requests()
-    }
-
-    /// Notify the busy timer that we stopped waiting on a network request
-    pub(crate) fn leave_active_request(&self) {
-        self.busy_timer.lock().decrement_active_requests()
+    pub(crate) fn enter_active_request(&self) -> BusyTimerGuard {
+        self.busy_timer.lock().increment_active_requests();
+        BusyTimerGuard {
+            busy_timer: self.busy_timer.clone(),
+        }
     }
 
     /// How much time was spent working on the request
     pub(crate) fn busy_time(&self) -> Duration {
         self.busy_timer.lock().current()
+    }
+
+    pub(crate) fn extend(&self, other: &Context) {
+        for kv in other.entries.iter() {
+            self.entries.insert(kv.key().clone(), kv.value().clone());
+        }
+    }
+}
+
+pub(crate) struct BusyTimerGuard {
+    busy_timer: Arc<Mutex<BusyTimer>>,
+}
+
+impl Drop for BusyTimerGuard {
+    fn drop(&mut self) {
+        self.busy_timer.lock().decrement_active_requests()
     }
 }
 

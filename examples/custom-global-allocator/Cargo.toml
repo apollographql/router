@@ -1,0 +1,19 @@
+[workspace]
+# Make this a separate workspace.
+#
+# If this package was in the same workspace as other examples
+# which don’t specify `default-features = false`, then apollo-router
+# would be compiled with its default global-allocator feature
+# and compilation of this example would fail.
+#
+# To manually test this example:
+# cargo run --manifest-path examples/custom-global-allocator/Cargo.toml -- --help
+
+[package]
+name = "custom-global-allocator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# The apollo-router/global-allocator feature is enabled by default, disable it here
+apollo-router = {path = "../../apollo-router", default-features = false}

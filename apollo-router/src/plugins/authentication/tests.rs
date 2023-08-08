@@ -65,38 +65,43 @@ async fn build_a_test_harness(
     let mut config = if multiple_jwks {
         serde_json::json!({
             "authentication": {
-                "jwt" : {
-                    "jwks": [
-                        {
-                            "url": &jwks_url
-                        },
-                        {
-                            "url": &jwks_url
-                        }
-                    ]
+                "router": {
+                    "jwt": {
+                        "jwks": [
+                            {
+                                "url": &jwks_url
+                            },
+                            {
+                                "url": &jwks_url
+                            }
+                        ]
+                    }
                 }
             }
         })
     } else {
         serde_json::json!({
             "authentication": {
-                "jwt" : {
-                    "jwks": [
-                        {
-                            "url": &jwks_url
-                        }
-                    ]
+                "router": {
+                    "jwt" : {
+                        "jwks": [
+                            {
+                                "url": &jwks_url
+                            }
+                        ]
+                    }
                 }
             }
         })
     };
 
     if let Some(hn) = header_name {
-        config["authentication"]["jwt"]["header_name"] = serde_json::Value::String(hn);
+        config["authentication"]["router"]["jwt"]["header_name"] = serde_json::Value::String(hn);
     }
 
     if let Some(hp) = header_value_prefix {
-        config["authentication"]["jwt"]["header_value_prefix"] = serde_json::Value::String(hp);
+        config["authentication"]["router"]["jwt"]["header_value_prefix"] =
+            serde_json::Value::String(hp);
     }
 
     crate::TestHarness::builder()
@@ -126,12 +131,14 @@ async fn it_rejects_when_there_is_no_auth_header() {
 
     let config = serde_json::json!({
         "authentication": {
-            "jwt" : {
-                "jwks": [
-                    {
-                        "url": &jwks_url
-                    }
-                ]
+            "router": {
+                "jwt" : {
+                    "jwks": [
+                        {
+                            "url": &jwks_url
+                        }
+                    ]
+                }
             }
         },
         "rhai": {
@@ -529,6 +536,45 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_pre
 }
 
 #[tokio::test]
+async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
+    let test_harness = build_a_test_harness(None, Some("".to_string()), false).await;
+
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+            .operation_name("me".to_string())
+            .header(
+                http::header::AUTHORIZATION,
+                "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
+            )
+            .build()
+            .unwrap();
+
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
+        .unwrap();
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    assert_eq!(response.errors, vec![]);
+
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    let expected_mock_response_data = "response created within the mock";
+    // with the expected message
+    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+}
+
+#[tokio::test]
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_whitespace() {
     let _test_harness = build_a_test_harness(None, Some("SOMET HING".to_string()), false).await;
@@ -570,8 +616,9 @@ async fn it_finds_key_with_criteria_kid_and_algorithm() {
     };
 
     let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
-        .expect("found a key");
+        .expect("found a key")
+        .pop()
+        .expect("list isn't empty");
     assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
     assert_eq!("key2", key.common.key_id.unwrap());
 }
@@ -586,8 +633,9 @@ async fn it_finds_best_matching_key_with_criteria_algorithm() {
     };
 
     let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
-        .expect("found a key");
+        .expect("found a key")
+        .pop()
+        .expect("list isn't empty");
     assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
     assert_eq!("key1", key.common.key_id.unwrap());
 }
@@ -601,9 +649,7 @@ async fn it_fails_to_find_key_with_criteria_algorithm_not_in_set() {
         alg: Algorithm::RS512,
     };
 
-    assert!(search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
-        .is_none());
+    assert!(search_jwks(&jwks_manager, &criteria).is_none());
 }
 
 #[tokio::test]
@@ -616,8 +662,9 @@ async fn it_finds_key_with_criteria_algorithm_ec() {
     };
 
     let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
-        .expect("found a key");
+        .expect("found a key")
+        .pop()
+        .expect("list isn't empty");
     assert_eq!(Algorithm::ES256, key.common.algorithm.unwrap());
     assert_eq!(
         "afda85e09a320cf748177874592de64d",
@@ -635,8 +682,9 @@ async fn it_finds_key_with_criteria_algorithm_rsa() {
     };
 
     let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
-        .expect("found a key");
+        .expect("found a key")
+        .pop()
+        .expect("list isn't empty");
     assert_eq!(Algorithm::RS256, key.common.algorithm.unwrap());
     assert_eq!(
         "022516583d56b68faf40260fda72978a",
@@ -872,7 +920,5 @@ async fn it_rejects_key_with_restricted_algorithm() {
         alg: Algorithm::HS256,
     };
 
-    assert!(search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
-        .is_none());
+    assert!(search_jwks(&jwks_manager, &criteria).is_none());
 }
