@@ -1,6 +1,7 @@
 authentication:
-  jwt:
-    jwks:
-      - url: https://example.com
-        refresh_interval: 1h
+  router:
+    jwt:
+      jwks:
+        - url: https://example.com
+          refresh_interval: 1h
 
