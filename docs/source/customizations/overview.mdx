@@ -55,7 +55,7 @@ client -->|request| router -->|request| infra
 infra -->|response| router -->|response| client
 ```
 
-Each service can have a set of plugins. For requests, the router executes plugins before the service.
+Each service can have a set of plugins. For requests, the router executes plugins _before_ the service.
 
 ```mermaid
 flowchart LR
@@ -68,7 +68,7 @@ Client -->|request| Plugin1
 coreService -->|request| NextService["Next service"]
 ```
 
-For responses, the router executes the plugins after the service.
+For responses, the router executes the plugins _after_ the service.
 
 ```mermaid
 flowchart RL
@@ -85,7 +85,6 @@ Each request and response object contains a `Context` object, which is carried t
 The following flowcharts diagram the entire request lifecycle.
 The first details the path of a request from a client, through the parts of the Apollo Router, all the way to your subgraphs.
 The second details the path of a response from your subgraphs back to the client.
-Continue reading for details on what occurs in each service.
 
 ### Request path
 
@@ -138,7 +137,7 @@ service2 --"8b. HTTP request"--> subgraphB;
 
 1. The router receives a client request at an HTTP server. 
 2. The HTTP server transforms the HTTP request into a `RouterRequest` containing HTTP headers and the request body as a stream of byte arrays.
-3. The router service receives the `RouterRequest`. It handles Automatic Persisted Queries (APQ), parses the GraphQL request from JSON and calls the supergraph service with the resulting `SupergraphRequest`.
+3. The router service receives the `RouterRequest`. It handles Automatic Persisted Queries (APQ), parses the GraphQL request from JSON, and calls the supergraph service with the resulting `SupergraphRequest`.
 4. The supergraph service calls the query planner with the GraphQL query from the `SupergraphRequest`.
 5. The query planner returns a query plan for most efficiently executing the query.
 6. The supergraph service calls the execution service with an `ExecutionRequest`, made up of `SupergraphRequest` and the query plan.
@@ -202,3 +201,7 @@ httpServer --"14. HTTP response" --> client
 12. The `SupergraphResponse` has the same content as the `ExecutionResponse`. It contains headers and a stream of GraphQL responses. That stream only contains one element for most queries—it can contain more if the query uses the `@defer` directive or subscriptions.
 13. The router service receives the `SupergraphResponse` and serializes the GraphQL responses to JSON.
 14. The HTTP server sends the JSON in an HTTP response to the client.
+
+## Next steps
+
+To learn how to hook in to the various lifecycle stages, including examples customizations, refer to the [Rhai scripts](./rhai/) and [external coprocessing](./coprocessor/) docs.
