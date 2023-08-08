@@ -4,9 +4,13 @@ description: Strengthen your supergraph's security with advanced access controls
 minVersion: 1.27.0
 ---
 
-> ⚠️ **This is an [Enterprise feature](../enterprise-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
->
-> If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](/graphos/org/plans/#enterprise-trials).
+<blockquote>
+
+**This feature is available only with a [GraphOS Enterprise plan](/graphos/enterprise/).** It is currently in [preview](/resources/product-launch-stages#preview).
+
+If your organization _doesn't_ currently have an Enterprise plan, you can test this functionality by signing up for a free [Enterprise trial](/graphos/org/plans/#enterprise-trials).
+
+</blockquote>
 
 APIs provide access to business-critical data. Unrestricted access can result in data breaches, monetary losses, or potential denial of service. Even for internal APIs, checks can be essential to limit data to authorized parties.
 
@@ -23,13 +27,13 @@ The router then enforces these directives on all incoming requests.
 ## Prerequisites
 
 To use the router's authorization directives, you need to either configure [JWT authentication](./authn-jwt) or add a [router service coprocessor](../customizations/coprocessor) that adds **claims** to a request's context.
-**Claims** are the individual details of a request's scope. They might include details like the ID of the associated user and/or any scopes assigned to that user.
+Claims are the individual details of a request's authentication and scope. They might include details like the ID of the associated user and/or any scopes assigned to that user.
 
 ### JWT authentication configuration
 
 If you configure [JWT authentication](./authn-jwt), the Apollo Router automatically adds a JWT token's claims to the request's context at the `apollo_authentication::JWT::claims` key.
 
-To-do: Recipe for JWT auth with these directives
+To-do: More information on how to use JWT auth with these directives
 
 ### Coprocessors for authorization
 
@@ -186,7 +190,8 @@ claims["scope"] = "scope1 scope2 scope3"
 
 Depending on the scopes present on the request, the router filters out unauthorized fields and types.
 If a field's required `scopes` array includes multiple scopes, the request must include _all_ required scopes to resolve it.
-If every field on a particular subgraph query requires scopes that aren't present, this can eliminate entire subgraph requests.
+
+Like the efficiencies gained via the `@authenticated` directive, if every field on a particular subgraph query requires scopes that aren't present, this can eliminate entire subgraph requests.
 
 #### Prerequisites
 
@@ -202,7 +207,6 @@ extend schema
 #### Example `@requiresScopes` use case
 
 Imagine your social media platform lets users view other users' information only if they have the required permissions.
-
 Your schema may look something like this:
 
 ```graphql title=""
@@ -258,11 +262,11 @@ query {
 
 The response would include errors at the `/users/@/email` path since that field requires the `read:emails` scope.
 
-If the request includes the `read:others read:emails` scope set, then the router could successfully execute the entire query.
+If the request includes the `read:others read:emails` scope set, then the router can successfully execute the entire query.
 
 <ExpansionPanel title="Want to see more examples?">
 
-Take the [authorization demo](https://apollo-router-auth-demo.fly.dev/graphql) for a whirl!
+Check out the [authorization demo](https://apollo-router-auth-demo.fly.dev/graphql)!
 
 </ExpansionPanel>
 
@@ -278,7 +282,7 @@ type Query {
 }
 ```
 
-And another subgraph requires the read:profiles` scope on `users` query:
+And another subgraph requires the `read:profiles` scope on `users` query:
 
 ```graphql title="Subgraph B"
 type Query {
@@ -358,7 +362,7 @@ For example, consider this schema where the `Post` interface doesn't require aut
 
 ```graphql
 type Query {
-  post(id: ID!): Post
+  posts: [Post!]!
 }
 
 type User {
@@ -368,13 +372,6 @@ type User {
 }
 
 interface Post {
-  id: ID!
-  author: User!
-  title: String!
-  content: String!
-}
-
-type PublicBlog implements Post {
   id: ID!
   author: User!
   title: String!
@@ -422,7 +419,7 @@ The response would include an `"UNAUTHORIZED_FIELD_OR_TYPE"` error at the `/post
 
 <ExpansionPanel title="Want to see more examples?">
 
-Take the [authorization demo](https://apollo-router-auth-demo.fly.dev/graphql) for a whirl!
+Check out the [authorization demo](https://apollo-router-auth-demo.fly.dev/graphql)!
 
 </ExpansionPanel>
 
