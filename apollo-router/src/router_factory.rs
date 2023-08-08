@@ -201,8 +201,6 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         let query_parsing_layer =
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
 
-        let mut persisted_query_manifest_poller = None;
-
         if let Some(previous_router) = previous_router {
             if configuration.supergraph.query_planning.warmed_up_queries > 0 {
                 let cache_keys = previous_router
@@ -220,20 +218,12 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                         .await;
                 }
             }
-
-            // capture the manifest poller for persisted queries and pass it on to the new router
-            // so it can keep running without needing to re-fetch every single operation on reload.
-            persisted_query_manifest_poller = previous_router
-                .persisted_query_layer
-                .manifest_poller
-                .clone();
         };
 
         Ok(Self::RouterFactory::new(
             query_parsing_layer,
             Arc::new(supergraph_creator),
             configuration,
-            persisted_query_manifest_poller,
         )
         .await?)
     }

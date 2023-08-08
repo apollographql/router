@@ -1689,7 +1689,7 @@ expression: "&schema"
           "type": "object",
           "properties": {
             "enabled": {
-              "description": "Enables using the peristed query list as a safelist (disabled by default)",
+              "description": "Enables using the persisted query list as a safelist (disabled by default)",
               "default": false,
               "type": "boolean"
             },
