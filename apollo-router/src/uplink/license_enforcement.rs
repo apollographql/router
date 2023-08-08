@@ -131,7 +131,7 @@ impl LicenseEnforcementReport {
                 .name("Restricted")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.authentication")
+                .path("$.authentication.router")
                 .name("Authentication plugin")
                 .build(),
             ConfigurationRestriction::builder()
