@@ -594,6 +594,7 @@ impl Telemetry {
         builder = setup_tracing(builder, &tracing_config.jaeger, trace_config)?;
         builder = setup_tracing(builder, &tracing_config.zipkin, trace_config)?;
         builder = setup_tracing(builder, &tracing_config.datadog, trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.stackdriver, trace_config)?;
         builder = setup_tracing(builder, &tracing_config.otlp, trace_config)?;
         builder = setup_tracing(builder, &config.apollo, trace_config)?;
         // For metrics
