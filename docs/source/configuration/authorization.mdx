@@ -8,7 +8,10 @@ minVersion: 1.27.0
 >
 > If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](/graphos/org/plans/#enterprise-trials).
 
-Whether your graph is small or large, you may need to restrict sensitive information to authenticated users or enforce conditional access rules. It's more efficient to do this on the supergraph level, rather than in your underlying services.
+APIs provide access to business-critical data. Unrestricted access can result in data breaches, monetary losses, or potential denial of service. Even for internal APIs, checks are essential to limit data to authorized parties.
+
+Enforcing authorization before processing requests is more efficient and secure because it allows for early request termination and creates an initial checkpoint that can be reinforced in other service layers.
+
 The Apollo Router lets you **control access to specific fields and types across your supergraph** through the `@authenticated` and `@requiresScopes` directives:
 
 - The `@authenticated` directive works in a binary way: authenticated requests can access the specified field or type and unauthenticated requests can't.
