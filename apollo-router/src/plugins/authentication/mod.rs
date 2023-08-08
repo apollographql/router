@@ -406,7 +406,6 @@ fn authenticate(
         tracing::info!(
             monotonic_counter
                 .apollo
-                .apollo
                 .router
                 .operations
                 .authentication
@@ -562,7 +561,7 @@ fn authenticate(
             monotonic_counter.apollo_authentication_success_count = 1u64,
             kind = %AUTHENTICATION_KIND
         );
-        tracing::info!(monotonic_counter.apollo.apollo.router.operations.jwt = 1);
+        tracing::info!(monotonic_counter.apollo.router.operations.jwt = 1);
         return Ok(ControlFlow::Continue(request));
     }
 
