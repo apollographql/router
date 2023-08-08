@@ -61,7 +61,7 @@ impl MetricsConfigurator for Config {
                     schema_id,
                     batch_processor,
                 )?;
-                // env variable EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED will disapper without warning in future
+                // env variable EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED will disappear without warning in future
                 if let Some("true") = std::env::var("EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED")
                     .ok()
                     .as_deref()
