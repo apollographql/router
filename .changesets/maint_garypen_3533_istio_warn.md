@@ -1,6 +1,6 @@
 ### Add a warning if we think istio-proxy injection is causing problems ([Issue #3533](https://github.com/apollographql/router/issues/3533))
 
-We have encountered situations where the injection of istio-proxy in a router pod (executing in kubernetes) causes strange networking errors during uplink retrieval.
+We have encountered situations where the injection of istio-proxy in a router pod (executing in Kubernetes) causes networking errors during uplink retrieval.
 
 The root cause of the issue is that the router is executing and attempting to retrieve uplink schemas whilst the istio-proxy is modifying network configuration at the same time.
 
