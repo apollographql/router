@@ -4,6 +4,6 @@ We have encountered situations where the injection of istio-proxy in a router po
 
 The root cause is that the router is executing and attempting to retrieve uplink schemas while the istio-proxy is simultaneously modifying network configuration.
 
-This new warning message will direct users to information which should help them to configure their kubernetes cluster or pod to avoid this problem.
+This new warning message directs users to information which should help them to configure their Kubernetes cluster or pod to avoid this problem.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3545
