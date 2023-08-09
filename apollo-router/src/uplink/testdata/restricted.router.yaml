@@ -4,9 +4,10 @@ homepage:
   enabled: true
 
 authentication:
-  jwt:
-    jwks:
-      - url: https://example.com
+  router:
+    jwt:
+      jwks:
+        - url: https://example.com
 
 coprocessor:
   url: https://example.com
