@@ -106,12 +106,12 @@ impl HttpServerHandle {
             tracing::error!("Failed to notify http thread of shutdown")
         };
         let _listener = self.main_future.await?;
-        // FOR TESTING IDEA PRETEND IT TAKES A LONG TIME TO SHUT DOWN MAIN
-        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+
         if let Err(_err) = self.extra_shutdown_sender.send(()) {
             tracing::error!("Failed to notify http thread of shutdown")
         };
         let _listener = self.extra_futures.await?;
+
         #[cfg(unix)]
         // listen_addresses includes the main graphql_address
         for listen_address in self.listen_addresses {
