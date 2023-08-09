@@ -267,7 +267,7 @@ async fn find_valid_trace(
         .map_err(|e| anyhow!("failed to contact jaeger; {}", e))?
         .json()
         .await?;
-    //println!("{}", serde_json::to_string_pretty(&trace)?);
+    tracing::debug!("{}", serde_json::to_string_pretty(&trace)?);
 
     // Verify that we got all the participants in the trace
     verify_trace_participants(&trace, services)?;
