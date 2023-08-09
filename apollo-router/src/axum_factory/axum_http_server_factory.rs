@@ -15,7 +15,6 @@ use axum::response::*;
 use axum::routing::get;
 use axum::Router;
 use futures::channel::oneshot;
-use futures::future::join;
 use futures::future::join_all;
 use futures::prelude::*;
 use http::header::ACCEPT_ENCODING;
@@ -322,14 +321,21 @@ impl HttpServerFactory for AxumHttpServerFactory {
                         )
                     });
 
-            let (servers, mut shutdowns): (Vec<_>, Vec<_>) = servers_and_shutdowns.unzip();
-            shutdowns.push(main_shutdown_sender);
+            let (servers, shutdowns): (Vec<_>, Vec<_>) = servers_and_shutdowns.unzip();
 
             // graceful shutdown mechanism:
             // we will fan out to all of the servers once we receive a signal
-            let (outer_shutdown_sender, outer_shutdown_receiver) = oneshot::channel::<()>();
+            let (mainer_shutdown_sender, mainer_shutdown_receiver) = oneshot::channel::<()>();
             tokio::task::spawn(async move {
-                let _ = outer_shutdown_receiver.await;
+                let _ = mainer_shutdown_receiver.await;
+                if let Err(_err) = main_shutdown_sender.send(()) {
+                    tracing::error!("Failed to notify http thread of shutdown");
+                }
+            });
+
+            let (extra_shutdown_sender, extra_shutdown_receiver) = oneshot::channel::<()>();
+            tokio::task::spawn(async move {
+                let _ = extra_shutdown_receiver.await;
                 shutdowns.into_iter().for_each(|sender| {
                     if let Err(_err) = sender.send(()) {
                         tracing::error!("Failed to notify http thread of shutdown")
@@ -338,13 +344,19 @@ impl HttpServerFactory for AxumHttpServerFactory {
             });
 
             // Spawn the server into a runtime
-            let server_future = tokio::task::spawn(join(main_server, join_all(servers)))
+            let main_future = tokio::task::spawn(main_server)
+                .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
+                .boxed();
+
+            let extra_futures = tokio::task::spawn(join_all(servers))
                 .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
             Ok(HttpServerHandle::new(
-                outer_shutdown_sender,
-                server_future,
+                mainer_shutdown_sender,
+                extra_shutdown_sender,
+                main_future,
+                extra_futures,
                 Some(actual_main_listen_address),
                 actual_extra_listen_adresses,
                 all_connections_stopped_sender,

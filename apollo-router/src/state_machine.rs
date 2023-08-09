@@ -1182,17 +1182,24 @@ mod tests {
     ) {
         let mut server_factory = MockMyHttpServerFactory::new();
         let shutdown_receivers = Arc::new(Mutex::new(vec![]));
+        let extra_shutdown_receivers = Arc::new(Mutex::new(vec![]));
         let shutdown_receivers_clone = shutdown_receivers.to_owned();
+        let extra_shutdown_receivers_clone = extra_shutdown_receivers.to_owned();
         server_factory
             .expect_create_server()
             .times(expect_times_called)
             .returning(
                 move |configuration: Arc<Configuration>, mut main_listener: Option<Listener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
+                    let (extra_shutdown_sender, extra_shutdown_receiver) = oneshot::channel();
                     shutdown_receivers_clone
                         .lock()
                         .unwrap()
                         .push(shutdown_receiver);
+                    extra_shutdown_receivers_clone
+                        .lock()
+                        .unwrap()
+                        .push(extra_shutdown_receiver);
 
                     let server = async move {
                         let main_listener = match main_listener.take() {
@@ -1202,14 +1209,16 @@ mod tests {
                             ),
                         };
 
-                        Ok((main_listener, vec![]))
+                        Ok(main_listener)
                     };
 
                     let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
 
                     Ok(HttpServerHandle::new(
                         shutdown_sender,
+                        extra_shutdown_sender,
                         Box::pin(server),
+                        Box::pin(async { Ok(vec![]) }),
                         Some(configuration.supergraph.listen.clone()),
                         vec![],
                         all_connections_stopped_sender,
