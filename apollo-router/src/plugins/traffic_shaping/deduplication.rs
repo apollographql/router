@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
-use parking_lot::Mutex;
+use futures::lock::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
@@ -78,7 +78,7 @@ where
         request: SubgraphRequest,
     ) -> Result<SubgraphResponse, BoxError> {
         loop {
-            match get_or_insert_wait_map(&wait_map, &request) {
+            match get_or_insert_wait_map(&wait_map, &request).await {
                 Err(receiver) => {
                     let r = receiver.read().await;
                     match (*r).clone() {
@@ -106,7 +106,7 @@ where
                         let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
                         tokio::task::spawn(async move {
                             let _ = drop_sentinel.await;
-                            wait_map.lock().remove(&http_request);
+                            wait_map.lock().await.remove(&http_request);
                         });
 
                         service
@@ -138,14 +138,14 @@ where
 }
 
 #[allow(clippy::type_complexity)]
-fn get_or_insert_wait_map(
+async fn get_or_insert_wait_map(
     wait_map: &WaitMap,
     request: &SubgraphRequest,
 ) -> Result<
     OwnedRwLockWriteGuard<Option<Result<CloneSubgraphResponse, String>>>,
     Arc<RwLock<Option<Result<CloneSubgraphResponse, String>>>>,
 > {
-    let mut locked_wait_map = wait_map.lock();
+    let mut locked_wait_map = wait_map.lock().await;
     match locked_wait_map.get(&(&request.subgraph_request).into()) {
         Some(waiter) => {
             // Register interest in key
