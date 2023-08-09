@@ -4,7 +4,6 @@
 use std::fmt;
 
 use opentelemetry::trace::TraceContextExt;
-use opentelemetry::trace::TraceId as OtelTraceId;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::Span;
@@ -15,15 +14,16 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 pub struct TraceId([u8; 16]);
 
 impl TraceId {
-    /// Create a TraceId. If called from an invalid context
-    /// (e.g.: not in a span, or in a disabled span), then
-    /// None is returned.
+    /// Create a TraceId. If the span is not sampled then return None.
     pub fn maybe_new() -> Option<Self> {
-        let trace_id = Span::current().context().span().span_context().trace_id();
-        if trace_id == OtelTraceId::INVALID {
-            None
+        let span = Span::current();
+        let context = span.context();
+        let span_ref = context.span();
+        let span_context = span_ref.span_context();
+        if span_context.is_sampled() {
+            Some(Self(span_context.trace_id().to_bytes()))
         } else {
-            Some(Self(trace_id.to_bytes()))
+            None
         }
     }
 
