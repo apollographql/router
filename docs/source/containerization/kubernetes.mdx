@@ -254,3 +254,8 @@ If you had a router running on your localhost, with default health-check configu
 
 curl "http://localhost:8088/health"
 
+## Using `istio` with the router
+
+The [istio service mesh](https://istio.io/) is a very popular choice for enhanced traffic routing within Kubernetes.
+
+`istio-proxy` pod injection can cause an [issue](https://github.com/apollographql/router/issues/3533) in the router. The router may start executing at the same time that istio is reconfiguring networking for the router pod. This is an issue with `istio`, not the router, and you can resolve it by following the advice in [istio's injection documentation](https://istio.io/latest/docs/ops/common-problems/injection/#pod-or-containers-start-with-network-issues-if-istio-proxy-is-not-ready).
