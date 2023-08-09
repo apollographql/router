@@ -204,8 +204,15 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let guard = request.context.enter_active_request();
+    let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    let duration = start.elapsed().as_secs_f64();
     drop(guard);
+    tracing::info!(
+        histogram.apollo.router.operations.coprocessor.duration = duration,
+        coprocessor.stage = %PipelineStep::SupergraphRequest,
+    );
+
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::SupergraphRequest)?;
@@ -342,8 +349,15 @@ where
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
     let guard = response.context.enter_active_request();
+    let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
+    let duration = start.elapsed().as_secs_f64();
     drop(guard);
+    tracing::info!(
+        histogram.apollo.router.operations.coprocessor.duration = duration,
+        coprocessor.stage = %PipelineStep::SupergraphResponse,
+    );
+
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
