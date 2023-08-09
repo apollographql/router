@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use lru::LruCache;
-use parking_lot::Mutex;
 use tokio::sync::oneshot;
+use tokio::sync::Mutex;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
 
@@ -63,7 +63,7 @@ where
     }
 
     pub(crate) async fn get(&self, key: &K) -> Entry<K, V> {
-        match self.get_in_memory(key) {
+        match self.get_in_memory(key).await {
             Some(v) => Entry {
                 inner: EntryInner::Value(v),
             },
@@ -71,10 +71,10 @@ where
         }
     }
 
-    fn get_in_memory(&self, key: &K) -> Option<V> {
+    async fn get_in_memory(&self, key: &K) -> Option<V> {
         let instant_memory = Instant::now();
 
-        match self.memory.lock().get(key).cloned() {
+        match self.memory.lock().await.get(key).cloned() {
             Some(v) => {
                 tracing::info!(
                     monotonic_counter.apollo_router_cache_hit_count = 1u64,
@@ -113,7 +113,7 @@ where
         // If the data is present, it is sent directly to all the tasks that were waiting for it.
         // If it is not present, the first task that requested it can perform the work to create
         // the data, store it in the cache and send the value to all the other tasks.
-        match self.get_or_insert_wait_map(key) {
+        match self.get_or_insert_wait_map(key).await {
             Err(receiver) => {
                 // Register interest in key
                 Entry {
@@ -153,11 +153,11 @@ where
     }
 
     #[allow(clippy::type_complexity)]
-    fn get_or_insert_wait_map(
+    async fn get_or_insert_wait_map(
         &self,
         key: &K,
     ) -> Result<OwnedRwLockWriteGuard<Option<V>>, Arc<RwLock<Option<V>>>> {
-        let mut locked_wait_map = self.wait_map.lock();
+        let mut locked_wait_map = self.wait_map.lock().await;
         match locked_wait_map.get_mut(key) {
             Some(waiter) => {
                 // Register interest in key
@@ -181,8 +181,8 @@ where
         }
     }
 
-    fn remove_from_wait_map(wait_map: &WaitMap<K, V>, key: &K) {
-        let mut locked_wait_map = wait_map.lock();
+    async fn remove_from_wait_map(wait_map: &WaitMap<K, V>, key: &K) {
+        let mut locked_wait_map = wait_map.lock().await;
         let _ = locked_wait_map.remove(key);
     }
 
@@ -192,9 +192,9 @@ where
         self.storage.insert(key, value).await;
     }
 
-    fn insert_in_memory(&self, key: K, value: V) {
+    async fn insert_in_memory(&self, key: K, value: V) {
         let size = {
-            let mut in_memory = self.memory.lock();
+            let mut in_memory = self.memory.lock().await;
             in_memory.put(key, value);
             in_memory.len() as u64
         };
