@@ -5,6 +5,7 @@ use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use bytes::Bytes;
 use futures::future::ready;
@@ -585,8 +586,15 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let guard = request.context.enter_active_request();
+    let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    let duration = start.elapsed().as_secs_f64();
     drop(guard);
+    tracing::info!(
+        histogram.apollo.router.operations.coprocessor.duration = duration,
+        coprocessor.stage = %PipelineStep::RouterRequest,
+    );
+
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
@@ -734,8 +742,15 @@ where
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
     let guard = response.context.enter_active_request();
+    let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
+    let duration = start.elapsed().as_secs_f64();
     drop(guard);
+    tracing::info!(
+        histogram.apollo.router.operations.coprocessor.duration = duration,
+        coprocessor.stage = %PipelineStep::RouterResponse,
+    );
+
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
@@ -898,8 +913,15 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let guard = request.context.enter_active_request();
+    let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    let duration = start.elapsed().as_secs_f64();
     drop(guard);
+    tracing::info!(
+        histogram.apollo.router.operations.coprocessor.duration = duration,
+        coprocessor.stage = %PipelineStep::SubgraphRequest,
+    );
+
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphRequest)?;
@@ -1029,8 +1051,15 @@ where
 
     tracing::debug!(?payload, "externalized output");
     let guard = response.context.enter_active_request();
+    let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    let duration = start.elapsed().as_secs_f64();
     drop(guard);
+    tracing::info!(
+        histogram.apollo.router.operations.coprocessor.duration = duration,
+        coprocessor.stage = %PipelineStep::SubgraphResponse,
+    );
+
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
