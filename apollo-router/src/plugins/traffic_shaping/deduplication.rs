@@ -146,7 +146,7 @@ fn get_or_insert_wait_map(
     Arc<RwLock<Option<Result<CloneSubgraphResponse, String>>>>,
 > {
     let mut locked_wait_map = wait_map.lock();
-    match locked_wait_map.get_mut(&(&request.subgraph_request).into()) {
+    match locked_wait_map.get(&(&request.subgraph_request).into()) {
         Some(waiter) => {
             // Register interest in key
             let receiver = waiter.clone();
