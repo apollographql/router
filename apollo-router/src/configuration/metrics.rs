@@ -175,7 +175,7 @@ impl Metrics {
         );
 
         log_usage_metrics!(
-            value.apollo.router.config.subscription,
+            value.apollo.router.config.subscriptions,
             "$.subscription[?(@.enabled == true)]",
             opt.mode.passthrough,
             "$.mode.passthrough",

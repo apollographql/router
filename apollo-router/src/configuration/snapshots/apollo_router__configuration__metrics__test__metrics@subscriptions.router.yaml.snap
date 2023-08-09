@@ -2,7 +2,7 @@
 source: apollo-router/src/configuration/metrics.rs
 expression: "&metrics.metrics"
 ---
-value.apollo.router.config.subscription:
+value.apollo.router.config.subscriptions:
   - 1
   - opt__deduplication__: "false"
     opt__max_opened__: "true"
