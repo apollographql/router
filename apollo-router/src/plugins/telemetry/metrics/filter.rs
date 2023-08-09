@@ -215,7 +215,6 @@ mod test {
         let filtered = FilterMeterProvider::apollo_metrics(delegate.clone())
             .versioned_meter("filtered", None, None);
         filtered.u64_counter("apollo.router.operations").init();
-        filtered.u64_counter("apollo.router.operation").init();
         filtered.u64_counter("apollo.router.operations.test").init();
         filtered.u64_counter("apollo.router.unknown.test").init();
         assert!(delegate
@@ -230,12 +229,6 @@ mod test {
             .lock()
             .unwrap()
             .contains(&("apollo.router.operations".to_string(), None, None)));
-        assert!(delegate
-            .instrument_provider
-            .counters_created
-            .lock()
-            .unwrap()
-            .contains(&("apollo.router.operation".to_string(), None, None)));
         assert!(!delegate
             .instrument_provider
             .counters_created
@@ -250,7 +243,6 @@ mod test {
         let filtered = FilterMeterProvider::public_metrics(delegate.clone())
             .versioned_meter("filtered", None, None);
         filtered.u64_counter("apollo.router.operations").init();
-        filtered.u64_counter("apollo.router.operation").init();
         filtered.u64_counter("apollo.router.operations.test").init();
         filtered.u64_counter("apollo.router.unknown.test").init();
         filtered
@@ -268,12 +260,6 @@ mod test {
             .lock()
             .unwrap()
             .contains(&("apollo.router.operations".to_string(), None, None)));
-        assert!(!delegate
-            .instrument_provider
-            .counters_created
-            .lock()
-            .unwrap()
-            .contains(&("apollo.router.operation".to_string(), None, None)));
         assert!(delegate
             .instrument_provider
             .counters_created
