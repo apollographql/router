@@ -263,50 +263,6 @@ fn subgraph_service(service, subgraph) {
 
 </ExpansionPanel>
 
-### Claim augmentation via coprocessors
-
-Tokens can come in with limited information, that is then used to look up user specific information like roles. This can be done with [coprocessors](/customizations/coprocessor).
-
-<ExpansionPanel title="Click to expand">
-
-The router level coprocessor is guaranteed to be called after the authentication plugin, so the coprocessor can receive the list of claims extracted from the token, use information like the `sub` (subject) claim to look up the user, insert its data in the claims list and return it to the router.
-
-If the router is configured with:
-
-```yaml title="router.yaml"
-authentication:
-  jwt:
-    jwks:
-      - url: "file:///etc/router/jwks.json"
-
-coprocessor:
-  url: http://127.0.0.1:8081
-  router:
-    request:
-      context: true
-```
-
-The coprocessor will then receive a request with this format:
-
-```json
-{
-    "version": 1,
-    "stage": "RouterRequest",
-    "control": "continue",
-    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
-    "context": {
-        "entries": {
-            "apollo_authentication::JWT::claims": {
-                "exp": 10000000000,
-                "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a"
-            }
-        }
-    },
-    "method": "POST"
-}
-```
-</ExpansionPanel>
-
 ## Creating your own JWKS (advanced)
 
 > ⚠️ **Most third-party IdP services create and host a JWKS for you.** If you use a third-party IdP, consult its documentation to obtain the [JWKS URL](#jwks) to pass to your router.

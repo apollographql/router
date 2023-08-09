@@ -35,11 +35,73 @@ If you configure [JWT authentication](./authn-jwt), the Apollo Router automatica
 
 To-do: More information on how to use JWT auth with these directives
 
-### Coprocessors for authorization
 
-To participate in the authorization process, the coprocessor you add needs to set the key `apollo_authentication::JWT::claims` in request contexts.
+### Claim augmentation via coprocessors
 
-To-do: Coprocessors specifications
+Tokens can come in with limited information, that is then used to look up user specific information like roles. This can be done with [coprocessors](/customizations/coprocessor).
+
+<ExpansionPanel title="Click to expand">
+
+The router level coprocessor is guaranteed to be called after the authentication plugin, so the coprocessor can receive the list of claims extracted from the token, use information like the `sub` (subject) claim to look up the user, insert its data in the claims list and return it to the router.
+
+If the router is configured with:
+
+```yaml title="router.yaml"
+authentication:
+  jwt:
+    jwks:
+      - url: "file:///etc/router/jwks.json"
+
+coprocessor:
+  url: http://127.0.0.1:8081
+  router:
+    request:
+      context: true
+```
+
+The coprocessor can then receive a request with this format:
+
+```json
+{
+    "version": 1,
+    "stage": "RouterRequest",
+    "control": "continue",
+    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
+    "context": {
+        "entries": {
+            "apollo_authentication::JWT::claims": {
+                "exp": 10000000000,
+                "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a"
+            }
+        }
+    },
+    "method": "POST"
+}
+```
+
+The coprocessor would then look up the user with identifier specified in the `sub` claim, and return a response with more claims:
+
+
+```json
+{
+    // Control properties
+    "version": 1,
+    "stage": "RouterResponse",
+    "control": "continue",
+    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
+    "context": {
+        "entries": {
+            "apollo_authentication::JWT::claims": {
+                "exp": 10000000000,
+                "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a",
+                "scope": "profile:read profile:write"
+            }
+        }
+    }
+}
+```
+
+</ExpansionPanel>
 
 ## Authorization directives
 
