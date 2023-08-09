@@ -1,0 +1,34 @@
+telemetry:
+  metrics:
+    prometheus:
+      listen: 127.0.0.1:4000
+      enabled: true
+      path: /metrics
+    common:
+      attributes:
+        subgraph:
+          all:
+            request:
+              header:
+                - named: "x-custom-header"
+                  rename: "custom_header"
+                  default: "unknown"
+headers:
+  all:
+    request:
+      - insert:
+          name: "x-custom-header"
+          value: "test_custom"
+override_subgraph_url:
+  products: http://localhost:4005
+include_subgraph_errors:
+  all: true
+authentication:
+  subgraph:
+    all:
+      aws_sig_v4:
+        hardcoded:
+          access_key_id: "test"
+          secret_access_key: "test"
+          region: "us-east-1"
+          service_name: "test_service"

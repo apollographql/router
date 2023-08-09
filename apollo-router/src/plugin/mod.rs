@@ -184,6 +184,9 @@ impl fmt::Debug for PluginFactory {
 }
 
 impl PluginFactory {
+    pub(crate) fn is_apollo(&self) -> bool {
+        self.name.starts_with("apollo.") || self.name.starts_with("experimental.")
+    }
     /// Create a plugin factory.
     pub fn new<P: Plugin>(group: &str, name: &str) -> PluginFactory {
         let plugin_factory_name = if group.is_empty() {
