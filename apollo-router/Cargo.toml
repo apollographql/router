@@ -162,6 +162,7 @@ prost = "0.11.9"
 prost-types = "0.11.9"
 proteus = "0.5.0"
 rand = "0.8.5"
+rand_core = "0.6.4"
 rhai = { version = "1.15.1", features = ["sync", "serde", "internals"] }
 regex = "1.9.1"
 reqwest = { version = "0.11.18", default-features = false, features = [
@@ -184,6 +185,7 @@ serde_json = { version = "1.0.103", features = ["preserve_order", "float_roundtr
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
+streaming_algorithms = "0.3.0"
 strum_macros = "0.24.3"
 sys-info = "0.9.1"
 thiserror = "1.0.43"
@@ -225,8 +227,6 @@ memchr = "2.5.0"
 brotli = "3.3.4"
 zstd = "0.12.3"
 zstd-safe = "6.0.5"
-rand_core = "0.6.4"
-bloom = "0.3.2"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
