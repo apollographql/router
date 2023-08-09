@@ -25,6 +25,59 @@ Whenever a router instance requires a query plan or APQ query string to resolve 
 3. If _not_ found, the router instance _generates_ the required query plan or requests the full operation string from the client for APQ.
 4. The router instance stores the obtained value in both the distributed cache _and_ its in-memory cache. 
 
+## Redis URL configuration
+
+The distributed caching configuration must contain one or more URLs using different schemes depending on the expected deployment:
+
+* `redis` - TCP connected to a centralized server.
+* `rediss` - TLS connected to a centralized server.
+* `redis-cluster` - TCP connected to a cluster.
+* `rediss-cluster` - TLS connected to a cluster.
+* `redis-sentinel` - TCP connected to a centralized server behind a sentinel layer.
+* `rediss-sentinel` - TLS connected to a centralized server behind a sentinel layer.
+
+The URLs must have the following format:
+
+### One node
+
+```
+redis|rediss :// [[username:]password@] host [:port][/database]
+```
+
+Example: `redis://localhost:6379`
+
+### Clustered
+
+```
+redis|rediss[-cluster] :// [[username:]password@] host [:port][?[node=host1:port1][&node=host2:port2][&node=hostN:portN]]
+```
+
+or, if configured with multiple URLs:
+
+```
+[
+  "redis|rediss[-cluster] :// [[username:]password@] host [:port]",
+  "redis|rediss[-cluster] :// [[username:]password@] host1 [:port1]",
+  "redis|rediss[-cluster] :// [[username:]password@] host2 [:port2]"
+]
+```
+
+### Sentinel
+
+```
+redis|rediss[-sentinel] :// [[username1:]password1@] host [:port][/database][?[node=host1:port1][&node=host2:port2][&node=hostN:portN]
+                            [&sentinelServiceName=myservice][&sentinelUsername=username2][&sentinelPassword=password2]]
+```
+
+or, if configured with multiple URLs:
+
+```
+[
+  "redis|rediss[-sentinel] :// [[username:]password@] host [:port][/database][?[&sentinelServiceName=myservice][&sentinelUsername=username2][&sentinelPassword=password2]]",
+  "redis|rediss[-sentinel] :// [[username1:]password1@] host [:port][/database][?[&sentinelServiceName=myservice][&sentinelUsername=username2][&sentinelPassword=password2]]"
+]
+```
+
 ## Distributed query plan caching
 
 To enable distributed caching of query plans, add the following to your router's [YAML config file](./overview/#yaml-config-file):
@@ -37,7 +90,7 @@ supergraph:
         urls: ["redis://..."] #highlight-line
 ```
 
-The value of `urls` is a list of URLs for all Redis instances in your cluster. These can be `redis://` or `rediss://` URLs.
+The value of `urls` is a list of URLs for all Redis instances in your cluster.
 
 > ⚠️ **You should specify your Redis URLs via environment variables and [variable expansion](./overview#variable-expansion)**. This prevents your Redis URLs from being committed to version control, which is especially dangerous if they include authentication information like a username and/or password.
 
@@ -53,6 +106,6 @@ apq:
         urls: ["redis://..."] #highlight-line
 ```
 
-The value of `urls` is a list of URLs for all Redis instances in your cluster. These can be `redis://` or `rediss://` URLs.
+The value of `urls` is a list of URLs for all Redis instances in your cluster.
 
 > ⚠️ **You should specify your Redis URLs via environment variables and [variable expansion](./overview#variable-expansion)**. This prevents your Redis URLs from being committed to version control, which is especially dangerous if they include authentication information like a username and/or password.
