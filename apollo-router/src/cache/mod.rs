@@ -129,11 +129,11 @@ where
                 let wait_map = self.wait_map.clone();
                 tokio::task::spawn(async move {
                     let _ = drop_sentinel.await;
-                    Self::remove_from_wait_map(&wait_map, &k);
+                    Self::remove_from_wait_map(&wait_map, &k).await;
                 });
 
                 if let Some(value) = self.storage.get(key).await {
-                    self.send(sender, key, value.clone());
+                    self.send(sender, key, value.clone()).await;
 
                     return Entry {
                         inner: EntryInner::Value(value),
@@ -187,7 +187,7 @@ where
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
-        self.insert_in_memory(key.clone(), value.clone());
+        self.insert_in_memory(key.clone(), value.clone()).await;
 
         self.storage.insert(key, value).await;
     }
@@ -205,13 +205,13 @@ where
         );
     }
 
-    fn send(&self, mut sender: OwnedRwLockWriteGuard<Option<V>>, key: &K, value: V) {
+    async fn send(&self, mut sender: OwnedRwLockWriteGuard<Option<V>>, key: &K, value: V) {
         *sender = Some(value);
         drop(sender);
 
         // Lock the wait map to prevent more subscribers racing with our send
         // notification
-        Self::remove_from_wait_map(&self.wait_map, key);
+        Self::remove_from_wait_map(&self.wait_map, key).await;
     }
 
     pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
@@ -271,7 +271,7 @@ where
         } = self.inner
         {
             cache.insert(key.clone(), value.clone()).await;
-            cache.send(sender, &key, value);
+            cache.send(sender, &key, value).await;
         }
     }
 
