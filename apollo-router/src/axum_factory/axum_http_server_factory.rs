@@ -324,18 +324,27 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let (servers, shutdowns): (Vec<_>, Vec<_>) = servers_and_shutdowns.unzip();
 
             // graceful shutdown mechanism:
-            // we will fan out to all of the servers once we receive a signal
-            let (mainer_shutdown_sender, mainer_shutdown_receiver) = oneshot::channel::<()>();
+            // create two shutdown channels. One for the main (GraphQL) server and the other for
+            // the extra servers (health, metrics, etc...)
+            // We spawn a task for each server which just waits to propagate the message to:
+            //  - main
+            //  - all extras
+            // We have two separate channels because we want to ensure that main is notified
+            // separately from all other servers and we wait for main to shutdown before we notify
+            // extra servers.
+            let (outer_main_shutdown_sender, outer_main_shutdown_receiver) =
+                oneshot::channel::<()>();
             tokio::task::spawn(async move {
-                let _ = mainer_shutdown_receiver.await;
+                let _ = outer_main_shutdown_receiver.await;
                 if let Err(_err) = main_shutdown_sender.send(()) {
                     tracing::error!("Failed to notify http thread of shutdown");
                 }
             });
 
-            let (extra_shutdown_sender, extra_shutdown_receiver) = oneshot::channel::<()>();
+            let (outer_extra_shutdown_sender, outer_extra_shutdown_receiver) =
+                oneshot::channel::<()>();
             tokio::task::spawn(async move {
-                let _ = extra_shutdown_receiver.await;
+                let _ = outer_extra_shutdown_receiver.await;
                 shutdowns.into_iter().for_each(|sender| {
                     if let Err(_err) = sender.send(()) {
                         tracing::error!("Failed to notify http thread of shutdown")
@@ -343,18 +352,19 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 })
             });
 
-            // Spawn the server into a runtime
+            // Spawn the main (GraphQL) server into a task
             let main_future = tokio::task::spawn(main_server)
                 .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
+            // Spawn all other servers (health, metrics, etc...) into a task
             let extra_futures = tokio::task::spawn(join_all(servers))
                 .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
             Ok(HttpServerHandle::new(
-                mainer_shutdown_sender,
-                extra_shutdown_sender,
+                outer_main_shutdown_sender,
+                outer_extra_shutdown_sender,
                 main_future,
                 extra_futures,
                 Some(actual_main_listen_address),
