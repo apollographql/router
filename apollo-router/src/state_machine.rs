@@ -594,6 +594,8 @@ mod tests {
     use crate::services::router;
     use crate::services::RouterRequest;
 
+    type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
+
     fn example_schema() -> String {
         include_str!("testdata/supergraph.graphql").to_owned()
     }
@@ -678,7 +680,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -700,7 +702,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -722,7 +724,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -747,7 +749,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -769,7 +771,7 @@ mod tests {
             .await,
             Err(ApolloRouterError::LicenseViolation)
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 0);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 0);
     }
 
     #[test(tokio::test)]
@@ -793,7 +795,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -833,7 +835,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -856,7 +858,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -879,7 +881,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -902,7 +904,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -934,7 +936,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -956,7 +958,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -982,7 +984,7 @@ mod tests {
             .await,
             Err(ApolloRouterError::ServiceCreationError(_))
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 0);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 0);
     }
 
     #[test(tokio::test)]
@@ -1023,7 +1025,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -1081,7 +1083,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     mock! {
@@ -1178,7 +1180,7 @@ mod tests {
         ready_false_times: usize,
     ) -> (
         MockMyHttpServerFactory,
-        Arc<Mutex<Vec<oneshot::Receiver<()>>>>,
+        (SharedOneShotReceiver, SharedOneShotReceiver),
     ) {
         let mut server_factory = MockMyHttpServerFactory::new();
         let shutdown_receivers = Arc::new(Mutex::new(vec![]));
@@ -1245,7 +1247,10 @@ mod tests {
             .with(eq(false))
             .times(ready_false_times)
             .return_const(());
-        (server_factory, shutdown_receivers)
+        (
+            server_factory,
+            (shutdown_receivers, extra_shutdown_receivers),
+        )
     }
 
     fn create_mock_router_configurator(expect_times_called: usize) -> MockMyRouterConfigurator {
