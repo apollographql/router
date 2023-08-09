@@ -11,12 +11,14 @@ use std::time::SystemTime;
 use buildstructor::buildstructor;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use http::HeaderValue;
 use jsonpath_lib::Selector;
 use mime::APPLICATION_JSON;
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::trace::Span;
+use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
 use serde_json::json;
@@ -343,11 +345,11 @@ impl IntegrationTest {
         );
         let default_query = &json!({"query":"query {topProducts{name}}","variables":{}});
         let query = query.unwrap_or(default_query).clone();
-        let id = Uuid::new_v4().to_string();
         let dispatch = self.subscriber.clone();
 
         async move {
-            let span = info_span!("client_request", unit_test = id.as_str());
+            let span = info_span!("client_request");
+            let span_id = span.context().span().span_context().trace_id().to_string();
 
             async move {
                 let client = reqwest::Client::new();
@@ -368,7 +370,7 @@ impl IntegrationTest {
                 });
                 request.headers_mut().remove(ACCEPT);
                 match client.execute(request).await {
-                    Ok(response) => (id, response),
+                    Ok(response) => (span_id, response),
                     Err(err) => {
                         panic!("unable to send successful request to router, {err}")
                     }
@@ -376,6 +378,51 @@ impl IntegrationTest {
             }
             .instrument(span)
             .await
+        }
+        .with_subscriber(dispatch.unwrap_or_default())
+    }
+
+    #[allow(dead_code)]
+    pub fn execute_untraced_query(
+        &self,
+        query: &Value,
+    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+        assert!(
+            self.router.is_some(),
+            "router was not started, call `router.start().await; router.assert_started().await`"
+        );
+        let query = query.clone();
+        let dispatch = self.subscriber.clone();
+
+        async move {
+            let client = reqwest::Client::new();
+
+            let mut request = client
+                .post("http://localhost:4000")
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .header("apollographql-client-name", "custom_name")
+                .header("apollographql-client-version", "1.0")
+                .json(&query)
+                .build()
+                .unwrap();
+
+            request.headers_mut().remove(ACCEPT);
+            match client.execute(request).await {
+                Ok(response) => (
+                    response
+                        .headers()
+                        .get("apollo-custom-trace-id")
+                        .cloned()
+                        .unwrap_or(HeaderValue::from_static("no-trace-id"))
+                        .to_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                    response,
+                ),
+                Err(err) => {
+                    panic!("unable to send successful request to router, {err}")
+                }
+            }
         }
         .with_subscriber(dispatch.unwrap_or_default())
     }
