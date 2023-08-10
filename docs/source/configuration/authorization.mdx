@@ -48,9 +48,10 @@ If the router is configured with:
 
 ```yaml title="router.yaml"
 authentication:
-  jwt:
-    jwks:
-      - url: "file:///etc/router/jwks.json"
+  router:
+    jwt:
+      jwks:
+        - url: "file:///etc/router/jwks.json"
 
 coprocessor:
   url: http://127.0.0.1:8081
