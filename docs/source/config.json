@@ -48,6 +48,13 @@
             "enterprise"
           ]
         ],
+        "Safelisting with persisted queries": [
+          "/configuration/persisted-queries",
+          [
+            "enterprise",
+            "preview"
+          ]
+        ],
         "Privacy and data collection": "/privacy"
       }
     },
