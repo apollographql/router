@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
@@ -14,10 +15,67 @@ use crate::spec::IncludeSkip;
 use crate::spec::SpecError;
 use crate::Configuration;
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Hash, Eq)]
+#[derive(Debug, PartialEq, Hash, Eq)]
 pub(crate) struct SubSelectionKey {
     pub(crate) defer_label: Option<String>,
     pub(crate) defer_conditions: BooleanValues,
+}
+
+// Do not replace this with a derived Serialize implementation
+// SubSelectionKey must serialize to a string because it is used as a JSON object key
+impl Serialize for SubSelectionKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let s = format!(
+            "{:?}|{}",
+            self.defer_conditions.bits,
+            self.defer_label.as_deref().unwrap_or("")
+        );
+        serializer.serialize_str(&s)
+    }
+}
+
+impl<'de> Deserialize<'de> for SubSelectionKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_str(SubSelectionKeyVisitor)
+    }
+}
+
+struct SubSelectionKeyVisitor;
+impl<'de> Visitor<'de> for SubSelectionKeyVisitor {
+    type Value = SubSelectionKey;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter
+            .write_str("a string containing the defer label and defer conditions separated by |")
+    }
+
+    fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        if let Some((bits_str, label)) = s.split_once('|') {
+            Ok(SubSelectionKey {
+                defer_conditions: BooleanValues {
+                    bits: bits_str
+                        .parse::<u32>()
+                        .map_err(|_| E::custom("expected a number"))?,
+                },
+                defer_label: if label.is_empty() {
+                    None
+                } else {
+                    Some(label.to_string())
+                },
+            })
+        } else {
+            Err(E::custom("invalid subselection"))
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

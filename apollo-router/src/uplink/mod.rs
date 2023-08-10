@@ -1,3 +1,4 @@
+use std::error::Error as stdError;
 use std::fmt::Debug;
 use std::time::Duration;
 use std::time::Instant;
@@ -12,6 +13,7 @@ use url::Url;
 
 pub(crate) mod license_enforcement;
 pub(crate) mod license_stream;
+pub(crate) mod persisted_queries_manifest_stream;
 pub(crate) mod schema_stream;
 
 const GCP_URL: &str = "https://uplink.api.apollographql.com";
@@ -32,6 +34,7 @@ pub(crate) enum Error {
     UplinkErrorNoRetry { code: String, message: String },
 }
 
+#[derive(Debug)]
 pub(crate) struct UplinkRequest {
     api_key: String,
     graph_ref: String,
@@ -59,7 +62,8 @@ where
     },
 }
 
-pub(crate) enum Endpoints {
+#[derive(Debug, Clone)]
+pub enum Endpoints {
     Fallback {
         urls: Vec<Url>,
     },
@@ -118,14 +122,44 @@ impl Endpoints {
     }
 }
 
+/// Configuration for polling Apollo Uplink.
+/// This struct does not change on router reloads - they are all sourced from CLI options.
+#[derive(Debug, Clone, Default)]
+pub struct UplinkConfig {
+    /// The Apollo key: `<YOUR_GRAPH_API_KEY>`
+    pub apollo_key: String,
+
+    /// The apollo graph reference: `<YOUR_GRAPH_ID>@<VARIANT>`
+    pub apollo_graph_ref: String,
+
+    /// The endpoints polled.
+    pub endpoints: Option<Endpoints>,
+
+    /// The duration between polling
+    pub poll_interval: Duration,
+
+    /// The HTTP client timeout for each poll
+    pub timeout: Duration,
+}
+
+impl UplinkConfig {
+    /// Mock uplink configuration options for use in tests
+    /// A nice pattern is to use wiremock to start an uplink mocker and pass the URL here.
+    pub fn for_tests(uplink_endpoints: Endpoints) -> Self {
+        Self {
+            apollo_key: "key".to_string(),
+            apollo_graph_ref: "graph".to_string(),
+            endpoints: Some(uplink_endpoints),
+            poll_interval: Duration::from_secs(2),
+            timeout: Duration::from_secs(5),
+        }
+    }
+}
+
 /// Regularly fetch from Uplink
-/// If urls are supplied then they will be called round robin  
+/// If urls are supplied then they will be called round robin
 pub(crate) fn stream_from_uplink<Query, Response>(
-    api_key: String,
-    graph_ref: String,
-    endpoints: Option<Endpoints>,
-    mut interval: Duration,
-    timeout: Duration,
+    mut uplink_config: UplinkConfig,
 ) -> impl Stream<Item = Result<Response, Error>>
 where
     Query: graphql_client::GraphQLQuery,
@@ -133,22 +167,27 @@ where
     <Query as graphql_client::GraphQLQuery>::Variables: From<UplinkRequest> + Send + Sync,
     Response: Send + 'static + Debug,
 {
-    let (sender, receiver) = channel(2);
     let query = query_name::<Query>();
+    let (sender, receiver) = channel(2);
     let task = async move {
         let mut last_id = None;
-        let mut endpoints = endpoints.unwrap_or_default();
+        let mut endpoints = uplink_config.endpoints.unwrap_or_default();
         loop {
-            let query_body = Query::build_query(
-                UplinkRequest {
-                    graph_ref: graph_ref.to_string(),
-                    api_key: api_key.to_string(),
-                    id: last_id.clone(),
-                }
-                .into(),
-            );
+            let variables = UplinkRequest {
+                graph_ref: uplink_config.apollo_graph_ref.to_string(),
+                api_key: uplink_config.apollo_key.to_string(),
+                id: last_id.clone(),
+            };
 
-            match fetch::<Query, Response>(&query_body, &mut endpoints.iter(), timeout).await {
+            let query_body = Query::build_query(variables.into());
+
+            match fetch::<Query, Response>(
+                &query_body,
+                &mut endpoints.iter(),
+                uplink_config.timeout,
+            )
+            .await
+            {
                 Ok(response) => {
                     tracing::info!(
                         counter.apollo_router_uplink_fetch_count_total = 1,
@@ -162,7 +201,7 @@ where
                             delay,
                         } => {
                             last_id = Some(id);
-                            interval = Duration::from_secs(delay);
+                            uplink_config.poll_interval = Duration::from_secs(delay);
 
                             if let Err(e) = sender.send(Ok(response)).await {
                                 tracing::debug!("failed to push to stream. This is likely to be because the router is shutting down: {e}");
@@ -170,13 +209,12 @@ where
                             }
                         }
                         UplinkResponse::Unchanged { id, delay } => {
-                            tracing::debug!("uplink response did not change");
                             // Preserve behavior for schema uplink errors where id and delay are not reset if they are not provided on error.
                             if let Some(id) = id {
                                 last_id = Some(id);
                             }
                             if let Some(delay) = delay {
-                                interval = Duration::from_secs(delay);
+                                uplink_config.poll_interval = Duration::from_secs(delay);
                             }
                         }
                         UplinkResponse::Error {
@@ -212,7 +250,7 @@ where
                 }
             }
 
-            tokio::time::sleep(interval).await;
+            tokio::time::sleep(uplink_config.poll_interval).await;
         }
     };
     drop(tokio::task::spawn(task.with_current_subscriber()));
@@ -237,7 +275,6 @@ where
         match http_request::<Query>(url.as_str(), request_body, timeout).await {
             Ok(response) => {
                 let response = response.data.map(Into::into);
-
                 match &response {
                     None => {
                         tracing::info!(
@@ -323,7 +360,27 @@ where
     Query: graphql_client::GraphQLQuery,
 {
     let client = reqwest::Client::builder().timeout(timeout).build()?;
-    let res = client.post(url).json(request_body).send().await?;
+    // It is possible that istio-proxy is re-configuring networking beneath us. If it is, we'll see an error something like this:
+    // level: "ERROR"
+    // message: "fetch failed from all endpoints"
+    // target: "apollo_router::router::event::schema"
+    // timestamp: "2023-08-01T10:40:28.831196Z"
+    // That's deeply confusing and very hard to debug. Let's try to help by printing out a helpful error message here
+    let res = client
+        .post(url)
+        .json(request_body)
+        .send()
+        .await
+        .map_err(|e| {
+            if let Some(hyper_err) = e.source() {
+                if let Some(os_err) = hyper_err.source() {
+                    if os_err.to_string().contains("tcp connect error: Cannot assign requested address (os error 99)") {
+                        tracing::warn!("If your router is executing within a kubernetes pod, this failure may be caused by istio-proxy injection. See https://github.com/apollographql/router/issues/3533 for more details about how to solve this");
+                    }
+                }
+            }
+            e
+        })?;
     tracing::debug!("uplink response {:?}", res);
     let response_body: graphql_client::Response<Query::ResponseData> = res.json().await?;
     Ok(response_body)
@@ -355,6 +412,7 @@ mod test {
     use crate::uplink::stream_from_uplink;
     use crate::uplink::Endpoints;
     use crate::uplink::Error;
+    use crate::uplink::UplinkConfig;
     use crate::uplink::UplinkRequest;
     use crate::uplink::UplinkResponse;
 
@@ -416,6 +474,26 @@ mod test {
         }
     }
 
+    fn mock_uplink_config_with_fallback_urls(urls: Vec<Url>) -> UplinkConfig {
+        UplinkConfig {
+            apollo_key: "dummy_key".to_string(),
+            apollo_graph_ref: "dummy_graph_ref".to_string(),
+            endpoints: Some(Endpoints::fallback(urls)),
+            poll_interval: Duration::from_secs(0),
+            timeout: Duration::from_secs(1),
+        }
+    }
+
+    fn mock_uplink_config_with_round_robin_urls(urls: Vec<Url>) -> UplinkConfig {
+        UplinkConfig {
+            apollo_key: "dummy_key".to_string(),
+            apollo_graph_ref: "dummy_graph_ref".to_string(),
+            endpoints: Some(Endpoints::round_robin(urls)),
+            poll_interval: Duration::from_secs(0),
+            timeout: Duration::from_secs(1),
+        }
+    }
+
     #[test]
     fn test_round_robin_endpoints() {
         let url1 = Url::parse("http://example1.com").expect("url must be valid");
@@ -453,11 +531,7 @@ mod test {
             .await;
 
         let results = stream_from_uplink::<TestQuery, QueryResult>(
-            "dummy_key".to_string(),
-            "dummy_graph_ref".to_string(),
-            Some(Endpoints::fallback(vec![url1, url2])),
-            Duration::from_secs(0),
-            Duration::from_secs(1),
+            mock_uplink_config_with_fallback_urls(vec![url1, url2]),
         )
         .take(2)
         .collect::<Vec<_>>()
@@ -482,11 +556,7 @@ mod test {
             .await;
 
         let results = stream_from_uplink::<TestQuery, QueryResult>(
-            "dummy_key".to_string(),
-            "dummy_graph_ref".to_string(),
-            Some(Endpoints::round_robin(vec![url1, url2])),
-            Duration::from_secs(0),
-            Duration::from_secs(1),
+            mock_uplink_config_with_round_robin_urls(vec![url1, url2]),
         )
         .take(2)
         .collect::<Vec<_>>()
@@ -505,11 +575,7 @@ mod test {
             .build()
             .await;
         let results = stream_from_uplink::<TestQuery, QueryResult>(
-            "dummy_key".to_string(),
-            "dummy_graph_ref".to_string(),
-            Some(Endpoints::fallback(vec![url1, url2])),
-            Duration::from_secs(0),
-            Duration::from_secs(1),
+            mock_uplink_config_with_fallback_urls(vec![url1, url2]),
         )
         .take(2)
         .collect::<Vec<_>>()
@@ -527,11 +593,7 @@ mod test {
             .build()
             .await;
         let results = stream_from_uplink::<TestQuery, QueryResult>(
-            "dummy_key".to_string(),
-            "dummy_graph_ref".to_string(),
-            Some(Endpoints::fallback(vec![url1, url2])),
-            Duration::from_secs(0),
-            Duration::from_secs(1),
+            mock_uplink_config_with_fallback_urls(vec![url1, url2]),
         )
         .collect::<Vec<_>>()
         .await;
@@ -561,11 +623,7 @@ mod test {
             .build()
             .await;
         let results = stream_from_uplink::<TestQuery, QueryResult>(
-            "dummy_key".to_string(),
-            "dummy_graph_ref".to_string(),
-            Some(Endpoints::fallback(vec![url1, url2, url3])),
-            Duration::from_secs(0),
-            Duration::from_secs(1),
+            mock_uplink_config_with_fallback_urls(vec![url1, url2, url3]),
         )
         .take(2)
         .collect::<Vec<_>>()
@@ -596,11 +654,7 @@ mod test {
             .build()
             .await;
         let results = stream_from_uplink::<TestQuery, QueryResult>(
-            "dummy_key".to_string(),
-            "dummy_graph_ref".to_string(),
-            Some(Endpoints::fallback(vec![url1, url2, url3])),
-            Duration::from_secs(0),
-            Duration::from_secs(1),
+            mock_uplink_config_with_fallback_urls(vec![url1, url2, url3]),
         )
         .take(2)
         .collect::<Vec<_>>()
@@ -630,11 +684,7 @@ mod test {
             .build()
             .await;
         let results = stream_from_uplink::<TestQuery, QueryResult>(
-            "dummy_key".to_string(),
-            "dummy_graph_ref".to_string(),
-            Some(Endpoints::round_robin(vec![url1, url2, url3])),
-            Duration::from_secs(0),
-            Duration::from_secs(1),
+            mock_uplink_config_with_round_robin_urls(vec![url1, url2, url3]),
         )
         .take(2)
         .collect::<Vec<_>>()
@@ -664,11 +714,7 @@ mod test {
             .build()
             .await;
         let results = stream_from_uplink::<TestQuery, QueryResult>(
-            "dummy_key".to_string(),
-            "dummy_graph_ref".to_string(),
-            Some(Endpoints::round_robin(vec![url1, url2, url3])),
-            Duration::from_secs(0),
-            Duration::from_secs(1),
+            mock_uplink_config_with_round_robin_urls(vec![url1, url2, url3]),
         )
         .take(2)
         .collect::<Vec<_>>()
@@ -686,11 +732,7 @@ mod test {
             .build()
             .await;
         let results = stream_from_uplink::<TestQuery, QueryResult>(
-            "dummy_key".to_string(),
-            "dummy_graph_ref".to_string(),
-            Some(Endpoints::round_robin(vec![url1, url2, url3])),
-            Duration::from_secs(0),
-            Duration::from_secs(1),
+            mock_uplink_config_with_round_robin_urls(vec![url1, url2, url3]),
         )
         .take(1)
         .collect::<Vec<_>>()
@@ -710,11 +752,7 @@ mod test {
             .build()
             .await;
         let results = stream_from_uplink::<TestQuery, QueryResult>(
-            "dummy_key".to_string(),
-            "dummy_graph_ref".to_string(),
-            Some(Endpoints::round_robin(vec![url1, url2, url3])),
-            Duration::from_secs(0),
-            Duration::from_secs(1),
+            mock_uplink_config_with_round_robin_urls(vec![url1, url2, url3]),
         )
         .take(2)
         .collect::<Vec<_>>()
@@ -738,11 +776,7 @@ mod test {
             .build()
             .await;
         let results = stream_from_uplink::<TestQuery, QueryResult>(
-            "dummy_key".to_string(),
-            "dummy_graph_ref".to_string(),
-            Some(Endpoints::round_robin(vec![url1, url2])),
-            Duration::from_secs(0),
-            Duration::from_secs(1),
+            mock_uplink_config_with_round_robin_urls(vec![url1, url2]),
         )
         .take(1)
         .collect::<Vec<_>>()

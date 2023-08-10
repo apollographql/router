@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.24.0"
+version = "1.26.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -52,7 +52,7 @@ features = ["docs_rs"]
 [dependencies]
 askama = "0.11.1"
 access-json = "0.1.0"
-anyhow = "1.0.71"
+anyhow = "1.0.72"
 apollo-compiler = "0.10.0"
 apollo-encoder = "0.5.1"
 apollo-parser = "0.5.3"
@@ -65,12 +65,11 @@ async-compression = { version = "0.3.15", features = [
 ] }
 async-trait = "0.1.71"
 atty = "0.2.14"
-axum = { version = "0.6.18", features = ["headers", "json", "original-uri"] }
-backtrace = "0.3.68"
+axum = { version = "0.6.19", features = ["headers", "json", "original-uri"] }
 base64 = "0.20.0"
 buildstructor = "0.5.3"
 bytes = "1.4.0"
-clap = { version = "4.3.11", default-features = false, features = [
+clap = { version = "4.3.16", default-features = false, features = [
     "env",
     "derive",
     "std",
@@ -109,6 +108,7 @@ lazy_static = "1.4.0"
 libc = "0.2.147"
 linkme = "0.3.12"
 lru = "0.8.1"
+maplit = "1.0.2"
 mediatype = "0.19.15"
 mockall = "0.11.4"
 mime = "0.3.17"
@@ -155,7 +155,7 @@ opentelemetry-zipkin = { version = "0.17.0", default-features = false, features 
     "reqwest-rustls",
 ] }
 opentelemetry-prometheus = "0.12.0"
-paste = "1.0.13"
+paste = "1.0.14"
 pin-project-lite = "0.2.10"
 prometheus = "0.13"
 prost = "0.11.9"
@@ -171,7 +171,7 @@ reqwest = { version = "0.11.18", default-features = false, features = [
     "stream",
 ] }
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.3.1+v2.4.9"
+router-bridge = "=0.5.1+v2.5.1"
 rust-embed="6.8.1"
 rustls = "0.20.8"
 rustls-pemfile = "1.0.3"
@@ -180,7 +180,7 @@ shellexpand = "3.1.0"
 sha2 = "0.10.7"
 serde = { version = "1.0.171", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.1", features = ["preserve_order"] }
-serde_json = { version = "1.0.102", features = ["preserve_order", "float_roundtrip"] }
+serde_json = { version = "1.0.103", features = ["preserve_order", "float_roundtrip"] }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
@@ -212,8 +212,9 @@ tracing-opentelemetry = "0.19.0"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
 url = { version = "2.4.0", features = ["serde"] }
 urlencoding = "2.1.2"
-uuid = { version = "1.4.0", features = ["serde", "v4"] }
+uuid = { version = "1.4.1", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
+wiremock = "0.5.19"
 wsl = "0.1.0"
 tokio-tungstenite = { version = "0.18.0", features = ["rustls-tls-native-roots"] }
 tokio-rustls = "0.23.4"
@@ -225,6 +226,11 @@ brotli = "3.3.4"
 zstd = "0.12.3"
 zstd-safe = "6.0.5"
 rand_core = "0.6.4"
+# note: AWS dependencies should always use the same version
+aws-sigv4 = "0.55.3"
+aws-credential-types = "0.55.3"
+aws-config = "0.55.3"
+aws-types = "0.55.3"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
@@ -236,11 +242,11 @@ uname = "0.1.1"
 tikv-jemallocator = "0.5"
 
 [dev-dependencies]
-axum = { version = "0.6.18", features = ["headers", "json", "original-uri", "ws"] }
+axum = { version = "0.6.19", features = ["headers", "json", "original-uri", "ws"] }
 ecdsa = { version = "0.15.1", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "6.3.0", features = ["enable-rustls", "no-client-setname"] }
 futures-test = "0.3.28"
-insta = { version = "1.30.0", features = ["json", "redactions", "yaml"] }
+insta = { version = "1.31.0", features = ["json", "redactions", "yaml"] }
 introspector-gadget = "0.2.2"
 maplit = "1.0.2"
 memchr = { version = "2.5.0", default-features = false }

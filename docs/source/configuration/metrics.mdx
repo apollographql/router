@@ -89,6 +89,16 @@ All cache metrics listed above have the following attributes:
 - `kind`: the cache being queried (`apq`, `query planner`, `introspection`)
 - `storage`: The backend storage of the cache (`memory`, `redis`)
 
+#### Coprocessor
+
+- `apollo_router_operations_coprocessor_total` - Total operations with co-processors enabled.
+- `apollo_router_operations_coprocessor.duration` - Time spent waiting for the coprocessor to answer, in seconds
+
+The coprocessor operations metric has the following attributes:
+
+- `coprocessor.stage`: string (`RouterRequest`, `RouterResponse`, `SubgraphRequest`, `SubgraphResponse`)
+- `coprocessor.succeeded`: bool
+
 #### Performance
 
 - `apollo_router_processing_time` - Time spent processing a request (outside of waiting for external or subgraph requests) in seconds.
