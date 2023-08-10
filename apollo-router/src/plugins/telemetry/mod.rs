@@ -12,7 +12,6 @@ use ::tracing::field;
 use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
-use bloom::CountingBloomFilter;
 use dashmap::DashMap;
 use futures::future::ready;
 use futures::future::BoxFuture;
@@ -38,12 +37,17 @@ use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
+use rand::distributions::Uniform;
+use rand::rngs::ThreadRng;
+use rand::thread_rng;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
+use streaming_algorithms::CountMinSketch;
+use streaming_algorithms::HyperLogLog;
 use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -157,7 +161,7 @@ pub(crate) struct Telemetry {
 
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
     meter_provider: AggregateMeterProvider,
-    counting_bloom_filter: Arc<Mutex<CountingBloomFilter>>,
+    counters: CacheCounters,
 }
 
 #[derive(Debug)]
@@ -234,9 +238,7 @@ impl Plugin for Telemetry {
             tracer_provider: Some(Self::create_tracer_provider(&config)?),
             meter_provider,
             config: Arc::new(config),
-            counting_bloom_filter: Arc::new(Mutex::new(CountingBloomFilter::with_rate(
-                4, 0.01, 100,
-            ))),
+            counters: CacheCounters::default(),
         })
     }
 
@@ -462,7 +464,7 @@ impl Plugin for Telemetry {
             .and_then(|m| m.common.as_ref())
             .map(|c| c.experimental_enable_cache_metrics)
             .unwrap_or_default();
-        let bloom_filter = self.counting_bloom_filter.clone();
+        let counters = self.counters.clone();
         let name = name.to_owned();
         let subgraph_name_arc = Arc::new(name.to_owned());
         ServiceBuilder::new()
@@ -515,7 +517,7 @@ impl Plugin for Telemetry {
                     let metrics = metrics.clone();
                     let subgraph_attribute = subgraph_attribute.clone();
                     let subgraph_metrics_conf = subgraph_metrics_conf_resp.clone();
-                    let counting_bloom_filter = bloom_filter.clone();
+                    let counters = counters.clone();
                     // Using Instant because it is guaranteed to be monotonically increasing.
                     let now = Instant::now();
                     f.map(move |result: Result<SubgraphResponse, BoxError>| {
@@ -525,7 +527,7 @@ impl Plugin for Telemetry {
                             subgraph_attribute,
                             subgraph_metrics_conf,
                             now,
-                            counting_bloom_filter,
+                            counters,
                             cache_attributes,
                             &result,
                         );
@@ -1040,7 +1042,7 @@ impl Telemetry {
     }
 
     fn update_cache_metrics(
-        bloom_filter: Arc<Mutex<CountingBloomFilter>>,
+        counters: &CacheCounters,
         sub_response: &SubgraphResponse,
         cache_attributes: CacheAttributes,
     ) {
@@ -1067,26 +1069,13 @@ impl Telemetry {
         } else {
             Arc::new(hash_vary_headers(&cache_attributes.headers))
         };
-        let mut cbf = bloom_filter.lock().unwrap();
-        for (typename, representation) in cache_attributes.representations {
-            let cache_key = CacheKey {
-                representation,
-                typename: typename.clone(),
-                query: cache_attributes.hashed_query.clone(),
-                subgraph_name: cache_attributes.subgraph_name.clone(),
-                hashed_headers: hashed_headers.clone(),
-            };
-            let mut count = cbf.insert_get_count(&cache_key);
-            // Because we had the previous count
-            count += 1;
 
-            ::tracing::info!(
-                histogram.apollo.router.operations.entity.cachable = count as u64,
-                entity_type = %typename,
-                subgraph = %cache_attributes.subgraph_name,
-                vary = %vary_headers,
-            );
-        }
+        counters.record_representations(
+            cache_attributes.hashed_query.clone(),
+            cache_attributes.subgraph_name.clone(),
+            hashed_headers.clone(),
+            cache_attributes.representations,
+        );
     }
 
     fn store_subgraph_request_attributes(
@@ -1116,7 +1105,7 @@ impl Telemetry {
         subgraph_attribute: KeyValue,
         attribute_forward_config: Arc<Option<AttributesForwardConf>>,
         now: Instant,
-        bloom_filter: Arc<Mutex<CountingBloomFilter>>,
+        counters: &CacheCounters,
         cache_attributes: Option<CacheAttributes>,
         result: &Result<Response, BoxError>,
     ) {
@@ -1159,7 +1148,7 @@ impl Telemetry {
                         metric_attrs.push(KeyValue::new("cache_control", cache_control));
                     }
 
-                    Self::update_cache_metrics(bloom_filter, response, cache_attributes)
+                    Self::update_cache_metrics(counters, response, cache_attributes)
                 }
                 metric_attrs.push(KeyValue::new(
                     "status",
@@ -1607,6 +1596,168 @@ fn extract_cache_attributes(representations: &[Value]) -> Result<Vec<(String, Va
         res.push((typename.to_string(), representation.clone()));
     }
     Ok(res)
+}
+
+#[derive(Debug, Hash, Clone, PartialEq, Eq, Default)]
+struct CountersKey {
+    typename: String,
+    query: Arc<String>,
+    subgraph_name: Arc<String>,
+    hashed_headers: Arc<String>,
+}
+
+struct CacheCounters {
+    counters: DashMap<CountersKey, Arc<Mutex<CacheCounter>>>,
+}
+
+impl CacheCounters {
+    async fn record_representations(
+        &self,
+        query: Arc<String>,
+        subgraph_name: Arc<String>,
+        hashed_headers: Arc<String>,
+        representations: Vec<(String, Value)>,
+    ) {
+        let mut representations_by_type: HashMap<String, Vec<Value>> = HashMap::new();
+        for (typename, representation) in representations.into_iter() {
+            representations_by_type
+                .entry(typename)
+                .or_default()
+                .push(representation);
+        }
+
+        for (typename, representations) in representations_by_type.into_iter() {
+            let key = CountersKey {
+                typename,
+                query: query.clone(),
+                subgraph_name: subgraph_name.clone(),
+                hashed_headers: hashed_headers.clone(),
+            };
+            let counter = self.counters.entry(key.clone()).or_default();
+            let mut c = counter.lock().unwrap();
+            c.incr_requests();
+            let mut rng = thread_rng();
+            for representation in representations {
+                c.record_representation(&key, &representation, &mut rng);
+            }
+
+            let distinct = c.distinct();
+            ::tracing::info!(
+                gauge.apollo.router.operations.entity.distinct = distinct,
+                entity_type = %key.typename,
+                subgraph = %key.subgraph_name,
+                vary = %key.hashed_headers,
+            );
+        }
+    }
+}
+
+struct CacheCounter {
+    counts: CountMinSketch<Value, u64>,
+    distinct_entities: HyperLogLog<Value>,
+    low_frequency_entities: HyperLogLog<Value>,
+    requests: usize,
+}
+
+impl Default for CacheCounter {
+    fn default() -> Self {
+        Self {
+            counts: CountMinSketch::new(
+                0.001, // probability calculate k_num
+                0.001, // error tolerance to calculate width
+                (),
+            ),
+            distinct_entities: HyperLogLog::new(0.001),
+            low_frequency_entities: HyperLogLog::new(0.001),
+            requests: 0,
+        }
+    }
+}
+
+impl CacheCounter {
+    fn incr_requests(&mut self) {
+        self.requests += 1;
+    }
+
+    fn distinct(&self) -> f64 {
+        self.distinct_entities.len()
+    }
+
+    fn record_representation(
+        &mut self,
+        key: &CountersKey,
+        representation: &Value,
+        rng: &mut ThreadRng,
+    ) {
+        // This function will send histogram metrics to generate a distribution of frequencies
+        // of entities. In other words, we want to know how many entities appear in 10% of
+        // requests, how many in 30%, etc. It will also create metrics measuring the number of
+        // different entities, and the proportion of entities with low frequency (<0.01).
+        //
+        // Explanations:
+        // The frequency distribution is easy to calculate if we can store, for each entity
+        // key, how many time we have seen it, and calculate the entire distribution at once.
+        // But here, we do not want to store all the tntiy keys (too much memory usage), we
+        // want to calculate it incrementally, and have the result stored in a histogram in an
+        // observability tool.
+        // The histogram receives a range of values, and for sub-ranges, calculates how
+        // many times they were received
+        // Let's say we have N different entities. To make a histogram of entity frequencies,
+        // e want each entity frequency to be sent roughly as often as every other entity
+        // frequency, as 1/N of all values sent.
+        // Unfortunately, if we send a value on each time we see an entity, high frequency
+        // entities will be overrepresented: if a single entity appears in all requests,
+        // the frequency '1' would have the highest amount of events in the histogram,
+        // even if all the other entities have much lower frequencies. In the same way,
+        // entities with lower frequencies would be underrepresented.
+        //
+        // We solve that with sampling. With `f` the frequency of an entity, and `s(f)` its
+        // sampling rate, the probability of sending `f` to the histogram would be `f*s(f)`.
+        // If we want every frequency to appear in the same proportion, then `s(f) = c/f`,
+        // with `c` a constant.
+        // We want the sampling rate to be between 0 and 1, but as `f` gets smaller, `1/f`
+        // becomes larger. So we have to set a bound. We want to know if some entities appear
+        // often enough to warrant caching. So we will ignore entities appearing in less
+        // than 1% of requests. Which means `1/f <= 100`, so `c = 1/100` and `s(f) = 0.01/f`.
+        // Now we still want to count the low frequency entities: if a few entities appear
+        // frequently, but the largest part are rare, then caching is less useful.
+        // So we will measure them separately. First we count the number of distinct entities
+        // we have seen. Then we count the number of distinct entities we see with a frequency
+        // lower than 0.01. We assume that those frequencies are stable over the time of
+        // measurement, so the calculated frequency of rare entities will get progressively lower,
+        // until it reaches the threashold, and stay under 0.01.
+        let count = self.counts.push(representation, &1);
+        self.distinct_entities.push(representation);
+
+        let frequency = count as f64 / self.requests as f64;
+
+        // ignore entities appearing 1% of the time
+        if frequency >= 0.01 {
+            let rate = 0.01 / frequency;
+
+            let distrib = Uniform::new(0.0, 1.0);
+            let sample = rng.sample(distrib);
+
+            if sample < rate {
+                ::tracing::info!(
+                    histogram.apollo.router.operations.entity.cacheable = frequency,
+                    entity_type = %key.typename,
+                    subgraph = %key.subgraph_name,
+                    vary = %key.hashed_headers,
+                );
+            }
+        // account for low frequency entities s eparately
+        } else {
+            self.low_frequency_entities.push(representation);
+            let uncacheable = self.low_frequency_entities.len() / self.distinct_entities.len();
+            ::tracing::info!(
+                gauge.apollo.router.operations.entity.uncacheable = frequency,
+                entity_type = %key.typename,
+                subgraph = %key.subgraph_name,
+                vary = %key.hashed_headers,
+            );
+        }
+    }
 }
 
 fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
