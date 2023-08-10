@@ -3,9 +3,9 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Instant;
 
+use futures::lock::Mutex;
 use lru::LruCache;
 use tokio::sync::oneshot;
-use tokio::sync::Mutex;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
 
