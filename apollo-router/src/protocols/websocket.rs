@@ -250,7 +250,27 @@ where
                 .build()
         })?;
 
-        let resp = tokio::time::timeout(CONNECTION_ACK_TIMEOUT, stream.next())
+        let first_non_ping_payload = async {
+            loop {
+                match stream.next().await {
+                    Some(Ok(ServerMessage::Ping { payload })) => {
+                        // we don't mind an error here
+                        // because it will fall through the error below
+                        // if we haven't been able to properly get a ConnectionAck within the `CONNECTION_ACK_TIMEOUT`
+                        let _ = stream
+                            .send(ClientMessage::Pong {
+                                payload: payload.map(|p| p.into()),
+                            })
+                            .await;
+                    }
+                    other => {
+                        return other;
+                    }
+                }
+            }
+        };
+
+        let resp = tokio::time::timeout(CONNECTION_ACK_TIMEOUT, first_non_ping_payload)
             .await
             .map_err(|_| {
                 graphql::Error::builder()
@@ -503,11 +523,9 @@ struct WithId {
 mod tests {
     use std::convert::Infallible;
     use std::net::SocketAddr;
-    use std::str::FromStr;
 
     use axum::extract::ws::Message as AxumWsMessage;
     use axum::extract::WebSocketUpgrade;
-    use axum::response::IntoResponse;
     use axum::routing::get;
     use axum::Router;
     use axum::Server;
@@ -520,8 +538,8 @@ mod tests {
     use super::*;
     use crate::graphql::Request;
 
-    async fn emulate_correct_websocket_server_new_protocol(socket_addr: SocketAddr) {
-        async fn ws_handler(ws: WebSocketUpgrade) -> Result<impl IntoResponse, Infallible> {
+    async fn emulate_correct_websocket_server_new_protocol(send_ping: bool) -> SocketAddr {
+        let ws_handler = move |ws: WebSocketUpgrade| async move {
             let res = ws.on_upgrade(move |mut socket| async move {
                 let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                 let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
@@ -531,6 +549,19 @@ mod tests {
                     }})));
                 } else {
                    panic!("it should be a connection init message");
+                }
+
+                if send_ping {
+                    // It turns out some servers may send Pings before they even ack the connection.
+                    socket
+                        .send(AxumWsMessage::Text(
+                            serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
+                        ))
+                        .await
+                        .unwrap();
+                    let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                    let pong_message: ClientMessage = serde_json::from_str(&new_message).unwrap();
+                    assert!(matches!(pong_message, ClientMessage::Pong { payload: None }));
                 }
 
                 socket
@@ -607,21 +638,35 @@ mod tests {
                 socket.close().await.unwrap();
             });
 
-            Ok(res)
-        }
+            Ok::<_, Infallible>(res)
+        };
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::bind(&socket_addr).serve(app.into_make_service());
-        server.await.unwrap();
+        let server = Server::bind(&"127.0.0.1:0".parse().unwrap()).serve(app.into_make_service());
+        let local_addr = server.local_addr();
+        tokio::spawn(async { server.await.unwrap() });
+        local_addr
     }
 
-    async fn emulate_correct_websocket_server_old_protocol(socket_addr: SocketAddr) {
-        async fn ws_handler(ws: WebSocketUpgrade) -> Result<impl IntoResponse, Infallible> {
+    async fn emulate_correct_websocket_server_old_protocol(send_ping: bool) -> SocketAddr {
+        let ws_handler = move |ws: WebSocketUpgrade| async move {
             let res = ws.on_upgrade(move |mut socket| async move {
                 let init_connection = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                 let init_msg: ClientMessage = serde_json::from_str(&init_connection).unwrap();
                 assert!(matches!(init_msg, ClientMessage::ConnectionInit { .. }));
 
+                if send_ping {
+                    // It turns out some servers may send Pings before they even ack the connection.
+                    socket
+                        .send(AxumWsMessage::Text(
+                            serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
+                        ))
+                        .await
+                        .unwrap();
+                    let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
+                    let pong_message: ClientMessage = serde_json::from_str(&new_message).unwrap();
+                    assert!(matches!(pong_message, ClientMessage::Pong { payload: None }));
+                }
                 socket
                     .send(AxumWsMessage::Text(
                         serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
@@ -682,20 +727,29 @@ mod tests {
                 socket.close().await.unwrap();
             });
 
-            Ok(res)
-        }
+            Ok::<_, Infallible>(res)
+        };
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::bind(&socket_addr).serve(app.into_make_service());
-        server.await.unwrap();
+        let server = Server::bind(&"127.0.0.1:0".parse().unwrap()).serve(app.into_make_service());
+        let local_addr = server.local_addr();
+        tokio::spawn(async { server.await.unwrap() });
+        local_addr
     }
 
     #[tokio::test]
-    async fn test_ws_connection_new_proto() {
-        let socket_addr = SocketAddr::from_str("127.0.0.1:3900").unwrap();
-        let join_task =
-            tokio::task::spawn(emulate_correct_websocket_server_new_protocol(socket_addr));
-        let url = url::Url::parse("ws://localhost:3900/ws").unwrap();
+    async fn test_ws_connection_new_proto_with_ping() {
+        test_ws_connection_new_proto(true).await
+    }
+
+    #[tokio::test]
+    async fn test_ws_connection_new_proto_without_ping() {
+        test_ws_connection_new_proto(false).await
+    }
+
+    async fn test_ws_connection_new_proto(send_ping: bool) {
+        let socket_addr = emulate_correct_websocket_server_new_protocol(send_ping).await;
+        let url = url::Url::parse(format!("ws://{}/ws", socket_addr).as_str()).unwrap();
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
             http::header::SEC_WEBSOCKET_PROTOCOL,
@@ -748,16 +802,21 @@ mod tests {
             gql_read_stream.next().await.is_none(),
             "It should be completed"
         );
-
-        join_task.abort();
     }
 
     #[tokio::test]
-    async fn test_ws_connection_old_proto() {
-        let socket_addr = SocketAddr::from_str("127.0.0.1:3901").unwrap();
-        let join_task =
-            tokio::task::spawn(emulate_correct_websocket_server_old_protocol(socket_addr));
-        let url = url::Url::parse("ws://localhost:3901/ws").unwrap();
+    async fn test_ws_connection_old_proto_with_ping() {
+        test_ws_connection_old_proto(true).await
+    }
+
+    #[tokio::test]
+    async fn test_ws_connection_old_proto_without_ping() {
+        test_ws_connection_old_proto(false).await
+    }
+
+    async fn test_ws_connection_old_proto(send_ping: bool) {
+        let socket_addr = emulate_correct_websocket_server_old_protocol(send_ping).await;
+        let url = url::Url::parse(format!("ws://{}/ws", socket_addr).as_str()).unwrap();
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
             http::header::SEC_WEBSOCKET_PROTOCOL,
@@ -809,7 +868,5 @@ mod tests {
             gql_read_stream.next().await.is_none(),
             "It should be completed"
         );
-
-        join_task.abort();
     }
 }
