@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
-use futures::lock::Mutex;
 use tokio::sync::oneshot;
+use tokio::sync::Mutex;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
 use tower::BoxError;
