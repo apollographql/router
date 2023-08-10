@@ -372,7 +372,6 @@ where
         None => first,
     };
 
-    //response.response = http::Response::from_parts(parts, stream::once(future::ready(new_body)));
 
     if let Some(control) = co_processor_output.control {
         parts.status = control.get_http_status()?
