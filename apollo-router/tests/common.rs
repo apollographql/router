@@ -11,12 +11,14 @@ use std::time::SystemTime;
 use buildstructor::buildstructor;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use http::HeaderValue;
 use jsonpath_lib::Selector;
 use mime::APPLICATION_JSON;
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::trace::Span;
+use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
 use serde_json::json;
@@ -31,7 +33,10 @@ use tokio::task;
 use tokio::time::Instant;
 use tower::BoxError;
 use tracing::info_span;
+use tracing_core::Dispatch;
 use tracing_core::LevelFilter;
+use tracing_futures::Instrument;
+use tracing_futures::WithSubscriber;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::EnvFilter;
@@ -52,7 +57,9 @@ pub struct IntegrationTest {
     _lock: tokio::sync::OwnedMutexGuard<bool>,
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
+    collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
     _subgraphs: wiremock::MockServer,
+    subscriber: Option<Dispatch>,
 }
 
 struct TracedResponder(pub(crate) ResponseTemplate);
@@ -92,15 +99,16 @@ impl IntegrationTest {
         config: &'static str,
         telemetry: Option<Telemetry>,
         responder: Option<ResponseTemplate>,
+        collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
     ) -> Self {
-        Self::init_telemetry(telemetry);
-
         // Prevent multiple integration tests from running at the same time
         let lock = LOCK
             .get_or_init(Default::default)
             .clone()
             .lock_owned()
             .await;
+
+        let subscriber = Self::init_telemetry(telemetry);
 
         let mut listener = None;
         for _ in 0..100 {
@@ -130,17 +138,26 @@ impl IntegrationTest {
 
         fs::write(&test_config_location, config).expect("could not write config");
 
-        let router_location = PathBuf::from(env!("CARGO_BIN_EXE_router"));
         let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
+        let collect_stdio = collect_stdio.map(|sender| {
+            let version_line_re = regex::Regex::new("Apollo Router v[^ ]+ ").unwrap();
+            (sender, version_line_re)
+        });
         Self {
             router: None,
-            router_location,
+            router_location: Self::router_location(),
             test_config_location,
             _lock: lock,
             stdio_tx,
             stdio_rx,
+            collect_stdio,
             _subgraphs: subgraphs,
+            subscriber,
         }
+    }
+
+    pub fn router_location() -> PathBuf {
+        PathBuf::from(env!("CARGO_BIN_EXE_router"))
     }
 
     #[allow(dead_code)]
@@ -161,19 +178,44 @@ impl IntegrationTest {
             .expect("router should start");
         let reader = BufReader::new(router.stdout.take().expect("out"));
         let stdio_tx = self.stdio_tx.clone();
+        let collect_stdio = self.collect_stdio.take();
         // We need to read from stdout otherwise we will hang
         task::spawn(async move {
+            let mut collected = Vec::new();
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 println!("{line}");
+                if let Some((_sender, version_line_re)) = &collect_stdio {
+                    #[derive(serde::Deserialize)]
+                    struct Log {
+                        #[allow(unused)]
+                        timestamp: String,
+                        level: String,
+                        message: String,
+                    }
+                    let log = serde_json::from_str::<Log>(&line).unwrap();
+                    // Omit this message from snapshots since it depends on external environment
+                    if !log.message.starts_with("RUST_BACKTRACE=full detected") {
+                        collected.push(format!(
+                            "{}: {}",
+                            log.level,
+                            // Redacted so we don't need to update snapshots every release
+                            version_line_re
+                                .replace(&log.message, "Apollo Router [version number] ")
+                        ))
+                    }
+                }
                 let _ = stdio_tx.send(line).await;
+            }
+            if let Some((sender, _version_line_re)) = collect_stdio {
+                let _ = sender.send(collected.join("\n"));
             }
         });
 
         self.router = Some(router);
     }
 
-    fn init_telemetry(telemetry: Option<Telemetry>) {
+    fn init_telemetry(telemetry: Option<Telemetry>) -> Option<Dispatch> {
         match telemetry {
             Some(Telemetry::Jaeger) => {
                 let tracer = opentelemetry_jaeger::new_agent_pipeline()
@@ -189,8 +231,8 @@ impl IntegrationTest {
                         .with_filter(EnvFilter::from_default_env()),
                 );
 
-                let _ = tracing::subscriber::set_global_default(subscriber);
                 global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
+                Some(Dispatch::new(subscriber))
             }
             Some(Telemetry::Datadog) => {
                 let tracer = opentelemetry_datadog::new_pipeline()
@@ -206,8 +248,8 @@ impl IntegrationTest {
                         .with_filter(EnvFilter::from_default_env()),
                 );
 
-                let _ = tracing::subscriber::set_global_default(subscriber);
                 global::set_text_map_propagator(opentelemetry_datadog::DatadogPropagator::new());
+                Some(Dispatch::new(subscriber))
             }
             Some(Telemetry::Otlp) => {
                 let tracer = opentelemetry_otlp::new_pipeline()
@@ -223,10 +265,10 @@ impl IntegrationTest {
                         .with_filter(EnvFilter::from_default_env()),
                 );
 
-                let _ = tracing::subscriber::set_global_default(subscriber);
                 global::set_text_map_propagator(
                     opentelemetry::sdk::propagation::TraceContextPropagator::new(),
                 );
+                Some(Dispatch::new(subscriber))
             }
             Some(Telemetry::Zipkin) => {
                 let tracer = opentelemetry_zipkin::new_pipeline()
@@ -242,10 +284,10 @@ impl IntegrationTest {
                         .with_filter(EnvFilter::from_default_env()),
                 );
 
-                let _ = tracing::subscriber::set_global_default(subscriber);
                 global::set_text_map_propagator(opentelemetry_zipkin::Propagator::new());
+                Some(Dispatch::new(subscriber))
             }
-            _ => {}
+            _ => None,
         }
     }
 
@@ -278,38 +320,148 @@ impl IntegrationTest {
             .expect("must be able to write config");
     }
 
-    pub fn run_query(&self) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    #[allow(dead_code)]
+    pub fn execute_default_query(
+        &self,
+    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+        self.execute_query_internal(None)
+    }
+
+    #[allow(dead_code)]
+    pub fn execute_query(
+        &self,
+        query: &Value,
+    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+        self.execute_query_internal(Some(query))
+    }
+
+    fn execute_query_internal(
+        &self,
+        query: Option<&Value>,
+    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
-        async {
+        let default_query = &json!({"query":"query {topProducts{name}}","variables":{}});
+        let query = query.unwrap_or(default_query).clone();
+        let dispatch = self.subscriber.clone();
+
+        async move {
+            let span = info_span!("client_request");
+            let span_id = span.context().span().span_context().trace_id().to_string();
+
+            async move {
+                let client = reqwest::Client::new();
+
+                let mut request = client
+                    .post("http://localhost:4000")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .header("apollographql-client-name", "custom_name")
+                    .header("apollographql-client-version", "1.0")
+                    .json(&query)
+                    .build()
+                    .unwrap();
+                global::get_text_map_propagator(|propagator| {
+                    propagator.inject_context(
+                        &tracing::span::Span::current().context(),
+                        &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    );
+                });
+                request.headers_mut().remove(ACCEPT);
+                match client.execute(request).await {
+                    Ok(response) => (span_id, response),
+                    Err(err) => {
+                        panic!("unable to send successful request to router, {err}")
+                    }
+                }
+            }
+            .instrument(span)
+            .await
+        }
+        .with_subscriber(dispatch.unwrap_or_default())
+    }
+
+    #[allow(dead_code)]
+    pub fn execute_untraced_query(
+        &self,
+        query: &Value,
+    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+        assert!(
+            self.router.is_some(),
+            "router was not started, call `router.start().await; router.assert_started().await`"
+        );
+        let query = query.clone();
+        let dispatch = self.subscriber.clone();
+
+        async move {
             let client = reqwest::Client::new();
-            let id = Uuid::new_v4().to_string();
-            let span = info_span!("client_request", unit_test = id.as_str());
-            let _span_guard = span.enter();
 
             let mut request = client
                 .post("http://localhost:4000")
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .header("apollographql-client-name", "custom_name")
                 .header("apollographql-client-version", "1.0")
-                .json(&json!({"query":"{topProducts{name}}","variables":{}}))
+                .json(&query)
                 .build()
                 .unwrap();
 
-            global::get_text_map_propagator(|propagator| {
-                propagator.inject_context(
-                    &span.context(),
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                );
-            });
             request.headers_mut().remove(ACCEPT);
             match client.execute(request).await {
-                Ok(response) => (id, response),
+                Ok(response) => (
+                    response
+                        .headers()
+                        .get("apollo-custom-trace-id")
+                        .cloned()
+                        .unwrap_or(HeaderValue::from_static("no-trace-id"))
+                        .to_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                    response,
+                ),
                 Err(err) => {
                     panic!("unable to send successful request to router, {err}")
                 }
+            }
+        }
+        .with_subscriber(dispatch.unwrap_or_default())
+    }
+
+    #[allow(dead_code)]
+    pub async fn run_subscription(&self, subscription: &str) -> (String, reqwest::Response) {
+        assert!(
+            self.router.is_some(),
+            "router was not started, call `router.start().await; router.assert_started().await`"
+        );
+        let client = reqwest::Client::new();
+        let id = Uuid::new_v4().to_string();
+        let span = info_span!("client_request", unit_test = id.as_str());
+        let _span_guard = span.enter();
+
+        let mut request = client
+            .post("http://localhost:4000")
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+            .header(
+                ACCEPT,
+                "multipart/mixed;boundary=\"graphql\";subscriptionSpec=1.0",
+            )
+            .header("apollographql-client-name", "custom_name")
+            .header("apollographql-client-version", "1.0")
+            .json(&json!({"query":subscription,"variables":{}}))
+            .build()
+            .unwrap();
+
+        global::get_text_map_propagator(|propagator| {
+            propagator.inject_context(
+                &span.context(),
+                &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+            );
+        });
+
+        match client.execute(request).await {
+            Ok(response) => (id, response),
+            Err(err) => {
+                panic!("unable to send successful request to router, {err}")
             }
         }
     }
@@ -340,7 +492,12 @@ impl IntegrationTest {
 
     #[cfg(target_os = "windows")]
     pub async fn graceful_shutdown(&mut self) {
-        // On windows we have to do complicated things to gracefully shutdown. One day we may get around to this, but it's not a priority.
+        // We don’t have SIGTERM on Windows, so do a non-graceful kill instead
+        self.kill().await
+    }
+
+    #[allow(dead_code)]
+    pub async fn kill(&mut self) {
         let _ = self
             .router
             .as_mut()
@@ -365,13 +522,18 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub async fn assert_no_reload_necessary(&mut self) {
+        self.assert_log_contains("no reload necessary").await;
+    }
+
+    #[allow(dead_code)]
     pub async fn assert_not_reloaded(&mut self) {
         self.assert_log_contains("continuing with previous configuration")
             .await;
     }
 
     #[allow(dead_code)]
-    async fn assert_log_contains(&mut self, msg: &str) {
+    pub async fn assert_log_contains(&mut self, msg: &str) {
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(5) {
             if let Ok(line) = self.stdio_rx.try_recv() {
@@ -408,6 +570,21 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub async fn assert_metrics_does_not_contain(&self, text: &str) {
+        if let Ok(metrics) = self
+            .get_metrics_response()
+            .await
+            .expect("failed to fetch metrics")
+            .text()
+            .await
+        {
+            if metrics.contains(text) {
+                panic!("'{text}' detected in metrics\n{metrics}");
+            }
+        }
+    }
+
+    #[allow(dead_code)]
     pub async fn assert_shutdown(&mut self) {
         let router = self.router.as_mut().expect("router must have been started");
         let now = Instant::now();
@@ -424,6 +601,14 @@ impl IntegrationTest {
 
         self.dump_stack_traces();
         panic!("unable to shutdown router, this probably means a hang and should be investigated");
+    }
+
+    #[allow(dead_code)]
+    #[cfg(target_family = "unix")]
+    pub async fn send_sighup(&mut self) {
+        unsafe {
+            libc::kill(self.pid(), libc::SIGHUP);
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -461,7 +646,6 @@ impl Drop for IntegrationTest {
         if let Some(child) = &mut self.router {
             let _ = child.start_kill();
         }
-        global::shutdown_tracer_provider();
     }
 }
 

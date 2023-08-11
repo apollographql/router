@@ -45,6 +45,11 @@ pub(crate) struct Config {
     /// Batch processor settings
     #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
+
+    /// Temporality for export (default: `Cumulative`).
+    /// Note that when exporting to Datadog agent use `Delta`.
+    #[serde(default)]
+    pub(crate) temporality: Temporality,
 }
 
 impl Config {
@@ -195,17 +200,22 @@ impl GrpcExporter {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Protocol {
+    #[default]
     Grpc,
     Http,
 }
 
-impl Default for Protocol {
-    fn default() -> Self {
-        Protocol::Grpc
-    }
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum Temporality {
+    /// Export cumulative metrics.
+    #[default]
+    Cumulative,
+    /// Export delta metrics. `Delta` should be used when exporting to DataDog Agent.
+    Delta,
 }
 
 mod metadata_map_serde {

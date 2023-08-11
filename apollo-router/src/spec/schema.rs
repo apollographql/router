@@ -1,25 +1,23 @@
 //! GraphQL schema.
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use apollo_compiler::hir;
+use apollo_compiler::diagnostics::ApolloDiagnostic;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
+use apollo_compiler::InputDatabase;
 use http::Uri;
 use sha2::Digest;
 use sha2::Sha256;
 
+use crate::configuration::GraphQLValidationMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
-use crate::json_ext::Object;
-use crate::json_ext::Value;
+use crate::error::ValidationErrors;
 use crate::query_planner::OperationKind;
-use crate::spec::query::parse_hir_value;
-use crate::spec::FieldType;
 use crate::Configuration;
 
 /// A GraphQL schema.
@@ -27,55 +25,43 @@ use crate::Configuration;
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
     pub(crate) type_system: Arc<apollo_compiler::hir::TypeSystem>,
+    /// Stored for comparison with the validation errors from query planning.
+    diagnostics: Vec<ApolloDiagnostic>,
     subgraphs: HashMap<String, Uri>,
-    pub(crate) object_types: HashMap<String, ObjectType>,
-    pub(crate) interfaces: HashMap<String, Interface>,
-    pub(crate) input_types: HashMap<String, InputObjectType>,
-    pub(crate) custom_scalars: HashSet<String>,
-    pub(crate) enums: HashMap<String, HashSet<String>>,
     api_schema: Option<Box<Schema>>,
     pub(crate) schema_id: Option<String>,
-    root_operations: HashMap<OperationKind, String>,
 }
 
 #[cfg(test)]
-fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
+fn make_api_schema(schema: &str, configuration: &Configuration) -> Result<String, SchemaError> {
     use itertools::Itertools;
-    use router_bridge::api_schema;
-    let s = api_schema::api_schema(schema)
-        .map_err(|e| SchemaError::Api(e.to_string()))?
-        .map_err(|e| SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", ")))?;
+    use router_bridge::api_schema::api_schema;
+    use router_bridge::api_schema::ApiSchemaOptions;
+    let s = api_schema(
+        schema,
+        ApiSchemaOptions {
+            graphql_validation: matches!(
+                configuration.experimental_graphql_validation_mode,
+                GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
+            ),
+        },
+    )
+    .map_err(|e| SchemaError::Api(e.to_string()))?
+    .map_err(|e| SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", ")))?;
     Ok(format!("{s}\n"))
 }
 
 impl Schema {
-    pub(crate) fn parse(
-        s: &str,
-        configuration: &Configuration,
-        api_schema: Option<Box<Schema>>,
-    ) -> Result<Self, SchemaError> {
-        let mut schema = Self::parse_inner(s, configuration)?;
-        schema.api_schema = api_schema;
-        Ok(schema)
-    }
-
     #[cfg(test)]
     pub(crate) fn parse_test(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        let mut schema = Self::parse_inner(s, configuration)?;
-        schema.api_schema = Some(Box::new(Self::parse_inner(
-            &make_api_schema(s)?,
-            configuration,
-        )?));
+        let api_schema = Self::parse(&make_api_schema(s, configuration)?, configuration)?;
+        let schema = Self::parse(s, configuration)?.with_api_schema(api_schema);
         Ok(schema)
     }
 
-    fn parse_inner(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {
+    pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
         let mut compiler = ApolloCompiler::new();
-        compiler.add_type_system(
-            include_str!("introspection_types.graphql"),
-            "introspection_types.graphql",
-        );
-        let id = compiler.add_type_system(schema, "schema.graphql");
+        let id = compiler.add_type_system(sdl, "schema.graphql");
 
         let ast = compiler.db.ast(id);
 
@@ -83,47 +69,55 @@ impl Schema {
         let recursion_limit = ast.recursion_limit();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        // TODO: run full compiler-based validation instead?
-        let errors = ast.errors().cloned().collect::<Vec<_>>();
-        if !errors.is_empty() {
-            let errors = ParseErrors {
-                raw_schema: schema.to_string(),
-                errors,
-            };
-            errors.print();
-            return Err(SchemaError::Parse(errors));
+        let mut parse_errors = ast.errors().peekable();
+        if parse_errors.peek().is_some() {
+            let errors = parse_errors.cloned().collect::<Vec<_>>();
+            return Err(SchemaError::Parse(ParseErrors { errors }));
         }
 
-        fn as_string(value: &hir::Value) -> Option<&String> {
-            if let hir::Value::String(string) = value {
-                Some(string)
-            } else {
-                None
+        let diagnostics = if configuration.experimental_graphql_validation_mode
+            == GraphQLValidationMode::Legacy
+        {
+            vec![]
+        } else {
+            compiler
+                .validate()
+                .into_iter()
+                .filter(|err| err.data.is_error())
+                .collect::<Vec<_>>()
+        };
+
+        if !diagnostics.is_empty() {
+            let errors = ValidationErrors {
+                errors: diagnostics.clone(),
+            };
+            errors.print();
+
+            // Only error out if new validation is used: with `Both`, we take the legacy
+            // validation as authoritative and only use the new result for comparison
+            if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::New {
+                return Err(SchemaError::Validate(errors));
             }
         }
 
         let mut subgraphs = HashMap::new();
         // TODO: error if not found?
         if let Some(join_enum) = compiler.db.find_enum_by_name("join__Graph".into()) {
-            for (name, url) in join_enum
-                .enum_values_definition()
-                .iter()
-                .filter_map(|value| {
-                    let join_directive = value
-                        .directives()
-                        .iter()
-                        .find(|directive| directive.name() == "join__graph")?;
-                    let name = as_string(join_directive.argument_by_name("name")?)?;
-                    let url = as_string(join_directive.argument_by_name("url")?)?;
-                    Some((name, url))
-                })
-            {
+            for (name, url) in join_enum.values().filter_map(|value| {
+                let join_directive = value
+                    .directives()
+                    .iter()
+                    .find(|directive| directive.name() == "join__graph")?;
+                let name = join_directive.argument_by_name("name")?.as_str()?;
+                let url = join_directive.argument_by_name("url")?.as_str()?;
+                Some((name, url))
+            }) {
                 if url.is_empty() {
-                    return Err(SchemaError::MissingSubgraphUrl(name.clone()));
+                    return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
                 }
-                let url =
-                    Uri::from_str(url).map_err(|err| SchemaError::UrlParse(name.clone(), err))?;
-                if subgraphs.insert(name.clone(), url).is_some() {
+                let url = Uri::from_str(url)
+                    .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?;
+                if subgraphs.insert(name.to_string(), url).is_some() {
                     return Err(SchemaError::Api(format!(
                         "must not have several subgraphs with same name '{name}'"
                     )));
@@ -131,87 +125,24 @@ impl Schema {
             }
         }
 
-        let object_types: HashMap<_, _> = compiler
-            .db
-            .object_types()
-            .iter()
-            .map(|(name, def)| (name.clone(), (&**def).into()))
-            .collect();
-
-        let interfaces: HashMap<_, _> = compiler
-            .db
-            .interfaces()
-            .iter()
-            .map(|(name, def)| (name.clone(), (&**def).into()))
-            .collect();
-
-        let input_types: HashMap<_, _> = compiler
-            .db
-            .input_objects()
-            .iter()
-            .map(|(name, def)| (name.clone(), (&**def).into()))
-            .collect();
-
-        let enums = compiler
-            .db
-            .enums()
-            .iter()
-            .map(|(name, def)| {
-                let values = def
-                    .enum_values_definition()
-                    .iter()
-                    .map(|value| value.enum_value().to_owned())
-                    .collect();
-                (name.clone(), values)
-            })
-            .collect();
-
-        let root_operations = compiler
-            .db
-            .schema()
-            .root_operation_type_definition()
-            .iter()
-            .filter(|def| def.loc().is_some()) // exclude implict operations
-            .map(|def| {
-                (
-                    def.operation_ty().into(),
-                    if let hir::Type::Named { name, .. } = def.named_type() {
-                        name.clone()
-                    } else {
-                        // FIXME: hir::RootOperationTypeDefinition should contain
-                        // the name directly, not a `Type` enum value which happens to always
-                        // be the `Named` variant.
-                        unreachable!()
-                    },
-                )
-            })
-            .collect();
-
-        let custom_scalars = compiler
-            .db
-            .scalars()
-            .iter()
-            .filter(|(_name, def)| !def.is_built_in())
-            .map(|(name, _def)| name.clone())
-            .collect();
-
+        let sdl = compiler.db.source_code(id);
         let mut hasher = Sha256::new();
-        hasher.update(schema.as_bytes());
+        hasher.update(sdl.as_bytes());
         let schema_id = Some(format!("{:x}", hasher.finalize()));
 
         Ok(Schema {
-            raw_sdl: Arc::new(schema.into()),
+            raw_sdl: Arc::new(sdl.to_string()),
             type_system: compiler.db.type_system(),
+            diagnostics,
             subgraphs,
-            object_types,
-            interfaces,
-            input_types,
-            custom_scalars,
-            enums,
             api_schema: None,
             schema_id,
-            root_operations,
         })
+    }
+
+    pub(crate) fn with_api_schema(mut self, api_schema: Schema) -> Self {
+        self.api_schema = Some(Box::new(api_schema));
+        self
     }
 }
 
@@ -234,6 +165,11 @@ impl Schema {
         self.subgraphs.iter()
     }
 
+    /// Return the subgraph URI given the service name
+    pub(crate) fn subgraph_url(&self, service_name: &str) -> Option<&Uri> {
+        self.subgraphs.get(service_name)
+    }
+
     pub(crate) fn api_schema(&self) -> &Schema {
         match &self.api_schema {
             Some(schema) => schema,
@@ -242,108 +178,22 @@ impl Schema {
     }
 
     pub(crate) fn root_operation_name(&self, kind: OperationKind) -> &str {
-        self.root_operations
-            .get(&kind)
-            .map(|s| s.as_str())
-            .unwrap_or_else(|| kind.as_str())
+        let schema_def = &self.type_system.definitions.schema;
+        match kind {
+            OperationKind::Query => schema_def.query(),
+            OperationKind::Mutation => schema_def.mutation(),
+            OperationKind::Subscription => schema_def.subscription(),
+        }
+        .unwrap_or_else(|| kind.as_str())
+    }
+
+    pub(crate) fn has_errors(&self) -> bool {
+        !self.diagnostics.is_empty()
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct InvalidObject;
-
-#[derive(Debug, Clone)]
-pub(crate) struct ObjectType {
-    pub(crate) fields: HashMap<String, FieldType>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct Interface {
-    pub(crate) fields: HashMap<String, FieldType>,
-}
-
-macro_rules! implement_object_type_or_interface {
-    ($name:ident => $hir_ty:ty $(,)?) => {
-        impl From<&'_ $hir_ty> for $name {
-            fn from(def: &'_ $hir_ty) -> Self {
-                Self {
-                    fields: def
-                        .fields_definition()
-                        .iter()
-                        .chain(
-                            def.extensions()
-                                .iter()
-                                .flat_map(|ext| ext.fields_definition()),
-                        )
-                        .map(|field| (field.name().to_owned(), field.ty().into()))
-                        .collect(),
-                }
-            }
-        }
-    };
-}
-
-// Spec: https://spec.graphql.org/draft/#sec-Objects
-// Spec: https://spec.graphql.org/draft/#sec-Object-Extensions
-implement_object_type_or_interface!(
-    ObjectType =>
-    hir::ObjectTypeDefinition,
-);
-// Spec: https://spec.graphql.org/draft/#sec-Interfaces
-// Spec: https://spec.graphql.org/draft/#sec-Interface-Extensions
-implement_object_type_or_interface!(
-    Interface =>
-    hir::InterfaceTypeDefinition,
-);
-
-#[derive(Debug, Clone)]
-pub(crate) struct InputObjectType {
-    pub(crate) fields: HashMap<String, (FieldType, Option<Value>)>,
-}
-
-impl InputObjectType {
-    pub(crate) fn validate_object(
-        &self,
-        object: &Object,
-        schema: &Schema,
-    ) -> Result<(), InvalidObject> {
-        self.fields
-            .iter()
-            .try_for_each(|(name, (ty, default_value))| {
-                let value = match object.get(name.as_str()) {
-                    Some(&Value::Null) | None => default_value.as_ref().unwrap_or(&Value::Null),
-                    Some(value) => value,
-                };
-                ty.validate_input_value(value, schema)
-            })
-            .map_err(|_| InvalidObject)
-    }
-}
-
-impl From<&'_ hir::InputObjectTypeDefinition> for InputObjectType {
-    fn from(def: &'_ hir::InputObjectTypeDefinition) -> Self {
-        InputObjectType {
-            fields: def
-                .input_fields_definition()
-                .iter()
-                .chain(
-                    def.extensions()
-                        .iter()
-                        .flat_map(|ext| ext.input_fields_definition()),
-                )
-                .map(|field| {
-                    (
-                        field.name().to_owned(),
-                        (
-                            field.ty().into(),
-                            field.default_value().and_then(parse_hir_value),
-                        ),
-                    )
-                })
-                .collect(),
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -521,14 +371,13 @@ mod tests {
     fn api_schema() {
         let schema = include_str!("../testdata/contract_schema.graphql");
         let schema = Schema::parse_test(schema, &Default::default()).unwrap();
-        assert!(schema.object_types["Product"]
-            .fields
-            .get("inStock")
-            .is_some());
-        assert!(schema.api_schema.unwrap().object_types["Product"]
-            .fields
-            .get("inStock")
-            .is_none());
+        let has_in_stock_field = |schema: &Schema| {
+            schema.type_system.definitions.objects["Product"]
+                .fields()
+                .any(|f| f.name() == "inStock")
+        };
+        assert!(has_in_stock_field(&schema));
+        assert!(!has_in_stock_field(schema.api_schema.as_ref().unwrap()));
     }
 
     #[test]

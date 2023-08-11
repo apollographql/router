@@ -1,6 +1,6 @@
 //! Configuration for apollo telemetry.
-// This entire file is license key functionality
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::num::NonZeroUsize;
 use std::ops::AddAssign;
 use std::time::SystemTime;
@@ -9,6 +9,7 @@ use derivative::Derivative;
 use http::header::HeaderName;
 use itertools::Itertools;
 use schemars::JsonSchema;
+use serde::ser::SerializeMap;
 use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
@@ -25,6 +26,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::query_planner::OperationKind;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 
@@ -63,9 +65,7 @@ pub(crate) struct Config {
     /// The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.
     pub(crate) buffer_size: NonZeroUsize,
 
-    /// Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
-    /// 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation.
-    /// Value MUST be less than global sampling rate
+    /// Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
     pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
@@ -80,9 +80,64 @@ pub(crate) struct Config {
 
     /// Configuration for batch processing.
     pub(crate) batch_processor: BatchProcessorConfig,
+
+    /// Configure the way errors are transmitted to Apollo Studio
+    pub(crate) errors: ErrorsConfiguration,
 }
 
-fn default_field_level_instrumentation_sampler() -> SamplerOption {
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct ErrorsConfiguration {
+    /// Handling of errors coming from subgraph
+    pub(crate) subgraph: SubgraphErrorConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct SubgraphErrorConfig {
+    /// Handling of errors coming from all subgraphs
+    pub(crate) all: ErrorConfiguration,
+    /// Handling of errors coming from specified subgraphs
+    pub(crate) subgraphs: Option<HashMap<String, ErrorConfiguration>>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct ErrorConfiguration {
+    /// Send subgraph errors to Apollo Studio
+    pub(crate) send: bool,
+    /// Redact subgraph errors to Apollo Studio
+    pub(crate) redact: bool,
+}
+
+impl Default for ErrorConfiguration {
+    fn default() -> Self {
+        Self {
+            send: default_send_errors(),
+            redact: default_redact_errors(),
+        }
+    }
+}
+
+impl SubgraphErrorConfig {
+    pub(crate) fn get_error_config(&self, subgraph: &str) -> &ErrorConfiguration {
+        if let Some(subgraph_conf) = self.subgraphs.as_ref().and_then(|s| s.get(subgraph)) {
+            subgraph_conf
+        } else {
+            &self.all
+        }
+    }
+}
+
+pub(crate) const fn default_send_errors() -> bool {
+    true
+}
+
+pub(crate) const fn default_redact_errors() -> bool {
+    true
+}
+
+const fn default_field_level_instrumentation_sampler() -> SamplerOption {
     SamplerOption::TraceIdRatioBased(0.01)
 }
 
@@ -124,6 +179,7 @@ impl Default for Config {
             send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
             batch_processor: BatchProcessorConfig::default(),
+            errors: ErrorsConfiguration::default(),
         }
     }
 }
@@ -209,7 +265,76 @@ pub(crate) enum SingleReport {
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct Report {
     pub(crate) traces_per_query: HashMap<String, TracesAndStats>,
-    pub(crate) operation_count: u64,
+    #[serde(serialize_with = "serialize_licensed_operation_count_by_type")]
+    pub(crate) licensed_operation_count_by_type:
+        HashMap<(OperationKind, Option<OperationSubType>), LicensedOperationCountByType>,
+}
+
+#[derive(Clone, Default, Debug, Serialize, PartialEq, Eq, Hash)]
+pub(crate) struct LicensedOperationCountByType {
+    pub(crate) r#type: OperationKind,
+    pub(crate) subtype: Option<OperationSubType>,
+    pub(crate) licensed_operation_count: u64,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq, Hash, Clone, Copy)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum OperationSubType {
+    SubscriptionEvent,
+    SubscriptionRequest,
+}
+
+impl OperationSubType {
+    pub(crate) const fn as_str(&self) -> &'static str {
+        match self {
+            OperationSubType::SubscriptionEvent => "subscription-event",
+            OperationSubType::SubscriptionRequest => "subscription-request",
+        }
+    }
+}
+
+impl Display for OperationSubType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OperationSubType::SubscriptionEvent => write!(f, "subscription-event"),
+            OperationSubType::SubscriptionRequest => write!(f, "subscription-request"),
+        }
+    }
+}
+
+impl From<LicensedOperationCountByType>
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::report::OperationCountByType
+{
+    fn from(value: LicensedOperationCountByType) -> Self {
+        Self {
+            r#type: value.r#type.as_apollo_operation_type().to_string(),
+            subtype: value.subtype.map(|s| s.to_string()).unwrap_or_default(),
+            operation_count: value.licensed_operation_count,
+        }
+    }
+}
+
+fn serialize_licensed_operation_count_by_type<S>(
+    elt: &HashMap<(OperationKind, Option<OperationSubType>), LicensedOperationCountByType>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let mut map_ser = serializer.serialize_map(Some(elt.len()))?;
+    for ((op_type, op_subtype), v) in elt {
+        map_ser.serialize_entry(
+            &format!(
+                "{}{}",
+                op_type.as_apollo_operation_type(),
+                op_subtype
+                    .map(|o| "/".to_owned() + o.as_str())
+                    .unwrap_or_default()
+            ),
+            v,
+        )?;
+    }
+    map_ser.end()
 }
 
 impl Report {
@@ -222,20 +347,27 @@ impl Report {
         aggregated_report
     }
 
-    pub(crate) fn into_report(
-        self,
+    pub(crate) fn build_proto_report(
+        &self,
         header: ReportHeader,
     ) -> crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
         let mut report = crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
             header: Some(header),
             end_time: Some(SystemTime::now().into()),
-            operation_count: self.operation_count,
+            operation_count_by_type: self
+                .licensed_operation_count_by_type
+                .values()
+                .cloned()
+                .map(|op| op.into())
+                .collect(),
             traces_pre_aggregated: true,
             ..Default::default()
         };
 
-        for (key, traces_and_stats) in self.traces_per_query {
-            report.traces_per_query.insert(key, traces_and_stats.into());
+        for (key, traces_and_stats) in &self.traces_per_query {
+            report
+                .traces_per_query
+                .insert(key.clone(), traces_and_stats.clone().into());
         }
         report
     }
@@ -269,11 +401,22 @@ impl AddAssign<SingleStatsReport> for Report {
             *self.traces_per_query.entry(k).or_default() += v;
         }
 
-        self.operation_count += report.operation_count;
+        if let Some(licensed_operation_count_by_type) = report.licensed_operation_count_by_type {
+            let key = (
+                licensed_operation_count_by_type.r#type,
+                licensed_operation_count_by_type.subtype,
+            );
+            self.licensed_operation_count_by_type
+                .entry(key)
+                .and_modify(|e| {
+                    e.licensed_operation_count += 1;
+                })
+                .or_insert(licensed_operation_count_by_type);
+        }
     }
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct TracesAndStats {
     pub(crate) traces: Vec<Trace>,
     #[serde(with = "vectorize")]

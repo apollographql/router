@@ -20,7 +20,7 @@ import ElasticNotice from '../../shared/elastic-notice.mdx';
 To compile the Apollo Router, you need to have the following installed:
 
 <!-- renovate-automation: rustc version -->
-* [Rust 1.67.1 or later](https://www.rust-lang.org/tools/install)
+* [Rust 1.70.0 or later](https://www.rust-lang.org/tools/install)
 * [Node.js 16.9.1 or later](https://nodejs.org/en/download/)
 
 After you install the above, also install the `cargo-xtask` and `cargo-scaffold` crates:
@@ -101,7 +101,7 @@ Now you can test out your compiled router with an example supergraph schema.
 
    During development, it's helpful to use `cargo run` to run the router.
 
-> If you're using managed federation, you set the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables instead of specifying the supergraph schema as a file. For details, see [this section](../managed-federation/setup#4-connect-the-router-to-studio).
+> If you're using managed federation, you set the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables instead of specifying the supergraph schema as a file. For details, see [this section](/federation/managed-federation/setup#4-connect-your-router-to-graphos).
 
 ## 4. Create a plugin
 
@@ -159,6 +159,24 @@ cargo router plugin remove hello_world
 ```
 
 Note that depending on the structure of your plugin, the command might fail to remove all of its associated files.
+
+## Memory allocator
+
+On Linux the `apollo-router` crate sets [jemalloc](http://jemalloc.net/) 
+as [the global memory allocator for Rust](https://doc.rust-lang.org/std/alloc/index.html#the-global_allocator-attribute)
+to reduce memory fragmentation.
+Future versions may do so on more platforms, or switch to yet a different allocator.
+This is enabled by default and controlled by a `global-allocator` Cargo feature flag.
+If you want to choose a different allocator, disable it in your `Cargo.toml`:
+
+```toml
+[dependencies]
+apollo-router = {version = "[…]", default-features = false}
+```
+
+If you make a library crate, also specify `default-features = false`
+in order to leave the choice open for the eventual executable crate.
+(Cargo default features are only disabled if *all* dependents specify `default-features = false`.)
 
 ## Docker
 

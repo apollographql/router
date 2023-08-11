@@ -8,6 +8,7 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use http::HeaderMap;
     use http::HeaderValue;
+    use http::Method;
     use http::StatusCode;
     use hyper::Body;
     use mime::APPLICATION_JSON;
@@ -29,7 +30,7 @@ mod tests {
 
     #[tokio::test]
     async fn load_plugin() {
-        let config = serde_json::json!({
+        let config = json!({
             "coprocessor": {
                 "url": "http://127.0.0.1:8081"
             }
@@ -47,7 +48,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_fields_are_denied() {
-        let config = serde_json::json!({
+        let config = json!({
             "coprocessor": {
                 "url": "http://127.0.0.1:8081",
                 "thisFieldDoesntExist": true
@@ -66,7 +67,7 @@ mod tests {
 
     #[tokio::test]
     async fn external_plugin_with_stages_wont_load_without_graph_ref() {
-        let config = serde_json::json!({
+        let config = json!({
             "coprocessor": {
                 "url": "http://127.0.0.1:8081",
                 "stages": {
@@ -92,11 +93,13 @@ mod tests {
     #[tokio::test]
     async fn coprocessor_returning_the_wrong_version_should_fail() {
         let router_stage = RouterStage {
-            request: RouterConf {
+            request: RouterRequestConf {
                 headers: true,
                 context: true,
                 body: true,
                 sdl: true,
+                path: false,
+                method: false,
             },
             response: Default::default(),
         };
@@ -107,22 +110,22 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
             Box::pin(async {
                 // Wrong version!
+                let input = json!(
+                      {
+                  "version": 2,
+                  "stage": "RouterRequest",
+                  "control": "continue",
+                  "id": "1b19c05fdafc521016df33148ad63c1b",
+                  "body": "{
+                      \"query\": \"query Long {\n  me {\n  name\n}\n}\"
+                    }",
+                  "context": {
+                      "entries": {}
+                  },
+                  "sdl": "the sdl shouldnt change"
+                });
                 Ok(hyper::Response::builder()
-                    .body(Body::from(
-                        r##"{
-                    "version": 2,
-                    "stage": "RouterRequest",
-                    "control": "continue",
-                    "id": "1b19c05fdafc521016df33148ad63c1b",
-                    "body": {
-                      "query": "query Long {\n  me {\n  name\n}\n}"
-                    },
-                    "context": {
-                        "entries": {}
-                    },
-                    "sdl": "the sdl shouldnt change"
-                  }"##,
-                    ))
+                    .body(Body::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
         });
@@ -149,11 +152,13 @@ mod tests {
     #[tokio::test]
     async fn coprocessor_returning_the_wrong_stage_should_fail() {
         let router_stage = RouterStage {
-            request: RouterConf {
+            request: RouterRequestConf {
                 headers: true,
                 context: true,
                 body: true,
                 sdl: true,
+                path: false,
+                method: false,
             },
             response: Default::default(),
         };
@@ -164,22 +169,22 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
             Box::pin(async {
                 // Wrong stage!
+                let input = json!(
+                {
+                    "version": 1,
+                    "stage": "RouterResponse",
+                    "control": "continue",
+                    "id": "1b19c05fdafc521016df33148ad63c1b",
+                    "body": "{
+                            \"query\": \"query Long {\n  me {\n  name\n}\n}\"
+                            }",
+                    "context": {
+                        "entries": {}
+                    },
+                    "sdl": "the sdl shouldnt change"
+                });
                 Ok(hyper::Response::builder()
-                    .body(Body::from(
-                        r##"{
-                            "version": 1,
-                            "stage": "RouterResponse",
-                            "control": "continue",
-                            "id": "1b19c05fdafc521016df33148ad63c1b",
-                            "body": {
-                            "query": "query Long {\n  me {\n  name\n}\n}"
-                            },
-                            "context": {
-                                "entries": {}
-                            },
-                            "sdl": "the sdl shouldnt change"
-                        }"##,
-                    ))
+                    .body(Body::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
         });
@@ -206,11 +211,13 @@ mod tests {
     #[tokio::test]
     async fn coprocessor_missing_request_control_should_fail() {
         let router_stage = RouterStage {
-            request: RouterConf {
+            request: RouterRequestConf {
                 headers: true,
                 context: true,
                 body: true,
                 sdl: true,
+                path: false,
+                method: false,
             },
             response: Default::default(),
         };
@@ -221,21 +228,21 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
             Box::pin(async {
                 // Wrong stage!
+                let input = json!(
+                {
+                    "version": 1,
+                    "stage": "RouterRequest",
+                    "id": "1b19c05fdafc521016df33148ad63c1b",
+                    "body": "{
+                    \"query\": \"query Long {\n  me {\n  name\n}\n}\"
+                    }",
+                    "context": {
+                        "entries": {}
+                    },
+                    "sdl": "the sdl shouldnt change"
+                });
                 Ok(hyper::Response::builder()
-                    .body(Body::from(
-                        r##"{
-                            "version": 1,
-                            "stage": "RouterRequest",
-                            "id": "1b19c05fdafc521016df33148ad63c1b",
-                            "body": {
-                            "query": "query Long {\n  me {\n  name\n}\n}"
-                            },
-                            "context": {
-                                "entries": {}
-                            },
-                            "sdl": "the sdl shouldnt change"
-                        }"##,
-                    ))
+                    .body(Body::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
         });
@@ -262,11 +269,12 @@ mod tests {
     #[tokio::test]
     async fn coprocessor_subgraph_with_invalid_response_body_should_fail() {
         let subgraph_stage = SubgraphStage {
-            request: SubgraphConf {
+            request: SubgraphRequestConf {
                 headers: false,
                 context: false,
                 body: true,
                 uri: false,
+                method: false,
                 service_name: false,
             },
             response: Default::default(),
@@ -323,11 +331,12 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_subgraph_request() {
         let subgraph_stage = SubgraphStage {
-            request: SubgraphConf {
+            request: SubgraphRequestConf {
                 headers: false,
                 context: false,
                 body: true,
                 uri: false,
+                method: false,
                 service_name: false,
             },
             response: Default::default(),
@@ -451,11 +460,12 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_subgraph_request_controlflow_break() {
         let subgraph_stage = SubgraphStage {
-            request: SubgraphConf {
+            request: SubgraphRequestConf {
                 headers: false,
                 context: false,
                 body: true,
                 uri: false,
+                method: false,
                 service_name: false,
             },
             response: Default::default(),
@@ -519,12 +529,12 @@ mod tests {
     async fn external_plugin_subgraph_response() {
         let subgraph_stage = SubgraphStage {
             request: Default::default(),
-            response: SubgraphConf {
+            response: SubgraphResponseConf {
                 headers: false,
                 context: false,
                 body: true,
-                uri: false,
                 service_name: false,
+                status_code: false,
             },
         };
 
@@ -629,11 +639,13 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_router_request() {
         let router_stage = RouterStage {
-            request: RouterConf {
+            request: RouterRequestConf {
                 headers: true,
                 context: true,
                 body: true,
                 sdl: true,
+                path: true,
+                method: true,
             },
             response: Default::default(),
         };
@@ -679,53 +691,53 @@ mod tests {
                     deserialized_request.stage
                 );
 
+                let input = json!(
+                      {
+                  "version": 1,
+                  "stage": "RouterRequest",
+                  "control": "continue",
+                  "id": "1b19c05fdafc521016df33148ad63c1b",
+                  "headers": {
+                    "cookie": [
+                      "tasty_cookie=strawberry"
+                    ],
+                    "content-type": [
+                      "application/json"
+                    ],
+                    "host": [
+                      "127.0.0.1:4000"
+                    ],
+                    "apollo-federation-include-trace": [
+                      "ftv1"
+                    ],
+                    "apollographql-client-name": [
+                      "manual"
+                    ],
+                    "accept": [
+                      "*/*"
+                    ],
+                    "user-agent": [
+                      "curl/7.79.1"
+                    ],
+                    "content-length": [
+                      "46"
+                    ]
+                  },
+                  "body": "{
+                      \"query\": \"query Long {\n  me {\n  name\n}\n}\"
+                    }",
+                  "context": {
+                    "entries": {
+                      "accepts-json": false,
+                      "accepts-wildcard": true,
+                      "accepts-multipart": false,
+                      "this-is-a-test-context": 42
+                    }
+                  },
+                  "sdl": "the sdl shouldnt change"
+                });
                 Ok(hyper::Response::builder()
-                    .body(Body::from(
-                        r##"{
-                    "version": 1,
-                    "stage": "RouterRequest",
-                    "control": "continue",
-                    "id": "1b19c05fdafc521016df33148ad63c1b",
-                    "headers": {
-                      "cookie": [
-                        "tasty_cookie=strawberry"
-                      ],
-                      "content-type": [
-                        "application/json"
-                      ],
-                      "host": [
-                        "127.0.0.1:4000"
-                      ],
-                      "apollo-federation-include-trace": [
-                        "ftv1"
-                      ],
-                      "apollographql-client-name": [
-                        "manual"
-                      ],
-                      "accept": [
-                        "*/*"
-                      ],
-                      "user-agent": [
-                        "curl/7.79.1"
-                      ],
-                      "content-length": [
-                        "46"
-                      ]
-                    },
-                    "body": {
-                      "query": "query Long {\n  me {\n  name\n}\n}"
-                    },
-                    "context": {
-                      "entries": {
-                        "accepts-json": false,
-                        "accepts-wildcard": true,
-                        "accepts-multipart": false,
-                        "this-is-a-test-context": 42
-                      }
-                    },
-                    "sdl": "the sdl shouldnt change"
-                  }"##,
-                    ))
+                    .body(Body::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
         });
@@ -743,13 +755,143 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_plugin_router_request_controlflow_break() {
+    async fn external_plugin_router_request_http_get() {
         let router_stage = RouterStage {
-            request: RouterConf {
+            request: RouterRequestConf {
                 headers: true,
                 context: true,
                 body: true,
                 sdl: true,
+                path: true,
+                method: true,
+            },
+            response: Default::default(),
+        };
+
+        let mock_router_service = router_service::from_supergraph_mock_callback(move |req| {
+            // Let's assert that the router request has been transformed as it should have.
+            assert_eq!(
+                req.supergraph_request.headers().get("cookie").unwrap(),
+                "tasty_cookie=strawberry"
+            );
+
+            // the method shouldn't have changed
+            assert_eq!(req.supergraph_request.method(), Method::GET);
+            // the uri shouldn't have changed
+            assert_eq!(req.supergraph_request.uri(), "/");
+
+            assert_eq!(
+                req.context
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .unwrap()
+                    .unwrap(),
+                42
+            );
+
+            // The query should have changed
+            assert_eq!(
+                "query Long {\n  me {\n  name\n}\n}",
+                req.supergraph_request.into_body().query.unwrap()
+            );
+
+            Ok(supergraph::Response::builder()
+                .data(json!({ "test": 1234_u32 }))
+                .context(req.context)
+                .build()
+                .unwrap())
+        })
+        .await;
+
+        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
+            Box::pin(async {
+                let deserialized_request: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+                        .unwrap();
+
+                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
+                assert_eq!(
+                    PipelineStep::RouterRequest.to_string(),
+                    deserialized_request.stage
+                );
+
+                let input = json!(
+                      {
+                  "version": 1,
+                  "stage": "RouterRequest",
+                  "control": "continue",
+                  "id": "1b19c05fdafc521016df33148ad63c1b",
+                  "uri": "/this/is/a/new/uri",
+                  "method": "POST",
+                  "headers": {
+                    "cookie": [
+                      "tasty_cookie=strawberry"
+                    ],
+                    "content-type": [
+                      "application/json"
+                    ],
+                    "host": [
+                      "127.0.0.1:4000"
+                    ],
+                    "apollo-federation-include-trace": [
+                      "ftv1"
+                    ],
+                    "apollographql-client-name": [
+                      "manual"
+                    ],
+                    "accept": [
+                      "*/*"
+                    ],
+                    "user-agent": [
+                      "curl/7.79.1"
+                    ],
+                    "content-length": [
+                      "46"
+                    ]
+                  },
+                  "body": "{
+                      \"query\": \"query Long {\n  me {\n  name\n}\n}\"
+                    }",
+                  "context": {
+                    "entries": {
+                      "accepts-json": false,
+                      "accepts-wildcard": true,
+                      "accepts-multipart": false,
+                      "this-is-a-test-context": 42
+                    }
+                  },
+                  "sdl": "the sdl shouldnt change"
+                });
+                Ok(hyper::Response::builder()
+                    .body(Body::from(serde_json::to_string(&input).unwrap()))
+                    .unwrap())
+            })
+        });
+
+        let service = router_stage.as_service(
+            mock_http_client,
+            mock_router_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::fake_builder()
+            .method(Method::GET)
+            .build()
+            .unwrap();
+
+        service.oneshot(request.try_into().unwrap()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn external_plugin_router_request_controlflow_break() {
+        let router_stage = RouterStage {
+            request: RouterRequestConf {
+                headers: true,
+                context: true,
+                body: true,
+                sdl: true,
+                path: true,
+                method: true,
             },
             response: Default::default(),
         };
@@ -768,28 +910,29 @@ mod tests {
                     deserialized_request.stage
                 );
 
+                let input = json!(
+                    {
+                    "version": 1,
+                    "stage": "RouterRequest",
+                    "control": {
+                        "break": 200
+                    },
+                    "id": "1b19c05fdafc521016df33148ad63c1b",
+                    "body": "{
+                    \"errors\": [{ \"message\": \"my error message\" }]
+                    }",
+                    "context": {
+                        "entries": {
+                            "testKey": true
+                        }
+                    },
+                    "headers": {
+                        "aheader": ["a value"]
+                    }
+                }
+                );
                 Ok(hyper::Response::builder()
-                    .body(Body::from(
-                        r##"{
-                            "version": 1,
-                            "stage": "RouterRequest",
-                            "control": {
-                                "break": 200
-                            },
-                            "id": "1b19c05fdafc521016df33148ad63c1b",
-                            "body": {
-                            "errors": [{ "message": "my error message" }]
-                            },
-                            "context": {
-                                "entries": {
-                                    "testKey": true
-                                }
-                            },
-                            "headers": {
-                                "aheader": ["a value"]
-                            }
-                        }"##,
-                    ))
+                    .body(Body::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
         });
@@ -818,7 +961,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            serde_json::json!({
+            json!({
                 "errors": [{
                    "message": "my error message"
                 }]
@@ -830,25 +973,26 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_router_response() {
         let router_stage = RouterStage {
-            response: RouterConf {
+            response: RouterResponseConf {
                 headers: true,
                 context: true,
                 body: true,
                 sdl: true,
+                status_code: false,
             },
             request: Default::default(),
         };
 
         let mock_router_service = router_service::from_supergraph_mock_callback(move |req| {
             Ok(supergraph::Response::builder()
-                .data(json!({ "test": 1234_u32 }))
+                .data(json!("{ \"test\": 1234_u32 }"))
                 .context(req.context)
                 .build()
                 .unwrap())
         })
         .await;
 
-        let mock_http_client = mock_with_callback(move |res: hyper::Request<Body>| {
+        let mock_http_client = mock_with_deferred_callback(move |res: hyper::Request<Body>| {
             Box::pin(async {
                 let deserialized_response: Externalizable<serde_json::Value> =
                     serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
@@ -861,59 +1005,59 @@ mod tests {
                 );
 
                 assert_eq!(
-                    json!({ "data": { "test": 1234_u32 } }),
+                    json!("{\"data\":\"{ \\\"test\\\": 1234_u32 }\"}"),
                     deserialized_response.body.unwrap()
                 );
 
+                let input = json!(
+                      {
+                  "version": 1,
+                  "stage": "RouterResponse",
+                  "control": {
+                      "break": 400
+                  },
+                  "id": "1b19c05fdafc521016df33148ad63c1b",
+                  "headers": {
+                    "cookie": [
+                      "tasty_cookie=strawberry"
+                    ],
+                    "content-type": [
+                      "application/json"
+                    ],
+                    "host": [
+                      "127.0.0.1:4000"
+                    ],
+                    "apollo-federation-include-trace": [
+                      "ftv1"
+                    ],
+                    "apollographql-client-name": [
+                      "manual"
+                    ],
+                    "accept": [
+                      "*/*"
+                    ],
+                    "user-agent": [
+                      "curl/7.79.1"
+                    ],
+                    "content-length": [
+                      "46"
+                    ]
+                  },
+                  "body": "{
+                      \"data\": { \"test\": 42 }
+                    }",
+                  "context": {
+                    "entries": {
+                      "accepts-json": false,
+                      "accepts-wildcard": true,
+                      "accepts-multipart": false,
+                      "this-is-a-test-context": 42
+                    }
+                  },
+                  "sdl": "the sdl shouldnt change"
+                });
                 Ok(hyper::Response::builder()
-                    .body(Body::from(
-                        r##"{
-                    "version": 1,
-                    "stage": "RouterResponse",
-                    "control": {
-                        "break": 400 
-                    },
-                    "id": "1b19c05fdafc521016df33148ad63c1b",
-                    "headers": {
-                      "cookie": [
-                        "tasty_cookie=strawberry"
-                      ],
-                      "content-type": [
-                        "application/json"
-                      ],
-                      "host": [
-                        "127.0.0.1:4000"
-                      ],
-                      "apollo-federation-include-trace": [
-                        "ftv1"
-                      ],
-                      "apollographql-client-name": [
-                        "manual"
-                      ],
-                      "accept": [
-                        "*/*"
-                      ],
-                      "user-agent": [
-                        "curl/7.79.1"
-                      ],
-                      "content-length": [
-                        "46"
-                      ]
-                    },
-                    "body": {
-                      "data": { "test": 42 }
-                    },
-                    "context": {
-                      "entries": {
-                        "accepts-json": false,
-                        "accepts-wildcard": true,
-                        "accepts-multipart": false,
-                        "this-is-a-test-context": 42
-                      }
-                    },
-                    "sdl": "the sdl shouldnt change"
-                  }"##,
-                    ))
+                    .body(Body::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
         });
@@ -1032,6 +1176,30 @@ mod tests {
             mock_http_client.expect_clone().returning(move || {
                 let mut mock_http_client = MockHttpClientService::new();
                 mock_http_client.expect_call().returning(callback);
+                mock_http_client
+            });
+            mock_http_client
+        });
+
+        mock_http_client
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn mock_with_deferred_callback(
+        callback: fn(
+            hyper::Request<Body>,
+        ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
+    ) -> MockHttpClientService {
+        let mut mock_http_client = MockHttpClientService::new();
+        mock_http_client.expect_clone().returning(move || {
+            let mut mock_http_client = MockHttpClientService::new();
+            mock_http_client.expect_clone().returning(move || {
+                let mut mock_http_client = MockHttpClientService::new();
+                mock_http_client.expect_clone().returning(move || {
+                    let mut mock_http_client = MockHttpClientService::new();
+                    mock_http_client.expect_call().returning(callback);
+                    mock_http_client
+                });
                 mock_http_client
             });
             mock_http_client

@@ -1,5 +1,6 @@
 //! Configuration for the telemetry plugin.
 use std::collections::BTreeMap;
+use std::env;
 
 use axum::headers::HeaderName;
 use opentelemetry::sdk::resource::EnvResourceDetector;
@@ -79,8 +80,8 @@ pub(crate) struct Metrics {
     pub(crate) prometheus: Option<metrics::prometheus::Config>,
 }
 
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct MetricsCommon {
     /// Configuration to add custom labels/attributes to metrics
     pub(crate) attributes: Option<MetricsAttributesConf>,
@@ -88,9 +89,29 @@ pub(crate) struct MetricsCommon {
     pub(crate) service_name: Option<String>,
     /// Set a service.namespace attribute in your metrics
     pub(crate) service_namespace: Option<String>,
-    #[serde(default)]
     /// Resources
     pub(crate) resources: HashMap<String, String>,
+    /// Custom buckets for histograms
+    #[serde(default = "default_buckets")]
+    pub(crate) buckets: Vec<f64>,
+}
+
+fn default_buckets() -> Vec<f64> {
+    vec![
+        0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
+    ]
+}
+
+impl Default for MetricsCommon {
+    fn default() -> Self {
+        Self {
+            attributes: None,
+            service_name: None,
+            service_namespace: None,
+            resources: HashMap::new(),
+            buckets: default_buckets(),
+        }
+    }
 }
 
 /// Tracing configuration
@@ -546,11 +567,9 @@ impl From<&Trace> for opentelemetry::sdk::trace::Config {
             ));
         }
 
-        // Take the env variables first, and then layer on the rest of the resources, last entry wins
-        let resource = EnvResourceDetector::default()
-            .detect(Duration::from_secs(0))
-            .merge(&Resource::new(resource_defaults))
-            .merge(&mut Resource::new(
+        // Take the default first, then config, then env resources, then env variable. Last entry wins
+        let resource = Resource::new(resource_defaults)
+            .merge(&Resource::new(
                 config
                     .attributes
                     .iter()
@@ -561,6 +580,18 @@ impl From<&Trace> for opentelemetry::sdk::trace::Config {
                         )
                     })
                     .collect::<Vec<KeyValue>>(),
+            ))
+            .merge(&EnvResourceDetector::new().detect(Duration::from_secs(0)))
+            .merge(&Resource::new(
+                env::var("OTEL_SERVICE_NAME")
+                    .ok()
+                    .map(|v| {
+                        vec![KeyValue::new(
+                            opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                            v,
+                        )]
+                    })
+                    .unwrap_or_default(),
             ));
 
         trace_config = trace_config.with_resource(resource);
@@ -611,6 +642,15 @@ impl Conf {
                 (_, SamplerOption::TraceIdRatioBased(ratio)) if ratio == 0.0 => 0.0,
                 (SamplerOption::TraceIdRatioBased(ratio), _) if ratio == 0.0 => 0.0,
                 (_, SamplerOption::Always(Sampler::AlwaysOn)) => 1.0,
+                // the `field_ratio` should be a ratio of the entire set of requests. But FTV1 would only be reported
+                // if a trace was generated with the Apollo exporter, which has its own sampling `global_ratio`.
+                // in telemetry::request_ftv1, we activate FTV1 if the current trace is sampled and depending on
+                // the ratio returned by this function.
+                // This means that:
+                // - field_ratio cannot be larger than global_ratio (see above, we return an error in that case)
+                // - we have to divide field_ratio by global_ratio
+                // Example: we want to measure FTV1 on 30% of total requests, but we the Apollo tracer samples at 50%.
+                // If we measure FTV1 on 60% (0.3 / 0.5) of these sampled requests, that amounts to 30% of the total traffic
                 (
                     SamplerOption::TraceIdRatioBased(global_ratio),
                     SamplerOption::TraceIdRatioBased(field_ratio),
@@ -627,6 +667,8 @@ impl Conf {
 
 #[cfg(test)]
 mod tests {
+    use opentelemetry::sdk::trace::Config;
+    use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
     use serde_json::json;
 
     use super::*;
@@ -782,5 +824,36 @@ mod tests {
         AttributeValue::try_from(json!([1, true])).expect_err("mixed conversion must fail");
         AttributeValue::try_from(json!([1.1, true])).expect_err("mixed conversion must fail");
         AttributeValue::try_from(json!([true, "bar"])).expect_err("mixed conversion must fail");
+    }
+
+    #[test]
+    fn test_service_name() {
+        let router_config = Trace {
+            service_name: "foo".to_string(),
+            ..Default::default()
+        };
+        let otel_config: Config = (&router_config).into();
+        assert_eq!(
+            Some(Value::String("foo".into())),
+            otel_config.resource.get(SERVICE_NAME)
+        );
+
+        // Env should take precedence
+        env::set_var("OTEL_RESOURCE_ATTRIBUTES", "service.name=bar");
+        let otel_config: Config = (&router_config).into();
+        assert_eq!(
+            Some(Value::String("bar".into())),
+            otel_config.resource.get(SERVICE_NAME)
+        );
+
+        // Env should take precedence
+        env::set_var("OTEL_SERVICE_NAME", "bif");
+        let otel_config: Config = (&router_config).into();
+        assert_eq!(
+            Some(Value::String("bif".into())),
+            otel_config.resource.get(SERVICE_NAME)
+        );
+        env::remove_var("OTEL_SERVICE_NAME");
+        env::remove_var("OTEL_RESOURCE_ATTRIBUTES");
     }
 }

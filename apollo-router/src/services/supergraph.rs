@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 #![allow(missing_docs)] // FIXME
 
 use futures::future::ready;
@@ -118,12 +116,14 @@ impl Request {
         headers
             .entry(http::header::CONTENT_TYPE.into())
             .or_insert(HeaderValue::from_static(APPLICATION_JSON.essence_str()).into());
+        let context = context.unwrap_or_default();
+
         Request::new(
             query,
             operation_name,
             variables,
             extensions,
-            context.unwrap_or_default(),
+            context,
             headers,
             Uri::from_static("http://default"),
             method.unwrap_or(Method::POST),
@@ -133,29 +133,31 @@ impl Request {
     /// Create a request with an example query, for tests
     #[builder(visibility = "pub")]
     fn canned_new(
+        query: Option<String>,
         operation_name: Option<String>,
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
         extensions: JsonMap<ByteString, Value>,
         context: Option<Context>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
     ) -> Result<Request, BoxError> {
-        let query = "
-            query TopProducts($first: Int) { 
-                topProducts(first: $first) { 
-                    upc 
-                    name 
-                    reviews { 
-                        id 
-                        product { name } 
-                        author { id name } 
-                    } 
-                } 
+        let default_query = "
+            query TopProducts($first: Int) {
+                topProducts(first: $first) {
+                    upc
+                    name
+                    reviews {
+                        id
+                        product { name }
+                        author { id name }
+                    }
+                }
             }
         ";
+        let query = query.unwrap_or(default_query.to_string());
         let mut variables = JsonMap::new();
         variables.insert("first", 2_usize.into());
         Self::fake_new(
-            Some(query.to_owned()),
+            Some(query),
             operation_name,
             variables,
             extensions,

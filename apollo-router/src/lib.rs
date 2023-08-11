@@ -59,8 +59,10 @@ mod http_ext;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
+pub(crate) mod notification;
 mod orbiter;
 mod plugins;
+pub(crate) mod protocols;
 mod query_planner;
 mod request;
 mod response;
@@ -69,7 +71,7 @@ mod router_factory;
 pub mod services;
 pub(crate) mod spec;
 mod state_machine;
-mod test_harness;
+pub mod test_harness;
 pub mod tracer;
 mod uplink;
 
@@ -78,15 +80,17 @@ pub use crate::configuration::ListenAddr;
 pub use crate::context::Context;
 pub use crate::executable::main;
 pub use crate::executable::Executable;
+pub use crate::notification::Notify;
 pub use crate::router::ApolloRouterError;
 pub use crate::router::ConfigurationSource;
-pub use crate::router::EntitlementSource;
+pub use crate::router::LicenseSource;
 pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
 pub use crate::router_factory::Endpoint;
 pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;
+pub use crate::uplink::UplinkConfig;
 
 /// Not part of the public API
 #[doc(hidden)]
