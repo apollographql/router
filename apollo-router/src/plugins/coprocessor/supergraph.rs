@@ -372,7 +372,6 @@ where
         None => first,
     };
 
-
     if let Some(control) = co_processor_output.control {
         parts.status = control.get_http_status()?
     }
