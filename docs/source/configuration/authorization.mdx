@@ -3,18 +3,13 @@ title: Authorization in the Apollo Router
 description: Strengthen your supergraph's security with advanced access controls
 minVersion: 1.27.0
 ---
+<GraphOSEnterpriseRequired />
 
-<blockquote>
-
-**This feature is available only with a [GraphOS Enterprise plan](/graphos/enterprise/).** It is currently in [preview](/resources/product-launch-stages#preview).
-
-If your organization _doesn't_ currently have an Enterprise plan, you can test this functionality by signing up for a free [Enterprise trial](/graphos/org/plans/#enterprise-trials).
-
-</blockquote>
+<FeatureInPreview />
 
 APIs provide access to business-critical data. Unrestricted access can result in data breaches, monetary losses, or potential denial of service. Even for internal APIs, checks can be essential to limit data to authorized parties.
 
-Enforcing authorization before processing requests is more efficient because it allows for early request termination. It also enhances security by creating an initial checkpoint that can be reinforced in other service layers.
+Enforcing authorization before processing requests is efficient because it allows for early request termination. It also enhances security by creating an initial checkpoint that can be reinforced in other service layers.
 
 The Apollo Router provides fine-grained access control at your graph's edge. Using the `@authenticated`, `@requiresScopes` and `@policy` directives, you can define access to specific fields and types across your supergraph:
 
