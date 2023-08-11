@@ -538,7 +538,10 @@ mod tests {
     use super::*;
     use crate::graphql::Request;
 
-    async fn emulate_correct_websocket_server_new_protocol(send_ping: bool) -> SocketAddr {
+    async fn emulate_correct_websocket_server_new_protocol(
+        send_ping: bool,
+        port: Option<u16>,
+    ) -> SocketAddr {
         let ws_handler = move |ws: WebSocketUpgrade| async move {
             let res = ws.on_upgrade(move |mut socket| async move {
                 let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
@@ -642,13 +645,21 @@ mod tests {
         };
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::bind(&"127.0.0.1:0".parse().unwrap()).serve(app.into_make_service());
+        let server = Server::bind(
+            &format!("127.0.0.1:{}", port.unwrap_or_default())
+                .parse()
+                .unwrap(),
+        )
+        .serve(app.into_make_service());
         let local_addr = server.local_addr();
         tokio::spawn(async { server.await.unwrap() });
         local_addr
     }
 
-    async fn emulate_correct_websocket_server_old_protocol(send_ping: bool) -> SocketAddr {
+    async fn emulate_correct_websocket_server_old_protocol(
+        send_ping: bool,
+        port: Option<u16>,
+    ) -> SocketAddr {
         let ws_handler = move |ws: WebSocketUpgrade| async move {
             let res = ws.on_upgrade(move |mut socket| async move {
                 let init_connection = socket.recv().await.unwrap().unwrap().into_text().unwrap();
@@ -731,7 +742,12 @@ mod tests {
         };
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::bind(&"127.0.0.1:0".parse().unwrap()).serve(app.into_make_service());
+        let server = Server::bind(
+            &format!("127.0.0.1:{}", port.unwrap_or_default())
+                .parse()
+                .unwrap(),
+        )
+        .serve(app.into_make_service());
         let local_addr = server.local_addr();
         tokio::spawn(async { server.await.unwrap() });
         local_addr
@@ -739,16 +755,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_connection_new_proto_with_ping() {
-        test_ws_connection_new_proto(true).await
+        test_ws_connection_new_proto(true, None).await
     }
 
     #[tokio::test]
     async fn test_ws_connection_new_proto_without_ping() {
-        test_ws_connection_new_proto(false).await
+        test_ws_connection_new_proto(false, None).await
     }
 
-    async fn test_ws_connection_new_proto(send_ping: bool) {
-        let socket_addr = emulate_correct_websocket_server_new_protocol(send_ping).await;
+    async fn test_ws_connection_new_proto(send_ping: bool, port: Option<u16>) {
+        let socket_addr = emulate_correct_websocket_server_new_protocol(send_ping, port).await;
         let url = url::Url::parse(format!("ws://{}/ws", socket_addr).as_str()).unwrap();
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
@@ -806,16 +822,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_connection_old_proto_with_ping() {
-        test_ws_connection_old_proto(true).await
+        test_ws_connection_old_proto(true, None).await
     }
 
     #[tokio::test]
     async fn test_ws_connection_old_proto_without_ping() {
-        test_ws_connection_old_proto(false).await
+        test_ws_connection_old_proto(false, None).await
     }
 
-    async fn test_ws_connection_old_proto(send_ping: bool) {
-        let socket_addr = emulate_correct_websocket_server_old_protocol(send_ping).await;
+    async fn test_ws_connection_old_proto(send_ping: bool, port: Option<u16>) {
+        let socket_addr = emulate_correct_websocket_server_old_protocol(send_ping, port).await;
         let url = url::Url::parse(format!("ws://{}/ws", socket_addr).as_str()).unwrap();
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
