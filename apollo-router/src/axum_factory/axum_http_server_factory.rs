@@ -1,5 +1,6 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::pin::Pin;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -14,7 +15,6 @@ use axum::response::*;
 use axum::routing::get;
 use axum::Router;
 use futures::channel::oneshot;
-use futures::future::join;
 use futures::future::join_all;
 use futures::prelude::*;
 use http::header::ACCEPT_ENCODING;
@@ -61,12 +61,17 @@ use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
-#[derive(Debug)]
-pub(crate) struct AxumHttpServerFactory;
+#[derive(Debug, Default)]
+pub(crate) struct AxumHttpServerFactory {
+    live: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
+}
 
 impl AxumHttpServerFactory {
     pub(crate) fn new() -> Self {
-        Self
+        Self {
+            ..Default::default()
+        }
     }
 }
 
@@ -84,6 +89,8 @@ struct Health {
 }
 
 pub(crate) fn make_axum_router<RF>(
+    live: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
@@ -104,15 +111,50 @@ where
             Endpoint::from_router_service(
                 "/health".to_string(),
                 service_fn(move |req: router::Request| {
-                    let health = Health {
-                        status: HealthStatus::Up,
+                    let mut status_code = StatusCode::OK;
+                    let health = if let Some(query) = req.router_request.uri().query() {
+                        let query_upper = query.to_ascii_uppercase();
+                        // Could be more precise, but sloppy match is fine for this use case
+                        if query_upper.starts_with("READY") {
+                            let status = if ready.load(Ordering::SeqCst) {
+                                HealthStatus::Up
+                            } else {
+                                // It's hard to get k8s to parse payloads. Especially since we
+                                // can't install curl or jq into our docker images because of CVEs.
+                                // So, compromise, k8s will interpret this as probe fail.
+                                status_code = StatusCode::SERVICE_UNAVAILABLE;
+                                HealthStatus::Down
+                            };
+                            Health { status }
+                        } else if query_upper.starts_with("LIVE") {
+                            let status = if live.load(Ordering::SeqCst) {
+                                HealthStatus::Up
+                            } else {
+                                // It's hard to get k8s to parse payloads. Especially since we
+                                // can't install curl or jq into our docker images because of CVEs.
+                                // So, compromise, k8s will interpret this as probe fail.
+                                status_code = StatusCode::SERVICE_UNAVAILABLE;
+                                HealthStatus::Down
+                            };
+                            Health { status }
+                        } else {
+                            Health {
+                                status: HealthStatus::Up,
+                            }
+                        }
+                    } else {
+                        Health {
+                            status: HealthStatus::Up,
+                        }
                     };
                     tracing::trace!(?health, request = ?req.router_request, "health check");
                     async move {
                         Ok(router::Response {
-                            response: http::Response::builder().body::<hyper::Body>(
-                                serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
-                            )?,
+                            response: http::Response::builder()
+                                .status(status_code)
+                                .body::<hyper::Body>(
+                                    serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
+                                )?,
                             context: req.context,
                         })
                     }
@@ -163,9 +205,17 @@ impl HttpServerFactory for AxumHttpServerFactory {
     where
         RF: RouterFactory,
     {
+        let live = self.live.clone();
+        let ready = self.ready.clone();
         Box::pin(async move {
-            let all_routers =
-                make_axum_router(service_factory, &configuration, extra_endpoints, license)?;
+            let all_routers = make_axum_router(
+                live.clone(),
+                ready.clone(),
+                service_factory,
+                &configuration,
+                extra_endpoints,
+                license,
+            )?;
 
             // serve main router
 
@@ -271,14 +321,30 @@ impl HttpServerFactory for AxumHttpServerFactory {
                         )
                     });
 
-            let (servers, mut shutdowns): (Vec<_>, Vec<_>) = servers_and_shutdowns.unzip();
-            shutdowns.push(main_shutdown_sender);
+            let (servers, shutdowns): (Vec<_>, Vec<_>) = servers_and_shutdowns.unzip();
 
             // graceful shutdown mechanism:
-            // we will fan out to all of the servers once we receive a signal
-            let (outer_shutdown_sender, outer_shutdown_receiver) = oneshot::channel::<()>();
+            // create two shutdown channels. One for the main (GraphQL) server and the other for
+            // the extra servers (health, metrics, etc...)
+            // We spawn a task for each server which just waits to propagate the message to:
+            //  - main
+            //  - all extras
+            // We have two separate channels because we want to ensure that main is notified
+            // separately from all other servers and we wait for main to shutdown before we notify
+            // extra servers.
+            let (outer_main_shutdown_sender, outer_main_shutdown_receiver) =
+                oneshot::channel::<()>();
             tokio::task::spawn(async move {
-                let _ = outer_shutdown_receiver.await;
+                let _ = outer_main_shutdown_receiver.await;
+                if let Err(_err) = main_shutdown_sender.send(()) {
+                    tracing::error!("Failed to notify http thread of shutdown");
+                }
+            });
+
+            let (outer_extra_shutdown_sender, outer_extra_shutdown_receiver) =
+                oneshot::channel::<()>();
+            tokio::task::spawn(async move {
+                let _ = outer_extra_shutdown_receiver.await;
                 shutdowns.into_iter().for_each(|sender| {
                     if let Err(_err) = sender.send(()) {
                         tracing::error!("Failed to notify http thread of shutdown")
@@ -286,19 +352,34 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 })
             });
 
-            // Spawn the server into a runtime
-            let server_future = tokio::task::spawn(join(main_server, join_all(servers)))
+            // Spawn the main (GraphQL) server into a task
+            let main_future = tokio::task::spawn(main_server)
+                .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
+                .boxed();
+
+            // Spawn all other servers (health, metrics, etc...) into a task
+            let extra_futures = tokio::task::spawn(join_all(servers))
                 .map_err(|_| ApolloRouterError::HttpServerLifecycleError)
                 .boxed();
 
             Ok(HttpServerHandle::new(
-                outer_shutdown_sender,
-                server_future,
+                outer_main_shutdown_sender,
+                outer_extra_shutdown_sender,
+                main_future,
+                extra_futures,
                 Some(actual_main_listen_address),
                 actual_extra_listen_adresses,
                 all_connections_stopped_sender,
             ))
         })
+    }
+
+    fn live(&self, live: bool) {
+        self.live.store(live, Ordering::SeqCst);
+    }
+
+    fn ready(&self, ready: bool) {
+        self.ready.store(ready, Ordering::SeqCst);
     }
 }
 

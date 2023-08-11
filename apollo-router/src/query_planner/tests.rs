@@ -73,7 +73,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
     let query_plan: QueryPlan = QueryPlan {
         root: serde_json::from_str(test_query_plan!()).unwrap(),
         formatted_query_plan: Default::default(),
-        query: Arc::new(Query::default()),
+        query: Arc::new(Query::empty()),
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
@@ -110,6 +110,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
             sender,
             None,
             &None,
+            None,
         )
         .await;
     assert_eq!(result.errors.len(), 1);
@@ -128,7 +129,7 @@ async fn fetch_includes_operation_name() {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
         },
-        query: Arc::new(Query::default()),
+        query: Arc::new(Query::empty()),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
@@ -169,6 +170,7 @@ async fn fetch_includes_operation_name() {
             sender,
             None,
             &None,
+            None,
         )
         .await;
 
@@ -184,7 +186,7 @@ async fn fetch_makes_post_requests() {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
         },
-        query: Arc::new(Query::default()),
+        query: Arc::new(Query::empty()),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
@@ -225,6 +227,7 @@ async fn fetch_makes_post_requests() {
             sender,
             None,
             &None,
+            None,
         )
         .await;
 
@@ -303,7 +306,7 @@ async fn defer() {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             },
-            query: Arc::new(Query::default()),
+            query: Arc::new(Query::empty()),
         };
 
     let mut mock_x_service = plugin::test::MockSubgraphService::new();
@@ -370,6 +373,7 @@ async fn defer() {
             sender,
             None,
             &None,
+            None,
         )
         .await;
 
@@ -468,6 +472,7 @@ async fn defer_if_condition() {
             sender,
             None,
             &None,
+            None,
         )
         .await;
 
@@ -488,6 +493,7 @@ async fn defer_if_condition() {
             default_sender,
             None,
             &None,
+            None,
         )
         .await;
 
@@ -514,6 +520,7 @@ async fn defer_if_condition() {
             sender,
             None,
             &None,
+            None,
         )
         .await;
     insta::assert_json_snapshot!(defer_disabled);
@@ -591,7 +598,7 @@ async fn dependent_mutations() {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
         },
-        query: Arc::new(Query::default()),
+        query: Arc::new(Query::empty()),
     };
 
     let mut mock_a_service = plugin::test::MockSubgraphService::new();
@@ -633,6 +640,7 @@ async fn dependent_mutations() {
             sender,
             None,
             &None,
+            None,
         )
         .await;
 }

@@ -243,6 +243,7 @@ mod test {
     use crate::uplink::license_stream::LicenseQuery;
     use crate::uplink::license_stream::LicenseStreamExt;
     use crate::uplink::stream_from_uplink;
+    use crate::uplink::UplinkConfig;
 
     #[tokio::test]
     async fn integration_test() {
@@ -250,13 +251,13 @@ mod test {
             std::env::var("TEST_APOLLO_KEY"),
             std::env::var("TEST_APOLLO_GRAPH_REF"),
         ) {
-            let results = stream_from_uplink::<LicenseQuery, License>(
+            let results = stream_from_uplink::<LicenseQuery, License>(UplinkConfig {
                 apollo_key,
                 apollo_graph_ref,
-                None,
-                Duration::from_secs(1),
-                Duration::from_secs(5),
-            )
+                endpoints: None,
+                poll_interval: Duration::from_secs(1),
+                timeout: Duration::from_secs(5),
+            })
             .take(1)
             .collect::<Vec<_>>()
             .await;

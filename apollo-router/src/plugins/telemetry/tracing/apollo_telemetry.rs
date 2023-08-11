@@ -27,7 +27,6 @@ use serde::de::DeserializeOwned;
 use thiserror::Error;
 use url::Url;
 
-use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry;
 use crate::plugins::telemetry::apollo::ErrorConfiguration;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
@@ -73,6 +72,7 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 
+const APOLLO_PRIVATE_REQUEST: Key = Key::from_static_str("apollo_private.request");
 pub(crate) const APOLLO_PRIVATE_DURATION_NS: &str = "apollo_private.duration_ns";
 const APOLLO_PRIVATE_DURATION_NS_KEY: Key = Key::from_static_str(APOLLO_PRIVATE_DURATION_NS);
 const APOLLO_PRIVATE_SENT_TIME_OFFSET: Key =
@@ -360,6 +360,9 @@ impl Exporter {
                     )),
                 })]
             }
+            // SUBSCRIBE_SPAN_NAME => {
+            // TODO: in the future we could add a subscription node in the report.proto and do exactly the same logic than in FETCH_SPAN_NAME branch
+            // }
             FLATTEN_SPAN_NAME => {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
                     node: Some(proto::reports::trace::query_plan_node::Node::Flatten(
@@ -411,7 +414,7 @@ impl Exporter {
                 });
                 child_nodes
             }
-            REQUEST_SPAN_NAME => {
+            _ if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some() => {
                 vec![TreeData::Request(
                     self.extract_root_trace(span, child_nodes),
                 )]
@@ -696,7 +699,9 @@ impl SpanExporter for Exporter {
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
         for span in batch {
-            if span.name == REQUEST_SPAN_NAME || span.name == SUBSCRIPTION_EVENT_SPAN_NAME {
+            if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
+                || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
+            {
                 match self.extract_trace(span.into()) {
                     Ok(mut trace) => {
                         let mut operation_signature = Default::default();

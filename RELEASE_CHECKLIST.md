@@ -37,6 +37,10 @@ To obtain the binary builds from the pipeline which was launched:
 4. Click on the **Artifacts** tab.
 5. Click on the link to the `.tar.gz` file to download the tarball of the build distribution.  For example, you might click on a link called `artifacts/router-v0.0.0-nightly-20230119-abcd1234-x86_64-apple-darwin.tar.gz` for a macOS build done on the 19th of January 2023 from commit hash starting with `abcd1234`.
 
+In addition, you will find `docker` and `helm` assets:
+ - [docker](https://github.com/apollographql/router/pkgs/container/nightly%2Frouter)
+ - [helm](https://github.com/apollographql/router/pkgs/container/helm-charts-nightly%2Frouter)
+
 This is a list of the things that need to happen during a release.
 
 Build a Release
@@ -264,7 +268,7 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
 28. Update the release notes on the now-published [GitHub Releases](https://github.com/apollographql/router/releases) (this needs to be moved to CI, but requires `this_release.md` which we created earlier):
 
     ```
-    gh release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" -F ./this_release.md
+    gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" -F ./this_release.md
     ```
 
 29. Publish the Crate from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):

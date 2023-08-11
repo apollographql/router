@@ -2319,10 +2319,13 @@ async fn test_supergraph_timeout() {
     let service = RouterCreator::new(
         QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&conf)).await,
         Arc::new(supergraph_creator),
-        Arc::clone(&conf),
+        conf.clone(),
+        Default::default(),
     )
     .await
+    .unwrap()
     .make();
+
     // keep the server handle around otherwise it will immediately shutdown
     let (_server, client) = init_with_config(service, conf.clone(), MultiMap::new())
         .await

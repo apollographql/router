@@ -41,12 +41,12 @@
           [
             "enterprise"
           ]
-        ],
+        ],        
+        "Subgraph Authentication": "/configuration/authn-subgraph",
         "Operation limits": [
           "/configuration/operation-limits",
           [
-            "enterprise",
-            "preview"
+            "enterprise"
           ]
         ],
         "Privacy and data collection": "/privacy"
@@ -66,7 +66,8 @@
         "Subgraph protocol: HTTP callback": [
           "/executing-operations/subscription-callback-protocol",
           [
-            "enterprise"
+            "enterprise",
+            "preview"
           ]
         ],
         "Client protocol: HTTP multipart": [

@@ -1,15 +1,19 @@
+use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 
 use axum::response::IntoResponse;
+use futures::future::BoxFuture;
 use http::StatusCode;
+use indexmap::IndexMap;
 use multimap::MultiMap;
-use once_cell::sync::Lazy;
 use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
+use tower::retry::Retry;
 use tower::service_fn;
 use tower::util::Either;
+use tower::util::Oneshot;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -18,11 +22,15 @@ use tower_service::Service;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::configuration::TlsSubgraph;
+use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
+use crate::plugins::traffic_shaping::rate;
+use crate::plugins::traffic_shaping::timeout;
+use crate::plugins::traffic_shaping::RetryPolicy;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
@@ -30,7 +38,9 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router_service::RouterCreator;
+use crate::services::subgraph;
 use crate::services::transport;
+use crate::services::HasConfig;
 use crate::services::HasSchema;
 use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::SubgraphService;
@@ -152,74 +162,34 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             }
         };
 
+        let schema_changed = previous_router
+            .map(|router| router.supergraph_creator.schema().raw_sdl.as_ref() == &schema)
+            .unwrap_or_default();
+
+        let config_changed = previous_router
+            .map(|router| router.supergraph_creator.config() == configuration)
+            .unwrap_or_default();
+
+        if config_changed {
+            configuration
+                .notify
+                .broadcast_configuration(configuration.clone());
+        }
+
         let schema = bridge_query_planner.schema();
+        if schema_changed {
+            configuration.notify.broadcast_schema(schema.clone());
+        }
 
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
-        let tls_root_store: Option<RootCertStore> = configuration
-            .tls
-            .subgraph
-            .all
-            .create_certificate_store()
-            .transpose()?;
-
         let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
-
-        let subscription_plugin_conf = plugins
-            .iter()
-            .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
-            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
-            .map(|p| p.config.clone());
-
-        for (name, _) in schema.subgraphs() {
-            let subgraph_root_store = configuration
-                .tls
-                .subgraph
-                .subgraphs
-                .get(name)
-                .as_ref()
-                .and_then(|subgraph| subgraph.create_certificate_store())
-                .transpose()?
-                .or_else(|| tls_root_store.clone());
-
-            let subgraph_service = match plugins
-                .iter()
-                .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
-                .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
-            {
-                Some(shaping) => Either::A(
-                    shaping.subgraph_service_internal(
-                        name,
-                        SubgraphService::new(
-                            name,
-                            configuration
-                                .apq
-                                .subgraph
-                                .subgraphs
-                                .get(name)
-                                .map(|apq| apq.enabled)
-                                .unwrap_or(configuration.apq.subgraph.all.enabled),
-                            subgraph_root_store,
-                            shaping.enable_subgraph_http2(name),
-                            subscription_plugin_conf.clone(),
-                            configuration.notify.clone(),
-                        ),
-                    ),
-                ),
-                None => Either::B(SubgraphService::new(
-                    name,
-                    false,
-                    subgraph_root_store,
-                    true,
-                    subscription_plugin_conf.clone(),
-                    configuration.notify.clone(),
-                )),
-            };
-            builder = builder.with_subgraph_service(name, subgraph_service);
+        let subgraph_services = create_subgraph_services(&plugins, &schema, &configuration).await?;
+        for (name, subgraph_service) in subgraph_services {
+            builder = builder.with_subgraph_service(&name, subgraph_service);
         }
-
         for (plugin_name, plugin) in plugins {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
@@ -231,9 +201,11 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         let query_parsing_layer =
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
 
-        if let Some(router) = previous_router {
+        let mut persisted_query_manifest_poller = None;
+
+        if let Some(previous_router) = previous_router {
             if configuration.supergraph.query_planning.warmed_up_queries > 0 {
-                let cache_keys = router
+                let cache_keys = previous_router
                     .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
                     .await;
 
@@ -248,15 +220,122 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                         .await;
                 }
             }
-        }
+
+            // capture the manifest poller for persisted queries and pass it on to the new router
+            // so it can keep running without needing to re-fetch every single operation on reload.
+            persisted_query_manifest_poller = previous_router
+                .persisted_query_layer
+                .manifest_poller
+                .clone();
+        };
 
         Ok(Self::RouterFactory::new(
             query_parsing_layer,
             Arc::new(supergraph_creator),
             configuration,
+            persisted_query_manifest_poller,
         )
-        .await)
+        .await?)
     }
+}
+
+pub(crate) async fn create_subgraph_services(
+    plugins: &[(String, Box<dyn DynPlugin>)],
+    schema: &Schema,
+    configuration: &Configuration,
+) -> Result<
+    IndexMap<
+        String,
+        impl Service<
+                subgraph::Request,
+                Response = subgraph::Response,
+                Error = BoxError,
+                Future = Either<
+                    Either<
+                        BoxFuture<'static, Result<subgraph::Response, BoxError>>,
+                        Either<
+                            BoxFuture<'static, Result<subgraph::Response, BoxError>>,
+                            timeout::future::ResponseFuture<
+                                Oneshot<
+                                    Either<
+                                        Retry<
+                                            RetryPolicy,
+                                            Either<
+                                                rate::service::RateLimit<SubgraphService>,
+                                                SubgraphService,
+                                            >,
+                                        >,
+                                        Either<
+                                            rate::service::RateLimit<SubgraphService>,
+                                            SubgraphService,
+                                        >,
+                                    >,
+                                    subgraph::Request,
+                                >,
+                            >,
+                        >,
+                    >,
+                    <SubgraphService as Service<subgraph::Request>>::Future,
+                >,
+            > + Clone
+            + Send
+            + Sync
+            + 'static,
+    >,
+    BoxError,
+> {
+    let tls_root_store: Option<RootCertStore> = configuration
+        .tls
+        .subgraph
+        .all
+        .create_certificate_store()
+        .transpose()?;
+
+    let subscription_plugin_conf = plugins
+        .iter()
+        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
+        .map(|p| p.config.clone());
+
+    let shaping = plugins
+        .iter()
+        .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
+        .expect("traffic shaping should always be part of the plugin list");
+
+    let mut subgraph_services = IndexMap::new();
+    for (name, _) in schema.subgraphs() {
+        let subgraph_root_store = configuration
+            .tls
+            .subgraph
+            .subgraphs
+            .get(name)
+            .as_ref()
+            .and_then(|subgraph| subgraph.create_certificate_store())
+            .transpose()?
+            .or_else(|| tls_root_store.clone());
+
+        let subgraph_service = shaping.subgraph_service_internal(
+            name,
+            SubgraphService::new(
+                name,
+                configuration
+                    .apq
+                    .subgraph
+                    .subgraphs
+                    .get(name)
+                    .map(|apq| apq.enabled)
+                    .unwrap_or(configuration.apq.subgraph.all.enabled),
+                subgraph_root_store,
+                shaping.enable_subgraph_http2(name),
+                subscription_plugin_conf.clone(),
+                configuration.notify.clone(),
+            ),
+        );
+        subgraph_services.insert(name.clone(), subgraph_service);
+    }
+
+    Ok(subgraph_services)
 }
 
 impl YamlRouterFactory {
@@ -281,68 +360,12 @@ impl YamlRouterFactory {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
-        let tls_root_store = configuration
-            .tls
-            .subgraph
-            .all
-            .create_certificate_store()
-            .transpose()?;
-
         let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
-
-        let subscription_plugin_conf = plugins
-            .iter()
-            .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
-            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
-            .map(|p| p.config.clone());
-        for (name, _) in schema.subgraphs() {
-            let subgraph_root_store = configuration
-                .tls
-                .subgraph
-                .subgraphs
-                .get(name)
-                .as_ref()
-                .and_then(|subgraph| subgraph.create_certificate_store())
-                .transpose()?
-                .or_else(|| tls_root_store.clone());
-
-            let subgraph_service = match plugins
-                .iter()
-                .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
-                .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
-            {
-                Some(shaping) => Either::A(
-                    shaping.subgraph_service_internal(
-                        name,
-                        SubgraphService::new(
-                            name,
-                            configuration
-                                .apq
-                                .subgraph
-                                .subgraphs
-                                .get(name)
-                                .map(|apq| apq.enabled)
-                                .unwrap_or(configuration.apq.subgraph.all.enabled),
-                            subgraph_root_store,
-                            shaping.enable_subgraph_http2(name),
-                            subscription_plugin_conf.clone(),
-                            configuration.notify.clone(),
-                        ),
-                    ),
-                ),
-                None => Either::B(SubgraphService::new(
-                    name,
-                    false,
-                    subgraph_root_store,
-                    true,
-                    subscription_plugin_conf.clone(),
-                    configuration.notify.clone(),
-                )),
-            };
-            builder = builder.with_subgraph_service(name, subgraph_service);
+        let subgraph_services = create_subgraph_services(&plugins, &schema, &configuration).await?;
+        for (name, subgraph_service) in subgraph_services {
+            builder = builder.with_subgraph_service(&name, subgraph_service);
         }
-
         for (plugin_name, plugin) in plugins {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
@@ -423,107 +446,113 @@ pub(crate) async fn create_plugins(
     schema: &Schema,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Vec<(String, Box<dyn DynPlugin>)>, BoxError> {
-    // List of mandatory plugins. Ordering is important!!
-    let mandatory_plugins = vec![
-        "apollo.include_subgraph_errors",
-        "apollo.csrf",
-        "apollo.headers",
-        "apollo.telemetry",
-    ];
-
-    let mut errors = Vec::new();
-    let plugin_registry: Vec<&'static Lazy<PluginFactory>> = crate::plugin::plugins().collect();
-    let mut plugin_instances = Vec::new();
+    let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
+    let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
-    let notify = configuration.notify.clone();
+    let plugin_registry = &*crate::plugin::PLUGINS;
+    let mut apollo_plugin_factories: HashMap<&str, &PluginFactory> = plugin_registry
+        .iter()
+        .filter(|factory| factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
+        .map(|factory| (factory.name.as_str(), &**factory))
+        .collect();
+    let mut errors = Vec::new();
+    let mut plugin_instances = Vec::new();
 
-    for (name, mut configuration) in configuration.plugins().into_iter() {
-        if extra.iter().any(|(n, _)| *n == name) {
-            // An instance of this plugin was already added through TestHarness::extra_plugin
-            continue;
-        }
-
-        match plugin_registry.iter().find(|factory| factory.name == name) {
-            Some(factory) => {
-                tracing::debug!(
-                    "creating plugin: '{}' with configuration:\n{:#}",
-                    name,
-                    configuration
-                );
-                if name == "apollo.telemetry" {
-                    inject_schema_id(schema, &mut configuration);
-                }
-                match factory
-                    .create_instance(&configuration, schema.as_string().clone(), notify.clone())
-                    .await
-                {
-                    Ok(plugin) => {
-                        plugin_instances.push((name, plugin));
-                    }
-                    Err(err) => errors.push(ConfigurationError::PluginConfiguration {
-                        plugin: name,
-                        error: err.to_string(),
-                    }),
-                }
+    // Use fonction-like macros to avoid borrow conflicts of captures
+    macro_rules! add_plugin {
+        ($name: expr, $factory: expr, $plugin_config: expr) => {{
+            match $factory
+                .create_instance(
+                    &$plugin_config,
+                    schema.as_string().clone(),
+                    configuration.notify.clone(),
+                )
+                .await
+            {
+                Ok(plugin) => plugin_instances.push(($name, plugin)),
+                Err(err) => errors.push(ConfigurationError::PluginConfiguration {
+                    plugin: $name,
+                    error: err.to_string(),
+                }),
             }
-            None => errors.push(ConfigurationError::PluginUnknown(name)),
-        }
+        }};
     }
-    plugin_instances.extend(extra);
 
-    // At this point we've processed all of the plugins that were provided in configuration.
-    // We now need to do process our list of mandatory plugins:
-    //  - If a mandatory plugin is already in the list, then it must be re-located
-    //    to its mandatory location
-    //  - If it is missing, it must be added at its mandatory location
+    macro_rules! add_apollo_plugin {
+        ($name: literal, $opt_plugin_config: expr) => {{
+            let name = format!("{}{}", APOLLO_PLUGIN_PREFIX, $name);
+            let factory = apollo_plugin_factories
+                .remove(name.as_str())
+                .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
+            if let Some(mut plugin_config) = $opt_plugin_config {
+                if name == "apollo.telemetry" {
+                    // The apollo.telemetry" plugin isn't happy with empty config, so we
+                    // give it some. If any of the other mandatory plugins need special
+                    // treatment, then we'll have to perform it here.
+                    // This is *required* by the telemetry module or it will fail...
+                    inject_schema_id(schema, &mut plugin_config);
+                }
+                add_plugin!(name, factory, plugin_config);
+            }
+        }};
+    }
 
-    for (desired_position, name) in mandatory_plugins.iter().enumerate() {
-        let position_maybe = plugin_instances.iter().position(|(x, _)| x == name);
-        match position_maybe {
-            Some(actual_position) => {
-                // Found it, re-locate if required.
-                if actual_position != desired_position {
-                    let temp = plugin_instances.remove(actual_position);
-                    plugin_instances.insert(desired_position, temp);
+    macro_rules! add_mandatory_apollo_plugin {
+        ($name: literal) => {
+            add_apollo_plugin!(
+                $name,
+                Some(
+                    apollo_plugins_config
+                        .remove($name)
+                        .unwrap_or(Value::Object(Map::new()))
+                )
+            );
+        };
+    }
+
+    macro_rules! add_optional_apollo_plugin {
+        ($name: literal) => {
+            add_apollo_plugin!($name, apollo_plugins_config.remove($name));
+        };
+    }
+
+    macro_rules! add_user_plugins {
+        () => {
+            for (name, plugin_config) in user_plugins_config {
+                if let Some(factory) = plugin_registry.iter().find(|factory| factory.name == name) {
+                    add_plugin!(name, factory, plugin_config);
+                } else {
+                    errors.push(ConfigurationError::PluginUnknown(name))
                 }
             }
-            None => {
-                // Didn't find it, insert
-                match plugin_registry
-                    .iter()
-                    .find(|factory| factory.name == **name)
-                {
-                    // Create an instance
-                    Some(factory) => {
-                        // Create default (empty) config
-                        let mut config = Value::Object(Map::new());
-                        // The apollo.telemetry" plugin isn't happy with empty config, so we
-                        // give it some. If any of the other mandatory plugins need special
-                        // treatment, then we'll have to perform it here.
-                        // This is *required* by the telemetry module or it will fail...
-                        if *name == "apollo.telemetry" {
-                            inject_schema_id(schema, &mut config);
-                        }
-                        match factory
-                            .create_instance(&config, schema.as_string().clone(), notify.clone())
-                            .await
-                        {
-                            Ok(plugin) => {
-                                plugin_instances.insert(
-                                    desired_position.min(plugin_instances.len()),
-                                    (name.to_string(), plugin),
-                                );
-                            }
-                            Err(err) => errors.push(ConfigurationError::PluginConfiguration {
-                                plugin: name.to_string(),
-                                error: err.to_string(),
-                            }),
-                        }
-                    }
-                    None => errors.push(ConfigurationError::PluginUnknown(name.to_string())),
-                }
-            }
-        }
+            plugin_instances.extend(extra);
+        };
+    }
+
+    add_mandatory_apollo_plugin!("include_subgraph_errors");
+    add_mandatory_apollo_plugin!("csrf");
+    add_mandatory_apollo_plugin!("headers");
+    add_mandatory_apollo_plugin!("telemetry");
+    add_mandatory_apollo_plugin!("traffic_shaping");
+    add_optional_apollo_plugin!("forbid_mutations");
+    add_optional_apollo_plugin!("subscription");
+    add_optional_apollo_plugin!("override_subgraph_url");
+    add_optional_apollo_plugin!("authorization");
+    add_optional_apollo_plugin!("authentication");
+
+    // This relative ordering is documented in `docs/source/customizations/native.mdx`:
+    add_optional_apollo_plugin!("rhai");
+    add_optional_apollo_plugin!("coprocessor");
+    add_user_plugins!();
+
+    // Macros above remove from `apollo_plugin_factories`, so anything left at the end
+    // indicates a missing macro call.
+    let unused_apollo_plugin_names = apollo_plugin_factories.keys().copied().collect::<Vec<_>>();
+    if !unused_apollo_plugin_names.is_empty() {
+        panic!(
+            "Apollo plugins without their ordering specified in `fn create_plugins`: {}",
+            unused_apollo_plugin_names.join(", ")
+        )
     }
 
     let plugin_details = plugin_instances
@@ -625,7 +654,7 @@ mod test {
     }
 
     register_plugin!(
-        "apollo.test",
+        "test",
         "always_starts_and_stops",
         AlwaysStartsAndStopsPlugin
     );
@@ -645,11 +674,7 @@ mod test {
         }
     }
 
-    register_plugin!(
-        "apollo.test",
-        "always_fails_to_start",
-        AlwaysFailsToStartPlugin
-    );
+    register_plugin!("test", "always_fails_to_start", AlwaysFailsToStartPlugin);
 
     #[tokio::test]
     async fn test_yaml_no_extras() {
@@ -663,7 +688,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                apollo.test.always_starts_and_stops:
+                test.always_starts_and_stops:
                     name: albert
         "#,
         )
@@ -677,7 +702,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                apollo.test.always_fails_to_start:
+                test.always_fails_to_start:
                     name: albert
         "#,
         )
@@ -691,9 +716,9 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                apollo.test.always_starts_and_stops:
+                test.always_starts_and_stops:
                     name: albert
-                apollo.test.always_fails_to_start:
+                test.always_fails_to_start:
                     name: albert
         "#,
         )
