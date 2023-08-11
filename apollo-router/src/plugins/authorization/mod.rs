@@ -230,22 +230,13 @@ impl AuthorizationPlugin {
         let compiler = match filter_res {
             None => compiler,
             Some((query, paths)) => {
+                unauthorized_paths.extend(paths.into_iter());
+
                 if query.is_empty() {
-                    return Err(QueryPlannerError::PlanningErrors(PlanErrors {
-                        errors: Arc::new(vec![router_bridge::planner::PlanError {
-                            message: Some("Unauthorized query".to_string()),
-                            extensions: None,
-                            validation_error: false,
-                        }]),
-                        usage_reporting: UsageReporting {
-                            stats_report_key: GRAPHQL_VALIDATION_FAILURE_ERROR_KEY.to_string(),
-                            referenced_fields_by_type: Default::default(),
-                        },
-                    }));
+                    return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
                 }
 
                 is_filtered = true;
-                unauthorized_paths.extend(paths.into_iter());
 
                 let mut compiler = ApolloCompiler::new();
                 compiler.set_type_system_hir(schema.type_system.clone());
@@ -259,22 +250,13 @@ impl AuthorizationPlugin {
         let compiler = match filter_res {
             None => compiler,
             Some((query, paths)) => {
+                unauthorized_paths.extend(paths.into_iter());
+
                 if query.is_empty() {
-                    return Err(QueryPlannerError::PlanningErrors(PlanErrors {
-                        errors: Arc::new(vec![router_bridge::planner::PlanError {
-                            message: Some("Unauthorized query".to_string()),
-                            extensions: None,
-                            validation_error: false,
-                        }]),
-                        usage_reporting: UsageReporting {
-                            stats_report_key: GRAPHQL_VALIDATION_FAILURE_ERROR_KEY.to_string(),
-                            referenced_fields_by_type: Default::default(),
-                        },
-                    }));
+                    return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
                 }
 
                 is_filtered = true;
-                unauthorized_paths.extend(paths.into_iter());
 
                 let mut compiler = ApolloCompiler::new();
                 compiler.set_type_system_hir(schema.type_system.clone());
@@ -288,22 +270,13 @@ impl AuthorizationPlugin {
         let compiler = match filter_res {
             None => compiler,
             Some((query, paths)) => {
+                unauthorized_paths.extend(paths.into_iter());
+
                 if query.is_empty() {
-                    return Err(QueryPlannerError::PlanningErrors(PlanErrors {
-                        errors: Arc::new(vec![router_bridge::planner::PlanError {
-                            message: Some("Unauthorized query".to_string()),
-                            extensions: None,
-                            validation_error: false,
-                        }]),
-                        usage_reporting: UsageReporting {
-                            stats_report_key: GRAPHQL_VALIDATION_FAILURE_ERROR_KEY.to_string(),
-                            referenced_fields_by_type: Default::default(),
-                        },
-                    }));
+                    return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
                 }
 
                 is_filtered = true;
-                unauthorized_paths.extend(paths.into_iter());
 
                 let mut compiler = ApolloCompiler::new();
                 compiler.set_type_system_hir(schema.type_system.clone());

@@ -26,6 +26,7 @@ use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::introspection::Introspection;
+use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -460,7 +461,29 @@ impl BridgeQueryPlanner {
         mut compiler: Arc<Mutex<ApolloCompiler>>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let filter_res = if self.enable_authorization_directives {
-            AuthorizationPlugin::filter_query(&key, &self.schema)?
+            match AuthorizationPlugin::filter_query(&key, &self.schema) {
+                Err(QueryPlannerError::Unauthorized(unauthorized_paths)) => {
+                    let response = graphql::Response::builder()
+                        .data(Object::new())
+                        .errors(
+                            unauthorized_paths
+                                .into_iter()
+                                .map(|path| {
+                                    graphql::Error::builder()
+                                        .message("Unauthorized field or type")
+                                        .path(path.clone())
+                                        .extension_code("UNAUTHORIZED_FIELD_OR_TYPE")
+                                        .build()
+                                })
+                                .collect(),
+                        )
+                        .build();
+                    return Ok(QueryPlannerContent::Introspection {
+                        response: Box::new(response),
+                    });
+                }
+                other => other?,
+            }
         } else {
             None
         };
