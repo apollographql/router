@@ -1,5 +1,6 @@
 //! Authorization plugin
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -11,6 +12,7 @@ use router_bridge::planner::UsageReporting;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::Value;
 use tokio::sync::Mutex;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -18,6 +20,9 @@ use tower::ServiceExt;
 
 use self::authenticated::AuthenticatedVisitor;
 use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
+use self::policy::PolicyExtractionVisitor;
+use self::policy::PolicyFilteringVisitor;
+use self::policy::POLICY_DIRECTIVE_NAME;
 use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
 use self::scopes::REQUIRES_SCOPES_DIRECTIVE_NAME;
@@ -37,6 +42,7 @@ use crate::register_plugin;
 use crate::services::supergraph;
 use crate::spec::query::transform;
 use crate::spec::query::traverse;
+use crate::spec::query::QUERY_EXECUTABLE;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
@@ -45,14 +51,17 @@ use crate::Configuration;
 use crate::Context;
 
 pub(crate) mod authenticated;
+pub(crate) mod policy;
 pub(crate) mod scopes;
 
 const REQUIRED_SCOPES_KEY: &str = "apollo_authorization::scopes::required";
+const REQUIRED_POLICIES_KEY: &str = "apollo_authorization::policies::required";
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize)]
 pub(crate) struct CacheKeyMetadata {
     is_authenticated: bool,
     scopes: Vec<String>,
+    policies: Vec<String>,
 }
 
 /// Authorization plugin
@@ -62,7 +71,7 @@ pub(crate) struct Conf {
     /// Reject unauthenticated requests
     #[serde(default)]
     require_authentication: bool,
-    /// enables the `@authenticated` and `@hasScopes` directives
+    /// enables the `@authenticated`, `@requiresScopes` and `@policy` directives
     #[serde(default)]
     experimental_enable_authorization_directives: bool,
 }
@@ -94,7 +103,12 @@ impl AuthorizationPlugin {
                 .type_system
                 .definitions
                 .directives
-                .contains_key(REQUIRES_SCOPES_DIRECTIVE_NAME);
+                .contains_key(REQUIRES_SCOPES_DIRECTIVE_NAME)
+            || schema
+                .type_system
+                .definitions
+                .directives
+                .contains_key(POLICY_DIRECTIVE_NAME);
 
         match has_config {
             Some(b) => Ok(b),
@@ -126,6 +140,21 @@ impl AuthorizationPlugin {
 
             context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
         }
+
+        let mut visitor = PolicyExtractionVisitor::new(&compiler, file_id);
+
+        // if this fails, the query is invalid and will fail at the query planning phase.
+        // We do not return validation errors here for now because that would imply a huge
+        // refactoring of telemetry and tests
+        if traverse::document(&mut visitor, file_id).is_ok() {
+            let policies: HashMap<String, Option<bool>> = visitor
+                .extracted_policies
+                .into_iter()
+                .map(|policy| (policy, None))
+                .collect();
+
+            context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
+        }
     }
 
     pub(crate) fn update_cache_key(context: &Context) {
@@ -156,9 +185,25 @@ impl AuthorizationPlugin {
         };
         scopes.sort();
 
+        let mut policies = context
+            .get_json_value(REQUIRED_POLICIES_KEY)
+            .and_then(|v| {
+                v.as_object().map(|v| {
+                    v.iter()
+                        .filter_map(|(policy, result)| match result {
+                            Value::Bool(true) => Some(policy.as_str().to_string()),
+                            _ => None,
+                        })
+                        .collect::<Vec<String>>()
+                })
+            })
+            .unwrap_or_default();
+        policies.sort();
+
         context.private_entries.lock().insert(CacheKeyMetadata {
             is_authenticated,
             scopes,
+            policies,
         });
     }
 
@@ -175,14 +220,16 @@ impl AuthorizationPlugin {
 
         let is_authenticated = key.metadata.is_authenticated;
         let scopes = &key.metadata.scopes;
+        let policies = &key.metadata.policies;
+
+        let mut is_filtered = false;
+        let mut unauthorized_paths: Vec<Path> = vec![];
 
         let filter_res = Self::authenticated_filter_query(&compiler, is_authenticated)?;
 
-        let filter_res = match filter_res {
-            None => Self::scopes_filter_query(&compiler, scopes).map(|opt| {
-                opt.map(|(query, paths)| (query, paths, Arc::new(Mutex::new(compiler))))
-            }),
-            Some((query, mut paths)) => {
+        let compiler = match filter_res {
+            None => compiler,
+            Some((query, paths)) => {
                 if query.is_empty() {
                     return Err(QueryPlannerError::PlanningErrors(PlanErrors {
                         errors: Arc::new(vec![router_bridge::planner::PlanError {
@@ -196,28 +243,24 @@ impl AuthorizationPlugin {
                         },
                     }));
                 }
+
+                is_filtered = true;
+                unauthorized_paths.extend(paths.into_iter());
+
                 let mut compiler = ApolloCompiler::new();
                 compiler.set_type_system_hir(schema.type_system.clone());
                 let _id = compiler.add_executable(&query, "query");
-
-                match Self::scopes_filter_query(&compiler, scopes)? {
-                    None => Ok(Some((query, paths, Arc::new(Mutex::new(compiler))))),
-                    Some((new_query, new_paths)) => {
-                        let mut compiler = ApolloCompiler::new();
-                        compiler.set_type_system_hir(schema.type_system.clone());
-                        let _id = compiler.add_executable(&new_query, "query");
-                        paths.extend(new_paths.into_iter());
-                        Ok(Some((new_query, paths, Arc::new(Mutex::new(compiler)))))
-                    }
-                }
+                compiler
             }
-        }?;
+        };
 
-        match filter_res {
-            None => Ok(None),
-            Some((filtered_query, paths, _)) => {
-                if filtered_query.is_empty() {
-                    Err(QueryPlannerError::PlanningErrors(PlanErrors {
+        let filter_res = Self::scopes_filter_query(&compiler, scopes)?;
+
+        let compiler = match filter_res {
+            None => compiler,
+            Some((query, paths)) => {
+                if query.is_empty() {
+                    return Err(QueryPlannerError::PlanningErrors(PlanErrors {
                         errors: Arc::new(vec![router_bridge::planner::PlanError {
                             message: Some("Unauthorized query".to_string()),
                             extensions: None,
@@ -227,18 +270,66 @@ impl AuthorizationPlugin {
                             stats_report_key: GRAPHQL_VALIDATION_FAILURE_ERROR_KEY.to_string(),
                             referenced_fields_by_type: Default::default(),
                         },
-                    }))
-                } else {
-                    let mut compiler = ApolloCompiler::new();
-                    compiler.set_type_system_hir(schema.type_system.clone());
-                    let _id = compiler.add_executable(&filtered_query, "query");
-                    Ok(Some((
-                        filtered_query,
-                        paths,
-                        Arc::new(Mutex::new(compiler)),
-                    )))
+                    }));
                 }
+
+                is_filtered = true;
+                unauthorized_paths.extend(paths.into_iter());
+
+                let mut compiler = ApolloCompiler::new();
+                compiler.set_type_system_hir(schema.type_system.clone());
+                let _id = compiler.add_executable(&query, "query");
+                compiler
             }
+        };
+
+        let filter_res = Self::policies_filter_query(&compiler, policies)?;
+
+        let compiler = match filter_res {
+            None => compiler,
+            Some((query, paths)) => {
+                if query.is_empty() {
+                    return Err(QueryPlannerError::PlanningErrors(PlanErrors {
+                        errors: Arc::new(vec![router_bridge::planner::PlanError {
+                            message: Some("Unauthorized query".to_string()),
+                            extensions: None,
+                            validation_error: false,
+                        }]),
+                        usage_reporting: UsageReporting {
+                            stats_report_key: GRAPHQL_VALIDATION_FAILURE_ERROR_KEY.to_string(),
+                            referenced_fields_by_type: Default::default(),
+                        },
+                    }));
+                }
+
+                is_filtered = true;
+                unauthorized_paths.extend(paths.into_iter());
+
+                let mut compiler = ApolloCompiler::new();
+                compiler.set_type_system_hir(schema.type_system.clone());
+                let _id = compiler.add_executable(&query, "query");
+                compiler
+            }
+        };
+
+        if is_filtered {
+            let file_id = compiler
+                .db
+                .source_file(QUERY_EXECUTABLE.into())
+                .ok_or_else(|| {
+                    QueryPlannerError::SpecError(SpecError::ValidationError(
+                        "missing input file for query".to_string(),
+                    ))
+                })?;
+            let filtered_query = compiler.db.source_code(file_id).to_string();
+
+            Ok(Some((
+                filtered_query,
+                unauthorized_paths,
+                Arc::new(Mutex::new(compiler)),
+            )))
+        } else {
+            Ok(None)
         }
     }
 
@@ -304,6 +395,38 @@ impl AuthorizationPlugin {
             Ok(Some((modified_query, visitor.unauthorized_paths)))
         } else {
             tracing::debug!("the query does not require scopes");
+            Ok(None)
+        }
+    }
+
+    fn policies_filter_query(
+        compiler: &ApolloCompiler,
+        policies: &[String],
+    ) -> Result<Option<(String, Vec<Path>)>, QueryPlannerError> {
+        let id = compiler
+            .db
+            .executable_definition_files()
+            .pop()
+            .expect("the query was added to the compiler earlier");
+
+        let mut visitor =
+            PolicyFilteringVisitor::new(compiler, id, policies.iter().cloned().collect());
+
+        let modified_query = transform::document(&mut visitor, id)
+            .map_err(|e| SpecError::ParsingError(e.to_string()))?
+            .to_string();
+
+        if visitor.query_requires_policies {
+            tracing::debug!("the query required policies, the requests present policies: {policies:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
+                visitor
+                    .unauthorized_paths
+                    .iter()
+                    .map(|path| path.to_string())
+                    .collect::<Vec<_>>()
+            );
+            Ok(Some((modified_query, visitor.unauthorized_paths)))
+        } else {
+            tracing::debug!("the query does not require policies");
             Ok(None)
         }
     }
