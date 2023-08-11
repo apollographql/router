@@ -163,7 +163,15 @@ impl<'a> PolicyFilteringVisitor<'a> {
         let field_policies = policy_argument(field.directive_by_name(POLICY_DIRECTIVE_NAME))
             .cloned()
             .collect::<HashSet<_>>();
-        if !self.request_policies.is_superset(&field_policies) {
+
+        // The field is authorized if any of the policies succeeds
+        if !field_policies.is_empty()
+            && self
+                .request_policies
+                .intersection(&field_policies)
+                .next()
+                .is_none()
+        {
             return false;
         }
 
@@ -178,7 +186,13 @@ impl<'a> PolicyFilteringVisitor<'a> {
         let type_policies = policy_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME))
             .cloned()
             .collect::<HashSet<_>>();
-        self.request_policies.is_superset(&type_policies)
+        // The field is authorized if any of the policies succeeds
+        type_policies.is_empty()
+            || self
+                .request_policies
+                .intersection(&type_policies)
+                .next()
+                .is_some()
     }
 }
 
