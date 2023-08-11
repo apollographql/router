@@ -6,4 +6,4 @@ This adds in-depth documentation of:
 - the request and response types they use
 - where plugins can attach themselves
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3391
+By [@Geal](https://github.com/Geal) [@Meschreiber](https://github.com/Meschreiber) in https://github.com/apollographql/router/pull/3391
