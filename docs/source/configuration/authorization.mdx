@@ -328,6 +328,35 @@ The response would include errors at the `/users/@/email` path since that field 
 
 If the request includes the `read:others read:emails` scope set, then the router can successfully execute the entire query.
 
+#### Scopes claims in other formats
+
+If the token holds scopes in another format (ex: an array of strings) or in another claim, it is possible to edit the claims with a Rhai script while the request is going through the router:
+
+```
+fn router_service(service) {
+  let request_callback = |request| {
+    let claims = request.context["apollo_authentication::JWT::claims"];
+    let roles = claims["roles"];
+
+    let scope = "";
+    if roles.len() > 1 {
+      scope = roles[0];
+    }
+
+    if roles.len() > 2 {
+      for role in roles[1..] {
+        scope += ' ';
+        scope += role;
+      }
+    }
+
+    claims["scope"] = scope;
+    request.context["apollo_authentication::JWT::claims"] = claims;
+  };
+  service.map_request(request_callback);
+}
+```
+
 ### `@policy`
 
 The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in Rhaiscript or in coprocessors.
