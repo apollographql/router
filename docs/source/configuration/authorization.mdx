@@ -16,10 +16,11 @@ APIs provide access to business-critical data. Unrestricted access can result in
 
 Enforcing authorization before processing requests is more efficient because it allows for early request termination. It also enhances security by creating an initial checkpoint that can be reinforced in other service layers.
 
-The Apollo Router provides fine-grained access control at your graph's edge. Using the `@authenticated` and `@requiresScopes` directives, you can define access to specific fields and types across your supergraph:
+The Apollo Router provides fine-grained access control at your graph's edge. Using the `@authenticated`, `@requiresScopes` and `@policy` directives, you can define access to specific fields and types across your supergraph:
 
 - The `@authenticated` directive works in a binary way: authenticated requests can access the specified field or type and unauthenticated requests can't.
 - The `@requiresScopes` directive allows granular access control through scopes you define.
+- The `@policy` directive offloads the authorization policy execution to Rhai or a coprocessor, and integrates the result with Router authorization
 
 You define and use these directives on subgraph schemas, and GraphOS [composes](#composition-and-federation) them on to the supergraph schema.
 The router then enforces these directives on all incoming requests.
@@ -87,7 +88,7 @@ The coprocessor would then look up the user with identifier specified in the `su
 {
     // Control properties
     "version": 1,
-    "stage": "RouterResponse",
+    "stage": "RouterRequest",
     "control": "continue",
     "id": "d0a8245df0efe8aa38a80dba1147fb2e",
     "context": {
@@ -326,6 +327,164 @@ query {
 The response would include errors at the `/users/@/email` path since that field requires the `read:emails` scope.
 
 If the request includes the `read:others read:emails` scope set, then the router can successfully execute the entire query.
+
+### `@policy`
+
+The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in Rhaiscript or in coprocessors.
+The directive should include a `policies` argument that defines an array of the required policies.
+
+```graphql
+@policy(policies: ["claims[`roles`].contains(`support`)"])
+```
+
+The Apollo Router extract from the schema the list of policies relevant to the query, and stores them in the request's context, under the key `apollo_authorization::policies::required` as a map `policy -> null|true|false`. This is done at the [Router service level](../customizations/overview#the-request-lifecycle). A Rhai script or a coprocessor at the Supergraph service level goes through this map, setting the value to `true` if they are successful and `false` if not. After that, the router will filter types and fields for which the policies failed or were not executed.
+If the `policies` array contains multiple elements, one of them has to be successful to keep the field.
+
+Like the efficiencies gained via the `@authenticated` directive, if every field on a particular subgraph query requires policies that fail, this can eliminate entire subgraph requests.
+
+#### Prerequisites
+
+To use the `@policy` directive in a subgraph you can [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
+
+```graphql
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.5",
+    import: [..., "@policy"])
+```
+
+It requires a Supergraph plugin to evaluate the authorization policies. This can be done with Rhaiscript, a coprocessor or a native plugin.
+
+##### Usage with Rhaiscript
+
+<ExpansionPanel title="Click to expand">
+
+The `policies` argument contains a list of strings, with no format constraints, so we can use them to store Rhai code. As an example, with the following schema, we define policies as boolean expressions that will be evaluated in Rhai:
+
+```graphql
+type Query {
+  me: User @join__field(graph: ACCOUNTS) @policy(policies: ["claims[`kind`] == `user`"])
+}
+
+type User
+  @join__owner(graph: ACCOUNTS)
+  @join__type(graph: ACCOUNTS, key: "id") {
+  id: ID! @join__field(graph: ACCOUNTS)
+  name: String @join__field(graph: ACCOUNTS)
+  username: String @join__field(graph: ACCOUNTS) @policy(policies: ["claims[`roles`].contains(`support`)"])
+}
+```
+
+We can then load the following Rhai file:
+
+```
+fn supergraph_service(service) {
+  let request_callback = |request| {
+    let claims = request.context["apollo_authentication::JWT::claims"];
+
+    let policies = request.context["apollo_authorization::policies::required"];
+
+    for key in policies.keys() {
+      let result = eval(key);
+      policies[key] = result;
+    }
+
+    request.context["apollo_authorization::policies::required"] = policies;
+  };
+  service.map_request(request_callback);
+}
+```
+
+For each policy, it will evaluate it and store the result in the `apollo_authorization::policies::required` map.
+
+</ExpansionPanel>
+
+##### Usage with a coprocessor
+
+A [coprocessor](../customizations/coprocessor) called at the Supergraph request stage can receive the list of policies and execute them. It is useful to bridge the Router authorization with an existing authorization stack, or link policy execution with lookups in a database.
+
+<ExpansionPanel title="Click to expand">
+
+If the router is configured with:
+
+```yaml title="router.yaml"
+coprocessor:
+  url: http://127.0.0.1:8081
+  supergraph:
+    request:
+      context: true
+```
+
+And a schema like this:
+
+```graphql
+type Query {
+  me: User @join__field(graph: ACCOUNTS) @policy(policies: ["read_profile"])
+}
+
+type User
+  @join__owner(graph: ACCOUNTS)
+  @join__type(graph: ACCOUNTS, key: "id") {
+  id: ID! @join__field(graph: ACCOUNTS)
+  name: String @join__field(graph: ACCOUNTS)
+  credit_card: String @join__field(graph: ACCOUNTS) @policy(policies: ["read_credit_card"])
+}
+```
+
+The coprocessor can then receive a request with this format:
+
+```json
+{
+    "version": 1,
+    "stage": "SupergraphRequest",
+    "control": "continue",
+    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
+    "context": {
+        "entries": {
+            "apollo_authentication::JWT::claims": {
+                "exp": 10000000000,
+                "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a"
+            },
+            "apollo_authorization::policies::required": {
+                "read_profile": null,
+                "read_address": null
+            }
+        }
+    },
+    "method": "POST"
+}
+```
+
+A user can read their own profile, so `read_profile` will succeed. But only the billing system should be able to see the credit card, so `read_credit_card` will fail. The corpocessor will then return:
+
+
+```json
+{
+    // Control properties
+    "version": 1,
+    "stage": "SupergraphRequest",
+    "control": "continue",
+    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
+    "context": {
+        "entries": {
+            "apollo_authentication::JWT::claims": {
+                "exp": 10000000000,
+                "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a"
+            },
+            "apollo_authorization::policies::required": {
+                "read_profile": true,
+                "read_address": false
+            }
+        }
+    }
+}
+```
+
+</ExpansionPanel>
+
+#### Example `@policy` use case
+
+TODO
 
 ## Composition and federation
 
