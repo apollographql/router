@@ -360,7 +360,7 @@ directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
 
-directive @requiresScopes(scopes: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 
 scalar join__FieldSet
 enum join__Graph {
@@ -375,10 +375,10 @@ type User
 @join__owner(graph: USER)
 @join__type(graph: ORGA, key: "id")
 @join__type(graph: USER, key: "id")
-@requiresScopes(scopes: ["user:read"]) {
+@requiresScopes(scopes: [["user:read"], ["admin"]]) {
    id: ID!
    name: String
-   phone: String @requiresScopes(scopes: ["pii"])
+   phone: String @requiresScopes(scopes: [["pii"]])
    activeOrganization: Organization
 }
 type Organization
@@ -496,6 +496,37 @@ async fn scopes_directive() {
         .insert(
             "apollo_authentication::JWT::claims",
             json! {{ "scope": "user:read pii" }},
+        )
+        .unwrap();
+    let request = router::Request {
+        context,
+        router_request: http::Request::builder()
+            .method("POST")
+            .header(CONTENT_TYPE, "application/json")
+            .header(ACCEPT, "application/json")
+            .body(serde_json::to_vec(&req).unwrap().into())
+            .unwrap(),
+    };
+
+    let response = service
+        .clone()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await
+        .next()
+        .await
+        .unwrap()
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+
+    let context = Context::new();
+    context
+        .insert(
+            "apollo_authentication::JWT::claims",
+            json! {{ "scope": "admin" }},
         )
         .unwrap();
     let request = router::Request {

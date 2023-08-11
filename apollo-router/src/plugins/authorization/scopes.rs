@@ -1,5 +1,10 @@
 //! Authorization plugin
-
+//!
+//! Implementation of the `@policy` directive:
+//!
+//! ```graphql
+//! directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+//! ```
 use std::collections::HashSet;
 
 use apollo_compiler::hir;
@@ -53,7 +58,15 @@ impl<'a> ScopeExtractionVisitor<'a> {
 fn scopes_argument(opt_directive: Option<&hir::Directive>) -> impl Iterator<Item = &String> {
     opt_directive
         .and_then(|directive| directive.argument_by_name("scopes"))
+        // outer array
         .and_then(|value| match value {
+            Value::List { value, .. } => Some(value),
+            _ => None,
+        })
+        .into_iter()
+        .flatten()
+        // inner array
+        .filter_map(|value| match value {
             Value::List { value, .. } => Some(value),
             _ => None,
         })
@@ -135,6 +148,32 @@ impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
     }
 }
 
+fn scopes_sets_argument(directive: &hir::Directive) -> impl Iterator<Item = HashSet<String>> + '_ {
+    directive
+        .argument_by_name("scopes")
+        // outer array
+        .and_then(|value| match value {
+            Value::List { value, .. } => Some(value),
+            _ => None,
+        })
+        .into_iter()
+        .flatten()
+        // inner array
+        .filter_map(|value| match value {
+            Value::List { value, .. } => Some(
+                value
+                    .into_iter()
+                    .filter_map(|v| match v {
+                        Value::String { value, .. } => Some(value),
+                        _ => None,
+                    })
+                    .cloned()
+                    .collect(),
+            ),
+            _ => None,
+        })
+}
+
 pub(crate) struct ScopeFilteringVisitor<'a> {
     compiler: &'a ApolloCompiler,
     file_id: FileId,
@@ -161,12 +200,21 @@ impl<'a> ScopeFilteringVisitor<'a> {
     }
 
     fn is_field_authorized(&mut self, field: &FieldDefinition) -> bool {
-        let field_scopes = scopes_argument(field.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME))
-            .cloned()
-            .collect::<HashSet<_>>();
+        if let Some(directive) = field.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME) {
+            let mut field_scopes_sets = scopes_sets_argument(directive);
 
-        if !self.request_scopes.is_superset(&field_scopes) {
-            return false;
+            // The outer array acts like a logical OR: if any of the inner arrays of scopes matches, the field
+            // is authorized.
+            // On an empty set, all returns true, so we must check that case separately
+            let mut empty = true;
+            if field_scopes_sets.all(|scopes_set| {
+                empty = false;
+                !self.request_scopes.is_superset(&scopes_set)
+            }) {
+                if !empty {
+                    return false;
+                }
+            }
         }
 
         if let Some(ty) = field.ty().type_def(&self.compiler.db) {
@@ -177,11 +225,23 @@ impl<'a> ScopeFilteringVisitor<'a> {
     }
 
     fn is_type_authorized(&self, ty: &TypeDefinition) -> bool {
-        let type_scopes = scopes_argument(ty.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME))
-            .cloned()
-            .collect::<HashSet<_>>();
+        match ty.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME) {
+            None => true,
+            Some(directive) => {
+                let mut type_scopes_sets = scopes_sets_argument(directive);
 
-        self.request_scopes.is_superset(&type_scopes)
+                // The outer array acts like a logical OR: if any of the inner arrays of scopes matches, the field
+                // is authorized.
+                // On an empty set, any returns false, so we must check that case separately
+                let mut empty = true;
+                let res = type_scopes_sets.any(|scopes_set| {
+                    empty = false;
+                    self.request_scopes.is_superset(&scopes_set)
+                });
+
+                empty || res
+            }
+        }
     }
 }
 
@@ -347,17 +407,17 @@ mod tests {
     use crate::spec::query::traverse;
 
     static BASIC_SCHEMA: &str = r#"
-    directive @requiresScopes(scopes: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 
     type Query {
       topProducts: Product
       customer: User
-      me: User @requiresScopes(scopes: ["profile"])
+      me: User @requiresScopes(scopes: [["profile"]])
       itf: I
     }
 
     type Mutation {
-        ping: User @requiresScopes(scopes: ["ping"])
+        ping: User @requiresScopes(scopes: [["ping"]])
     }
 
     interface I {
@@ -372,16 +432,16 @@ mod tests {
       publicReviews: [Review]
     }
 
-    scalar Internal @requiresScopes(scopes: ["internal", "test"]) @specifiedBy(url: "http///example.com/test")
+    scalar Internal @requiresScopes(scopes: [["internal", "test"]]) @specifiedBy(url: "http///example.com/test")
 
-    type Review @requiresScopes(scopes: ["review"]) {
+    type Review @requiresScopes(scopes: [["review"]]) {
         body: String
         author: User
     }
 
-    type User implements I @requiresScopes(scopes: ["read:user"]) {
+    type User implements I @requiresScopes(scopes: [["read:user"]]) {
       id: ID
-      name: String @requiresScopes(scopes: ["read:username"])
+      name: String @requiresScopes(scopes: [["read:username"]])
     }
     "#;
 
