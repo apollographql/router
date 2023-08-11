@@ -35,15 +35,18 @@ If you configure [JWT authentication](./authn-jwt), the Apollo Router [automatic
  
 ### Claim augmentation via coprocessors
 
-Your authorization policies may require information beyond what your JWT tokens' claims provide. For example, the claims may include a user ID, which you then use to look up a user's role. For situations like this, you can augment claims with [coprocessors](/customizations/coprocessor).
+Your authorization policies may require information beyond what your JWT tokens' claims provide. For example, the claims may include a user ID, which you then use to look up a user's role. For situations like this, you can augment claims with [coprocessors](../customizations/coprocessor).
 
-A [`RouterService` coprocessor](/customizations/coprocessor#how-it-works) is called after the authentication plugin, which suits it to this use case. You can use this type of coprocessor to:
+
+<ExpansionPanel title="Click to expand">
+
+A [`RouterService` coprocessor](../customizations/coprocessor#how-it-works) is called after the authentication plugin, which suits it to this use case. You can use this type of coprocessor to:
 - receive the list of claims extracted from the token
 - use information like the `sub` (subject) claim to look up the user in an external database or service
 - insert additional data in the claims list
 - return the claims list to the router
 
-For example, if you use this [router configuration](/configuration/overview#yaml-config-file):
+For example, if you use this [router configuration](../configuration/overview#yaml-config-file):
 
 ```yaml title="router.yaml"
 authentication:
@@ -100,6 +103,8 @@ The coprocessor can then look up the user with the identifier specified in the `
     }
 }
 ```
+
+</ExpansionPanel>
 
 ## Authorization directives
 
@@ -388,7 +393,7 @@ extend schema
     import: [..., "@policy"])
 ```
 
-Using the `@policy` directive requires a [Supergraph plugin](../customizations/overview) to evaluate the authorization policies. You can do this with a [Rhai script](../customizations/rhai/), [coprocessor](../customizations/coprocessor), or [native plugin](/customizations/native). Refer to the following Rhai script and coprocessor examples for more information.
+Using the `@policy` directive requires a [Supergraph plugin](../customizations/overview) to evaluate the authorization policies. You can do this with a [Rhai script](../customizations/rhai/), [coprocessor](../customizations/coprocessor), or [native plugin](../customizations/native). Refer to the following Rhai script and coprocessor examples for more information.
 
 ##### Usage with a Rhai script
 
@@ -679,4 +684,4 @@ You can also hide fields using [contracts](/graphos/delivery/contracts/).
 
 ## Query deduplication
 
-When [query deduplication](/configuration/traffic-shaping/#query-deduplication) is activated for subgraphs, the authorization status is accounted for: the router groups unauthenticated queries together, and authenticated queries are grouped by scope set.
+When [query deduplication](../configuration/traffic-shaping/#query-deduplication) is activated for subgraphs, the authorization status is accounted for: the router groups unauthenticated queries together, and authenticated queries are grouped by scope set.
