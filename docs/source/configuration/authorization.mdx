@@ -10,7 +10,9 @@ minVersion: 1.27.0
 
 APIs provide access to business-critical data. Unrestricted access can result in data breaches, monetary losses, or potential denial of service. Even for internal APIs, checks can be essential to limit data to authorized parties.
 
-Enforcing authorization _before_ processing requests is efficient because it allows for early request termination. It also enhances security by creating an initial checkpoint that can be reinforced in other service layers.
+Enforcing authorization in the Apollo Router is valuable for a few reasons:
+- Validating authorization _before_ processing requests allows for early request termination.
+- It supports a defense-in-depth strategy by creating an initial checkpoint that other service layers can reinforce.
 
 The Apollo Router provides fine-grained access controls at your graph's edge. Using the `@authenticated`, `@requiresScopes`, and `@policy` directives, you can define access to specific fields and types across your supergraph:
 
@@ -599,7 +601,7 @@ query {
 }
 ```
 
-This behavior is similar to what you can create with [contracts](/graphos/delivery/contracts/) and the [`@inaccessible` directive](https://www.apollographql.com/docs/federation/federated-types/federated-directives/#inaccessible).
+This behavior resembles what you can create with [contracts](/graphos/delivery/contracts/) and the [`@inaccessible` directive](https://www.apollographql.com/docs/federation/federated-types/federated-directives/#inaccessible).
 
 ### Authorization and interfaces
 
