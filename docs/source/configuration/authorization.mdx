@@ -15,7 +15,7 @@ The Apollo Router provides fine-grained access control at your graph's edge. Usi
 
 - The `@authenticated` directive works in a binary way: authenticated requests can access the specified field or type and unauthenticated requests can't.
 - The `@requiresScopes` directive allows granular access control through scopes you define.
-- The `@policy` directive offloads the authorization policy execution to Rhai or a coprocessor, and integrates the result with Router authorization
+- The `@policy` directive offloads authorization policy execution to a [Rhai script](../customizations/rhai/) or a [coprocessor](../customizations/coprocessor) and integrates the result in the router.
 
 You define and use these directives on subgraph schemas, and GraphOS [composes](#composition-and-federation) them on to the supergraph schema.
 The router then enforces these directives on all incoming requests.
@@ -31,12 +31,9 @@ If you configure [JWT authentication](./authn-jwt), the Apollo Router automatica
 
 To-do: More information on how to use JWT auth with these directives
 
-
 ### Claim augmentation via coprocessors
 
 Tokens can come in with limited information, that is then used to look up user specific information like roles. This can be done with [coprocessors](/customizations/coprocessor).
-
-<ExpansionPanel title="Click to expand">
 
 The router level coprocessor is guaranteed to be called after the authentication plugin, so the coprocessor can receive the list of claims extracted from the token, use information like the `sub` (subject) claim to look up the user, insert its data in the claims list and return it to the router.
 
@@ -98,8 +95,6 @@ The coprocessor would then look up the user with identifier specified in the `su
 }
 ```
 
-</ExpansionPanel>
-
 ## Authorization directives
 
 ### `@authenticated`
@@ -108,10 +103,10 @@ The `@authenticated` directive marks specific fields and types as requiring auth
 It works by checking for the `apollo_authentication::JWT::claims` key in a request's context.
 If the request is authenticated, the router executes the query in its entirety.
 
-For unauthenticated requests, the router removes `@authenticated` fields before planning the query and only executes the parts of the query that don't require authentication.
-If every field in a particular subgraph's query is marked as requiring authentication, this can eliminate entire subgraph requests.
+If the request is unauthenticated, the router removes `@authenticated` fields before planning the query and only executes the parts of the query that don't require authentication.
+If every field in a particular subgraph's query is marked as requiring authentication, this can eliminate entire subgraph requests, thereby increasing router efficiency.
 
-#### Prerequisites
+#### Usage
 
 To use the `@authenticated` directive in a subgraph you can [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
 
@@ -124,9 +119,9 @@ extend schema
 
 #### Example `@authenticated` use case
 
-Suppose you are building a social media platform. Unauthenticated users can view all other parts of a public post—its title, author, etc.
-However, you only want authenticated users to be able to see a post's number of views.
-You also want to be able to query for an authenticated user's information.
+Suppose you're building a social media platform. Unauthenticated users can view a public post's title, author, and content.
+However, you only want authenticated users to be able to see the number of views a post has received.
+You also need to be able to query for an authenticated user's information.
 
 Your schema may look something like this:
 
@@ -138,7 +133,7 @@ type Query {
 
 type User {
   id: ID!
-  name: String
+  username: String
   posts: [Post!]!
 }
 
@@ -157,7 +152,7 @@ Consider the following query:
 ```graphql title="Sample query"
 query {
   me {
-    name
+    username
   }
   post(id: "1234") {
     title
@@ -166,7 +161,7 @@ query {
 }
 ```
 
-An authenticated request would execute the entire query.
+The router would executed the entire request if it's authenticated.
 For an unauthenticated request, the router would remove the `@authenticated` fields and execute the filtered query.
 
 <CodeColumns>
@@ -174,7 +169,7 @@ For an unauthenticated request, the router would remove the `@authenticated` fie
 ```graphql title="Query executed for an authenticated request"
 query {
   me {
-    name
+    username
   }
   post(id: "1234") {
     title
@@ -233,101 +228,30 @@ If _every_ requested field requires authentication and a request is unauthentica
 ### `@requiresScopes`
 
 The `@requiresScopes` directive marks fields and types as restricted based on required scopes.
+Depending on the scopes present on the request, the router filters out unauthorized fields and types.
 The directive should include a `scopes` argument that defines an array of the required scopes.
 
 ```graphql
 @requiresScopes(scopes: ["scope1", "scope2", "scope3"])
 ```
 
+> If a field's required `scopes` array includes multiple scopes, the request must include _all_ required scopes to resolve it.
+
 The directive validates the required scopes by loading the claims object at the `apollo_authentication::JWT::claims` key in a request's context.
 The claims object's `scope` key's value should be a space separated string of scopes in the format defined by the [OAuth2 RFC for access token scopes](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3).
 
-```
+```rhai
 claims = context["apollo_authentication::JWT::claims"]
 claims["scope"] = "scope1 scope2 scope3"
 ```
 
-Depending on the scopes present on the request, the router filters out unauthorized fields and types.
-If a field's required `scopes` array includes multiple scopes, the request must include _all_ required scopes to resolve it.
+<ExpansionPanel title="What if my scopes aren't in this format?">
 
-Like the efficiencies gained via the `@authenticated` directive, if every field on a particular subgraph query requires scopes that aren't present, this can eliminate entire subgraph requests.
+If the `apollo_authentication::JWT::claims` token holds scopes in another format, for example, an array of strings, or in another claim, you can edit the claims with a [custom Rhai script](../customizations/rhai).
 
-#### Prerequisites
+The example below extracts an array of scopes from the `roles` claim and reformats them as a space separated string.
 
-To use the `@requiresScopes` directive in a subgraph you can [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
-
-```graphql
-extend schema
-  @link(
-    url: "https://specs.apollo.dev/federation/v2.5",
-    import: [..., "@requiresScopes"])
-```
-
-#### Example `@requiresScopes` use case
-
-Imagine your social media platform lets users view other users' information only if they have the required permissions.
-Your schema may look something like this:
-
-```graphql title=""
-type Query {
-  me: User @authenticated
-  user(id: ID!): User @requiresScopes(scopes: ["read:others"])
-  users: [User!]! @requiresScopes(scopes: ["read:others"])
-}
-
-type User {
-  id: ID!
-  name: String
-  email: String @requiresScopes(scopes: ["read:email"])
-  profileImage: String
-  posts: [Post!]!
-}
-
-type Post {
-  id: ID!
-  author: User!
-  title: String!
-  content: String!
-  views: Int @authenticated
-}
-```
-
-The router executes the following query differently, depending on the request's attached scopes.
-
-If the request includes only the `read:others` scope, then the router would execute the following filtered query:
-
-<CodeColumns>
-
-```graphql title="Raw query to router"
-query {
-  users {
-    name
-    profileImage
-    email
-  }
-}
-```
-
-```graphql title="Scopes: 'read:others'"
-query {
-  users {
-    name
-    profileImage
-  }
-}
-```
-
-</CodeColumns>
-
-The response would include errors at the `/users/@/email` path since that field requires the `read:emails` scope.
-
-If the request includes the `read:others read:emails` scope set, then the router can successfully execute the entire query.
-
-#### Scopes claims in other formats
-
-If the token holds scopes in another format (ex: an array of strings) or in another claim, it is possible to edit the claims with a Rhai script while the request is going through the router:
-
-```
+```Rhai
 fn router_service(service) {
   let request_callback = |request| {
     let claims = request.context["apollo_authentication::JWT::claims"];
@@ -352,21 +276,97 @@ fn router_service(service) {
 }
 ```
 
+</ExpansionPanel>
+
+Like the efficiencies gained via the `@authenticated` directive, if every field on a particular subgraph query requires scopes that aren't present, this can eliminate entire subgraph requests.
+
+#### Usage
+
+To use the `@requiresScopes` directive in a subgraph you can [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
+
+```graphql
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.5",
+    import: [..., "@requiresScopes"])
+```
+
+#### Example `@requiresScopes` use case
+
+Imagine the social media platform you're building lets users view other users' information only if they have the required permissions.
+Your schema may look something like this:
+
+```graphql title=""
+type Query {
+  me: User @authenticated
+  user(id: ID!): User @requiresScopes(scopes: ["read:others"])
+  users: [User!]! @requiresScopes(scopes: ["read:others"])
+  post(id: ID!): Post
+}
+
+type User {
+  id: ID!
+  username: String
+  email: String @requiresScopes(scopes: ["read:email"])
+  profileImage: String
+  posts: [Post!]!
+}
+
+type Post {
+  id: ID!
+  author: User!
+  title: String!
+  content: String!
+  views: Int @authenticated
+}
+```
+
+The router executes the following query differently, depending on the request's attached scopes.
+
+If the request includes only the `read:others` scope, then the router would execute the following filtered query:
+
+<CodeColumns>
+
+```graphql title="Raw query to router"
+query {
+  users {
+    username
+    profileImage
+    email
+  }
+}
+```
+
+```graphql title="Scopes: 'read:others'"
+query {
+  users {
+    username
+    profileImage
+  }
+}
+```
+
+</CodeColumns>
+
+The response would include an errors at the `/users/@/email` path since that field requires the `read:emails` scope.
+
+If the request includes the `read:others read:emails` scope set, then the router can successfully execute the entire query.
+
 ### `@policy`
 
-The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in Rhaiscript or in coprocessors.
-The directive should include a `policies` argument that defines an array of the required policies.
+The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in a [Rhai script](../customizations/rhai/) or[coprocessor](../customizations/coprocessor).
+The directive should include a `policies` argument that defines an array of the required policies. The example below includes one policy that requires all roles from the claims object to include the string `"support"`.
 
 ```graphql
 @policy(policies: ["claims[`roles`].contains(`support`)"])
 ```
 
-The Apollo Router extract from the schema the list of policies relevant to the query, and stores them in the request's context, under the key `apollo_authorization::policies::required` as a map `policy -> null|true|false`. This is done at the [Router service level](../customizations/overview#the-request-lifecycle). A Rhai script or a coprocessor at the Supergraph service level goes through this map, setting the value to `true` if they are successful and `false` if not. After that, the router will filter types and fields for which the policies failed or were not executed.
-If the `policies` array contains multiple elements, one of them has to be successful to keep the field.
+The Apollo Router extracts the list of policies relevant to a request from the schema. It then stores them in the request's context, under the key `apollo_authorization::policies::required` as a map `policy -> null|true|false`. This happens at the [Router service level](../customizations/overview#the-request-lifecycle). A Rhai script or a coprocessor at the Supergraph service level goes through this map, setting the value to `true` if they are successful and `false` if not. After that, the router filters the requests' types and fields to only those where the policy is `true`.
+If the `policies` array contains multiple elements, only one of them has to be successful for the policy to be `true`.
 
-Like the efficiencies gained via the `@authenticated` directive, if every field on a particular subgraph query requires policies that fail, this can eliminate entire subgraph requests.
+Like the efficiencies gained via the authorization directives, if every field on a particular subgraph query is unauthorized because none of its policies pass, this can eliminate entire subgraph requests.
 
-#### Prerequisites
+#### Usage
 
 To use the `@policy` directive in a subgraph you can [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
 
@@ -377,13 +377,13 @@ extend schema
     import: [..., "@policy"])
 ```
 
-It requires a Supergraph plugin to evaluate the authorization policies. This can be done with Rhaiscript, a coprocessor or a native plugin.
+Using the `@policy` directive requires a [Supergraph plugin](../customizations/overview) to evaluate the authorization policies. You can do this with a a [Rhai script](../customizations/rhai/), [coprocessor](../customizations/coprocessor), or [native plugin](/customizations/native). Refer to the following Rhai script and coprocessor examples for more information.
 
-##### Usage with Rhaiscript
+##### Usage with a Rhai script
 
 <ExpansionPanel title="Click to expand">
 
-The `policies` argument contains a list of strings, with no format constraints, so we can use them to store Rhai code. As an example, with the following schema, we define policies as boolean expressions that will be evaluated in Rhai:
+The `policies` argument contains a list of strings, with no formatting constraints, so you can use them to store Rhai code. As an example,the following schema defines policies as boolean expressions that will be evaluated in Rhai:
 
 ```graphql
 type Query {
@@ -394,12 +394,12 @@ type User
   @join__owner(graph: ACCOUNTS)
   @join__type(graph: ACCOUNTS, key: "id") {
   id: ID! @join__field(graph: ACCOUNTS)
-  name: String @join__field(graph: ACCOUNTS)
+  username: String @join__field(graph: ACCOUNTS)
   username: String @join__field(graph: ACCOUNTS) @policy(policies: ["claims[`roles`].contains(`support`)"])
 }
 ```
 
-We can then load the following Rhai file:
+You can then use the following Rhai script to evaluate the policies:
 
 ```
 fn supergraph_service(service) {
@@ -419,27 +419,17 @@ fn supergraph_service(service) {
 }
 ```
 
-For each policy, it will evaluate it and store the result in the `apollo_authorization::policies::required` map.
+The script uses the [`eval` function](https://rhai.rs/book/ref/eval.html) to evaluate each policy and store the result in the `apollo_authorization::policies::required` map.
 
 </ExpansionPanel>
 
 ##### Usage with a coprocessor
 
-A [coprocessor](../customizations/coprocessor) called at the Supergraph request stage can receive the list of policies and execute them. It is useful to bridge the Router authorization with an existing authorization stack, or link policy execution with lookups in a database.
+You can use a [coprocessor](../customizations/coprocessor) called at the Supergraph request stage to receive the list of policies and execute them. This is useful to bridge the router authorization with an existing authorization stack, or link policy execution with lookups in a database.
 
 <ExpansionPanel title="Click to expand">
 
-If the router is configured with:
-
-```yaml title="router.yaml"
-coprocessor:
-  url: http://127.0.0.1:8081
-  supergraph:
-    request:
-      context: true
-```
-
-And a schema like this:
+Suppose you only want a user with a `read_profile` policy to have access to their own information. An additional policy `read_credit_card` is required to access credit card information. Your schema may look something like this:
 
 ```graphql
 type Query {
@@ -450,12 +440,22 @@ type User
   @join__owner(graph: ACCOUNTS)
   @join__type(graph: ACCOUNTS, key: "id") {
   id: ID! @join__field(graph: ACCOUNTS)
-  name: String @join__field(graph: ACCOUNTS)
+  username: String @join__field(graph: ACCOUNTS)
   credit_card: String @join__field(graph: ACCOUNTS) @policy(policies: ["read_credit_card"])
 }
 ```
 
-The coprocessor can then receive a request with this format:
+If you configure your router like this:
+
+```yaml title="router.yaml"
+coprocessor:
+  url: http://127.0.0.1:8081
+  supergraph:
+    request:
+      context: true
+```
+
+then a coprocessor can then receive a request with this format:
 
 ```json
 {
@@ -506,13 +506,9 @@ A user can read their own profile, so `read_profile` will succeed. But only the 
 
 </ExpansionPanel>
 
-#### Example `@policy` use case
-
-TODO
-
 ## Composition and federation
 
-Authorization directives are defined at the subgraph level and the GraphOS composes them in the supergraph schema. In other words, if subgraph fields or types include either `@authenticated` or `@requiresScopes` directives, they are set on the supergraph too.
+Authorization directives are defined at the subgraph level and the GraphOS composes them in the supergraph schema. In other words, if subgraph fields or types include `@authenticated`, `@requiresScopes`, or `@policy` directives, they are set on the supergraph too.
 
 If multiple shared subgraph fields include `@requiresScopes`, the supergraph schema merges the sets of scopes required by each subgraph. For example, imagine one subgraph requires the `read:others` scope on the `users` query:
 
@@ -552,7 +548,7 @@ type Query {
 
 type Product @key(fields: "id") {
   id: ID! @authenticated
-  name: String!
+  username: String!
   price: Int @authenticated
 }
 ```
@@ -573,7 +569,7 @@ An unauthenticated request would successfully execute this query:
 ```graphql
 query {
   product {
-    name
+    username
     inStock
   }
 }
@@ -587,7 +583,7 @@ For the following query, an unauthenticated request would resolve `null` for `id
 query {
   product {
     id
-    name
+    username
   }
 }
 ```
@@ -607,7 +603,7 @@ type Query {
 
 type User {
   id: ID!
-  name: String
+  username: String
   posts: [Post!]!
 }
 
