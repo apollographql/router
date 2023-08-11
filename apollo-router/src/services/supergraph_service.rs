@@ -14,6 +14,7 @@ use http::StatusCode;
 use indexmap::IndexMap;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
+use sha1::{Digest, Sha1};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tower::BoxError;
@@ -368,6 +369,10 @@ async fn subscription_task(
     let mut subscription_handle = subscription_handle.clone();
     let operation_signature =
         if let Some(usage_reporting) = context.private_entries.lock().get::<UsageReporting>() {
+            let _ = context.insert(
+                "stats_report_key_hash",
+                stats_report_key_hash(usage_reporting),
+            );
             usage_reporting.stats_report_key.clone()
         } else {
             String::new()
@@ -467,6 +472,13 @@ async fn subscription_task(
     if limit_is_set {
         OPENED_SUBSCRIPTIONS.fetch_sub(1, Ordering::Relaxed);
     }
+}
+
+fn stats_report_key_hash(usage_reporting: &UsageReporting) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(usage_reporting.stats_report_key.as_bytes());
+    let result = hasher.finalize();
+    hex::encode(result)
 }
 
 async fn dispatch_event(

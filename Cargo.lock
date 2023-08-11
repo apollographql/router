@@ -372,6 +372,7 @@ dependencies = [
  "serde_json_bytes",
  "serde_urlencoded",
  "serde_yaml",
+ "sha1 0.10.5",
  "sha2",
  "shellexpand",
  "similar-asserts",
