@@ -11,6 +11,7 @@ override_subgraph_url:
 include_subgraph_errors:
   all: true
 subscription:
+  enabled: true
   mode:
     passthrough:
       all:

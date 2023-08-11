@@ -1,13 +1,11 @@
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
-use std::time::Duration;
 
 use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
 use futures::prelude::*;
-use url::Url;
 
 use crate::router::Event;
 use crate::router::Event::NoMoreLicense;
@@ -15,7 +13,7 @@ use crate::uplink::license_enforcement::License;
 use crate::uplink::license_stream::LicenseQuery;
 use crate::uplink::license_stream::LicenseStreamExt;
 use crate::uplink::stream_from_uplink;
-use crate::uplink::Endpoints;
+use crate::uplink::UplinkConfig;
 
 type LicenseStream = Pin<Box<dyn Stream<Item = License> + Send>>;
 
@@ -49,22 +47,7 @@ pub enum LicenseSource {
 
     /// Apollo uplink.
     #[display(fmt = "Registry")]
-    Registry {
-        /// The Apollo key: `<YOUR_GRAPH_API_KEY>`
-        apollo_key: String,
-
-        /// The apollo graph reference: `<YOUR_GRAPH_ID>@<VARIANT>`
-        apollo_graph_ref: String,
-
-        /// The endpoint polled to fetch its latest supergraph schema.
-        urls: Option<Vec<Url>>,
-
-        /// The duration between polling
-        poll_interval: Duration,
-
-        /// The HTTP client timeout for each poll
-        timeout: Duration,
-    },
+    Registry(UplinkConfig),
 }
 
 impl Default for LicenseSource {
@@ -131,29 +114,20 @@ impl LicenseSource {
                     }
                 }
             }
-            LicenseSource::Registry {
-                apollo_key,
-                apollo_graph_ref,
-                urls,
-                poll_interval,
-                timeout,
-            } => stream_from_uplink::<LicenseQuery, License>(
-                apollo_key,
-                apollo_graph_ref,
-                urls.map(Endpoints::fallback),
-                poll_interval,
-                timeout,
-            )
-            .filter_map(|res| {
-                future::ready(match res {
-                    Ok(license) => Some(license),
-                    Err(e) => {
-                        tracing::error!("{}", e);
-                        None
-                    }
-                })
-            })
-            .boxed(),
+
+            LicenseSource::Registry(uplink_config) => {
+                stream_from_uplink::<LicenseQuery, License>(uplink_config)
+                    .filter_map(|res| {
+                        future::ready(match res {
+                            Ok(license) => Some(license),
+                            Err(e) => {
+                                tracing::error!("{}", e);
+                                None
+                            }
+                        })
+                    })
+                    .boxed()
+            }
             LicenseSource::Env => {
                 // EXPERIMENTAL and not subject to semver.
                 match std::env::var("APOLLO_ROUTER_LICENSE").map(|e| License::from_str(&e)) {

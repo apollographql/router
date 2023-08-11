@@ -83,13 +83,10 @@ impl MetricsConfigurator for Config {
         metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         if self.enabled {
-            let mut controller = controllers::basic(
-                processors::factory(
-                    selectors::simple::histogram(metrics_config.buckets.clone()),
-                    aggregation::stateless_temporality_selector(),
-                )
-                .with_memory(true),
-            )
+            let mut controller = controllers::basic(processors::factory(
+                selectors::simple::histogram(metrics_config.buckets.clone()),
+                aggregation::stateless_temporality_selector(),
+            ))
             .with_resource(Resource::new(
                 metrics_config
                     .resources
@@ -158,11 +155,15 @@ impl Service<router::Request> for PrometheusService {
             let encoder = TextEncoder::new();
             let mut result = Vec::new();
             encoder.encode(&metric_families, &mut result)?;
+            // otel 0.19.0 started adding "_total" onto various statistics.
+            // Let's remove any problems they may have created for us.
+            let stats = String::from_utf8_lossy(&result);
+            let modified_stats = stats.replace("_total_total", "_total");
             Ok(router::Response {
                 response: http::Response::builder()
                     .status(StatusCode::OK)
                     .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
-                    .body::<hyper::Body>(result.into())
+                    .body::<hyper::Body>(modified_stats.into())
                     .map_err(BoxError::from)?,
                 context: req.context,
             })
