@@ -471,7 +471,7 @@ impl BridgeQueryPlanner {
                                 .map(|path| {
                                     graphql::Error::builder()
                                         .message("Unauthorized field or type")
-                                        .path(path.clone())
+                                        .path(path)
                                         .extension_code("UNAUTHORIZED_FIELD_OR_TYPE")
                                         .build()
                                 })
