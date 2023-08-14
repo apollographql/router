@@ -358,13 +358,13 @@ mod router_context {
 
     #[rhai_fn(get = "context", pure, return_raw)]
     pub(crate) fn router_first_response_context_get(
-        obj: &mut SharedMut<router::Response>,
+        obj: &mut SharedMut<router::FirstResponse>,
     ) -> Result<Context, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.context.clone()))
     }
     #[rhai_fn(set = "context", return_raw)]
     pub(crate) fn router_first_response_context_set(
-        obj: &mut SharedMut<router::Response>,
+        obj: &mut SharedMut<router::FirstResponse>,
         context: Context,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| response.context = context);
@@ -536,13 +536,13 @@ mod router_plugin {
 
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_router_response(
-        obj: &mut SharedMut<router::Response>,
+        obj: &mut SharedMut<router::FirstResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
     #[rhai_fn(name = "is_primary", pure)]
-    pub(crate) fn router_response_is_primary(_obj: &mut SharedMut<router::Response>) -> bool {
+    pub(crate) fn router_response_is_primary(_obj: &mut SharedMut<router::FirstResponse>) -> bool {
         true
     }
 
@@ -625,7 +625,7 @@ mod router_plugin {
 
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_router_response(
-        obj: &mut SharedMut<router::Response>,
+        obj: &mut SharedMut<router::FirstResponse>,
     ) -> Result<Vec<u8>, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.body().to_vec()))
     }
@@ -682,7 +682,7 @@ mod router_plugin {
 
     #[rhai_fn(set = "headers", return_raw)]
     pub(crate) fn set_originating_headers_router_response(
-        obj: &mut SharedMut<router::Response>,
+        obj: &mut SharedMut<router::FirstResponse>,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| *response.response.headers_mut() = headers);
@@ -742,7 +742,7 @@ mod router_plugin {
 
     #[rhai_fn(set = "body", return_raw)]
     pub(crate) fn set_originating_body_router_response(
-        obj: &mut SharedMut<router::Response>,
+        obj: &mut SharedMut<router::FirstResponse>,
         body: String,
     ) -> Result<(), Box<EvalAltResult>> {
         let bytes = Bytes::from(body);
@@ -831,7 +831,7 @@ mod router_plugin {
     }
 
     #[rhai_fn(name = "headers_are_available", pure)]
-    pub(crate) fn router_response(_: &mut SharedMut<router::Response>) -> bool {
+    pub(crate) fn router_response(_: &mut SharedMut<router::FirstResponse>) -> bool {
         true
     }
 

@@ -49,15 +49,12 @@ use crate::plugin::PluginInit;
 use crate::plugins::rhai::engine::OptionDance;
 use crate::plugins::rhai::engine::RhaiExecutionDeferredResponse;
 use crate::plugins::rhai::engine::RhaiExecutionResponse;
-use crate::plugins::rhai::engine::RhaiRouterChunkedRequest;
 use crate::plugins::rhai::engine::RhaiRouterChunkedResponse;
-use crate::plugins::rhai::engine::RhaiRouterFirstRequest;
 use crate::plugins::rhai::engine::RhaiRouterResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphDeferredResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphResponse;
 use crate::register_plugin;
 use crate::services::ExecutionResponse;
-use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
 use crate::Context;
@@ -366,55 +363,26 @@ macro_rules! gen_map_request {
 
 // Actually use the checkpoint function so that we can shortcut requests which fail
 macro_rules! gen_map_router_deferred_request {
-    ($request: ident, $response: ident,  $rhai_first_request: ident, $rhai_deferred_request: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
         $borrow.replace(|service| {
-            fn rhai_service_span() -> impl Fn(&$request) -> tracing::Span + Clone {
-                move |_request: &$request| {
+            fn rhai_service_span() -> impl Fn(&$base::Request) -> tracing::Span + Clone {
+                move |_request: &$base::Request| {
                     tracing::info_span!(
                         RHAI_SPAN_NAME,
-                        "rhai service" = stringify!($request),
+                        "rhai service" = stringify!($base::Request),
                         "otel.kind" = "INTERNAL"
                     )
                 }
             }
             ServiceBuilder::new()
                 .instrument(rhai_service_span())
-                .checkpoint( move |chunked_request: $request|  {
-                    // Let's define a local function to build an error response
-                    fn failure_message(
-                        context: Context,
-                        error_details: ErrorDetails,
-                    ) -> Result<ControlFlow<$response, $request>, BoxError> {
-                        let res = if let Some(body) = error_details.body {
-                            $response::builder()
-                                .extensions(body.extensions)
-                                .errors(body.errors)
-                                .status_code(error_details.status)
-                                .context(context)
-                                .and_data(body.data)
-                                .and_label(body.label)
-                                .and_path(body.path)
-                                .build()?
-                        } else {
-                            $response::error_builder()
-                                .errors(vec![Error {
-                                    message: error_details.message.unwrap_or_default(),
-                                    ..Default::default()
-                                }])
-                                .context(context)
-                                .status_code(error_details.status)
-                                .build()?
-                        };
-
-                        Ok(ControlFlow::Break(res))
-                    }
-
+                .checkpoint( move |chunked_request: $base::Request|  {
                     // we split the request stream into headers+first body chunk, then a stream of chunks
                     // for which we will implement mapping later
-                    let $request { router_request, context } = chunked_request;
+                    let $base::Request { router_request, context } = chunked_request;
                     let (parts, stream) = router_request.into_parts();
 
-                    let request = $rhai_first_request {
+                    let request = $base::FirstRequest {
                         context,
                         request: http::Request::from_parts(
                             parts,
@@ -429,12 +397,12 @@ macro_rules! gen_map_router_deferred_request {
                         let error_details = process_error(error);
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
-                        return failure_message(request_opt.unwrap().context, error_details);
+                        return $base::request_failure(request_opt.unwrap().context, error_details);
                     }
 
                     let request_opt = shared_request.lock().unwrap().take();
 
-                    let $rhai_first_request { context, request } =
+                    let $base::FirstRequest { context, request } =
                     request_opt.unwrap();
                     let (parts, _body) = http::Request::from(request).into_parts();
 
@@ -447,12 +415,11 @@ macro_rules! gen_map_router_deferred_request {
                     let mapped_stream = stream
                         .map_err(BoxError::from)
                         .and_then(move |chunk| {
-                            //let rhai_service = $rhai_service.clone();
                             let context = ctx.clone();
                             let rhai_service = rhai_service.clone();
                             let callback = callback.clone();
                             async move {
-                                let request = $rhai_deferred_request {
+                                let request = $base::ChunkedRequest {
                                     context,
                                     request: chunk.into(),
                                 };
@@ -479,14 +446,14 @@ macro_rules! gen_map_router_deferred_request {
                                 }
 
                                 let request_opt = shared_request.lock().unwrap().take();
-                                let $rhai_deferred_request { request, .. } =
+                                let $base::ChunkedRequest { request, .. } =
                                     request_opt.unwrap();
                                 Ok(request)
                             }
                         });
 
                     // Finally, return a response which has a Body that wraps our stream of response chunks.
-                    Ok(ControlFlow::Continue($request {
+                    Ok(ControlFlow::Continue($base::Request {
                         context,
                         router_request: http::Request::from_parts(parts, hyper::Body::wrap_stream(mapped_stream)),
                     }))
@@ -864,15 +831,7 @@ impl ServiceStep {
     fn map_request(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
             ServiceStep::Router(service) => {
-                gen_map_router_deferred_request!(
-                    RouterRequest,
-                    RouterResponse,
-                    RhaiRouterFirstRequest,
-                    RhaiRouterChunkedRequest,
-                    service,
-                    rhai_service,
-                    callback
-                );
+                gen_map_router_deferred_request!(router, service, rhai_service, callback);
             }
             ServiceStep::Supergraph(service) => {
                 gen_map_request!(supergraph, service, rhai_service, callback);

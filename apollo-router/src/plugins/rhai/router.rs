@@ -11,7 +11,7 @@ use super::ErrorDetails;
 
 pub(crate) type FirstRequest = super::engine::RhaiRouterFirstRequest;
 pub(crate) type ChunkedRequest = super::engine::RhaiRouterChunkedRequest;
-pub(crate) type Response = super::engine::RhaiRouterResponse;
+pub(crate) type FirstResponse = super::engine::RhaiRouterResponse;
 pub(crate) type DeferredResponse = super::engine::RhaiRouterChunkedResponse;
 
 pub(super) fn request_failure(
