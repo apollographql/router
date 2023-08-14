@@ -12,7 +12,6 @@ use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::Method;
 use http::Uri;
-use hyper::Body;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
 use rhai::serde::from_dynamic;
@@ -580,18 +579,8 @@ mod router_plugin {
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_router_response(
         obj: &mut SharedMut<router::Response>,
-    ) -> Result<String, Box<EvalAltResult>> {
-        // Get the body
-        let bytes = obj.with_mut(|response| {
-            let http_response = std::mem::take(&mut response.response);
-            let (parts, body) = http_response.into_parts();
-            let bytes = http_body_as_bytes(body)?;
-            // Copy back the response so it can continue to be used
-            response.response = http::Response::from_parts(parts, bytes.clone().into());
-            Ok::<Bytes, Box<EvalAltResult>>(bytes)
-        })?;
-
-        String::from_utf8(bytes.to_vec()).map_err(|err| err.to_string().into())
+    ) -> Result<Vec<u8>, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.response.body().to_vec()))
     }
 
     #[rhai_fn(get = "body", pure, return_raw)]
@@ -1061,13 +1050,24 @@ mod router_plugin {
 }
 
 #[derive(Default)]
-pub(crate) struct RhaiRouterResponse {
+pub(crate) struct RhaiRouterFirstRequest {
     pub(crate) context: Context,
-    pub(crate) response: http::Response<Body>,
+    pub(crate) request: http::Request<()>,
+}
+#[derive(Default)]
+pub(crate) struct RhaiRouterChunkedRequest {
+    pub(crate) context: Context,
+    pub(crate) request: Bytes,
 }
 
 #[derive(Default)]
-pub(crate) struct RhaiRouterDeferredResponse {
+pub(crate) struct RhaiRouterResponse {
+    pub(crate) context: Context,
+    pub(crate) response: http::Response<Bytes>,
+}
+
+#[derive(Default)]
+pub(crate) struct RhaiRouterChunkedResponse {
     pub(crate) context: Context,
     pub(crate) response: Bytes,
 }
@@ -1103,21 +1103,6 @@ macro_rules! if_subgraph {
     ( $base: ident => $subgraph: block else $not_subgraph: block ) => {
         $not_subgraph
     };
-}
-
-fn http_body_as_bytes(body: Body) -> Result<Bytes, Box<EvalAltResult>> {
-    futures::executor::block_on(async move {
-        let hdl = tokio::runtime::Handle::current();
-        std::thread::spawn(move || {
-            let _guard = hdl.enter();
-            hdl.spawn(async move { hyper::body::to_bytes(body).await })
-        })
-        .join()
-        .map_err(|_e| "join failed".to_string())?
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string().into())
-    })
 }
 
 macro_rules! register_rhai_router_interface {
@@ -1177,31 +1162,21 @@ macro_rules! register_rhai_router_interface {
 
             $engine.register_get(
                 "body",
-                |obj: &mut SharedMut<$base::Request>| -> Result<String, Box<EvalAltResult>> {
-                    // Get the body
-                    let bytes = obj.with_mut(|request| {
-                        let http_request = std::mem::take(&mut request.router_request);
-                        let (parts, body) = http_request.into_parts();
-                        let bytes = http_body_as_bytes(body)?;
-                        // Copy back the request so it can continue to be used
-                        request.router_request = http::Request::from_parts(parts, bytes.clone().into());
-                        Ok::<Bytes, Box<EvalAltResult>>(bytes)
-                    })?;
-
-                    String::from_utf8(bytes.to_vec()).map_err(|err| err.to_string().into())
+                |obj: &mut SharedMut<$base::ChunkedRequest>| -> Result<Vec<u8>, Box<EvalAltResult>> {
+                    Ok( obj.with_mut(|request| { request.request.to_vec()}))
                 }
             );
 
             $engine.register_set(
                 "body",
-                |obj: &mut SharedMut<$base::Request>, body: String| {
+                |obj: &mut SharedMut<$base::ChunkedRequest>, body: Vec<u8>| {
                     if_subgraph! {
                         $base => {
                             let _unused = (obj, body);
                             Err("cannot mutate originating request on a subgraph".into())
                         } else {
                             let bytes = Bytes::from(body);
-                            obj.with_mut(|request| *request.router_request.body_mut() = bytes.into());
+                            obj.with_mut(|request| request.request = bytes);
                             Ok(())
                         }
                     }

@@ -49,7 +49,9 @@ use crate::plugin::PluginInit;
 use crate::plugins::rhai::engine::OptionDance;
 use crate::plugins::rhai::engine::RhaiExecutionDeferredResponse;
 use crate::plugins::rhai::engine::RhaiExecutionResponse;
-use crate::plugins::rhai::engine::RhaiRouterDeferredResponse;
+use crate::plugins::rhai::engine::RhaiRouterChunkedRequest;
+use crate::plugins::rhai::engine::RhaiRouterChunkedResponse;
+use crate::plugins::rhai::engine::RhaiRouterFirstRequest;
 use crate::plugins::rhai::engine::RhaiRouterResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphDeferredResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphResponse;
@@ -374,21 +376,8 @@ macro_rules! gen_map_request {
                         Ok(ControlFlow::Break(res))
                     }
                     let shared_request = Shared::new(Mutex::new(Some(request)));
-                    let result: Result<Dynamic, Box<EvalAltResult>> = if $callback.is_curried() {
-                        $callback.call(
-                            &$rhai_service.engine,
-                            &$rhai_service.ast,
-                            (shared_request.clone(),),
-                        )
-                    } else {
-                        let mut guard = $rhai_service.scope.lock().unwrap();
-                        $rhai_service.engine.call_fn(
-                            &mut guard,
-                            &$rhai_service.ast,
-                            $callback.fn_name(),
-                            (shared_request.clone(),),
-                        )
-                    };
+                    let result: Result<Dynamic, Box<EvalAltResult>> =
+                        execute(&$rhai_service, &$callback, (shared_request.clone(),));
                     if let Err(error) = result {
                         let error_details = process_error(error);
                         tracing::error!("map_request callback failed: {error_details:#?}");
@@ -469,6 +458,140 @@ macro_rules! gen_map_deferred_request {
         })
     };
 }
+
+// Actually use the checkpoint function so that we can shortcut requests which fail
+macro_rules! gen_map_router_deferred_request {
+    ($request: ident, $response: ident,  $rhai_first_request: ident, $rhai_deferred_request: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
+        $borrow.replace(|service| {
+            fn rhai_service_span() -> impl Fn(&$request) -> tracing::Span + Clone {
+                move |_request: &$request| {
+                    tracing::info_span!(
+                        RHAI_SPAN_NAME,
+                        "rhai service" = stringify!($request),
+                        "otel.kind" = "INTERNAL"
+                    )
+                }
+            }
+            ServiceBuilder::new()
+                .instrument(rhai_service_span())
+                .checkpoint( move |chunked_request: $request|  {
+                    // Let's define a local function to build an error response
+                    fn failure_message(
+                        context: Context,
+                        error_details: ErrorDetails,
+                    ) -> Result<ControlFlow<$response, $request>, BoxError> {
+                        let res = if let Some(body) = error_details.body {
+                            $response::builder()
+                                .extensions(body.extensions)
+                                .errors(body.errors)
+                                .status_code(error_details.status)
+                                .context(context)
+                                .and_data(body.data)
+                                .and_label(body.label)
+                                .and_path(body.path)
+                                .build()?
+                        } else {
+                            $response::error_builder()
+                                .errors(vec![Error {
+                                    message: error_details.message.unwrap_or_default(),
+                                    ..Default::default()
+                                }])
+                                .context(context)
+                                .status_code(error_details.status)
+                                .build()?
+                        };
+
+                        Ok(ControlFlow::Break(res))
+                    }
+
+                    // we split the request stream into headers+first body chunk, then a stream of chunks
+                    // for which we will implement mapping later
+                    let $request { router_request, context } = chunked_request;
+                    let (parts, stream) = router_request.into_parts();
+
+                    let request = $rhai_first_request {
+                        context,
+                        request: http::Request::from_parts(
+                            parts,
+                           (),
+                        ),
+                    };
+                    let shared_request = Shared::new(Mutex::new(Some(request)));
+                    let result = execute(&$rhai_service, &$callback, (shared_request.clone(),));
+
+                    if let Err(error) = result {
+                        tracing::error!("map_request callback failed: {error}");
+                        let error_details = process_error(error);
+                        let mut guard = shared_request.lock().unwrap();
+                        let request_opt = guard.take();
+                        return failure_message(request_opt.unwrap().context, error_details);
+                    }
+
+                    let request_opt = shared_request.lock().unwrap().take();
+
+                    let $rhai_first_request { context, request } =
+                    request_opt.unwrap();
+                    let (parts, _body) = http::Request::from(request).into_parts();
+
+
+                    //let mut first = true;
+                    let ctx = context.clone();
+                    let rhai_service = $rhai_service.clone();
+                    let callback = $callback.clone();
+
+                    let mapped_stream = stream
+                        .map_err(BoxError::from)
+                        .and_then(move |chunk| {
+                            //let rhai_service = $rhai_service.clone();
+                            let context = ctx.clone();
+                            let rhai_service = rhai_service.clone();
+                            let callback = callback.clone();
+                            async move {
+                                let request = $rhai_deferred_request {
+                                    context,
+                                    request: chunk.into(),
+                                };
+                                let shared_request = Shared::new(Mutex::new(Some(request)));
+
+                                let result = execute(
+                                    &rhai_service,
+                                    &callback,
+                                    (shared_request.clone(),),
+                                );
+
+                                if let Err(error) = result {
+                                    tracing::error!("map_request callback failed: {error}");
+                                    let error_details = process_error(error);
+                                    let error = Error {
+                                        message: error_details.message.unwrap_or_default(),
+                                        ..Default::default()
+                                    };
+                                    // We don't have a structured response to work with here. Let's
+                                    // throw away our response and custom build an error response
+                                    let error_response = graphql::Response::builder()
+                                        .errors(vec![error]).build();
+                                    return Ok(serde_json::to_vec(&error_response)?.into());
+                                }
+
+                                let request_opt = shared_request.lock().unwrap().take();
+                                let $rhai_deferred_request { request, .. } =
+                                    request_opt.unwrap();
+                                Ok(request)
+                            }
+                        });
+
+                    // Finally, return a response which has a Body that wraps our stream of response chunks.
+                    Ok(ControlFlow::Continue($request {
+                        context,
+                        router_request: http::Request::from_parts(parts, hyper::Body::wrap_stream(mapped_stream)),
+                    }))
+                })
+                .service(service)
+                .boxed()
+        })
+    };
+}
+
 macro_rules! gen_map_response {
     ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
         $borrow.replace(|service| {
@@ -690,8 +813,7 @@ macro_rules! gen_map_router_deferred_response {
 
                     // Create our response stream which consists of the bytes from our first body chained with the
                     // rest of the responses in our mapped stream.
-                    let bytes = hyper::body::to_bytes(body).await.map_err(BoxError::from);
-                    let final_stream = once(ready(bytes)).chain(mapped_stream).boxed();
+                    let final_stream = once(ready(Ok(body))).chain(mapped_stream).boxed();
 
                     // Finally, return a response which has a Body that wraps our stream of response chunks.
                     Ok($response {
@@ -849,9 +971,11 @@ impl ServiceStep {
     fn map_request(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
             ServiceStep::Router(service) => {
-                gen_map_deferred_request!(
+                gen_map_router_deferred_request!(
                     RouterRequest,
                     RouterResponse,
+                    RhaiRouterFirstRequest,
+                    RhaiRouterChunkedRequest,
                     service,
                     rhai_service,
                     callback
@@ -887,7 +1011,7 @@ impl ServiceStep {
                 gen_map_router_deferred_response!(
                     RouterResponse,
                     RhaiRouterResponse,
-                    RhaiRouterDeferredResponse,
+                    RhaiRouterChunkedResponse,
                     service,
                     rhai_service,
                     callback
