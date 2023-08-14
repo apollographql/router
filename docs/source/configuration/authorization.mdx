@@ -172,7 +172,7 @@ Your authorization policies may require information beyond what your JWT tokens'
 
 <ExpansionPanel title="Click to expand">
 
-As with [adding claims](#adding-claims-with-coprocessor), a [`RouterService` coprocessor](../customizations/coprocessor#how-it-works) is appropriate for augmenting claims since the router calls it directly after receiving a client request. Specifically, the router calls it after the JWT authentication plugin, so you can use a `RouterService` coprocessor to:
+As with [adding claims](#adding-claims-with-coprocessor), a [`RouterService` coprocessor](../customizations/coprocessor#how-it-works) is appropriate for augmenting claims since the router calls it directly after receiving a client request. The router calls it after the JWT authentication plugin, so you can use a `RouterService` coprocessor to:
 - receive the list of claims extracted from the JWT
 - use information like the `sub` (subject) claim to look up the user in an external database or service
 - insert additional data in the claims list
