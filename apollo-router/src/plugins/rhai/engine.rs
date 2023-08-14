@@ -699,7 +699,7 @@ mod router_plugin {
         body: String,
     ) -> Result<(), Box<EvalAltResult>> {
         let bytes = Bytes::from(body);
-        obj.with_mut(|response| *response.response.body_mut() = bytes.into());
+        obj.with_mut(|response| *response.response.body_mut() = bytes);
         Ok(())
     }
 
@@ -1111,20 +1111,38 @@ macro_rules! register_rhai_router_interface {
             // Context stuff
             $engine.register_get(
                 "context",
-                |obj: &mut SharedMut<$base::Request>| -> Result<Context, Box<EvalAltResult>> {
+                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<Context, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|request| request.context.clone()))
                 }
             )
             .register_get(
                 "context",
+                |obj: &mut SharedMut<$base::ChunkedRequest>| -> Result<Context, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|request| request.context.clone()))
+                }
+            ).register_get(
+                "context",
                 |obj: &mut SharedMut<$base::Response>| -> Result<Context, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|response| response.context.clone()))
+                }
+            )
+            .register_get(
+                "context",
+                |obj: &mut SharedMut<$base::DeferredResponse>| -> Result<Context, Box<EvalAltResult>> {
                     Ok(obj.with_mut(|response| response.context.clone()))
                 }
             );
 
             $engine.register_set(
                 "context",
-                |obj: &mut SharedMut<$base::Request>, context: Context| {
+                |obj: &mut SharedMut<$base::FirstRequest>, context: Context| {
+                    obj.with_mut(|request| request.context = context);
+                    Ok(())
+                }
+            )
+            .register_set(
+                "context",
+                |obj: &mut SharedMut<$base::ChunkedRequest>, context: Context| {
                     obj.with_mut(|request| request.context = context);
                     Ok(())
                 }
@@ -1135,25 +1153,49 @@ macro_rules! register_rhai_router_interface {
                     obj.with_mut(|response| response.context = context);
                     Ok(())
                 }
+            ).register_set(
+                "context",
+                |obj: &mut SharedMut<$base::DeferredResponse>, context: Context| {
+                    obj.with_mut(|response| response.context = context);
+                    Ok(())
+                }
             );
 
             // Originating Request
             $engine.register_get(
                 "headers",
-                |obj: &mut SharedMut<$base::Request>| -> Result<HeaderMap, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| request.router_request.headers().clone()))
+                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<HeaderMap, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|request| request.request.headers().clone()))
+                }
+            ).register_get(
+                "headers",
+                |obj: &mut SharedMut<$base::Response>| -> Result<HeaderMap, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|response| response.response.headers().clone()))
                 }
             );
 
             $engine.register_set(
                 "headers",
-                |obj: &mut SharedMut<$base::Request>, headers: HeaderMap| {
+                |obj: &mut SharedMut<$base::FirstRequest>, headers: HeaderMap| {
                     if_subgraph! {
                         $base => {
                             let _unused = (obj, headers);
                             Err("cannot mutate originating request on a subgraph".into())
                         } else {
-                            obj.with_mut(|request| *request.router_request.headers_mut() = headers);
+                            obj.with_mut(|request| *request.request.headers_mut() = headers);
+                            Ok(())
+                        }
+                    }
+                }
+            ).register_set(
+                "headers",
+                |obj: &mut SharedMut<$base::Response>, headers: HeaderMap| {
+                    if_subgraph! {
+                        $base => {
+                            let _unused = (obj, headers);
+                            Err("cannot mutate originating request on a subgraph".into())
+                        } else {
+                            obj.with_mut(|response| *response.response.headers_mut() = headers);
                             Ok(())
                         }
                     }
