@@ -10,9 +10,37 @@ minVersion: 1.27.0
 
 APIs provide access to business-critical data. Unrestricted access can result in data breaches, monetary losses, or potential denial of service. Even for internal APIs, checks can be essential to limit data to authorized parties.
 
-Enforcing authorization in the Apollo Router is valuable for a few reasons:
+Enforcing authorization in the **Apollo Router** is valuable for a few reasons:
+  - It supports a defense-in-depth strategy by creating an initial checkpoint that other service layers can reinforce.
+
+```mermaid
+flowchart LR;
+  clients(Clients);
+  subgraph Level1["<br>🔐 Router Layer&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp"]
+    router(["<b>Apollo Router</b>"]);
+      subgraph Level2["&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp🔐 Services Layer&nbsp&nbsp&nbsp&nbsp"]
+        serviceB[Products<br/>API];
+        serviceC[Reviews<br/>API];
+        end
+  end
+
+  router -->|"Sub-query"| serviceB & serviceC;
+  clients -->|"Request"| router;
+```
+
 - Validating authorization _before_ processing requests allows for early request termination.
-- It supports a defense-in-depth strategy by creating an initial checkpoint that other service layers can reinforce.
+
+```mermaid
+flowchart LR;
+  clients(Client);
+  subgraph Router[" "]
+    router(["<b>Apollo Router</b>"]);
+    serviceB[Products<br/>API];
+    serviceC[Reviews<br/>API];
+  end
+  router -.->|"❌ Sub-query"| serviceB & serviceC;
+  clients -->|"⚠️Unauthorized <br/>request"| router;
+```
 
 ## How it works
 
