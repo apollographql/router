@@ -344,35 +344,6 @@ macro_rules! gen_map_request {
             ServiceBuilder::new()
                 .instrument(rhai_service_span())
                 .checkpoint(move |request: $base::Request| {
-                    // Let's define a local function to build an error response
-                    fn failure_message(
-                        context: Context,
-                        error_details: ErrorDetails,
-                    ) -> Result<ControlFlow<$base::Response, $base::Request>, BoxError>
-                    {
-                        let res = if let Some(body) = error_details.body {
-                            $base::Response::builder()
-                                .extensions(body.extensions)
-                                .errors(body.errors)
-                                .status_code(error_details.status)
-                                .context(context)
-                                .and_data(body.data)
-                                .and_label(body.label)
-                                .and_path(body.path)
-                                .build()
-                        } else {
-                            $base::Response::error_builder()
-                                .errors(vec![Error {
-                                    message: error_details.message.unwrap_or_default(),
-                                    ..Default::default()
-                                }])
-                                .context(context)
-                                .status_code(error_details.status)
-                                .build()?
-                        };
-
-                        Ok(ControlFlow::Break(res))
-                    }
                     let shared_request = Shared::new(Mutex::new(Some(request)));
                     let result: Result<Dynamic, Box<EvalAltResult>> =
                         execute(&$rhai_service, &$callback, (shared_request.clone(),));
@@ -381,72 +352,7 @@ macro_rules! gen_map_request {
                         tracing::error!("map_request callback failed: {error_details:#?}");
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
-                        return failure_message(request_opt.unwrap().context, error_details);
-                    }
-                    let mut guard = shared_request.lock().unwrap();
-                    let request_opt = guard.take();
-                    Ok(ControlFlow::Continue(request_opt.unwrap()))
-                })
-                .service(service)
-                .boxed()
-        })
-    };
-}
-
-// Actually use the checkpoint function so that we can shortcut requests which fail
-macro_rules! gen_map_deferred_request {
-    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
-        $borrow.replace(|service| {
-            fn rhai_service_span() -> impl Fn(&$base::Request) -> tracing::Span + Clone {
-                move |_request: &$base::Request| {
-                    tracing::info_span!(
-                        RHAI_SPAN_NAME,
-                        "rhai service" = stringify!($base::Request),
-                        "otel.kind" = "INTERNAL"
-                    )
-                }
-            }
-            ServiceBuilder::new()
-                .instrument(rhai_service_span())
-                .checkpoint(move |request: $base::Request| {
-                    // Let's define a local function to build an error response
-                    fn failure_message(
-                        context: Context,
-                        error_details: ErrorDetails,
-                    ) -> Result<ControlFlow<$base::Response, $base::Request>, BoxError>
-                    {
-                        let res = if let Some(body) = error_details.body {
-                            $base::Response::builder()
-                                .extensions(body.extensions)
-                                .errors(body.errors)
-                                .status_code(error_details.status)
-                                .context(context)
-                                .and_data(body.data)
-                                .and_label(body.label)
-                                .and_path(body.path)
-                                .build()?
-                        } else {
-                            $base::Response::error_builder()
-                                .errors(vec![Error {
-                                    message: error_details.message.unwrap_or_default(),
-                                    ..Default::default()
-                                }])
-                                .context(context)
-                                .status_code(error_details.status)
-                                .build()?
-                        };
-
-                        Ok(ControlFlow::Break(res))
-                    }
-                    let shared_request = Shared::new(Mutex::new(Some(request)));
-                    let result = execute(&$rhai_service, &$callback, (shared_request.clone(),));
-
-                    if let Err(error) = result {
-                        tracing::error!("map_request callback failed: {error}");
-                        let error_details = process_error(error);
-                        let mut guard = shared_request.lock().unwrap();
-                        let request_opt = guard.take();
-                        return failure_message(request_opt.unwrap().context, error_details);
+                        return $base::request_failure(request_opt.unwrap().context, error_details);
                     }
                     let mut guard = shared_request.lock().unwrap();
                     let request_opt = guard.take();
@@ -969,24 +875,10 @@ impl ServiceStep {
                 );
             }
             ServiceStep::Supergraph(service) => {
-                gen_map_deferred_request!(
-                    supergraph,
-                    //SupergraphRequest,
-                    //SupergraphResponse,
-                    service,
-                    rhai_service,
-                    callback
-                );
+                gen_map_request!(supergraph, service, rhai_service, callback);
             }
             ServiceStep::Execution(service) => {
-                gen_map_deferred_request!(
-                    execution,
-                    //ExecutionRequest,
-                    //ExecutionResponse,
-                    service,
-                    rhai_service,
-                    callback
-                );
+                gen_map_request!(execution, service, rhai_service, callback);
             }
             ServiceStep::Subgraph(service) => {
                 gen_map_request!(subgraph, service, rhai_service, callback);
