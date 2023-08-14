@@ -356,6 +356,51 @@ mod router_context {
         format!("{x:?}")
     }
 
+    #[rhai_fn(get = "context", pure, return_raw)]
+    pub(crate) fn router_first_response_context_get(
+        obj: &mut SharedMut<router::Response>,
+    ) -> Result<Context, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.context.clone()))
+    }
+    #[rhai_fn(set = "context", return_raw)]
+    pub(crate) fn router_first_response_context_set(
+        obj: &mut SharedMut<router::Response>,
+        context: Context,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| response.context = context);
+        Ok(())
+    }
+
+    #[rhai_fn(get = "context", pure, return_raw)]
+    pub(crate) fn supergraph_first_response_context_get(
+        obj: &mut SharedMut<supergraph::FirstResponse>,
+    ) -> Result<Context, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.context.clone()))
+    }
+    #[rhai_fn(set = "context", return_raw)]
+    pub(crate) fn supergraph_first_response_context_set(
+        obj: &mut SharedMut<supergraph::FirstResponse>,
+        context: Context,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| response.context = context);
+        Ok(())
+    }
+
+    #[rhai_fn(get = "context", pure, return_raw)]
+    pub(crate) fn execution_first_response_context_get(
+        obj: &mut SharedMut<execution::FirstResponse>,
+    ) -> Result<Context, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.context.clone()))
+    }
+    #[rhai_fn(set = "context", return_raw)]
+    pub(crate) fn execution_first_response_context_set(
+        obj: &mut SharedMut<execution::FirstResponse>,
+        context: Context,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| response.context = context);
+        Ok(())
+    }
+
     // Add context getter/setters for deferred responses
     #[rhai_fn(get = "context", pure, return_raw)]
     pub(crate) fn router_deferred_response_context_get(
