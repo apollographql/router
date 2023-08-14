@@ -517,14 +517,14 @@ mod router_plugin {
 
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_supergraph_response(
-        obj: &mut SharedMut<supergraph::Response>,
+        obj: &mut SharedMut<supergraph::FirstResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
     #[rhai_fn(name = "is_primary", pure)]
     pub(crate) fn supergraph_response_is_primary(
-        _obj: &mut SharedMut<supergraph::Response>,
+        _obj: &mut SharedMut<supergraph::FirstResponse>,
     ) -> bool {
         true
     }
@@ -545,13 +545,15 @@ mod router_plugin {
 
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_execution_response(
-        obj: &mut SharedMut<execution::Response>,
+        obj: &mut SharedMut<execution::FirstResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
     #[rhai_fn(name = "is_primary", pure)]
-    pub(crate) fn execution_response_is_primary(_obj: &mut SharedMut<execution::Response>) -> bool {
+    pub(crate) fn execution_response_is_primary(
+        _obj: &mut SharedMut<execution::FirstResponse>,
+    ) -> bool {
         true
     }
 
@@ -585,14 +587,14 @@ mod router_plugin {
 
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_supergraph_response(
-        obj: &mut SharedMut<supergraph::Response>,
+        obj: &mut SharedMut<supergraph::FirstResponse>,
     ) -> Result<Response, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.body().clone()))
     }
 
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_execution_response(
-        obj: &mut SharedMut<execution::Response>,
+        obj: &mut SharedMut<execution::FirstResponse>,
     ) -> Result<Response, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.body().clone()))
     }
@@ -652,7 +654,7 @@ mod router_plugin {
 
     #[rhai_fn(set = "headers", return_raw)]
     pub(crate) fn set_originating_headers_supergraph_response(
-        obj: &mut SharedMut<supergraph::Response>,
+        obj: &mut SharedMut<supergraph::FirstResponse>,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| *response.response.headers_mut() = headers);
@@ -669,7 +671,7 @@ mod router_plugin {
 
     #[rhai_fn(set = "headers", return_raw)]
     pub(crate) fn set_originating_headers_execution_response(
-        obj: &mut SharedMut<execution::Response>,
+        obj: &mut SharedMut<execution::FirstResponse>,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| *response.response.headers_mut() = headers);
@@ -705,7 +707,7 @@ mod router_plugin {
 
     #[rhai_fn(set = "body", return_raw)]
     pub(crate) fn set_originating_body_supergraph_response(
-        obj: &mut SharedMut<supergraph::Response>,
+        obj: &mut SharedMut<supergraph::FirstResponse>,
         body: Response,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| *response.response.body_mut() = body);
@@ -714,7 +716,7 @@ mod router_plugin {
 
     #[rhai_fn(set = "body", return_raw)]
     pub(crate) fn set_originating_body_execution_response(
-        obj: &mut SharedMut<execution::Response>,
+        obj: &mut SharedMut<execution::FirstResponse>,
         body: Response,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| *response.response.body_mut() = body);
@@ -794,7 +796,7 @@ mod router_plugin {
     }
 
     #[rhai_fn(name = "headers_are_available", pure)]
-    pub(crate) fn supergraph_response(_: &mut SharedMut<supergraph::Response>) -> bool {
+    pub(crate) fn supergraph_response(_: &mut SharedMut<supergraph::FirstResponse>) -> bool {
         true
     }
 
@@ -806,7 +808,7 @@ mod router_plugin {
     }
 
     #[rhai_fn(name = "headers_are_available", pure)]
-    pub(crate) fn execution_response(_: &mut SharedMut<execution::Response>) -> bool {
+    pub(crate) fn execution_response(_: &mut SharedMut<execution::FirstResponse>) -> bool {
         true
     }
 
