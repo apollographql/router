@@ -70,7 +70,6 @@ fn scopes_argument(opt_directive: Option<&hir::Directive>) -> impl Iterator<Item
             Value::List { value, .. } => Some(value),
             _ => None,
         })
-        .into_iter()
         .flatten()
         .filter_map(|v| match v {
             Value::String { value, .. } => Some(value),
@@ -162,7 +161,7 @@ fn scopes_sets_argument(directive: &hir::Directive) -> impl Iterator<Item = Hash
         .filter_map(|value| match value {
             Value::List { value, .. } => Some(
                 value
-                    .into_iter()
+                    .iter()
                     .filter_map(|v| match v {
                         Value::String { value, .. } => Some(value),
                         _ => None,
@@ -210,10 +209,9 @@ impl<'a> ScopeFilteringVisitor<'a> {
             if field_scopes_sets.all(|scopes_set| {
                 empty = false;
                 !self.request_scopes.is_superset(&scopes_set)
-            }) {
-                if !empty {
-                    return false;
-                }
+            }) && !empty
+            {
+                return false;
             }
         }
 
