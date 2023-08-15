@@ -59,7 +59,7 @@ The router then enforces these directives on all incoming requests.
 
 ## Prerequisites
 
-To provide the router with the claims it needs to evaluate authorization directives, you must either configure [JSON Web Token (JWT) authentication](./authn-jwt) or add an [external coprocessor](../customizations/coprocessor) that adds claims to a request's context. In [some cases](#augmenting-jwt-claims-via-coprocessor) (explained below), you may require both.
+To provide the router with the claims it needs to evaluate authorization directives, you must either configure [JSON Web Token (JWT) authentication](#jwt-authentication-configuration) or add an [external coprocessor](#adding-claims-via-coprocessor) that adds claims to a request's context. In [some cases](#augmenting-jwt-claims-via-coprocessor) (explained below), you may require both.
 
 ### JWT authentication configuration
 
@@ -68,6 +68,9 @@ If you configure [JWT authentication](./authn-jwt), the Apollo Router [automatic
 ### Adding claims via coprocessor
 
 If you can't use JWT authentiation, you can add claims via a [`RouterService` coprocessor](../customizations/coprocessor#how-it-works).
+
+<ExpansionPanel title="Click to learn how">
+
 Coprocessors let you hook into the [router's request-handling lifecycle](../customizations/overview#the-request-lifecycle) using standalone code. A [`RouterService` coprocessor](../customizations/coprocessor#how-it-works) hooks into the request life cycle directly after the router has received a client request.
 
 ```mermaid
@@ -164,11 +167,13 @@ When your coprocessor receives this request from the router, it should add claim
 
 Refer to [the coprocessor documentation](../customizations/coprocessor) for more information on [coprocessor request format](../customizations/coprocessor/#coprocessor-request-format) and [responding to coprocessor requests](../customizations/coprocessor/#responding-to-coprocessor-requests).
 
+</ExpansionPanel>
+
 #### Augmenting JWT claims via coprocessor
 
 Your authorization policies may require information beyond what your JSON web tokens' claims provide. For example, the token's claims may include user IDs, which you then use to look up user roles. For situations like this, you can augment the claims from your JSON web tokens with [coprocessors](../customizations/coprocessor).
 
-<ExpansionPanel title="Click to expand">
+<ExpansionPanel title="Click to learn how">
 
 As with [adding claims](#adding-claims-via-coprocessor), a [`RouterService` coprocessor](../customizations/coprocessor#how-it-works) is appropriate for augmenting claims since the router calls it directly after receiving a client request. The router calls it after the JWT authentication plugin, so you can use a `RouterService` coprocessor to:
 - receive the list of claims extracted from the JWT
