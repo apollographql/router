@@ -85,7 +85,7 @@ derive_more = { version = "0.99.17", default-features = false, features = [
 ] }
 dhat = { version = "0.3.2", optional = true }
 diff = "0.1.13"
-directories = "4.0.1"
+directories = "5.0.1"
 displaydoc = "0.2"
 flate2 = "1.0.24" # TODO: bump the flate2 dependency once deno updates it. Also, be sure to update Renovate configuration.
 fred = { version = "6.3.0", features = ["enable-rustls", "no-client-setname"] }
