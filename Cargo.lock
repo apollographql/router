@@ -281,6 +281,7 @@ dependencies = [
  "arc-swap",
  "askama",
  "async-compression",
+ "async-ffi",
  "async-trait",
  "atty",
  "aws-config",
@@ -327,6 +328,7 @@ dependencies = [
  "jsonwebtoken",
  "lazy_static",
  "libc",
+ "libloading",
  "linkme",
  "lru",
  "maplit",
@@ -591,6 +593,12 @@ dependencies = [
  "pin-project-lite",
  "tokio",
 ]
+
+[[package]]
+name = "async-ffi"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ed5a937a789391ebc1c77d3a15b060e0d100e6d7c483a2af3f250d6b8dc2a23"
 
 [[package]]
 name = "async-stream"
@@ -1050,6 +1058,38 @@ name = "base64ct"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
+
+[[package]]
+name = "bin-forbid-anonymous-operations"
+version = "0.1.0"
+dependencies = [
+ "apollo-router",
+ "async-ffi",
+ "async-trait",
+ "http",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "bin-hello-world"
+version = "0.1.0"
+dependencies = [
+ "apollo-router",
+ "async-ffi",
+ "async-trait",
+ "http",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "bit-set"
@@ -3584,6 +3624,16 @@ dependencies = [
  "libz-sys",
  "openssl-sys",
  "pkg-config",
+]
+
+[[package]]
+name = "libloading"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b67380fd3b2fbe7527a606e18729d21c6f3951633d0500574c4dc22d2d638b9f"
+dependencies = [
+ "cfg-if",
+ "winapi 0.3.9",
 ]
 
 [[package]]

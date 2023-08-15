@@ -6,6 +6,8 @@ members = [
     "apollo-router-scaffold",
     "examples/add-timestamp-header/rhai",
     "examples/async-auth/rust",
+    "examples/bin-hello-world/rust",
+    "examples/bin-forbid-anonymous-operations/rust",
     "examples/cache-control/rhai",
     "examples/context/rust",
     "examples/cookies-to-headers/rhai",

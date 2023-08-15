@@ -182,6 +182,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         }
 
         // Process the plugins.
+
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
         let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
@@ -191,6 +192,22 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             builder = builder.with_subgraph_service(&name, subgraph_service);
         }
         for (plugin_name, plugin) in plugins {
+            builder = builder.with_dyn_plugin(plugin_name, plugin);
+        }
+
+        // TODO: Let users know if binary plugins can't be scanned. This
+        // is most likely because there are none, so could be handled
+        // better.
+        let bin_plugins = match crate::plugin::binary_plugins::scan_plugins().await {
+            Ok(bp) => bp,
+            Err(e) => {
+                tracing::info!("no binary plugins found: {}", e);
+                vec![]
+            }
+        };
+
+        for (plugin_name, plugin) in bin_plugins {
+            tracing::info!("adding binary plugin: {}", plugin_name);
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
