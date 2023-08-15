@@ -135,6 +135,8 @@ pub(crate) struct Tracing {
     pub(crate) zipkin: Option<tracing::zipkin::Config>,
     /// Datadog exporter configuration
     pub(crate) datadog: Option<tracing::datadog::Config>,
+    /// Stackdriver exporter configuration
+    pub(crate) stackdriver: Option<tracing::stackdriver::Config>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Default)]

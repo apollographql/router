@@ -28,6 +28,7 @@ pub(crate) mod datadog;
 pub(crate) mod jaeger;
 pub(crate) mod otlp;
 pub(crate) mod reload;
+pub(crate) mod stackdriver;
 pub(crate) mod zipkin;
 
 pub(crate) trait TracingConfigurator {
