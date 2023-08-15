@@ -36,27 +36,12 @@ impl PersistedQueryLayer {
     /// Create a new [`PersistedQueryLayer`] from CLI options, YAML configuration,
     /// and optionally, an existing persisted query manifest poller.
     pub(crate) async fn new(configuration: &Configuration) -> Result<Self, BoxError> {
-        if configuration.preview_persisted_queries.safelist.require_id
-            && !configuration.preview_persisted_queries.safelist.enabled
-        {
-            return Err("invalid configuration: preview_persisted_queries.safelist.require_id = true requires you to also set preview_persisted_queries.safelist.enabled = true".into());
-        }
-
         if configuration.preview_persisted_queries.enabled {
-            if configuration.apq.enabled && configuration.preview_persisted_queries.safelist.enabled
-            {
-                Err("invalid configuration: preview_persisted_queries.safelist.enabled = true, which is incompatible with apq.enabled = true. you must disable apq in your configuration to enable persisted queries with safelisting".into())
-            } else {
-                Ok(Self {
-                    manifest_poller: Some(
-                        PersistedQueryManifestPoller::new(configuration.clone()).await?,
-                    ),
-                })
-            }
-        } else if configuration.preview_persisted_queries.safelist.enabled {
-            Err("invalid configuration: preview_persisted_queries.safelist.enabled = true, which is incompatible with preview_persisted_queries.enabled = false. you must enabled persisted queries to enable safelisting".into())
-        } else if configuration.preview_persisted_queries.log_unknown {
-            Err("invalid configuration: preview_persisted_queries.log_unknown = true, which is incompatible with preview_persisted_queries.enabled = false. you must enabled persisted queries to enable log_unknown".into())
+            Ok(Self {
+                manifest_poller: Some(
+                    PersistedQueryManifestPoller::new(configuration.clone()).await?,
+                ),
+            })
         } else {
             Ok(Self {
                 manifest_poller: None,
@@ -784,21 +769,17 @@ mod tests {
     async fn apq_and_pq_safelisting_is_invalid_config() {
         let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
         let safelist_config = PersistedQueriesSafelist::builder().enabled(true).build();
-        let pq_layer_result = PersistedQueryLayer::new(
-            &Configuration::fake_builder()
-                .persisted_query(
-                    PersistedQueries::builder()
-                        .enabled(true)
-                        .safelist(safelist_config)
-                        .build(),
-                )
-                .apq(Apq::fake_builder().enabled(true).build())
-                .uplink(uplink_config)
-                .build()
-                .unwrap(),
-        )
-        .await;
-        assert!(pq_layer_result.is_err());
+        assert!(Configuration::fake_builder()
+            .persisted_query(
+                PersistedQueries::builder()
+                    .enabled(true)
+                    .safelist(safelist_config)
+                    .build(),
+            )
+            .apq(Apq::fake_builder().enabled(true).build())
+            .uplink(uplink_config)
+            .build()
+            .is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]
