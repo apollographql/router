@@ -23,7 +23,7 @@ use crate::Configuration;
 
 const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
 
-struct UsedQueryIdFromManifest {}
+struct UsedQueryIdFromManifest;
 
 #[derive(Debug)]
 pub(crate) struct PersistedQueryLayer {
@@ -116,7 +116,7 @@ impl PersistedQueryLayer {
                     .context
                     .private_entries
                     .lock()
-                    .insert(UsedQueryIdFromManifest {});
+                    .insert(UsedQueryIdFromManifest);
                 Ok(request)
             } else if manifest_poller.augmenting_apq_with_pre_registration_and_no_safelisting() {
                 // The query ID isn't in our manifest, but we have APQ enabled
