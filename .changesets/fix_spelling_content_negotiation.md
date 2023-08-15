@@ -1,4 +1,4 @@
-### spelling of content_negociation corrected to content_negotiation ([PR #3162](https://github.com/apollographql/router/pull/3162))
+### spelling of content_negociation corrected to content_negotiation ([Issue #3204](https://github.com/apollographql/router/issues/3204))
 
 spelling mistake in content_negociation is fixed
 
