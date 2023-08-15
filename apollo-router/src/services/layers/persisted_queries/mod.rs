@@ -30,6 +30,7 @@ pub(crate) struct PersistedQueryLayer {
     /// Manages polling uplink for persisted queries and caches the current
     /// value of the manifest and projected safelist. None if the layer is disabled.
     pub(crate) manifest_poller: Option<PersistedQueryManifestPoller>,
+    introspection_enabled: bool,
 }
 
 impl PersistedQueryLayer {
@@ -41,10 +42,12 @@ impl PersistedQueryLayer {
                 manifest_poller: Some(
                     PersistedQueryManifestPoller::new(configuration.clone()).await?,
                 ),
+                introspection_enabled: configuration.supergraph.introspection,
             })
         } else {
             Ok(Self {
                 manifest_poller: None,
+                introspection_enabled: configuration.supergraph.introspection,
             })
         }
     }
@@ -191,11 +194,13 @@ impl PersistedQueryLayer {
             }
         };
 
-        // Introspection requests are always allowed. (This means any document
-        // all of whose top-level fields in all operations (after spreading
-        // fragments) are __type/__schema/__typename.) We do want to make sure
-        // the document parsed properly before poking around at it, though.
-        if db.ast(file_id).errors().peekable().peek().is_none()
+        // If introspection is enabled in this server, all introspection
+        // requests are always allowed. (This means any document all of whose
+        // top-level fields in all operations (after spreading fragments) are
+        // __type/__schema/__typename.) We do want to make sure the document
+        // parsed properly before poking around at it, though.
+        if self.introspection_enabled
+            && db.ast(file_id).errors().peekable().peek().is_none()
             && db
                 .operations(file_id)
                 .iter()
@@ -337,6 +342,7 @@ mod tests {
     use crate::configuration::Apq;
     use crate::configuration::PersistedQueries;
     use crate::configuration::PersistedQueriesSafelist;
+    use crate::configuration::Supergraph;
     use crate::services::layers::persisted_queries::manifest_poller::FreeformGraphQLBehavior;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::spec::Schema;
@@ -646,6 +652,7 @@ mod tests {
             )
             .uplink(uplink_config)
             .apq(Apq::fake_builder().enabled(false).build())
+            .supergraph(Supergraph::fake_builder().introspection(true).build())
             .build()
             .unwrap();
 
@@ -697,7 +704,8 @@ mod tests {
         // ... unless they precisely match a safelisted document that also has invalid syntax.
         allowed_by_safelist(&pq_layer, &query_analysis_layer, "}}}").await;
 
-        // Introspection queries are allowed (even using fragments and aliases).
+        // Introspection queries are allowed (even using fragments and aliases), because
+        // introspection is enabled.
         allowed_by_safelist(
             &pq_layer,
             &query_analysis_layer,
