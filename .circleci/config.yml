@@ -690,6 +690,9 @@ jobs:
       VERSION: << pipeline.git.tag >>
     steps:
       - checkout
+      - setup_remote_docker:
+          version: 20.10.11
+          docker_layer_caching: true
       - attach_workspace:
           at: artifacts
       - gh/setup
@@ -715,10 +718,6 @@ jobs:
               *) gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/* ;;
 
             esac
-
-      - setup_remote_docker:
-          version: 20.10.11
-          docker_layer_caching: true
       - run:
           name: Docker build
           command: |
