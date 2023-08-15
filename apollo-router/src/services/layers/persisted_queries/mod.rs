@@ -68,7 +68,13 @@ impl PersistedQueryLayer {
                     manifest_poller,
                     &persisted_query_id,
                 )
-            } else if manifest_poller.never_allows_freeform_graphql() {
+            } else if let Some(log_unknown) = manifest_poller.never_allows_freeform_graphql() {
+                // If we don't have an ID and we require an ID, return an error immediately,
+                if log_unknown {
+                    if let Some(operation_body) = request.supergraph_request.body().query.clone() {
+                        log_unknown_operation(&operation_body);
+                    }
+                }
                 Err(supergraph_err_pq_id_required(request))
             } else {
                 // Let the freeform document (or complete lack of a document) be
@@ -214,11 +220,19 @@ impl PersistedQueryLayer {
             FreeformGraphQLAction::Deny => Err(supergraph_err_operation_not_in_safelist(request)),
             // Note that this might even include complaining about an operation that came via APQs.
             FreeformGraphQLAction::AllowAndLog => {
-                tracing::warn!(message = "unknown operation", operation_body);
+                log_unknown_operation(&operation_body);
                 Ok(request)
+            }
+            FreeformGraphQLAction::DenyAndLog => {
+                log_unknown_operation(&operation_body);
+                Err(supergraph_err_operation_not_in_safelist(request))
             }
         }
     }
+}
+
+fn log_unknown_operation(operation_body: &str) {
+    tracing::warn!(message = "unknown operation", operation_body);
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -846,7 +860,8 @@ mod tests {
         assert!(pq_layer
             .manifest_poller
             .unwrap()
-            .never_allows_freeform_graphql())
+            .never_allows_freeform_graphql()
+            .is_some())
     }
 
     #[tokio::test(flavor = "multi_thread")]

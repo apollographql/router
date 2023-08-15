@@ -37,9 +37,12 @@ pub(crate) enum FreeformGraphQLBehavior {
     AllowAll {
         apq_enabled: bool,
     },
-    DenyAll,
+    DenyAll {
+        log_unknown: bool,
+    },
     AllowIfInSafelist {
         safelist: FreeformGraphQLSafelist,
+        log_unknown: bool,
     },
     LogUnlessInSafelist {
         safelist: FreeformGraphQLSafelist,
@@ -53,6 +56,7 @@ pub(crate) enum FreeformGraphQLAction {
     Allow,
     Deny,
     AllowAndLog,
+    DenyAndLog,
 }
 
 impl FreeformGraphQLBehavior {
@@ -63,10 +67,24 @@ impl FreeformGraphQLBehavior {
     ) -> FreeformGraphQLAction {
         match self {
             FreeformGraphQLBehavior::AllowAll { .. } => FreeformGraphQLAction::Allow,
-            FreeformGraphQLBehavior::DenyAll => FreeformGraphQLAction::Deny,
-            FreeformGraphQLBehavior::AllowIfInSafelist { safelist, .. } => {
+            // Note that this branch doesn't get called in practice, because we catch
+            // DenyAll at an earlier phase with never_allows_freeform_graphql.
+            FreeformGraphQLBehavior::DenyAll { log_unknown, .. } => {
+                if *log_unknown {
+                    FreeformGraphQLAction::DenyAndLog
+                } else {
+                    FreeformGraphQLAction::Deny
+                }
+            }
+            FreeformGraphQLBehavior::AllowIfInSafelist {
+                safelist,
+                log_unknown,
+                ..
+            } => {
                 if safelist.is_allowed(body_from_request, ast) {
                     FreeformGraphQLAction::Allow
+                } else if *log_unknown {
+                    FreeformGraphQLAction::DenyAndLog
                 } else {
                     FreeformGraphQLAction::Deny
                 }
@@ -210,7 +228,7 @@ impl PersistedQueryManifestPoller {
             // end up `unwrap`ping a lot later. Perhaps MaybeUninit, but that's even worse?)
             let state = Arc::new(RwLock::new(PersistedQueryManifestPollerState {
                 persisted_query_manifest: PersistedQueryManifest::new(),
-                freeform_graphql_behavior: FreeformGraphQLBehavior::DenyAll,
+                freeform_graphql_behavior: FreeformGraphQLBehavior::DenyAll { log_unknown: false },
             }));
 
             let http_client = Client::builder().timeout(uplink_config.timeout).build()
@@ -281,15 +299,18 @@ impl PersistedQueryManifestPoller {
             .action_for_freeform_graphql(query, ast)
     }
 
-    pub(crate) fn never_allows_freeform_graphql(&self) -> bool {
+    // Some(bool) means "never allows freeform GraphQL, bool is whether or not to log"
+    // None means "sometimes allows freeform GraphQL"
+    pub(crate) fn never_allows_freeform_graphql(&self) -> Option<bool> {
         let state = self
             .state
             .read()
             .expect("could not acquire read lock on persisted query state");
-        matches!(
-            state.freeform_graphql_behavior,
-            FreeformGraphQLBehavior::DenyAll
-        )
+        if let FreeformGraphQLBehavior::DenyAll { log_unknown } = state.freeform_graphql_behavior {
+            Some(log_unknown)
+        } else {
+            None
+        }
     }
 
     // The way we handle requests that contain an unknown ID or which contain
@@ -362,10 +383,13 @@ async fn poll_uplink(
                 let freeform_graphql_behavior = if config.preview_persisted_queries.safelist.enabled
                 {
                     if config.preview_persisted_queries.safelist.require_id {
-                        FreeformGraphQLBehavior::DenyAll
+                        FreeformGraphQLBehavior::DenyAll {
+                            log_unknown: config.preview_persisted_queries.log_unknown,
+                        }
                     } else {
                         FreeformGraphQLBehavior::AllowIfInSafelist {
                             safelist: FreeformGraphQLSafelist::new(&new_manifest),
+                            log_unknown: config.preview_persisted_queries.log_unknown,
                         }
                     }
                 } else if config.preview_persisted_queries.log_unknown {
