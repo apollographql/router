@@ -5,7 +5,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::RwLock;
 
-use anyhow::anyhow;
 use apollo_parser::ast;
 use apollo_parser::ast::AstNode;
 use apollo_parser::Parser;
@@ -215,11 +214,11 @@ impl PersistedQueryManifestPoller {
             }));
 
             let http_client = Client::builder().timeout(uplink_config.timeout).build()
-            .map_err(|e| {
-                anyhow!(
+            .map_err(|e| -> BoxError {
+                format!(
                     "could not initialize HTTP client for fetching persisted queries manifest chunks: {}",
                     e
-                )
+                ).into()
             })?;
 
             let (_drop_signal, drop_receiver) = mpsc::channel::<()>(1);
@@ -244,9 +243,7 @@ impl PersistedQueryManifestPoller {
                     ManifestPollResultOnStartup::Err(error) => return Err(error),
                 },
                 None => {
-                    return Err(
-                        anyhow!("could not receive ready event for persisted query layer").into(),
-                    );
+                    return Err("could not receive ready event for persisted query layer".into());
                 }
             }
 
@@ -255,7 +252,7 @@ impl PersistedQueryManifestPoller {
                 _drop_signal,
             })
         } else {
-            Err(anyhow!("persisted queries requires Apollo GraphOS. ensure that you have set APOLLO_KEY and APOLLO_GRAPH_REF environment variables").into())
+            Err("persisted queries requires Apollo GraphOS. ensure that you have set APOLLO_KEY and APOLLO_GRAPH_REF environment variables".into())
         }
     }
 
@@ -347,7 +344,7 @@ async fn poll_uplink(
                 future::ready(match res {
                     None => Some(ManifestPollEvent::Shutdown),
                     Some(()) => Some(ManifestPollEvent::Err(
-                        anyhow!("received message on drop channel in persisted query layer, which never gets sent")
+                        "received message on drop channel in persisted query layer, which never gets sent"
                             .into(),
                     )),
                 })
@@ -407,7 +404,7 @@ async fn poll_uplink(
                 send_startup_event(
                     &ready_sender,
                     ManifestPollResultOnStartup::Err(
-                        anyhow!("could not fetch persisted queries: {e}").into(),
+                        format!("could not fetch persisted queries: {e}").into(),
                     ),
                 )
                 .await
@@ -419,7 +416,7 @@ async fn poll_uplink(
                 send_startup_event(
                     &ready_sender,
                     ManifestPollResultOnStartup::Err(
-                        anyhow!("no persisted query list found for graph ref {}", &graph_ref)
+                        format!("no persisted query list found for graph ref {}", &graph_ref)
                             .into(),
                     ),
                 )
@@ -468,7 +465,7 @@ async fn add_chunk_to_operations(
     chunk: PersistedQueriesManifestChunk,
     operations: &mut PersistedQueryManifest,
     http_client: Client,
-) -> anyhow::Result<()> {
+) -> Result<(), BoxError> {
     // TODO: chunk URLs will eventually respond with fallback URLs, when it does, implement falling back here
     if let Some(chunk_url) = chunk.urls.get(0) {
         let chunk = http_client
@@ -476,31 +473,29 @@ async fn add_chunk_to_operations(
             .send()
             .await
             .and_then(|r| r.error_for_status())
-            .map_err(|e| {
-                anyhow!(
+            .map_err(|e| -> BoxError {
+                format!(
                     "error fetching persisted queries manifest chunk from {}: {}",
-                    chunk_url,
-                    e
+                    chunk_url, e
                 )
+                .into()
             })?
             .json::<SignedUrlChunk>()
             .await
-            .map_err(|e| {
-                anyhow!(
+            .map_err(|e| -> BoxError {
+                format!(
                     "error reading body of persisted queries manifest chunk from {}: {}",
-                    chunk_url,
-                    e
+                    chunk_url, e
                 )
+                .into()
             })?;
 
         if chunk.format != "apollo-persisted-query-manifest" {
-            return Err(anyhow!(
-                "chunk format is not 'apollo-persisted-query-manifest'"
-            ));
+            return Err("chunk format is not 'apollo-persisted-query-manifest'".into());
         }
 
         if chunk.version != 1 {
-            return Err(anyhow!("persisted query manifest chunk version is not 1"));
+            return Err("persisted query manifest chunk version is not 1".into());
         }
 
         for operation in chunk.operations {
@@ -509,9 +504,7 @@ async fn add_chunk_to_operations(
 
         Ok(())
     } else {
-        Err(anyhow!(
-            "persisted query chunk did not include any URLs to fetch operations from"
-        ))
+        Err("persisted query chunk did not include any URLs to fetch operations from".into())
     }
 }
 

@@ -4,7 +4,6 @@ mod manifest_poller;
 #[cfg(test)]
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
 use apollo_compiler::InputDatabase;
@@ -40,13 +39,13 @@ impl PersistedQueryLayer {
         if configuration.preview_persisted_queries.safelist.require_id
             && !configuration.preview_persisted_queries.safelist.enabled
         {
-            return Err(anyhow!("invalid configuration: preview_persisted_queries.safelist.require_id = true requires you to also set preview_persisted_queries.safelist.enabled = true").into());
+            return Err("invalid configuration: preview_persisted_queries.safelist.require_id = true requires you to also set preview_persisted_queries.safelist.enabled = true".into());
         }
 
         if configuration.preview_persisted_queries.enabled {
             if configuration.apq.enabled && configuration.preview_persisted_queries.safelist.enabled
             {
-                Err(anyhow!("invalid configuration: preview_persisted_queries.safelist.enabled = true, which is incompatible with apq.enabled = true. you must disable apq in your configuration to enable persisted queries with safelisting").into())
+                Err("invalid configuration: preview_persisted_queries.safelist.enabled = true, which is incompatible with apq.enabled = true. you must disable apq in your configuration to enable persisted queries with safelisting".into())
             } else {
                 Ok(Self {
                     manifest_poller: Some(
@@ -55,9 +54,9 @@ impl PersistedQueryLayer {
                 })
             }
         } else if configuration.preview_persisted_queries.safelist.enabled {
-            Err(anyhow!("invalid configuration: preview_persisted_queries.safelist.enabled = true, which is incompatible with preview_persisted_queries.enabled = false. you must enabled persisted queries to enable safelisting").into())
+            Err("invalid configuration: preview_persisted_queries.safelist.enabled = true, which is incompatible with preview_persisted_queries.enabled = false. you must enabled persisted queries to enable safelisting".into())
         } else if configuration.preview_persisted_queries.log_unknown {
-            Err(anyhow!("invalid configuration: preview_persisted_queries.log_unknown = true, which is incompatible with preview_persisted_queries.enabled = false. you must enabled persisted queries to enable log_unknown").into())
+            Err("invalid configuration: preview_persisted_queries.log_unknown = true, which is incompatible with preview_persisted_queries.enabled = false. you must enabled persisted queries to enable log_unknown".into())
         } else {
             Ok(Self {
                 manifest_poller: None,
