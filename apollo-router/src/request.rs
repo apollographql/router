@@ -1,4 +1,6 @@
+use bytes::Bytes;
 use derivative::Derivative;
+use serde::de::DeserializeSeed;
 use serde::de::Error;
 use serde::Deserialize;
 use serde::Serialize;
@@ -10,6 +12,8 @@ use crate::json_ext::Object;
 
 /// A GraphQL `Request` used to represent both supergraph and subgraph requests.
 #[derive(Clone, Derivative, Serialize, Deserialize, Default)]
+// Note: if adding #[serde(deny_unknown_fields)],
+// also remove `Fields::Other` in `DeserializeSeed` impl.
 #[serde(rename_all = "camelCase")]
 #[derivative(Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -78,6 +82,26 @@ where
     <Option<T>>::deserialize(deserializer).map(|x| x.unwrap_or_default())
 }
 
+fn as_object<E: Error>(value: Value, null_is_default: bool) -> Result<Object, E> {
+    use serde::de::Unexpected;
+
+    let exp = if null_is_default {
+        "a map or null"
+    } else {
+        "a map"
+    };
+    match value {
+        Value::Object(object) => Ok(object),
+        // Similar to `deserialize_null_default`:
+        Value::Null if null_is_default => Ok(Object::default()),
+        Value::Null => Err(E::invalid_type(Unexpected::Unit, &exp)),
+        Value::Bool(value) => Err(E::invalid_type(Unexpected::Bool(value), &exp)),
+        Value::Number(_) => Err(E::invalid_type(Unexpected::Other("a number"), &exp)),
+        Value::String(value) => Err(E::invalid_type(Unexpected::Str(value.as_str()), &exp)),
+        Value::Array(_) => Err(E::invalid_type(Unexpected::Seq, &exp)),
+    }
+}
+
 #[buildstructor::buildstructor]
 impl Request {
     #[builder(visibility = "pub")]
@@ -127,6 +151,13 @@ impl Request {
             variables,
             extensions,
         }
+    }
+
+    /// Deserialize as JSON from `&Bytes`, avoiding string copies where possible
+    pub fn deserialize_from_bytes(data: &Bytes) -> Result<Self, serde_json::Error> {
+        let seed = RequestFromBytesSeed(data);
+        let mut de = serde_json::Deserializer::from_slice(data);
+        seed.deserialize(&mut de)
     }
 
     /// Convert encoded URL query string parameters (also known as "search
@@ -179,6 +210,95 @@ fn get_from_urldecoded<'a, T: Deserialize<'a>>(
         Some(serde_json::from_str(byte_string.as_str())).transpose()
     } else {
         Ok(None)
+    }
+}
+
+struct RequestFromBytesSeed<'data>(&'data Bytes);
+
+impl<'data, 'de> DeserializeSeed<'de> for RequestFromBytesSeed<'data> {
+    type Value = Request;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(field_identifier, rename_all = "camelCase")]
+        enum Field {
+            Query,
+            OperationName,
+            Variables,
+            Extensions,
+            #[serde(other)]
+            Other,
+        }
+
+        const FIELDS: &[&str] = &["query", "operationName", "variables", "extensions"];
+
+        struct RequestVisitor<'data>(&'data Bytes);
+
+        impl<'data, 'de> serde::de::Visitor<'de> for RequestVisitor<'data> {
+            type Value = Request;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a GraphQL request")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Request, V::Error>
+            where
+                V: serde::de::MapAccess<'de>,
+            {
+                let mut query = None;
+                let mut operation_name = None;
+                let mut variables = None;
+                let mut extensions = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Query => {
+                            if query.is_some() {
+                                return Err(Error::duplicate_field("query"));
+                            }
+                            query = Some(map.next_value()?);
+                        }
+                        Field::OperationName => {
+                            if operation_name.is_some() {
+                                return Err(Error::duplicate_field("operationName"));
+                            }
+                            operation_name = Some(map.next_value()?);
+                        }
+                        Field::Variables => {
+                            if variables.is_some() {
+                                return Err(Error::duplicate_field("variables"));
+                            }
+                            let seed = serde_json_bytes::value::BytesSeed::new(self.0);
+                            let value = map.next_value_seed(seed)?;
+                            let null_is_default = true;
+                            variables = Some(as_object(value, null_is_default)?);
+                        }
+                        Field::Extensions => {
+                            if extensions.is_some() {
+                                return Err(Error::duplicate_field("extensions"));
+                            }
+                            let seed = serde_json_bytes::value::BytesSeed::new(self.0);
+                            let value = map.next_value_seed(seed)?;
+                            let null_is_default = false;
+                            extensions = Some(as_object(value, null_is_default)?);
+                        }
+                        Field::Other => {
+                            let _: serde::de::IgnoredAny = map.next_value()?;
+                        }
+                    }
+                }
+                Ok(Request {
+                    query: query.unwrap_or_default(),
+                    operation_name: operation_name.unwrap_or_default(),
+                    variables: variables.unwrap_or_default(),
+                    extensions: extensions.unwrap_or_default(),
+                })
+            }
+        }
+
+        deserializer.deserialize_struct("Request", FIELDS, RequestVisitor(self.0))
     }
 }
 

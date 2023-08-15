@@ -81,7 +81,9 @@ impl EngineBlock {
             sdl.to_string(),
             main.clone(),
         ));
-        let ast = engine.compile_file(main)?;
+        let ast = engine
+            .compile_file(main.clone())
+            .map_err(|err| format!("in Rhai script {}: {}", main.display(), err))?;
         let mut scope = Scope::new();
         // Keep these two lower cases ones as mistakes until 2.0
         // At 2.0 (or maybe before), replace with upper case
@@ -131,7 +133,7 @@ impl Plugin for Rhai {
         let sdl = init.supergraph_sdl.clone();
         let scripts_path = match init.config.scripts {
             Some(path) => path,
-            None => "./rhai".into(),
+            None => "rhai".into(),
         };
 
         let main_file = match init.config.main {

@@ -6,7 +6,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use super::duration_histogram::DurationHistogram;
-use crate::plugins::telemetry::apollo::OperationCountByType;
+use crate::plugins::telemetry::apollo::LicensedOperationCountByType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 
@@ -14,7 +14,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 pub(crate) struct SingleStatsReport {
     pub(crate) request_id: Uuid,
     pub(crate) stats: HashMap<String, SingleStats>,
-    pub(crate) operation_count_by_type: Option<OperationCountByType>,
+    pub(crate) licensed_operation_count_by_type: Option<LicensedOperationCountByType>,
 }
 
 #[derive(Default, Debug, Serialize)]
@@ -277,7 +277,6 @@ mod test {
         let metric_1 = create_test_metric("client_1", "version_1", "report_key_1");
         let metric_2 = create_test_metric("client_1", "version_1", "report_key_1");
         let aggregated_metrics = Report::new(vec![metric_1, metric_2]);
-
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(aggregated_metrics);
         });
@@ -319,10 +318,10 @@ mod test {
 
         SingleStatsReport {
             request_id: Uuid::default(),
-            operation_count_by_type: OperationCountByType {
+            licensed_operation_count_by_type: LicensedOperationCountByType {
                 r#type: OperationKind::Query,
                 subtype: None,
-                operation_count: count.inc_u64(),
+                licensed_operation_count: count.inc_u64(),
             }
             .into(),
             stats: HashMap::from([(

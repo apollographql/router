@@ -3,11 +3,9 @@ use std::path::Path;
 use std::process::Command;
 use std::process::Stdio;
 
-use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
-use serde_json_traversal::serde_json_traversal;
 use xtask::*;
 
 const ENTITLEMENTS: &str = "macos-entitlements.plist";
@@ -25,10 +23,6 @@ pub struct PackageMacos {
     /// Certificate bundle keychain_password.
     #[clap(long)]
     cert_bundle_password: String,
-
-    /// Primary bundle ID.
-    #[clap(long)]
-    primary_bundle_id: String,
 
     /// Apple team ID.
     #[clap(long)]
@@ -206,82 +200,33 @@ impl PackageMacos {
         )?;
         zip.finish()?;
 
+        let dist_zip = dist_zip
+            .to_str()
+            .unwrap_or_else(|| panic!("'{} is not valid UTF-8", dist_zip.display()));
+
         eprintln!("Beginning notarization process...");
         let output = Command::new("xcrun")
-            .args(["altool", "--notarize-app", "--primary-bundle-id"])
-            .arg(&self.primary_bundle_id)
-            .arg("--username")
-            .arg(&self.apple_username)
-            .arg("--password")
-            .arg(&self.notarization_password)
-            .arg("--asc-provider")
-            .arg(&self.apple_team_id)
-            .arg("--file")
-            .arg(&dist_zip)
-            .args(["--output-format", "json"])
+            .args([
+                "notarytool",
+                "submit",
+                dist_zip,
+                "--apple-id",
+                &self.apple_username,
+                "--team-id",
+                &self.apple_team_id,
+                "--password",
+                &self.notarization_password,
+                "--wait",
+                "--timeout",
+                "20m",
+            ])
             .stderr(Stdio::inherit())
             .output()
             .context("could not start command xcrun")?;
         let _ = std::io::stdout().write(&output.stdout);
         ensure!(output.status.success(), "command exited with error",);
-        let json: serde_json::Value =
-            serde_json::from_slice(&output.stdout).context("could not parse json output")?;
-        let success_message = serde_json_traversal!(json => success-message)
-            .unwrap()
-            .as_str()
-            .unwrap();
-        let request_uuid = serde_json_traversal!(json => notarization-upload => RequestUUID)
-            .unwrap()
-            .as_str()
-            .unwrap();
-        eprintln!("Success message: {success_message}");
-        eprintln!("Request UUID: {request_uuid}");
 
-        let start_time = std::time::Instant::now();
-        let duration = std::time::Duration::from_secs(60 * 5);
-        let result = loop {
-            eprintln!("Checking notarization status...");
-            let output = Command::new("xcrun")
-                .args(["altool", "--notarization-info"])
-                .arg(request_uuid)
-                .arg("--username")
-                .arg(&self.apple_username)
-                .arg("--password")
-                .arg(&self.notarization_password)
-                .args(["--output-format", "json"])
-                .stderr(Stdio::inherit())
-                .output()
-                .context("could not start command xcrun")?;
-
-            let status = if !output.status.success() {
-                // NOTE: if the exit status is failure we need to keep trying otherwise the
-                //       process becomes a bit flaky
-                eprintln!("command exited with error");
-                None
-            } else {
-                let json: serde_json::Value = serde_json::from_slice(&output.stdout)
-                    .context("could not parse json output")?;
-                serde_json_traversal!(json => notarization-info => Status)
-                    .ok()
-                    .and_then(|x| x.as_str())
-                    .map(|x| x.to_string())
-            };
-
-            if !matches!(
-                status.as_deref(),
-                Some("in progress") | None if start_time.elapsed() < duration
-            ) {
-                break status;
-            }
-
-            std::thread::sleep(std::time::Duration::from_secs(5));
-        };
-        match result.as_deref() {
-            Some("success") => eprintln!("Notarization successful"),
-            Some("in progress") => bail!("Notarization timeout"),
-            Some(other) => bail!("Notarization failed: {}", other),
-            None => bail!("Notarization failed without status message"),
-        }
+        eprintln!("Notarization successful");
 
         Ok(())
     }

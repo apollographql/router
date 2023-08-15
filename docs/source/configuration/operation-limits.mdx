@@ -3,7 +3,7 @@ title: Enforcing operation limits in the Apollo Router
 description: With GraphOS Enterprise
 ---
 
-> ⚠️ **This is an [Enterprise feature](../enterprise-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/). It is currently in [preview](/resources/product-launch-stages#preview).
+> ⚠️ **This is an [Enterprise feature](../enterprise-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
 >
 > If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](/graphos/org/plans/#enterprise-trials).
 
@@ -13,10 +13,10 @@ You can define **operation limits** in your router's configuration to reject pot
 
 To use operation limits, you must run v1.17 or later of the Apollo Router. [Download the latest version.](../quickstart#download-options)
 
-You define operation limits in your router's [YAML config file](./configuration/overview/#yaml-config-file), like so:
+You define operation limits in your router's [YAML config file](./overview/#yaml-config-file), like so:
 
 ```yaml title="router.yaml"
-preview_operation_limits:
+limits:
   max_depth: 100
   max_height: 200
   max_aliases: 30
@@ -117,9 +117,30 @@ If you run your router in `warn_only` mode, operations that exceed defined limit
 
 Running in `warn_only` mode can be useful while you're testing to determine the most appropriate limits to set for your supergraph.
 
-You can enable or disable `warn_only` mode in your router's [YAML config file](./configuration/overview/#yaml-config-file), like so:
+You can enable or disable `warn_only` mode in your router's [YAML config file](./overview/#yaml-config-file), like so:
 
 ```yaml title="router.yaml"
-preview_operation_limits:
+limits:
   warn_only: true # warn_only mode always enabled
 ```
+
+## Response format for exceeded limits
+
+Whenever your router rejects a request because it exceeds an operation limit, the router responds with a 400 HTTP status code and a standard GraphQL error response body:
+
+```json5
+# HTTP 400
+{
+  "data": {},
+  "errors": [
+    {
+      "message": "Maximum height (field count) limit exceeded in this operation",
+      "extensions": {
+        "code": "MAX_HEIGHT_LIMIT"
+      }
+    }
+  ]
+}
+```
+
+If you run your router in [`warn_only` mode](#warn_only-mode), the router logs the limit violation but executes the operation as normal, returning a 200 status code with the expected response.

@@ -7,6 +7,7 @@ telemetry:
       jaeger: true
     trace_config:
       service_name: router
+      sampler: always_on
     jaeger:
       batch_processor:
         scheduled_delay: 100ms

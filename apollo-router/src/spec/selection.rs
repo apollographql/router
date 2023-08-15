@@ -6,6 +6,8 @@ use serde_json_bytes::ByteString;
 use super::Fragments;
 use crate::json_ext::Object;
 use crate::json_ext::PathElement;
+use crate::spec::query::subselections::DEFER_DIRECTIVE_NAME;
+use crate::spec::query::DeferStats;
 use crate::spec::FieldType;
 use crate::spec::Schema;
 use crate::spec::SpecError;
@@ -24,6 +26,8 @@ pub(crate) enum Selection {
         // Optional in specs but we fill it with the current type if not specified
         type_condition: String,
         include_skip: IncludeSkip,
+        defer: Condition,
+        defer_label: Option<String>,
         known_type: Option<String>,
         selection_set: Vec<Selection>,
     },
@@ -31,6 +35,8 @@ pub(crate) enum Selection {
         name: String,
         known_type: Option<String>,
         include_skip: IncludeSkip,
+        defer: Condition,
+        defer_label: Option<String>,
     },
 }
 
@@ -40,6 +46,7 @@ impl Selection {
         current_type: &FieldType,
         schema: &Schema,
         mut count: usize,
+        defer_stats: &mut DeferStats,
     ) -> Result<Option<Self>, SpecError> {
         // The RECURSION_LIMIT is chosen to be:
         //   < # expected to cause stack overflow &&
@@ -81,7 +88,10 @@ impl Selection {
                             .ok_or_else(|| {
                                 SpecError::InvalidField(
                                     field_name.to_owned(),
-                                    current_type.to_string(),
+                                    current_type
+                                        .inner_type_name()
+                                        .map(ToString::to_string)
+                                        .unwrap_or_else(|| current_type.to_string()),
                                 )
                             })?
                             .ty()
@@ -102,8 +112,14 @@ impl Selection {
                             selection
                                 .iter()
                                 .filter_map(|selection| {
-                                    Selection::from_hir(selection, &field_type, schema, count)
-                                        .transpose()
+                                    Selection::from_hir(
+                                        selection,
+                                        &field_type,
+                                        schema,
+                                        count,
+                                        defer_stats,
+                                    )
+                                    .transpose()
                                 })
                                 .collect::<Result<_, _>>()?,
                         )
@@ -124,6 +140,7 @@ impl Selection {
                 if include_skip.statically_skipped() {
                     return Ok(None);
                 }
+                let (defer, defer_label) = parse_defer(inline_fragment.directives(), defer_stats);
 
                 let type_condition = inline_fragment
                     .type_condition()
@@ -140,7 +157,8 @@ impl Selection {
                     .selection()
                     .iter()
                     .filter_map(|selection| {
-                        Selection::from_hir(selection, &fragment_type, schema, count).transpose()
+                        Selection::from_hir(selection, &fragment_type, schema, count, defer_stats)
+                            .transpose()
                     })
                     .collect::<Result<_, _>>()?;
 
@@ -149,6 +167,8 @@ impl Selection {
                     type_condition,
                     selection_set,
                     include_skip,
+                    defer,
+                    defer_label,
                     known_type,
                 })
             }
@@ -158,10 +178,13 @@ impl Selection {
                 if include_skip.statically_skipped() {
                     return Ok(None);
                 }
+                let (defer, defer_label) = parse_defer(fragment_spread.directives(), defer_stats);
                 Some(Self::FragmentSpread {
                     name: fragment_spread.name().to_owned(),
                     known_type: current_type.inner_type_name().map(|s| s.to_string()),
                     include_skip,
+                    defer,
+                    defer_label,
                 })
             }
         })
@@ -268,6 +291,41 @@ pub(crate) enum Condition {
     Variable(String),
 }
 
+/// Returns the `if` condition and the `label`
+fn parse_defer(
+    directives: &[hir::Directive],
+    defer_stats: &mut DeferStats,
+) -> (Condition, Option<String>) {
+    for directive in directives {
+        if directive.name() == DEFER_DIRECTIVE_NAME {
+            let condition = Condition::parse(directive).unwrap_or(Condition::Yes);
+            match &condition {
+                Condition::Yes => {
+                    defer_stats.has_defer = true;
+                    defer_stats.has_unconditional_defer = true;
+                }
+                Condition::No => {}
+                Condition::Variable(name) => {
+                    defer_stats.has_defer = true;
+                    defer_stats
+                        .conditional_defer_variable_names
+                        .insert(name.clone());
+                }
+            }
+            let label = if condition != Condition::No {
+                directive
+                    .argument_by_name("label")
+                    .and_then(|value| value.as_str())
+                    .map(|str| str.to_owned())
+            } else {
+                None
+            };
+            return (condition, label);
+        }
+    }
+    (Condition::No, None)
+}
+
 impl IncludeSkip {
     pub(crate) fn parse(directives: &[hir::Directive]) -> Self {
         let mut include = None;
@@ -301,8 +359,8 @@ impl IncludeSkip {
 impl Condition {
     pub(crate) fn parse(directive: &hir::Directive) -> Option<Self> {
         match directive.argument_by_name("if")? {
-            hir::Value::Boolean(true) => Some(Condition::Yes),
-            hir::Value::Boolean(false) => Some(Condition::No),
+            hir::Value::Boolean { value: true, .. } => Some(Condition::Yes),
+            hir::Value::Boolean { value: false, .. } => Some(Condition::No),
             hir::Value::Variable(variable) => Some(Condition::Variable(variable.name().to_owned())),
             _ => None,
         }

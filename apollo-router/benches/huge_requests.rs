@@ -127,7 +127,10 @@ async fn graphql_client(string_variable_bytes: usize) -> Duration {
     let latency = start_time.elapsed();
     let mut response = result.unwrap();
     let body = hyper::body::to_bytes(response.body_mut()).await.unwrap();
-    assert_eq!(&*body, br#"{"data":{"upload":true}}"#);
+    assert_eq!(
+        String::from_utf8_lossy(&body),
+        r#"{"data":{"upload":true}}"#
+    );
     if VERBOSE {
         println!("{}", String::from_utf8_lossy(&body));
     }

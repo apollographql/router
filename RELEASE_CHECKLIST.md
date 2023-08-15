@@ -37,6 +37,10 @@ To obtain the binary builds from the pipeline which was launched:
 4. Click on the **Artifacts** tab.
 5. Click on the link to the `.tar.gz` file to download the tarball of the build distribution.  For example, you might click on a link called `artifacts/router-v0.0.0-nightly-20230119-abcd1234-x86_64-apple-darwin.tar.gz` for a macOS build done on the 19th of January 2023 from commit hash starting with `abcd1234`.
 
+In addition, you will find `docker` and `helm` assets:
+ - [docker](https://github.com/apollographql/router/pkgs/container/nightly%2Frouter)
+ - [helm](https://github.com/apollographql/router/pkgs/container/helm-charts-nightly%2Frouter)
+
 This is a list of the things that need to happen during a release.
 
 Build a Release
@@ -64,7 +68,7 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
 
    ```
    APOLLO_ROUTER_RELEASE_VERSION=#.#.#
-   APOLLO_ROUTER_RELEASE_GIT_ORIGIN=public
+   APOLLO_ROUTER_RELEASE_GIT_ORIGIN=origin
    APOLLO_ROUTER_RELEASE_GITHUB_REPO=apollographql/router
    ```
 
@@ -107,7 +111,7 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
      - Run our compliance checks and update the `licenses.html` file as appropriate.
      - Ensure we're not using any incompatible licenses in the release.
 
-10. **MANUALLY CHECK AND UPDATE** the `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
+10. **MANUALLY CHECK AND UPDATE** the `federation-version-support.mdx` to make sure it shows the version of Federation which is included in the `router-bridge` that ships with this version of Router.  This can be obtained by looking at the version of `router-bridge` in `apollo-router/Cargo.toml` and taking the number after the `+` (e.g., `router-bridge@0.2.0+v2.4.3` means Federation v2.4.3).
 
 11. Now, review and stage he changes produced by the previous step.  This is most safely done using the `--patch` (or `-p`) flag to `git add` (`-u` ignores untracked files).
 
@@ -135,7 +139,7 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
 14. Now push the branch up to the correct remote:
 
     ```
-    git push --set-upstream "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}"
+    git push --set-upstream "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "prep-${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
 15. Programatically create a small temporary file called `this_release.md` with the changelog details of _precisely this release_ from the `CHANGELOG.md`:
@@ -200,7 +204,7 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
 20. After the PR has auto-merged, change your local branch back to the _non-_prep branch, pull any changes you (or others) may have added on GitHub :
 
     ```
-    git checkout "${APOLLO_ROUTER_RELEASE_VERSION}"
+    git checkout "${APOLLO_ROUTER_RELEASE_VERSION}" && \
     git pull "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}"
     ```
 
@@ -241,17 +245,18 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
     This process will kick off the bulk of the release process on CircleCI, including building each architecture on its own infrastructure and notarizing the macOS binary.
 
     ```
-    git checkout main
-    git pull "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}"
-    git tag -a "v${APOLLO_ROUTER_RELEASE_VERSION}" -m "${APOLLO_ROUTER_RELEASE_VERSION}" && git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "v${APOLLO_ROUTER_RELEASE_VERSION}"
+    git checkout main && \
+    git pull "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" && \
+    git tag -a "v${APOLLO_ROUTER_RELEASE_VERSION}" -m "${APOLLO_ROUTER_RELEASE_VERSION}" && \
+    git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "v${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-24. Open a PR that reconciles `dev`:
+24. Open a PR that reconciles `dev` (Make sure to merge this reconciliation PR back to dev, do not squash or rebase):
 
     ```
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create --title "Reconcile \`dev\` after merge to \`main\` for v${APOLLO_ROUTER_RELEASE_VERSION}" -B dev -H main --body "Follow-up to the v${APOLLO_ROUTER_RELEASE_VERSION} being officially released, bringing version bumps and changelog updates into the \`dev\` branch."
     ```
-    
+
 25. 👀 Follow along with the process by [going to CircleCI for the repository](https://app.circleci.com/pipelines/github/apollographql/router) and clicking on `release` for the Git tag that appears at the top of the list.  **Wait for `publish_github_release` to finish on this job before continuing.**
 
 26. After the CI job has finished for the tag, re-run the `perl` command from Step 15, which will regenerate the `this_release.md` with changes that happened in the release review.
@@ -263,7 +268,7 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
 28. Update the release notes on the now-published [GitHub Releases](https://github.com/apollographql/router/releases) (this needs to be moved to CI, but requires `this_release.md` which we created earlier):
 
     ```
-    gh release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" -F ./this_release.md
+    gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" -F ./this_release.md
     ```
 
 29. Publish the Crate from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
@@ -272,16 +277,15 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
     cargo publish -p apollo-router
     ```
 
-30. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:
+30. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`, or on MacOS `brew install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:
 
     ```
     curl -s "https://github.com/apollographql/router/releases/tag/v${APOLLO_ROUTER_RELEASE_VERSION}" | htmlq 'meta[property="og:image"]' --attribute content
     ```
 
-### Review
+### prep PR Review
 
-Most review comments will be about the changelog. Once the PR is finalized and
-approved:
+Most review comments for the prep PR will be about the changelog. Once the prep PR is finalized and approved:
 
 1.  Always use `Squash and Merge` GitHub button.
 

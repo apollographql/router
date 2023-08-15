@@ -3,7 +3,4 @@ source: apollo-router/src/configuration/tests.rs
 expression: "Configuration::default().validated_yaml"
 ---
 plugins: ~
-telemetry:
-  apollo:
-    endpoint: "https://usage-reporting.api.apollographql.com/api/ingress/traces"
 

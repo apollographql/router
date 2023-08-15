@@ -1,5 +1,4 @@
 //! Telemetry plugin.
-// With regards to ELv2 licensing, this entire file is license key functionality
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
@@ -53,7 +52,7 @@ use tracing_subscriber::fmt::format::JsonFields;
 use tracing_subscriber::Layer;
 
 use self::apollo::ForwardValues;
-use self::apollo::OperationCountByType;
+use self::apollo::LicensedOperationCountByType;
 use self::apollo::OperationSubType;
 use self::apollo::SingleReport;
 use self::apollo_exporter::proto;
@@ -67,7 +66,10 @@ use self::reload::reload_fmt;
 use self::reload::reload_metrics;
 use self::reload::NullFieldFormatter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
+use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::reload::ReloadTracer;
+use crate::axum_factory::utils::REQUEST_SPAN_NAME;
+use crate::context::OPERATION_NAME;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -127,7 +129,7 @@ pub(crate) const EXECUTION_SPAN_NAME: &str = "execution";
 const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
-const OPERATION_KIND: &str = "apollo_telemetry::operation_kind";
+pub(crate) const OPERATION_KIND: &str = "apollo_telemetry::operation_kind";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
@@ -233,6 +235,30 @@ impl Plugin for Telemetry {
         let config_later = self.config.clone();
 
         ServiceBuilder::new()
+            .map_response(|response: router::Response|{
+                // The current span *should* be the request span as we are outside the instrument block.
+                let span = Span::current();
+                if let Some(REQUEST_SPAN_NAME) = span.metadata().map(|metadata| metadata.name()) {
+
+                    //https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/
+                    let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
+                    let operation_name = response.context.get::<_, String>(OPERATION_NAME);
+
+                    if let Ok(Some(operation_kind)) = &operation_kind {
+                        span.record("graphql.operation.type", operation_kind);
+                    }
+                    if let Ok(Some(operation_name)) = &operation_name {
+                        span.record("graphql.operation.name", operation_name);
+                    }
+                    match (&operation_kind, &operation_name) {
+                        (Ok(Some(kind)), Ok(Some(name))) => span.record("otel.name", format!("{kind} {name}")),
+                        (Ok(Some(kind)), _) => span.record("otel.name", kind),
+                        _ => span.record("otel.name", "GraphQL Operation")
+                    };
+                }
+
+                response
+            })
             .instrument(move |request: &router::Request| {
                 let apollo = config.apollo.as_ref().cloned().unwrap_or_default();
                 let trace_id = TraceId::maybe_new()
@@ -271,7 +297,7 @@ impl Plugin for Telemetry {
                     let response: Result<router::Response, BoxError> = fut.await;
 
                     span.record(
-                        "apollo_private.duration_ns",
+                        APOLLO_PRIVATE_DURATION_NS,
                         start.elapsed().as_nanos() as i64,
                     );
 
@@ -668,17 +694,11 @@ impl Telemetry {
         move |request: &SupergraphRequest| {
             let http_request = &request.supergraph_request;
             let query = http_request.body().query.as_deref().unwrap_or_default();
-            let operation_name = http_request
-                .body()
-                .operation_name
-                .as_deref()
-                .unwrap_or_default();
-
             let span = info_span!(
                 SUPERGRAPH_SPAN_NAME,
                 graphql.document = query,
                 // TODO add graphql.operation.type
-                graphql.operation.name = operation_name,
+                graphql.operation.name = field::Empty,
                 otel.kind = "INTERNAL",
                 apollo_private.field_level_instrumentation_ratio =
                     field_level_instrumentation_ratio,
@@ -688,6 +708,13 @@ impl Telemetry {
                     &config.send_variable_values,
                 ),
             );
+            if let Some(operation_name) = request
+                .context
+                .get::<_, String>(OPERATION_NAME)
+                .unwrap_or_default()
+            {
+                span.record("graphql.operation.name", operation_name);
+            }
 
             span
         }
@@ -863,7 +890,7 @@ impl Telemetry {
             let mut attributes: HashMap<String, AttributeValue> = HashMap::new();
             if let Some(operation_name) = &req.supergraph_request.body().operation_name {
                 attributes.insert(
-                    "operation_name".to_string(),
+                    OPERATION_NAME.to_string(),
                     AttributeValue::String(operation_name.clone()),
                 );
             }
@@ -1080,6 +1107,8 @@ impl Telemetry {
         match result {
             Err(e) => {
                 if !matches!(sender, Sender::Noop) {
+                    let operation_subtype = (operation_kind == OperationKind::Subscription)
+                        .then_some(OperationSubType::SubscriptionRequest);
                     Self::update_apollo_metrics(
                         ctx,
                         field_level_instrumentation_ratio,
@@ -1087,7 +1116,7 @@ impl Telemetry {
                         true,
                         start.elapsed(),
                         operation_kind,
-                        None,
+                        operation_subtype,
                     );
                 }
                 let mut metric_attrs = Vec::new();
@@ -1116,30 +1145,74 @@ impl Telemetry {
                 Err(e)
             }
             Ok(router_response) => {
-                let mut has_errors = !router_response.response.status().is_success();
+                let http_status_is_success = router_response.response.status().is_success();
 
+                // Only send the subscription-request metric if it's an http status in error because we won't always enter the stream after.
+                if operation_kind == OperationKind::Subscription && !http_status_is_success {
+                    Self::update_apollo_metrics(
+                        ctx,
+                        field_level_instrumentation_ratio,
+                        sender.clone(),
+                        true,
+                        start.elapsed(),
+                        operation_kind,
+                        Some(OperationSubType::SubscriptionRequest),
+                    );
+                }
                 Ok(router_response.map(move |response_stream| {
                     let sender = sender.clone();
                     let ctx = ctx.clone();
 
                     response_stream
-                        .map(move |response| {
-                            if !response.errors.is_empty() {
-                                has_errors = true;
-                            }
+                        .enumerate()
+                        .map(move |(idx, response)| {
+                            let has_errors = !response.errors.is_empty();
 
-                            if !response.has_next.unwrap_or(false)
-                                && !matches!(sender, Sender::Noop)
-                            {
-                                Self::update_apollo_metrics(
-                                    &ctx,
-                                    field_level_instrumentation_ratio,
-                                    sender.clone(),
-                                    has_errors,
-                                    start.elapsed(),
-                                    operation_kind,
-                                    None,
-                                );
+                            if !matches!(sender, Sender::Noop) {
+                                if operation_kind == OperationKind::Subscription {
+                                    // The first empty response is always a heartbeat except if it's an error
+                                    if idx == 0 {
+                                        // Don't count for subscription-request if http status was in error because it has been counted before
+                                        if http_status_is_success {
+                                            Self::update_apollo_metrics(
+                                                &ctx,
+                                                field_level_instrumentation_ratio,
+                                                sender.clone(),
+                                                has_errors,
+                                                start.elapsed(),
+                                                operation_kind,
+                                                Some(OperationSubType::SubscriptionRequest),
+                                            );
+                                        }
+                                    } else {
+                                        // Only for subscription events
+                                        Self::update_apollo_metrics(
+                                            &ctx,
+                                            field_level_instrumentation_ratio,
+                                            sender.clone(),
+                                            has_errors,
+                                            response
+                                                .created_at
+                                                .map(|c| c.elapsed())
+                                                .unwrap_or_else(|| start.elapsed()),
+                                            operation_kind,
+                                            Some(OperationSubType::SubscriptionEvent),
+                                        );
+                                    }
+                                } else {
+                                    // If it's the last response
+                                    if !response.has_next.unwrap_or(false) {
+                                        Self::update_apollo_metrics(
+                                            &ctx,
+                                            field_level_instrumentation_ratio,
+                                            sender.clone(),
+                                            has_errors,
+                                            start.elapsed(),
+                                            operation_kind,
+                                            None,
+                                        );
+                                    }
+                                }
                             }
 
                             response
@@ -1165,7 +1238,8 @@ impl Telemetry {
             .get::<UsageReporting>()
             .cloned()
         {
-            let operation_count = operation_count(&usage_reporting.stats_report_key);
+            let licensed_operation_count =
+                licensed_operation_count(&usage_reporting.stats_report_key);
             let persisted_query_hit = context
                 .get::<_, bool>("persisted_query_hit")
                 .unwrap_or_default();
@@ -1176,11 +1250,11 @@ impl Telemetry {
             {
                 // The request was excluded don't report the details, but do report the operation count
                 SingleStatsReport {
-                    operation_count_by_type: (operation_count > 0).then_some(
-                        OperationCountByType {
+                    licensed_operation_count_by_type: (licensed_operation_count > 0).then_some(
+                        LicensedOperationCountByType {
                             r#type: operation_kind,
                             subtype: operation_subtype,
-                            operation_count,
+                            licensed_operation_count,
                         },
                     ),
                     ..Default::default()
@@ -1198,11 +1272,11 @@ impl Telemetry {
                             .trace_id()
                             .to_bytes(),
                     ),
-                    operation_count_by_type: (operation_count > 0).then_some(
-                        OperationCountByType {
+                    licensed_operation_count_by_type: (licensed_operation_count > 0).then_some(
+                        LicensedOperationCountByType {
                             r#type: operation_kind,
                             subtype: operation_subtype,
-                            operation_count,
+                            licensed_operation_count,
                         },
                     ),
                     stats: HashMap::from([(
@@ -1246,10 +1320,10 @@ impl Telemetry {
         } else {
             // Usage reporting was missing, so it counts as one operation.
             SingleStatsReport {
-                operation_count_by_type: OperationCountByType {
+                licensed_operation_count_by_type: LicensedOperationCountByType {
                     r#type: operation_kind,
                     subtype: operation_subtype,
-                    operation_count: 1,
+                    licensed_operation_count: 1,
                 }
                 .into(),
                 ..Default::default()
@@ -1419,7 +1493,7 @@ fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String
 
 // Planner errors return stats report key that start with `## `
 // while successful planning stats report key start with `# `
-fn operation_count(stats_report_key: &str) -> u64 {
+fn licensed_operation_count(stats_report_key: &str) -> u64 {
     if stats_report_key.starts_with("## ") {
         0
     } else {
@@ -1665,6 +1739,7 @@ mod tests {
             .create_instance(
                 &serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}),
                 Default::default(),
+                Default::default(),
             )
             .await
             .unwrap();
@@ -1812,6 +1887,7 @@ mod tests {
                         }
                     }
                 }),
+                Default::default(),
                 Default::default(),
             )
             .await
@@ -1981,6 +2057,7 @@ mod tests {
                 )
                 .unwrap(),
                 Default::default(),
+                Default::default(),
             )
             .await
             .unwrap();
@@ -2093,6 +2170,288 @@ mod tests {
             .to_string()
             .split('\n')
             .filter(|l| l.contains("_count") && !l.contains("apollo_router_span_count"))
+            .sorted()
+            .join("\n");
+        assert_snapshot!(prom_metrics);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_custom_buckets() {
+        let mut mock_service = MockSupergraphService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: SupergraphRequest| {
+                Ok(SupergraphResponse::fake_builder()
+                    .context(req.context)
+                    .header("x-custom", "coming_from_header")
+                    .data(json!({"data": {"my_value": 2usize}}))
+                    .build()
+                    .unwrap())
+            });
+
+        let mut mock_bad_request_service = MockSupergraphService::new();
+        mock_bad_request_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: SupergraphRequest| {
+                Ok(SupergraphResponse::fake_builder()
+                    .context(req.context)
+                    .status_code(StatusCode::BAD_REQUEST)
+                    .data(json!({"errors": [{"message": "nope"}]}))
+                    .build()
+                    .unwrap())
+            });
+
+        let mut mock_subgraph_service = MockSubgraphService::new();
+        mock_subgraph_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: SubgraphRequest| {
+                let mut extension = Object::new();
+                extension.insert(
+                    serde_json_bytes::ByteString::from("status"),
+                    serde_json_bytes::Value::String(ByteString::from("INTERNAL_SERVER_ERROR")),
+                );
+                let _ = req
+                    .context
+                    .insert("my_key", "my_custom_attribute_from_context".to_string())
+                    .unwrap();
+                Ok(SubgraphResponse::fake_builder()
+                    .context(req.context)
+                    .error(
+                        Error::builder()
+                            .message(String::from("an error occured"))
+                            .extensions(extension)
+                            .extension_code("FETCH_ERROR")
+                            .build(),
+                    )
+                    .build())
+            });
+
+        let mut mock_subgraph_service_in_error = MockSubgraphService::new();
+        mock_subgraph_service_in_error
+            .expect_call()
+            .times(1)
+            .returning(move |_req: SubgraphRequest| {
+                Err(Box::new(FetchError::SubrequestHttpError {
+                    status_code: None,
+                    service: String::from("my_subgraph_name_error"),
+                    reason: String::from("cannot contact the subgraph"),
+                }))
+            });
+
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.telemetry")
+            .expect("Plugin not found")
+            .create_instance(
+                &Value::from_str(
+                    r#"{
+                "apollo": {
+                    "client_name_header": "name_header",
+                    "client_version_header": "version_header",
+                    "schema_id": "schema_sha"
+                },
+                "metrics": {
+                    "common": {
+                        "service_name": "apollo-router",
+                        "buckets": [5.0, 10.0, 20.0],
+                        "attributes": {
+                            "supergraph": {
+                                "static": [
+                                    {
+                                        "name": "myname",
+                                        "value": "label_value"
+                                    }
+                                ],
+                                "request": {
+                                    "header": [
+                                        {
+                                            "named": "test",
+                                            "default": "default_value",
+                                            "rename": "renamed_value"
+                                        },
+                                        {
+                                            "named": "another_test",
+                                            "default": "my_default_value"
+                                        }
+                                    ]
+                                },
+                                "response": {
+                                    "header": [{
+                                        "named": "x-custom"
+                                    }],
+                                    "body": [{
+                                        "path": ".data.data.my_value",
+                                        "name": "my_value"
+                                    }]
+                                }
+                            },
+                            "subgraph": {
+                                "all": {
+                                    "errors": {
+                                        "include_messages": true,
+                                        "extensions": [{
+                                            "name": "subgraph_error_extended_code",
+                                            "path": ".code"
+                                        }, {
+                                            "name": "message",
+                                            "path": ".reason"
+                                        }]
+                                    }
+                                },
+                                "subgraphs": {
+                                    "my_subgraph_name": {
+                                        "request": {
+                                            "body": [{
+                                                "path": ".query",
+                                                "name": "query_from_request"
+                                            }, {
+                                                "path": ".data",
+                                                "name": "unknown_data",
+                                                "default": "default_value"
+                                            }, {
+                                                "path": ".data2",
+                                                "name": "unknown_data_bis"
+                                            }]
+                                        },
+                                        "response": {
+                                            "body": [{
+                                                "path": ".errors[0].extensions.status",
+                                                "name": "error"
+                                            }]
+                                        },
+                                        "context": [
+                                            {
+                                                "named": "my_key"
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "prometheus": {
+                        "enabled": true
+                    }
+                }
+            }"#,
+                )
+                .unwrap(),
+                Default::default(),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        let mut supergraph_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
+
+        let _router_response = supergraph_service
+            .ready()
+            .await
+            .unwrap()
+            .call(router_req.build().unwrap())
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+
+        let mut bad_request_supergraph_service =
+            dyn_plugin.supergraph_service(BoxService::new(mock_bad_request_service));
+        let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
+
+        let _router_response = bad_request_supergraph_service
+            .ready()
+            .await
+            .unwrap()
+            .call(router_req.build().unwrap())
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+
+        let mut subgraph_service =
+            dyn_plugin.subgraph_service("my_subgraph_name", BoxService::new(mock_subgraph_service));
+        let subgraph_req = SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http_ext::Request::fake_builder()
+                    .header("test", "my_value_set")
+                    .body(
+                        Request::fake_builder()
+                            .query(String::from("query { test }"))
+                            .build(),
+                    )
+                    .build()
+                    .unwrap(),
+            )
+            .build();
+        let _subgraph_response = subgraph_service
+            .ready()
+            .await
+            .unwrap()
+            .call(subgraph_req)
+            .await
+            .unwrap();
+        // Another subgraph
+        let mut subgraph_service = dyn_plugin.subgraph_service(
+            "my_subgraph_name_error",
+            BoxService::new(mock_subgraph_service_in_error),
+        );
+        let subgraph_req = SubgraphRequest::fake_builder()
+            .subgraph_request(
+                http_ext::Request::fake_builder()
+                    .header("test", "my_value_set")
+                    .body(
+                        Request::fake_builder()
+                            .query(String::from("query { test }"))
+                            .build(),
+                    )
+                    .build()
+                    .unwrap(),
+            )
+            .build();
+        let _subgraph_response = subgraph_service
+            .ready()
+            .await
+            .unwrap()
+            .call(subgraph_req)
+            .await
+            .expect_err("Must be in error");
+
+        let http_req_prom = http::Request::get("http://localhost:9090/WRONG/URL/metrics")
+            .body(Default::default())
+            .unwrap();
+        let mut web_endpoint = dyn_plugin
+            .web_endpoints()
+            .into_iter()
+            .next()
+            .unwrap()
+            .1
+            .into_iter()
+            .next()
+            .unwrap()
+            .into_router();
+        let resp = web_endpoint
+            .ready()
+            .await
+            .unwrap()
+            .call(http_req_prom)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        let http_req_prom = http::Request::get("http://localhost:9090/metrics")
+            .body(Default::default())
+            .unwrap();
+        let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
+        let prom_metrics = String::from_utf8_lossy(&body)
+            .to_string()
+            .split('\n')
+            .filter(|l| l.contains("bucket") && !l.contains("apollo_router_span_count"))
             .sorted()
             .join("\n");
         assert_snapshot!(prom_metrics);

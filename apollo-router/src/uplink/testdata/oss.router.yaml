@@ -2,5 +2,5 @@ health_check:
   enabled: false
 homepage:
   enabled: false
-preview_operation_limits:
+limits:
   parser_max_recursion: 1000

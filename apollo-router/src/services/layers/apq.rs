@@ -3,10 +3,9 @@
 //!  For more information on APQ see:
 //!  <https://www.apollographql.com/docs/apollo-server/performance/apq/>
 
-// This entire file is license key functionality
-
 use http::header::CACHE_CONTROL;
 use http::HeaderValue;
+use http::StatusCode;
 use serde::Deserialize;
 use serde_json_bytes::json;
 use serde_json_bytes::Value;
@@ -39,7 +38,7 @@ impl PersistedQuery {
             .and_then(|value| serde_json_bytes::from_value(value.clone()).ok())
     }
 
-    /// Attempt to decode the sha256 hash in a `PersistedQuery`
+    /// Attempt to decode the sha256 hash in a [`PersistedQuery`]
     pub(crate) fn decode_hash(self) -> Option<(String, Vec<u8>)> {
         hex::decode(self.sha256hash.as_bytes())
             .ok()
@@ -89,10 +88,27 @@ async fn apq_request(
                 tracing::trace!("apq: cache insert");
                 let _ = request.context.insert("persisted_query_register", true);
                 cache.insert(redis_key(&query_hash), query).await;
+                Ok(request)
             } else {
-                tracing::warn!("apq: graphql request doesn't match provided sha256Hash");
+                tracing::debug!("apq: graphql request doesn't match provided sha256Hash");
+                let errors = vec![crate::error::Error {
+                    message: "provided sha does not match query".to_string(),
+                    locations: Default::default(),
+                    path: Default::default(),
+                    extensions: serde_json_bytes::from_value(json!({
+                      "code": "PERSISTED_QUERY_HASH_MISMATCH",
+                    }))
+                    .unwrap(),
+                }];
+                let res = SupergraphResponse::builder()
+                    .status_code(StatusCode::BAD_REQUEST)
+                    .data(Value::default())
+                    .errors(errors)
+                    .context(request.context)
+                    .build()
+                    .expect("response is valid");
+                Err(res)
             }
-            Ok(request)
         }
         (Some((apq_hash, _)), _) => {
             if let Ok(cached_query) = cache.get(&redis_key(&apq_hash)).await.get().await {
@@ -108,12 +124,7 @@ async fn apq_request(
                     locations: Default::default(),
                     path: Default::default(),
                     extensions: serde_json_bytes::from_value(json!({
-                          "code": "PERSISTED_QUERY_NOT_FOUND",
-                          "exception": {
-                          "stacktrace": [
-                              "PersistedQueryNotFoundError: PersistedQueryNotFound",
-                          ],
-                      },
+                      "code": "PERSISTED_QUERY_NOT_FOUND",
                     }))
                     .unwrap(),
                 }];
@@ -168,12 +179,7 @@ async fn disabled_apq_request(
             locations: Default::default(),
             path: Default::default(),
             extensions: serde_json_bytes::from_value(json!({
-                  "code": "PERSISTED_QUERY_NOT_SUPPORTED",
-                  "exception": {
-                  "stacktrace": [
-                      "PersistedQueryNotSupportedError: PersistedQueryNotSupported",
-                  ],
-              },
+              "code": "PERSISTED_QUERY_NOT_SUPPORTED",
             }))
             .unwrap(),
         }];
@@ -195,11 +201,11 @@ mod apq_tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
+    use http::StatusCode;
     use serde_json_bytes::json;
     use tower::Service;
 
     use super::*;
-    use crate::configuration::Apq;
     use crate::error::Error;
     use crate::graphql::Response;
     use crate::services::router::ClientRequestAccepts;
@@ -218,12 +224,7 @@ mod apq_tests {
             locations: Default::default(),
             path: Default::default(),
             extensions: serde_json_bytes::from_value(json!({
-                  "code": "PERSISTED_QUERY_NOT_FOUND",
-                  "exception": {
-                  "stacktrace": [
-                      "PersistedQueryNotFoundError: PersistedQueryNotFound",
-                  ],
-              },
+              "code": "PERSISTED_QUERY_NOT_FOUND",
             }))
             .unwrap(),
         };
@@ -329,12 +330,7 @@ mod apq_tests {
             locations: Default::default(),
             path: Default::default(),
             extensions: serde_json_bytes::from_value(json!({
-                  "code": "PERSISTED_QUERY_NOT_FOUND",
-                  "exception": {
-                  "stacktrace": [
-                      "PersistedQueryNotFoundError: PersistedQueryNotFound",
-                  ],
-              },
+              "code": "PERSISTED_QUERY_NOT_FOUND",
             }))
             .unwrap(),
         };
@@ -408,7 +404,30 @@ mod apq_tests {
         assert_error_matches(&expected_apq_miss_error, apq_error);
 
         // sha256 is wrong, apq insert won't happen
-        router_service.call(with_query).await.unwrap();
+        let insert_failed_response = router_service.call(with_query).await.unwrap();
+
+        assert_eq!(
+            StatusCode::BAD_REQUEST,
+            insert_failed_response.response.status()
+        );
+
+        let graphql_response = insert_failed_response
+            .into_graphql_response_stream()
+            .await
+            .next()
+            .await
+            .unwrap()
+            .unwrap();
+        let expected_apq_insert_failed_error = Error {
+            message: "provided sha does not match query".to_string(),
+            locations: Default::default(),
+            path: Default::default(),
+            extensions: serde_json_bytes::from_value(json!({
+              "code": "PERSISTED_QUERY_HASH_MISMATCH",
+            }))
+            .unwrap(),
+        };
+        assert_eq!(graphql_response.errors[0], expected_apq_insert_failed_error);
 
         // apq insert failed, this call will miss
         let second_apq_error = router_service
@@ -432,21 +451,13 @@ mod apq_tests {
             locations: Default::default(),
             path: Default::default(),
             extensions: serde_json_bytes::from_value(json!({
-                  "code": "PERSISTED_QUERY_NOT_SUPPORTED",
-                  "exception": {
-                  "stacktrace": [
-                      "PersistedQueryNotSupportedError: PersistedQueryNotSupported",
-                  ],
-              },
+              "code": "PERSISTED_QUERY_NOT_SUPPORTED",
             }))
             .unwrap(),
         };
 
         let mut config = Configuration::default();
-        config.apq = Apq {
-            enabled: false,
-            ..Default::default()
-        };
+        config.apq.enabled = false;
 
         let mut router_service = from_supergraph_mock_callback_and_configuration(
             move |req| {

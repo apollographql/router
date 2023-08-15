@@ -362,9 +362,9 @@ fn process_request(request) {
 fn process_response(response) {
     log_info("processing response"); // This will appear in the router log as an INFO log
     // Verify that x-custom-header is present and has the expected value
-    if request.context["x-custom-header"] != "CUSTOM_VALUE" {
+    if response.context["x-custom-header"] != "CUSTOM_VALUE" {
         log_error("Error: we lost our custom header from our context"); // This will appear in the router log as an ERROR log
-        throw "Error: we lost our custom header from our context"; // This will appear in the errors response and short-circuit the request
+        throw "Error: we lost our custom header from our context"; // This will appear in the errors response and short-circuit the response
     }
 }
 ```
@@ -430,8 +430,76 @@ Currently, Rhai scripts _cannot_ do the following:
 
 If your router customization needs to do any of these, you can instead use [external co-processing](./coprocessor/) (this is an [Enterprise feature](../enterprise-features)).
 
+### Global variables
+
+The router's `Rhai` interface can simulate closures: https://rhai.rs/book/language/fn-closure.html
+
+However, and this is an important restriction:
+
+"
+The [anonymous function](https://rhai.rs/book/language/fn-anon.html) syntax, however, automatically captures [variables](https://rhai.rs/book/language/variables.html) that are not defined within the current scope, but are defined in the external scope – i.e. the scope where the [anonymous function](https://rhai.rs/book/language/fn-anon.html) is created.
+"
+
+Thus it's not possible for a `Rhai` closure to reference a global variable. For example: this kind of thing might be attempted:
+
+```rhai
+fn supergraph_service(service){
+    let f = |request| {
+        let v = Router.APOLLO_SDL;
+        print(v);
+    };
+    service.map_request(f);
+}
+```
+Note: `Router` is a global variable.
+
+That won't work and you'll get an error something like: `service callback failed: Variable not found: Router (line 4, position 17)`
+
+There are two workarounds. Either:
+
+1. Create a local copy of the global that can be captured by the closure:
+
+```rhai
+fn supergraph_service(service){
+    let v = Router.APOLLO_SDL;
+    let f = |request| {
+        print(v);
+    };
+    service.map_request(f);
+}
+```
+
+Or:
+
+2. Use a function pointer rather than closure syntax:
+
+```rhai
+fn supergraph_service(service) {
+    const request_callback = Fn("process_request");
+    service.map_request(request_callback);
+}
+
+fn process_request(request) {
+    print(`${Router.APOLLO_SDL}`);
+}
+```
+
 ### Avoiding deadlocks
 
 The Apollo Router requires that its Rhai engine implements the [sync feature](https://rhai.rs/book/start/features.html) to guarantee data integrity within the router's multi-threading execution environment. This means that [shared values](https://rhai.rs/book/language/fn-closure.html?highlight=deadlock#data-races-in-sync-builds-can-become-deadlocks) within Rhai might cause a deadlock.
 
 This is particularly risky when using closures within callbacks while referencing external data. Take particular care to avoid this kind of situation by making copies of data when required. The [examples/surrogate-cache-key directory](https://github.com/apollographql/router/tree/main/examples/surrogate-cache-key) contains an example of this, where "closing over" `response.headers` would cause a deadlock. To avoid this, a local copy of the required data is obtained and used in the closure.
+
+## Debugging
+
+### Understanding errors
+
+If there is a syntax error in a Rhai script, the router will log an error message at startup mentioning the `apollo.rhai` plugin. The line number in the error message describes where the error was _detected_, not where the error is present. For example, if you're missing a semicolon at the end of line 10, the error will mention line 11 (once Rhai realizes the mistake).
+
+### Syntax highlighting
+
+Syntax highlighting can make it easier to spot errors in a script. We recommend using the online [Rhai playground](https://rhai.rs/playground/stable/) or using VS Code with the [Rhai extension](https://marketplace.visualstudio.com/items?itemName=rhaiscript.vscode-rhai).
+
+### Logging
+
+For tracking down runtime errors, insert [logging](/docs/router/customizations/rhai-api#logging) statements to narrow down the issue.

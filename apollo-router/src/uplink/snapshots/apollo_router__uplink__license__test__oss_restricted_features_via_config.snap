@@ -1,0 +1,11 @@
+---
+source: apollo-router/src/uplink/license.rs
+expression: err.to_string()
+---
+TODO PREAMBLE
+
+Violations:
+* Healthcheck at $.health_check.enabled
+* Homepage at $.homepage.enabled
+
+TODO POSTAMBLE

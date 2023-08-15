@@ -4,16 +4,19 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use apollo_compiler::hir;
+use apollo_compiler::diagnostics::ApolloDiagnostic;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
+use apollo_compiler::InputDatabase;
 use http::Uri;
 use sha2::Digest;
 use sha2::Sha256;
 
+use crate::configuration::GraphQLValidationMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
+use crate::error::ValidationErrors;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
@@ -22,45 +25,43 @@ use crate::Configuration;
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
     pub(crate) type_system: Arc<apollo_compiler::hir::TypeSystem>,
+    /// Stored for comparison with the validation errors from query planning.
+    diagnostics: Vec<ApolloDiagnostic>,
     subgraphs: HashMap<String, Uri>,
     api_schema: Option<Box<Schema>>,
     pub(crate) schema_id: Option<String>,
 }
 
 #[cfg(test)]
-fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
+fn make_api_schema(schema: &str, configuration: &Configuration) -> Result<String, SchemaError> {
     use itertools::Itertools;
-    use router_bridge::api_schema;
-    let s = api_schema::api_schema(schema)
-        .map_err(|e| SchemaError::Api(e.to_string()))?
-        .map_err(|e| SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", ")))?;
+    use router_bridge::api_schema::api_schema;
+    use router_bridge::api_schema::ApiSchemaOptions;
+    let s = api_schema(
+        schema,
+        ApiSchemaOptions {
+            graphql_validation: matches!(
+                configuration.experimental_graphql_validation_mode,
+                GraphQLValidationMode::Legacy | GraphQLValidationMode::Both
+            ),
+        },
+    )
+    .map_err(|e| SchemaError::Api(e.to_string()))?
+    .map_err(|e| SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", ")))?;
     Ok(format!("{s}\n"))
 }
 
 impl Schema {
-    pub(crate) fn parse(
-        s: &str,
-        configuration: &Configuration,
-        api_schema: Option<Box<Schema>>,
-    ) -> Result<Self, SchemaError> {
-        let mut schema = Self::parse_inner(s, configuration)?;
-        schema.api_schema = api_schema;
-        Ok(schema)
-    }
-
     #[cfg(test)]
     pub(crate) fn parse_test(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        let mut schema = Self::parse_inner(s, configuration)?;
-        schema.api_schema = Some(Box::new(Self::parse_inner(
-            &make_api_schema(s)?,
-            configuration,
-        )?));
+        let api_schema = Self::parse(&make_api_schema(s, configuration)?, configuration)?;
+        let schema = Self::parse(s, configuration)?.with_api_schema(api_schema);
         Ok(schema)
     }
 
-    fn parse_inner(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {
+    pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
         let mut compiler = ApolloCompiler::new();
-        let id = compiler.add_type_system(schema, "schema.graphql");
+        let id = compiler.add_type_system(sdl, "schema.graphql");
 
         let ast = compiler.db.ast(id);
 
@@ -68,22 +69,34 @@ impl Schema {
         let recursion_limit = ast.recursion_limit();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        // TODO: run full compiler-based validation instead?
-        let errors = ast.errors().cloned().collect::<Vec<_>>();
-        if !errors.is_empty() {
-            let errors = ParseErrors {
-                raw_schema: schema.to_string(),
-                errors,
-            };
-            errors.print();
-            return Err(SchemaError::Parse(errors));
+        let mut parse_errors = ast.errors().peekable();
+        if parse_errors.peek().is_some() {
+            let errors = parse_errors.cloned().collect::<Vec<_>>();
+            return Err(SchemaError::Parse(ParseErrors { errors }));
         }
 
-        fn as_string(value: &hir::Value) -> Option<&String> {
-            if let hir::Value::String(string) = value {
-                Some(string)
-            } else {
-                None
+        let diagnostics = if configuration.experimental_graphql_validation_mode
+            == GraphQLValidationMode::Legacy
+        {
+            vec![]
+        } else {
+            compiler
+                .validate()
+                .into_iter()
+                .filter(|err| err.data.is_error())
+                .collect::<Vec<_>>()
+        };
+
+        if !diagnostics.is_empty() {
+            let errors = ValidationErrors {
+                errors: diagnostics.clone(),
+            };
+            errors.print();
+
+            // Only error out if new validation is used: with `Both`, we take the legacy
+            // validation as authoritative and only use the new result for comparison
+            if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::New {
+                return Err(SchemaError::Validate(errors));
             }
         }
 
@@ -95,16 +108,16 @@ impl Schema {
                     .directives()
                     .iter()
                     .find(|directive| directive.name() == "join__graph")?;
-                let name = as_string(join_directive.argument_by_name("name")?)?;
-                let url = as_string(join_directive.argument_by_name("url")?)?;
+                let name = join_directive.argument_by_name("name")?.as_str()?;
+                let url = join_directive.argument_by_name("url")?.as_str()?;
                 Some((name, url))
             }) {
                 if url.is_empty() {
-                    return Err(SchemaError::MissingSubgraphUrl(name.clone()));
+                    return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
                 }
-                let url =
-                    Uri::from_str(url).map_err(|err| SchemaError::UrlParse(name.clone(), err))?;
-                if subgraphs.insert(name.clone(), url).is_some() {
+                let url = Uri::from_str(url)
+                    .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?;
+                if subgraphs.insert(name.to_string(), url).is_some() {
                     return Err(SchemaError::Api(format!(
                         "must not have several subgraphs with same name '{name}'"
                     )));
@@ -112,17 +125,24 @@ impl Schema {
             }
         }
 
+        let sdl = compiler.db.source_code(id);
         let mut hasher = Sha256::new();
-        hasher.update(schema.as_bytes());
+        hasher.update(sdl.as_bytes());
         let schema_id = Some(format!("{:x}", hasher.finalize()));
 
         Ok(Schema {
-            raw_sdl: Arc::new(schema.into()),
+            raw_sdl: Arc::new(sdl.to_string()),
             type_system: compiler.db.type_system(),
+            diagnostics,
             subgraphs,
             api_schema: None,
             schema_id,
         })
+    }
+
+    pub(crate) fn with_api_schema(mut self, api_schema: Schema) -> Self {
+        self.api_schema = Some(Box::new(api_schema));
+        self
     }
 }
 
@@ -145,6 +165,11 @@ impl Schema {
         self.subgraphs.iter()
     }
 
+    /// Return the subgraph URI given the service name
+    pub(crate) fn subgraph_url(&self, service_name: &str) -> Option<&Uri> {
+        self.subgraphs.get(service_name)
+    }
+
     pub(crate) fn api_schema(&self) -> &Schema {
         match &self.api_schema {
             Some(schema) => schema,
@@ -160,6 +185,10 @@ impl Schema {
             OperationKind::Subscription => schema_def.subscription(),
         }
         .unwrap_or_else(|| kind.as_str())
+    }
+
+    pub(crate) fn has_errors(&self) -> bool {
+        !self.diagnostics.is_empty()
     }
 }
 
