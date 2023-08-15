@@ -1,6 +1,6 @@
 ---
 title: Authorization in the Apollo Router
-description: Strengthen your supergraph's security with advanced access controls
+description: Enhance your services' security with an overlying governance layer
 minVersion: 1.27.0
 ---
 
@@ -11,7 +11,22 @@ minVersion: 1.27.0
 APIs provide access to business-critical data. Unrestricted access can result in data breaches, monetary losses, or potential denial of service. Even for internal APIs, checks can be essential to limit data to authorized parties.
 
 Enforcing authorization _in the Apollo Router_ is valuable for a few reasons:
-  - It supports a defense-in-depth strategy by creating an initial checkpoint that other service layers can reinforce.
+
+- **Optimized query execution**: Validating authorization _before_ processing requests allows for early termination. Terminating unauthorized requests at the edge of your graph reduces the load on your services and improves performance.
+
+```mermaid
+flowchart LR;
+  clients(Client);
+  subgraph Router[" "]
+    router(["<b>Apollo Router</b>"]);
+    serviceB[Products<br/>API];
+    serviceC[Reviews<br/>API];
+  end
+  router -.->|"❌ Sub-query"| serviceB & serviceC;
+  clients -->|"⚠️Unauthorized <br/>request"| router;
+```
+
+- **Principled architecture**: Authorization at the router level supports a defense-in-depth strategy by creating an initial checkpoint that other service layers can reinforce.
 
 ```mermaid
 flowchart LR;
@@ -31,19 +46,7 @@ flowchart LR;
 classDef padding padding-left:1em, padding-right:1em
 ```
 
-- Validating authorization _before_ processing requests allows for early request termination.
-
-```mermaid
-flowchart LR;
-  clients(Client);
-  subgraph Router[" "]
-    router(["<b>Apollo Router</b>"]);
-    serviceB[Products<br/>API];
-    serviceC[Reviews<br/>API];
-  end
-  router -.->|"❌ Sub-query"| serviceB & serviceC;
-  clients -->|"⚠️Unauthorized <br/>request"| router;
-```
+- **Declarative access rules**: You define access controls at the field level and GraphOS [composes](#composition-and-federation) them _across_ all your services. Composition creates graph-native governance without you having to create an additional orchestration layer.
 
 ## How it works
 
@@ -59,188 +62,11 @@ The router then enforces these directives on all incoming requests.
 
 ## Prerequisites
 
-To provide the router with the claims it needs to evaluate authorization directives, you must either configure [JSON Web Token (JWT) authentication](#jwt-authentication-configuration) or add an [external coprocessor](#adding-claims-via-coprocessor) that adds claims to a request's context. In [some cases](#augmenting-jwt-claims-via-coprocessor) (explained below), you may require both.
+To provide the router with the claims it needs to evaluate authorization directives, you must either configure JSON Web Token (JWT) authentication or add an external coprocessor that adds claims to a request's context. In some cases (explained below), you may require both.
 
-### JWT authentication configuration
-
-If you configure [JWT authentication](./authn-jwt), the Apollo Router [automatically adds a JWT token's claims](./authn-jwt#working-with-jwt-claims) to the request's context at the `apollo_authentication::JWT::claims` key. These claims are then accessible to the authorization directives to evaluate which fields and types are authorized.
-
-### Adding claims via coprocessor
-
-If you can't use JWT authentiation, you can add claims via a [`RouterService` coprocessor](../customizations/coprocessor#how-it-works).
-
-<ExpansionPanel title="Click to learn how">
-
-Coprocessors let you hook into the [router's request-handling lifecycle](../customizations/overview#the-request-lifecycle) using standalone code. A [`RouterService` coprocessor](../customizations/coprocessor#how-it-works) hooks into the request life cycle directly after the router has received a client request.
-
-```mermaid
-flowchart TB;
-    client(Client);
-    router:::alignLeft
-    subgraph router["Apollo Router"]
-        direction LR
-        httpServer("HTTP server")
-        subgraph routerService["<code>RouterService</code>"]
-            routerPlugins[[Router plugins]];
-        end
-        subgraph supergraphService["<code>SupergraphService</code>"]
-            supergraphPlugins[[Supergraph plugins]];
-        end     
-        subgraph executionService["<code>ExecutionService</code>"]
-            executionPlugins[[Execution plugins]];
-        end
-
-        subgraph subgraphService["<code>SubgraphServices</code>"]
-            subgraph service1["Subgraph Service A"]
-            subgraphPlugins1[[Subgraph plugins]];
-            end
-            subgraph service2["Subgraph Service B"]
-            subgraphPlugins2[[Subgraph plugins]];
-            end            
-        end
-    end;
-subgraphA[Subgraph A];
-subgraphB[Subgraph B];
-
-coprocessor[Coprocessor]
-routerService <--> coprocessor
-
-client --> httpServer;
-httpServer --> routerService;
-routerService --> supergraphService
-supergraphService --> executionService;
-executionService --> service1;
-executionService --> service2;
-service1 --> subgraphA;
-service2 --> subgraphB;
-
-classDef alignLeft padding-right:25em;
-class coprocessor secondary;
-```
-
-You configure external coprocessing in your router's [YAML config file](../configuration/overview/#yaml-config-file) under the `coprocessor` key. To use the authorization directives, you need to add claims to a `RouterRequest`'s [`context`](/customizations/coprocessor/#context). 
-The router configuration needs to include at least these settings:
-
-```yaml title="router.yaml"
-coprocessor:
-  url: http://127.0.0.1:8081 # Required. Replace with the URL of your coprocessor's HTTP endpoint.
-  router: # By including this key, a coprocessor can hook into the `RouterService`
-    request: # By including this key, the `RouterService` sends a coprocessor request whenever it first receives a client request.
-      headers: false # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
-      context: true # The authorization directives works with claims stored in the request's context
-```
-
-This configuration prompts the router to send an HTTP POST request to your coprocessor whenever it receives a client request. For example, your coprocessor may receive a request with this format:
-
-```json
-{
-    "version": 1,
-    "stage": "RouterRequest",
-    "control": "continue",
-    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
-    "context": {
-      "entries": {
-        "accepts-json": true
-      }
-    }
-}
-```
-
-When your coprocessor receives this request from the router, it should add claims to the request's [`context`](/customizations/coprocessor/#context) and return them in the response to the router. Specifically, the coprocessor should add an entry with a claims object. The key must be `apollo_authentication::JWT::claims`, and the value should be the claims required by the authorization directives you intend to use. For example, if you want to use [`@requireScopes`](#requirescopes), the response may look something like this:
-
-```json
-{
-    "version": 1,
-    "stage": "RouterRequest",
-    "control": "continue",
-    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
-    "context": {
-        "entries": {
-            "accepts-json": true,
-            "apollo_authentication::JWT::claims": {
-                "scope": "profile:read profile:write"
-            }
-        }
-    }
-}
-```
-
-Refer to [the coprocessor documentation](../customizations/coprocessor) for more information on [coprocessor request format](../customizations/coprocessor/#coprocessor-request-format) and [responding to coprocessor requests](../customizations/coprocessor/#responding-to-coprocessor-requests).
-
-</ExpansionPanel>
-
-#### Augmenting JWT claims via coprocessor
-
-Your authorization policies may require information beyond what your JSON web tokens' claims provide. For example, the token's claims may include user IDs, which you then use to look up user roles. For situations like this, you can augment the claims from your JSON web tokens with [coprocessors](../customizations/coprocessor).
-
-<ExpansionPanel title="Click to learn how">
-
-As with [adding claims](#adding-claims-via-coprocessor), a [`RouterService` coprocessor](../customizations/coprocessor#how-it-works) is appropriate for augmenting claims since the router calls it directly after receiving a client request. The router calls it after the JWT authentication plugin, so you can use a `RouterService` coprocessor to:
-- receive the list of claims extracted from the JWT
-- use information like the `sub` (subject) claim to look up the user in an external database or service
-- insert additional data in the claims list
-- return the claims list to the router
-
-For example, if you use this [router configuration](../configuration/overview#yaml-config-file):
-
-```yaml title="router.yaml"
-authentication:
-  router:
-    jwt:
-      jwks:
-        - url: "file:///etc/router/jwks.json"
-
-coprocessor:
-  url: http://127.0.0.1:8081
-  router:
-    request:
-      context: true
-```
-
-The router sends requests to the coprocessor with this format:
-
-```json
-{
-    "version": 1,
-    "stage": "RouterRequest",
-    "control": "continue",
-    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
-    "context": {
-        "entries": {
-            "apollo_authentication::JWT::claims": {
-                "exp": 10000000000,
-                "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a"
-            }
-        }
-    },
-    "method": "POST"
-}
-```
-
-The coprocessor can then look up the user with the identifier specified in the `sub` claim and return a response with more claims:
-
-
-```json
-{
-    "version": 1,
-    "stage": "RouterRequest",
-    "control": "continue",
-    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
-    "context": {
-        "entries": {
-            "apollo_authentication::JWT::claims": {
-                "exp": 10000000000,
-                "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a",
-                "scope": "profile:read profile:write"
-            }
-        }
-    }
-}
-```
-
-For more information, refer to [the coprocessor documentation](../customizations/coprocessor/).
-
-</ExpansionPanel>
+- **JWT authentication configuration**: If you configure [JWT authentication](./authn-jwt), the Apollo Router [automatically adds a JWT token's claims](./authn-jwt#working-with-jwt-claims) to the request's context at the `apollo_authentication::JWT::claims` key.
+- **Adding claims via coprocessor**:  If you can't use JWT authentiation, you can [add claims with a coprocessor](/customizations/coprocessor#adding-authorization-claims-via-coprocessor). Coprocessors let you hook into the Apollo Router's request-handling lifecycle with custom code.
+- **Augmenting JWT claims via coprocessor**: Your authorization policies may require information beyond what your JSON web tokens provide. For example, a token's claims may include user IDs, which you then use to look up user roles. For situations like this, you can [augment the claims](./authn-jwt#claim-augmentation-via-coprocessors) from your JSON web tokens with coprocessors.
 
 ## Authorization directives
 

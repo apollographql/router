@@ -903,3 +903,98 @@ Subsequent response chunks omit the `headers` and `statusCode` fields:
   }
 }
 ```
+
+## Adding authorization claims via coprocessor
+
+An alternative to JWT authentiation is adding claims via a [`RouterService` coprocessor](#how-it-works). since it hooks into the request life cycle directly after the router has received a client request.
+
+```mermaid
+flowchart TB;
+    client(Client);
+    router:::alignLeft
+    subgraph router["Apollo Router"]
+        direction LR
+        httpServer("HTTP server")
+        subgraph routerService["<code>RouterService</code>"]
+            routerPlugins[[Router plugins]];
+        end
+        subgraph supergraphService["<code>SupergraphService</code>"]
+            supergraphPlugins[[Supergraph plugins]];
+        end     
+        subgraph executionService["<code>ExecutionService</code>"]
+            executionPlugins[[Execution plugins]];
+        end
+
+        subgraph subgraphService["<code>SubgraphServices</code>"]
+            subgraph service1["Subgraph Service A"]
+            subgraphPlugins1[[Subgraph plugins]];
+            end
+            subgraph service2["Subgraph Service B"]
+            subgraphPlugins2[[Subgraph plugins]];
+            end            
+        end
+    end;
+subgraphA[Subgraph A];
+subgraphB[Subgraph B];
+
+coprocessor[Coprocessor]
+routerService <--> coprocessor
+
+client --> httpServer;
+httpServer --> routerService;
+routerService --> supergraphService
+supergraphService --> executionService;
+executionService --> service1;
+executionService --> service2;
+service1 --> subgraphA;
+service2 --> subgraphB;
+
+classDef alignLeft padding-right:25em;
+class coprocessor secondary;
+```
+To use the [authorization directives](../configuration/authorization#authorization-directives), you need to add claims to a `RouterRequest`'s [`context`](#context). 
+The router configuration needs to include at least these settings:
+
+```yaml title="router.yaml"
+coprocessor:
+  url: http://127.0.0.1:8081 # Required. Replace with the URL of your coprocessor's HTTP endpoint.
+  router: # By including this key, a coprocessor can hook into the `RouterService`
+    request: # By including this key, the `RouterService` sends a coprocessor request whenever it first receives a client request.
+      headers: false # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
+      context: true # The authorization directives works with claims stored in the request's context
+```
+
+This configuration prompts the router to send an HTTP POST request to your coprocessor whenever it receives a client request. For example, your coprocessor may receive a request with this format:
+
+```json
+{
+    "version": 1,
+    "stage": "RouterRequest",
+    "control": "continue",
+    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
+    "context": {
+      "entries": {
+        "accepts-json": true
+      }
+    }
+}
+```
+
+When your coprocessor receives this request from the router, it should add claims to the request's [`context`](#context) and return them in the response to the router. Specifically, the coprocessor should add an entry with a claims object. The key must be `apollo_authentication::JWT::claims`, and the value should be the claims required by the authorization directives you intend to use. For example, if you want to use [`@requireScopes`](../configuration/authorization#requiresscopes), the response may look something like this:
+
+```json
+{
+    "version": 1,
+    "stage": "RouterRequest",
+    "control": "continue",
+    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
+    "context": {
+        "entries": {
+            "accepts-json": true,
+            "apollo_authentication::JWT::claims": {
+                "scope": "profile:read profile:write"
+            }
+        }
+    }
+}
+```
