@@ -54,20 +54,20 @@ The Apollo Router provides fine-grained access controls at your graph's edge via
 
 The authorization directives use a request's **claims** to evaluate which fields and types are authorized. Claims are the individual details of a request's authentication and scope. They might include details like the ID of the associated user and any authorization scopes assigned to that user.
 
-You define and use these directives on subgraph schemas, and GraphOS [composes](#composition-and-federation) them onto the supergraph schema.
+You define and use authorization directives on subgraph schemas, and GraphOS [composes](#composition-and-federation) them onto the supergraph schema.
 The router then enforces these directives on all incoming requests.
 
 ## Prerequisites
 
-To provide the router with the claims it needs to evaluate authorization directives, you must either configure [JSON Web Token (JWT) authentication](./authn-jwt) or add an [external coprocessor](../customizations/coprocessor) that adds claims to a request's context. In [some cases](#augmenting-claims-with-coprocessors) (explained below), you may require both.
+To provide the router with the claims it needs to evaluate authorization directives, you must either configure [JSON Web Token (JWT) authentication](./authn-jwt) or add an [external coprocessor](../customizations/coprocessor) that adds claims to a request's context. In [some cases](#augmenting-jwt-claims-via-coprocessor) (explained below), you may require both.
 
 ### JWT authentication configuration
 
 If you configure [JWT authentication](./authn-jwt), the Apollo Router [automatically adds a JWT token's claims](./authn-jwt#working-with-jwt-claims) to the request's context at the `apollo_authentication::JWT::claims` key. These claims are then accessible to the authorization directives to evaluate which fields and types are authorized.
 
-### Adding claims with coprocessor
+### Adding claims via coprocessor
 
-If you can't use JWT tokens to add claims to your request, you can do so via a [`RouterService` coprocessor](../customizations/coprocessor#how-it-works).
+If you can't use JWT authentiation, you can add claims via a [`RouterService` coprocessor](../customizations/coprocessor#how-it-works).
 Coprocessors let you hook into the [router's request-handling lifecycle](../customizations/overview#the-request-lifecycle) using standalone code. A [`RouterService` coprocessor](../customizations/coprocessor#how-it-works) hooks into the request life cycle directly after the router has received a client request.
 
 ```mermaid
@@ -143,9 +143,7 @@ This configuration prompts the router to send an HTTP POST request to your copro
 }
 ```
 
-When your coprocessor receives this request from the router, it should add claims to the request's [`context`](/customizations/coprocessor/#context) and return them in the response to the router.
-
-Specifically, the coprocessor should add an entry with a claims object. The key must be `apollo_authentication::JWT::claims`, and the value should be the claims required by the authorization directives you intend to use. For example, if you want to use [`@requireScopes`](#requirescopes), the response may look something like this:
+When your coprocessor receives this request from the router, it should add claims to the request's [`context`](/customizations/coprocessor/#context) and return them in the response to the router. Specifically, the coprocessor should add an entry with a claims object. The key must be `apollo_authentication::JWT::claims`, and the value should be the claims required by the authorization directives you intend to use. For example, if you want to use [`@requireScopes`](#requirescopes), the response may look something like this:
 
 ```json
 {
@@ -166,13 +164,13 @@ Specifically, the coprocessor should add an entry with a claims object. The key 
 
 Refer to [the coprocessor documentation](../customizations/coprocessor) for more information on [coprocessor request format](../customizations/coprocessor/#coprocessor-request-format) and [responding to coprocessor requests](../customizations/coprocessor/#responding-to-coprocessor-requests).
 
-#### Augmenting claims with coprocessors
+#### Augmenting JWT claims via coprocessor
 
-Your authorization policies may require information beyond what your JWT tokens' claims provide. For example, the claims may include user IDs, which you then use to look up the user roles. For situations like this, you can augment the claims from your JWT tokens with [coprocessors](../customizations/coprocessor).
+Your authorization policies may require information beyond what your JSON web tokens' claims provide. For example, the token's claims may include user IDs, which you then use to look up user roles. For situations like this, you can augment the claims from your JSON web tokens with [coprocessors](../customizations/coprocessor).
 
 <ExpansionPanel title="Click to expand">
 
-As with [adding claims](#adding-claims-with-coprocessor), a [`RouterService` coprocessor](../customizations/coprocessor#how-it-works) is appropriate for augmenting claims since the router calls it directly after receiving a client request. The router calls it after the JWT authentication plugin, so you can use a `RouterService` coprocessor to:
+As with [adding claims](#adding-claims-via-coprocessor), a [`RouterService` coprocessor](../customizations/coprocessor#how-it-works) is appropriate for augmenting claims since the router calls it directly after receiving a client request. The router calls it after the JWT authentication plugin, so you can use a `RouterService` coprocessor to:
 - receive the list of claims extracted from the JWT
 - use information like the `sub` (subject) claim to look up the user in an external database or service
 - insert additional data in the claims list
@@ -245,7 +243,7 @@ For more information, refer to [the coprocessor documentation](../customizations
 
 The `@authenticated` directive marks specific fields and types as requiring authentication.
 It works by checking for the `apollo_authentication::JWT::claims` key in a request's context.
-If the request is authenticated, the router executes the query in its entirety.
+If the key exists, it means the request is authenticated and the router executes the query in its entirety.
 
 If the request is unauthenticated, the router removes `@authenticated` fields before planning the query and only executes the parts of the query that don't require authentication.
 If every field in a particular subgraph's query is marked as requiring authentication, this can eliminate entire subgraph requests, thereby increasing router efficiency.
@@ -467,7 +465,7 @@ type Post {
 ```
 
 Depending on a request's attached scopes, the router executes the following query differently.
-If the request includes only the `read:others` scope, then the router will execute the following filtered query:
+If the request includes only the `read:others` scope, then the router executes the following filtered query:
 
 <CodeColumns>
 
@@ -538,7 +536,7 @@ type Query {
 
 type Product @key(fields: "id") {
   id: ID! @authenticated
-  username: String!
+  name: String!
   price: Int @authenticated
 }
 ```
@@ -559,7 +557,7 @@ An unauthenticated request would successfully execute this query:
 ```graphql
 query {
   product {
-    username
+    name
     inStock
   }
 }
