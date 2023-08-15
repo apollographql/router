@@ -63,7 +63,6 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | ingress.hosts[0].paths[0].path | string | `"/"` |  |
 | ingress.hosts[0].paths[0].pathType | string | `"ImplementationSpecific"` |  |
 | ingress.tls | list | `[]` |  |
-| lifecycle | object | `{}` |  |
 | managedFederation.apiKey | string | `nil` | If using managed federation, the graph API key to identify router to Studio |
 | managedFederation.existingSecret | string | `nil` | If using managed federation, use existing Secret which stores the graph API key instead of creating a new one. If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as name |
 | managedFederation.graphRef | string | `""` | If using managed federation, the variant of which graph to use |
