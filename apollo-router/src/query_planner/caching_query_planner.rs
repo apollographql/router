@@ -156,7 +156,7 @@ where
                     Err(error) => {
                         count += 1;
                         let e = Arc::new(error);
-                        entry.insert(Err(e.clone())).await;
+                        entry.send(Err(e.clone())).await;
                     }
                 }
             }
@@ -293,7 +293,7 @@ where
                             }
                             Err(error) => {
                                 let e = Arc::new(error);
-                                entry.insert(Err(e.clone())).await;
+                                entry.send(Err(e.clone())).await;
                                 Err(CacheResolverError::RetrievalError(e))
                             }
                         }
