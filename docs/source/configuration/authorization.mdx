@@ -53,11 +53,11 @@ classDef padding padding-left:1em, padding-right:1em
 The Apollo Router provides fine-grained access controls at your graph's edge via **authorization directives**. Using the `@authenticated` and `@requiresScopes` directives, you can define access to specific fields and types across your supergraph:
 
 - The [`@authenticated`](#authenticated) directive works in a binary way: authenticated requests can access the specified field or type, and unauthenticated requests can't.
-- The [`@requiresScopes`](#requiresscopes) directive allows granular access control through the scopes you define.
+- The [`@requiresScopes`](#requiresscopes) directive allows granular access control through the scopes you define. For example, you may declare that querying a user's information requires a `read:user` scope, while mutating a user's information requires an `update:user` scope. You can require scopes on individual fields.
 
 The authorization directives use a request's **claims** to evaluate which fields and types are authorized. Claims are the individual details of a request's authentication and scope. They might include details like the ID of the associated user and any authorization scopes assigned to that user.
 
-You define and use authorization directives on subgraph schemas, and GraphOS [composes](#composition-and-federation) them onto the supergraph schema.
+You define and use authorization directives on fields and types in subgraph schemas, and GraphOS [composes](#composition-and-federation) them onto the supergraph schema.
 The router then enforces these directives on all incoming requests.
 
 ## Prerequisites

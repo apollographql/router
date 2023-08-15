@@ -35,11 +35,11 @@ flowchart TB;
   end;
   subgraphs[[Subgraphs]];
   client --"<b>1.</b> Sends request"--> routerService;
-  routerService -."<b>2.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;
+  routerService <-."<b>2.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;
   routerService --"<b>3</b>"--> supergraphService;
   supergraphService --"<b>4</b>"--> executionService;
   executionService --"<b>5</b>"--> subgraphService;
-  subgraphService -."<b>6.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;
+  subgraphService <-."<b>6.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;
   subgraphService -- "<b>7</b>"--> subgraphs;
 
   class client,subgraphs,coprocessing secondary;
@@ -906,53 +906,8 @@ Subsequent response chunks omit the `headers` and `statusCode` fields:
 
 ## Adding authorization claims via coprocessor
 
-An alternative to JWT authentiation is adding claims via a [`RouterService` coprocessor](#how-it-works). since it hooks into the request life cycle directly after the router has received a client request.
+To use the [authorization directives](../configuration/authorization#authorization-directives), a request needs to include **claims**—the details of its authentication and scope. The most straightforward way to add claims is with [JWT authentication](../configuration/./authn-jwt). You can also add claims with a [`RouterService` coprocessor](#how-it-works) since it hooks into the request lifecycle directly after the router has received a client request.
 
-```mermaid
-flowchart TB;
-    client(Client);
-    router:::alignLeft
-    subgraph router["Apollo Router"]
-        direction LR
-        httpServer("HTTP server")
-        subgraph routerService["<code>RouterService</code>"]
-            routerPlugins[[Router plugins]];
-        end
-        subgraph supergraphService["<code>SupergraphService</code>"]
-            supergraphPlugins[[Supergraph plugins]];
-        end     
-        subgraph executionService["<code>ExecutionService</code>"]
-            executionPlugins[[Execution plugins]];
-        end
-
-        subgraph subgraphService["<code>SubgraphServices</code>"]
-            subgraph service1["Subgraph Service A"]
-            subgraphPlugins1[[Subgraph plugins]];
-            end
-            subgraph service2["Subgraph Service B"]
-            subgraphPlugins2[[Subgraph plugins]];
-            end            
-        end
-    end;
-subgraphA[Subgraph A];
-subgraphB[Subgraph B];
-
-coprocessor[Coprocessor]
-routerService <--> coprocessor
-
-client --> httpServer;
-httpServer --> routerService;
-routerService --> supergraphService
-supergraphService --> executionService;
-executionService --> service1;
-executionService --> service2;
-service1 --> subgraphA;
-service2 --> subgraphB;
-
-classDef alignLeft padding-right:25em;
-class coprocessor secondary;
-```
-To use the [authorization directives](../configuration/authorization#authorization-directives), you need to add claims to a `RouterRequest`'s [`context`](#context). 
 The router configuration needs to include at least these settings:
 
 ```yaml title="router.yaml"
