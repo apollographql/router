@@ -7,7 +7,7 @@ license = "Elastic-2.0"
 publish = false
 
 [dependencies]
-anyhow = "1.0.73"
+anyhow = "1.0.74"
 clap = { version = "4.3.21", features = ["derive"] }
 cargo-scaffold = { version = "0.8.10", default-features = false }
 regex = "1"
