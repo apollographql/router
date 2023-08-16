@@ -373,6 +373,36 @@ impl IntoGraphQLErrors for QueryPlannerError {
     }
 }
 
+impl QueryPlannerError {
+    pub fn stats_report_key(&self) -> Option<&str> {
+        match self {
+            QueryPlannerError::PlanningErrors(PlanErrors {
+                usage_reporting, ..
+            }) => Some(usage_reporting.stats_report_key.as_str()),
+            QueryPlannerError::EmptyPlan(usage_reporting) => {
+                Some(usage_reporting.stats_report_key.as_str())
+            }
+            QueryPlannerError::CacheResolverError(retrieval_error) => {
+                if let CacheResolverError::RetrievalError(e) = retrieval_error.as_ref() {
+                    e.stats_report_key()
+                } else {
+                    None
+                }
+            }
+            QueryPlannerError::SpecError(e) => Some(e.get_error_key()),
+            // TODO[igni]: check with the team and update the code path for LimitExceeded
+            QueryPlannerError::LimitExceeded(_) => todo!(),
+            // These paths cannot be translated to a stats_report_key:
+            // QueryPlannerError::Introspection(_),
+            // QueryPlannerError::SchemaValidationErrors(_),
+            // QueryPlannerError::JoinError(_),
+            // QueryPlannerError::UnhandledPlannerResult,
+            // QueryPlannerError::RouterBridgeError(_),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Error, Serialize, Deserialize)]
 /// Container for planner setup errors
 pub(crate) struct PlannerErrors(Arc<Vec<PlannerError>>);

@@ -9,6 +9,7 @@ use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
+use sha1;
 use sha2::Digest;
 use sha2::Sha256;
 use tokio::sync::Mutex;
@@ -262,6 +263,12 @@ where
                                     stats_report_key: error.get_error_key().to_string(),
                                     referenced_fields_by_type: HashMap::new(),
                                 });
+
+                            let _ = request.context.insert(
+                                "studio_operation_id",
+                                stats_report_key_hash(error.get_error_key()),
+                            );
+
                             let e = Arc::new(QueryPlannerError::SpecError(error));
                             entry.insert(Err(e.clone())).await;
                             return Err(CacheResolverError::RetrievalError(e));
@@ -278,8 +285,14 @@ where
                                 if let Some(content) = &content {
                                     entry.insert(Ok(content.clone())).await;
                                 }
-
                                 if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
+                                    context.insert(
+                                        "studio_operation_id",
+                                        stats_report_key_hash(
+                                            plan.usage_reporting.stats_report_key.as_str(),
+                                        ),
+                                    );
+
                                     context
                                         .private_entries
                                         .lock()
@@ -354,6 +367,13 @@ where
             }
         })
     }
+}
+
+fn stats_report_key_hash(stats_report_key: &str) -> String {
+    let mut hasher = sha1::Sha1::new();
+    hasher.update(stats_report_key.as_bytes());
+    let result = hasher.finalize();
+    hex::encode(result)
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
