@@ -27,7 +27,7 @@ use tracing_futures::Instrument;
 
 use super::execution::QueryPlan;
 use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
-use super::layers::content_negociation;
+use super::layers::content_negotiation;
 use super::layers::query_analysis::Compiler;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
@@ -737,7 +737,7 @@ impl SupergraphCreator {
             .layer(shaping.supergraph_service_internal(supergraph_service));
 
         ServiceBuilder::new()
-            .layer(content_negociation::SupergraphLayer::default())
+            .layer(content_negotiation::SupergraphLayer::default())
             .service(
                 self.plugins
                     .iter()
@@ -804,7 +804,7 @@ mod tests {
    type Subscription @join__type(graph: USER) {
         userWasCreated: User
    }
-   
+
    type User
    @join__owner(graph: USER)
    @join__type(graph: ORGA, key: "id")

@@ -29,7 +29,7 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::layers::apq::APQLayer;
-use super::layers::content_negociation;
+use super::layers::content_negotiation;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::layers::static_page::StaticPageLayer;
 use super::new_service::ServiceFactory;
@@ -52,7 +52,7 @@ use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::QueryPlanResult;
 use crate::query_planner::WarmUpCachingQueryKey;
 use crate::router_factory::RouterFactory;
-use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
+use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::persisted_queries::PersistedQueryManifestPoller;
 use crate::services::RouterRequest;
@@ -379,7 +379,7 @@ impl RouterService {
                 .unwrap_or_else(|| {
                     Err((
                         StatusCode::BAD_REQUEST,
-                        "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.", 
+                        "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.",
                         "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.".to_string()
                     ))
                 })
@@ -525,7 +525,7 @@ impl RouterCreator {
         Error = BoxError,
         Future = BoxFuture<'static, router::ServiceResult>,
     > + Send {
-        let router_service = content_negociation::RouterLayer::default().layer(RouterService::new(
+        let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
             self.supergraph_creator.clone(),
             self.apq_layer.clone(),
             self.persisted_query_layer.clone(),
