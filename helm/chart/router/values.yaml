@@ -101,6 +101,14 @@ initContainers: []
 #   label_two_name: "label_two_value"
 extraLabels: {}
 
+lifecycle: {}
+#  preStop:
+#    exec:
+#      command:
+#        - /bin/bash
+#        - -c
+#        - sleep 10
+
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
