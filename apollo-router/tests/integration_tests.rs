@@ -1096,6 +1096,119 @@ async fn include_if_works() {
     insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn query_operation_id() {
+    let config = serde_json::json!({
+        "supergraph": {
+            "introspection": true
+        },
+    });
+
+    let expected_studio_operation_id = "d1554552698157b05c2a462827fb4367a4548ee5";
+
+    let request: router::Request = supergraph::Request::fake_builder()
+        .query(
+            r#"query IgnitionMeQuery {
+            me {
+              id
+            }
+          }"#,
+        )
+        .method(Method::POST)
+        .build()
+        .expect("expecting valid request")
+        .try_into()
+        .unwrap();
+
+    let (router, _) = setup_router_and_registry(config).await;
+
+    let response = http_query_with_router(router.clone(), request).await;
+    assert_eq!(
+        expected_studio_operation_id,
+        response
+            .context
+            .get::<_, String>("studio_operation_id".to_string())
+            .unwrap()
+            .unwrap()
+            .as_str()
+    );
+
+    // let's do it again to make sure a cached query plan still yields a stats report key hash
+    let request: router::Request = supergraph::Request::fake_builder()
+        .query(
+            r#"query IgnitionMeQuery {
+                me {
+                    id
+                }
+            }"#,
+        )
+        .method(Method::POST)
+        .build()
+        .expect("expecting valid request")
+        .try_into()
+        .unwrap();
+
+    let response = http_query_with_router(router.clone(), request).await;
+    assert_eq!(
+        expected_studio_operation_id,
+        response
+            .context
+            .get::<_, String>("studio_operation_id".to_string())
+            .unwrap()
+            .unwrap()
+            .as_str()
+    );
+
+    // let's test failures now
+    let parse_failure: router::Request = supergraph::Request::fake_builder()
+        .query(r#"that's not even a query!"#)
+        .method(Method::POST)
+        .build()
+        .expect("expecting valid request")
+        .try_into()
+        .unwrap();
+
+    let response = http_query_with_router(router.clone(), parse_failure).await;
+    assert_eq!(
+        // "## GraphQLParseFailure\n"
+        "1f08e40c1ec077e7376b0f0945ba1bee09ba753b",
+        response
+            .context
+            .get::<_, String>("studio_operation_id".to_string())
+            .unwrap()
+            .unwrap()
+            .as_str()
+    );
+
+    let validation_error: router::Request = supergraph::Request::fake_builder()
+        .query(
+            r#"query Me {
+                me {
+                    id
+                }
+            }"#,
+        )
+        .operation_name("NotMe")
+        .method(Method::POST)
+        .build()
+        .expect("expecting valid request")
+        .try_into()
+        .unwrap();
+
+    let response = http_query_with_router(router, validation_error).await;
+    dbg!(response.response.body());
+    // "## GraphQLValidationFailure\n"
+    assert_eq!(
+        "15b0987fd8bb540379db0ecb6e5ab75f9f385b1d",
+        response
+            .context
+            .get::<_, String>("studio_operation_id".to_string())
+            .unwrap()
+            .unwrap()
+            .as_str()
+    );
+}
+
 async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {
     reqwest::Client::new()
         .post("https://federation-demo-gateway.fly.dev/")
