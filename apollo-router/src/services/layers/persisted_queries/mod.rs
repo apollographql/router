@@ -71,8 +71,8 @@ impl PersistedQueryLayer {
             } else if let Some(log_unknown) = manifest_poller.never_allows_freeform_graphql() {
                 // If we don't have an ID and we require an ID, return an error immediately,
                 if log_unknown {
-                    if let Some(operation_body) = request.supergraph_request.body().query.clone() {
-                        log_unknown_operation(&operation_body);
+                    if let Some(operation_body) = request.supergraph_request.body().query.as_ref() {
+                        log_unknown_operation(operation_body);
                     }
                 }
                 Err(supergraph_err_pq_id_required(request))
@@ -153,7 +153,7 @@ impl PersistedQueryLayer {
             Some(mp) => mp,
         };
 
-        let operation_body = match request.supergraph_request.body().query.clone() {
+        let operation_body = match request.supergraph_request.body().query.as_ref() {
             // if the request doesn't have a `query` document, continue with normal execution, which
             // will result in the normal no-operation error.
             None => return Ok(request),
@@ -215,16 +215,16 @@ impl PersistedQueryLayer {
             return Ok(request);
         }
 
-        match manifest_poller.action_for_freeform_graphql(&operation_body, db.ast(file_id)) {
+        match manifest_poller.action_for_freeform_graphql(operation_body, db.ast(file_id)) {
             FreeformGraphQLAction::Allow => Ok(request),
             FreeformGraphQLAction::Deny => Err(supergraph_err_operation_not_in_safelist(request)),
             // Note that this might even include complaining about an operation that came via APQs.
             FreeformGraphQLAction::AllowAndLog => {
-                log_unknown_operation(&operation_body);
+                log_unknown_operation(operation_body);
                 Ok(request)
             }
             FreeformGraphQLAction::DenyAndLog => {
-                log_unknown_operation(&operation_body);
+                log_unknown_operation(operation_body);
                 Err(supergraph_err_operation_not_in_safelist(request))
             }
         }
