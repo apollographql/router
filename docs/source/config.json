@@ -1,5 +1,5 @@
 {
-  "title": "Router",
+  "title": "Router (self-hosted)",
   "algoliaFilters": [
     "docset:router"
   ],
@@ -41,31 +41,59 @@
           [
             "enterprise"
           ]
+        ],        
+        "Subgraph Authentication": "/configuration/authn-subgraph",
+        "Operation limits": [
+          "/configuration/operation-limits",
+          [
+            "enterprise"
+          ]
         ],
         "Privacy and data collection": "/privacy"
       }
     },
-    "Monitoring & Metrics": {
-      "Health check": "/configuration/health-checks",
-      "Apollo Studio reporting": "/configuration/apollo-telemetry",
-      "Collecting metrics": "/configuration/metrics",
-      "Tracing": "/configuration/tracing"
+    "Executing Operations": {
+      "Build and run queries": "/executing-operations/build-run-queries",
+      "@defer support": "/executing-operations/defer-support",
+      "Request format": "/executing-operations/requests",
+      "GraphQL Subscriptions": {
+        "Subscriptions setup": [
+          "/executing-operations/subscription-support",
+          [
+            "enterprise"
+          ]
+        ],
+        "Subgraph protocol: HTTP callback": [
+          "/executing-operations/subscription-callback-protocol",
+          [
+            "enterprise",
+            "preview"
+          ]
+        ],
+        "Client protocol: HTTP multipart": [
+          "/executing-operations/subscription-multipart-protocol",
+          [
+            "enterprise"
+          ]
+        ]
+      }
+    },
+    "Metrics & Monitoring": {
+      "GraphOS reporting": "/configuration/apollo-telemetry",
+      "OpenTelemetry tracing": "/configuration/tracing",
+      "Configuring metrics collectors": "/configuration/metrics",
+      "Client awareness": "/managed-federation/client-awareness",
+      "Health check": "/configuration/health-checks"
     },
     "Containerization": {
       "Overview": "/containerization/overview",
       "Docker": "/containerization/docker",
       "Kubernetes": "/containerization/kubernetes"
     },
-    "Executing Operations": {
-      "Build and run queries": "/executing-operations/build-run-queries",
-      "@defer support": "/executing-operations/defer-support",
-      "Request format": "/executing-operations/requests"
-    },
     "Managed Federation": {
-      "Overview": "/managed-federation/overview",
-      "Setup": "/managed-federation/setup",
-      "Client awareness": "/managed-federation/client-awareness",
-      "Studio features": "https://www.apollographql.com/docs/studio/federated-graphs/"
+      "Overview": "https://www.apollographql.com/docs/federation/managed-federation/overview",
+      "Setup": "https://www.apollographql.com/docs/federation/managed-federation/setup",
+      "GraphOS Studio features": "https://www.apollographql.com/docs/graphos/graphs/federated-graphs"
     },
     "Customizations": {
       "Overview": "/customizations/overview",
@@ -76,7 +104,9 @@
         [
           "enterprise"
         ]
-      ]
+      ],
+      "Native Rust plugins": "/customizations/native",
+      "Custom router binary": "/customizations/custom-binary"
     },
     "Subgraph Support": {
       "Subgraph-compatible libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",

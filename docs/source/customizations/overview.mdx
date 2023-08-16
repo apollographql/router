@@ -1,5 +1,5 @@
 ---
-title: Customizations for the Apollo Router
+title: Apollo Router customizations
 description: Extend your router with custom functionality
 ---
 
@@ -10,17 +10,272 @@ You can create **customizations** for the Apollo Router to add functionality tha
 The Apollo Router supports the following customization types:
 
 - [**Rhai scripts**](./rhai/)
-    - The [Rhai scripting language](https://rhai.rs/book/) enables you to add functionality directly to your stock router binary by hooking into different phases of the router's request lifecycle.
+    - The [Rhai scripting language](https://rhai.rs/book/) lets you add functionality directly to your stock router binary by hooking into different phases of the router's request lifecycle.
 - [**External co-processing**](./coprocessor/) ([Enterprise feature](../enterprise-features/))
     - If your organization has a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/), you can write custom request-handling code in any language. This code can run in the same container as your router or separately.
     - The router calls your custom code via HTTP, passing it the details of each incoming client request.
 
-**Use [Rhai scripts](./rhai/) if they support your use case.** External co-processing is most helpful if your customization needs to do any of the following (which Rhai scripts _don't_ support):
+Because [Rhai scripts](./rhai/) are easier to deploy, we recommend using them if they support your use case. Use external co-processing if your customization needs to do any of the following (which Rhai scripts _don't_ support):
 
 - Read or write to disk
 - Make network requests
 - Use libraries from a particular language or framework
 
----
+## The request lifecycle
 
-Next, see the documentation for your preferred [customization type](#customization-types).
+Customizations intervene at specific points of the request lifecycle, depending on the task you want to perform. Each point is represented by a specific service with its own request and response objects.
+
+```mermaid
+flowchart RL
+    subgraph client["Client"]
+    end
+
+    subgraph router["Apollo Router"]
+        direction LR
+        routerService("Router <br/> Service")
+        supergraphService("Supergraph <br/> Service")
+        executionService("Execution <br/> Service")
+        subgraphService("Subgraph <br/> Service")
+        routerService -->|request| supergraphService -->|request| executionService -->|request| subgraphService
+        subgraphService -->|response| executionService -->|response| supergraphService -->|response| routerService
+
+    end
+
+    subgraph infra["Your infrastructure"]
+      direction TB
+      api1("subgraph A");
+      api2("subgraph B");
+      api3("subgraph C");
+      api1 --- api2 --- api3 
+
+    end
+
+client -->|request| router -->|request| infra
+
+infra -->|response| router -->|response| client
+```
+
+Each service can have a set of plugins. For requests, the router executes plugins _before_ the service.
+
+```mermaid
+flowchart LR
+  subgraph Service
+    Plugin1["Plugin 1"] -->|request| Plugin2["Plugin 2"] -->|request| coreService["Core <br/>service"]
+    coreService
+  end
+
+Client -->|request| Plugin1
+coreService -->|request| NextService["Next service"]
+```
+
+For responses, the router executes the plugins _after_ the service.
+
+```mermaid
+flowchart RL
+  subgraph Service
+    coreService["Core <br/>service"] -->|response| Plugin2["Plugin 2"]  -->|response| Plugin1["Plugin 1"]   
+  end
+
+Plugin1["Plugin 1"] -->|response| Client
+NextService["Next service"] -->|response| coreService
+```
+
+Each request and response object contains a `Context` object, which is carried throughout the entire process. Each request's `Context` object is unique. You can use it to store plugin-specific information between the request and response or to communicate between different hook points. (A plugin can be called at multiple steps of the request lifecycle.)
+
+The following flowcharts diagram the entire request lifecycle.
+The first details the path of a request from a client, through the parts of the Apollo Router, all the way to your subgraphs.
+The second details the path of a response from your subgraphs back to the client.
+
+### Request path
+
+```mermaid
+flowchart TB;
+    client(Client);
+    subgraph router["Apollo Router"]
+        direction LR
+        httpServer("HTTP server")
+        subgraph routerService["Router Service"]
+            routerPlugins[[Router plugins]];
+        end
+        subgraph " "
+            subgraph supergraphService["Supergraph Service"]
+                supergraphPlugins[[Supergraph plugins]];
+            end
+            queryPlanner("Query Planner");
+        end
+        
+        
+        subgraph executionService["Execution Service"]
+            executionPlugins[[Execution plugins]];
+        end
+
+        subgraph subgraphService["Subgraph Services"]
+            subgraph service1["Subgraph Service A"]
+            subgraphPlugins1[[Subgraph plugins]];
+            end
+            subgraph service2["Subgraph Service B"]
+            subgraphPlugins2[[Subgraph plugins]];
+            end            
+        end
+    end;
+subgraphA[Subgraph A];
+subgraphB[Subgraph B];
+
+client --"1. HTTP request"--> httpServer;
+httpServer --"2. <code>RouterRequest</code>"--> routerService;
+routerService --"3. <code>SupergraphRequest</code>"--> supergraphService
+supergraphService --"4. Query"--> queryPlanner;
+queryPlanner --"5. Query plan"--> supergraphService;
+supergraphService --"6. <code>ExecutionRequest</code>"--> executionService;
+
+executionService --"7a. <code>SubgraphRequest</code>"--> service1;
+executionService --"7b. <code>SubgraphRequest</code>"--> service2;
+
+service1 --"8a. HTTP request"--> subgraphA;
+service2 --"8b. HTTP request"--> subgraphB;
+```
+
+1. The router receives a client request at an HTTP server. 
+2. The HTTP server transforms the HTTP request into a `RouterRequest` containing HTTP headers and the request body as a stream of byte arrays.
+3. The router service receives the `RouterRequest`. It handles Automatic Persisted Queries (APQ), parses the GraphQL request from JSON, and calls the supergraph service with the resulting `SupergraphRequest`.
+4. The supergraph service calls the query planner with the GraphQL query from the `SupergraphRequest`.
+5. The query planner returns a query plan for most efficiently executing the query.
+6. The supergraph service calls the execution service with an `ExecutionRequest`, made up of `SupergraphRequest` and the query plan.
+7. For each fetch node of the query plan, the execution service creates a `SubgraphRequest` and then calls the respective subgraph service.
+8. Each subgraph has its own subgraph service, and each service can have its own subgraph plugin configuration. The subgraph service transforms the `SubgraphRequest` into an HTTP request to its subgraph. The `SubgraphRequest` contains:
+    - the (read-only) `SupergraphRequest`
+    - HTTP headers
+    - the subgraph request's operation type (query, mutation, or subscription)
+    - a GraphQL request object as the request body
+
+Once your subgraphs provide a response, the response follows the path outlined below.
+
+### Response path
+
+```mermaid
+flowchart BT;
+    client(Client);
+    subgraph " "
+        direction LR
+        httpServer("HTTP server")
+        subgraph routerService["Router Service"]
+            routerPlugins[[Router plugins]];
+        end
+        subgraph " "
+            subgraph supergraphService["Supergraph Service"]
+                supergraphPlugins[[Supergraph plugins]];
+            end
+            queryPlanner("QueryPlanner");
+        end
+        
+        
+        subgraph executionService["Execution Service"]
+            executionPlugins[[Execution plugins]];
+        end
+
+        subgraph subgraphService["Subgraph Services"]
+            subgraph service1["Subgraph Service A"]
+            subgraphPlugins1[[Subgraph plugins]];
+            end
+            subgraph service2["Subgraph Service B"]
+            subgraphPlugins2[[Subgraph plugins]];
+            end            
+        end
+    end;
+subgraph1[Subgraph A];
+subgraph2[Subgraph B];
+
+subgraph1 -- "9a. HTTP response"--> service1;
+subgraph2 -- "9b. HTTP response"--> service2;
+service1 --"10a. <code>SubgraphResponse</code>"--> executionService;
+service2 --"10b. <code>SubgraphResponse</code>"--> executionService;
+executionService --"11. <code>ExecutionResponse</code>"--> supergraphService;
+supergraphService --"12. <code>SupergraphResponse</code>"--> routerService;
+routerService --"13. <code>RouterResponse</code>"--> httpServer;
+httpServer --"14. HTTP response" --> client
+```
+
+9. Each subgraph provides an HTTP response to the subgraph services.
+10. Each subgraph service creates a `SubgraphResponse` containing the HTTP headers and a GraphQL response.
+11. Once the execution service has received all subgraph responses, it formats the GraphQL responses—removing unneeded data and propagating nulls—before sending it back to the supergraph plugin as the `ExecutionResponse`.
+12. The `SupergraphResponse` has the same content as the `ExecutionResponse`. It contains headers and a stream of GraphQL responses. That stream only contains one element for most queries—it can contain more if the query uses the `@defer` directive or subscriptions.
+13. The router service receives the `SupergraphResponse` and serializes the GraphQL responses to JSON.
+14. The HTTP server sends the JSON in an HTTP response to the client.
+
+### Request and response nuances
+
+For simplicity's sake, the preceding diagrams show the request and response sides separately and sequentially. In reality, some requests and responses may happen simultaneously and repeatedly.
+
+For example, `SubgraphRequest`s can happen both in parallel _and_ in sequence: one subgraph's response may be necessary for another's `SubgraphRequest`. (The query planner decides which requests can happen in parallel vs. which need to happen in sequence.)
+
+##### Requests run in parallel 
+
+```mermaid
+flowchart LR;
+    subgraph parallel[" "]
+        subgraph executionService["Execution Service"]
+            executionPlugins[[Execution plugins]];
+        end
+
+        subgraph subgraphService["Subgraph Services"]
+            subgraph service1["Subgraph Service A"]
+            subgraphPlugins1[[Subgraph plugins]];
+            end
+            subgraph service2["Subgraph Service B"]
+            subgraphPlugins2[[Subgraph plugins]];
+            end            
+        end
+
+
+        executionService --"1A. <code>SubgraphRequest</code>"--> service1;
+        executionService --"1B. <code>SubgraphRequest</code>"--> service2;
+        service1 --"4A. <code>SubgraphResponse</code>"--> executionService;
+        service2 --"4B. <code>SubgraphResponse</code>"--> executionService;
+    end
+    subgraphA[Subgraph A];
+    subgraphB[Subgraph B];
+
+    service1 --"2A. HTTP request"--> subgraphA;
+    service2 --"2B. HTTP request"--> subgraphB;
+    subgraphA --"3A. HTTP response"--> service1;
+    subgraphB --"3B. HTTP response"--> service2;
+```
+
+##### Requests run sequentially
+
+```mermaid
+flowchart LR;
+    subgraph sequentially[" "]
+        subgraph executionService["Execution Service"]
+            executionPlugins[[Execution plugins]];
+        end
+
+        subgraph subgraphService["Subgraph Services"]
+            subgraph service1["Subgraph Service A"]
+            subgraphPlugins1[[Subgraph plugins]];
+            end
+            subgraph service2["Subgraph Service B"]
+            subgraphPlugins2[[Subgraph plugins]];
+            end            
+        end
+
+
+        executionService --"1. <code>SubgraphRequest</code>"--> service1;
+        service1 --"4. <code>SubgraphResponse</code>"--> executionService;
+        executionService --"5. <code>SubgraphRequest</code>"--> service2;
+        service2 --"8. <code>SubgraphResponse</code>"--> executionService;
+    end
+    subgraphA[Subgraph A];
+    subgraphB[Subgraph B];
+
+    service1 --"2. HTTP request"--> subgraphA;
+    service2 --"6. HTTP request"--> subgraphB;
+    subgraphA --"3. HTTP response"--> service1;
+    subgraphB --"7. HTTP response"--> service2;
+```
+
+Additionally, some requests and responses may happen multiple times for the same operation. With subscriptions, for example, a subgraph sends a new `SubgraphResponse` whenever data is updated. Each response object travels through all the services in the response path and interacts with any customizations you've created.
+
+## Customization creation
+
+To learn how to hook in to the various lifecycle stages, including examples customizations, refer to the [Rhai scripts](./rhai/) and [external coprocessing](./coprocessor/) docs.

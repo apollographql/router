@@ -1,0 +1,5 @@
+---
+source: apollo-router/src/query_planner/bridge_query_planner.rs
+expression: "subselections_keys(\"query Q { me { username name { first last }}}\").await"
+---
+

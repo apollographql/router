@@ -1,15 +1,36 @@
-FROM debian:bullseye-slim
-
+FROM debian:bullseye-slim AS downloader
 ARG ROUTER_RELEASE=latest
-ARG DEBUG_IMAGE=false
-
-WORKDIR /dist
+ARG ARTIFACT_URL=
 
 # Install curl
 RUN \
   apt-get update -y \
   && apt-get install -y \
     curl
+
+WORKDIR /dist
+
+# Run the Router downloader which puts Router into current working directory
+RUN if [ -z "${ARTIFACT_URL}"]; then \
+    curl -sSL https://router.apollo.dev/download/nix/${ROUTER_RELEASE}/ | sh; \
+  else \
+    cd /; \
+    curl -sSL -o - ${ARTIFACT_URL} | tar -xzf -; \
+    cd -; \
+  fi
+
+FROM debian:bullseye-slim AS distro
+ARG DEBUG_IMAGE=false
+
+WORKDIR /dist
+
+COPY --from=downloader /dist/router /dist
+
+# Update apt and install ca-certificates
+RUN \
+  apt-get update -y \
+  && apt-get install -y \
+    ca-certificates
 
 # If debug image, install heaptrack and make a data directory
 RUN \
@@ -20,9 +41,6 @@ RUN \
 
 # Clean up apt lists
 RUN rm -rf /var/lib/apt/lists/*
-
-# Run the Router downloader which puts Router into current working directory
-RUN curl -sSL https://router.apollo.dev/download/nix/${ROUTER_RELEASE}/ | sh
 
 # Make directories for config and schema
 RUN mkdir config schema

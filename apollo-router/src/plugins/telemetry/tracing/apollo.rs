@@ -1,5 +1,4 @@
 //! Tracing configuration for apollo telemetry.
-// With regards to ELv2 licensing, this entire file is license key functionality
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use serde::Serialize;
@@ -23,6 +22,7 @@ impl TracingConfigurator for Config {
                 buffer_size,
                 field_level_instrumentation_sampler,
                 batch_processor,
+                errors,
                 ..
             } => {
                 tracing::debug!("configuring exporter to Studio");
@@ -35,6 +35,7 @@ impl TracingConfigurator for Config {
                     .buffer_size(*buffer_size)
                     .field_execution_sampler(field_level_instrumentation_sampler.clone())
                     .batch_config(batch_processor.clone())
+                    .errors_configuration(errors.clone())
                     .build()?;
                 builder.with_span_processor(
                     BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)

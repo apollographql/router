@@ -50,15 +50,32 @@ traffic_shaping:
 
 This rate limiting applies to all requests, there is no filtering per IP or other criteria.
 
-### Timeout
+### Timeouts
 
-The Apollo Router applies a default limit of 30 seconds to receive the entire client request. That limit is configurable:
+The Apollo Router applies a default timeout of 30 seconds for all requests, including the following:
+
+- Requests the client makes to the router
+- Requests the router makes to subgraphs
+- Initial requests subgraphs make to the router for [subscription callbacks](https://www.apollographql.com/docs/react/data/subscriptions/#http)
+  - For subscriptions callbacks, the timeout only applies to the initial request to the router. Once the subscription has been established, the request duration can exceed the timeout.
+
+You can change the default timeout for client requests to the router like so:
 
 ```yaml title="router.yaml"
 traffic_shaping:
   router: 
-    timeout: 50s # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
+    timeout: 50s # If client requests to the router take more than 50 seconds, cancel the request (30 seconds by default)
 ```
+
+You can change the default timeout for all requests between the router and subgraphs like so:
+
+```yaml title="router.yaml"
+traffic_shaping:
+  all: 
+    timeout: 50s # If subgraph requests take more than 50 seconds, cancel the request (30 seconds by default)
+```
+
+> **Note:** Since [deferred](/executing-operations/defer-support/#what-is-defer) fragments are separate requests, each fragment's request is individually subject to timeouts.
 
 ### Compression
 
@@ -126,7 +143,7 @@ To reduce the size of subgraph requests and the amount of work they might perfor
 
 ### Query deduplication
 
-If the Router is simultaneously processing similar queries, it may result in producing multiple identical requests to a subgraph.  With the `deduplicate_query` functionality enabled, the Router can avoid sending the same query multiple times and instead buffer one or more of the dependent queries pending the result of the first, and reuse that result to fulfill all of the initial queries.  This will reduce the overall traffic to the subgraph and the overall client request latency.  To meet the criteria for deduplication, the feature must be enabled and the subgraph queries must have have the same HTTP path, headers and body:
+If the Router is simultaneously processing similar queries, it may result in producing multiple identical requests to a subgraph.  With the `deduplicate_query` functionality enabled (by default, it is disabled), the Router can avoid sending the same query multiple times and instead buffer one or more of the dependent queries pending the result of the first, and reuse that result to fulfill all of the initial queries.  This will reduce the overall traffic to the subgraph and the overall client request latency.  To meet the criteria for deduplication, the feature must be enabled and the subgraph queries must have have the same HTTP path, headers and body:
 
 ```yaml title="router.yaml"
 traffic_shaping:

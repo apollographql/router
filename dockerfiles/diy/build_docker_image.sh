@@ -1,7 +1,10 @@
 #! /bin/sh
 
 ###
-# Build docker images from git commit hash or tag or from released version.
+# Build docker images from router repo outputs. Including:
+#  -  router release artifact
+#  -  arbitrary router artifact (-a)
+#  -  git commit hash/tag (-b)
 #
 # See the usage message for more help
 # docker_build_image.sh -h
@@ -18,18 +21,29 @@
 # Note: A debug image is an image where heaptrack is installed. The router
 #       is still a release build router, but all memory is being tracked
 #       under heaptrack. (https://github.com/KDE/heaptrack)
+# Note: When I first wrote this script, I was careful to make sure that various
+#       invalid combinations of parameters were detected. As the functionality
+#       has grown, I've become less careful. So, take care you don't do things
+#       like trying to build an amd64 image on an arm64 machine. It may work,
+#       but if it does you'll be waiting around for a long time for it to
+#       finish...
+#       I'm very happy to take argument verification patches...
+#
 ###
 
 ###
 # Terminate with a nice usage message
 ###
 usage () {
-   printf "Usage: build_docker_image.sh [-b [-r <repo>]] [-d] [<release>]\n"
+   printf "Usage: build_docker_image.sh [-b [-r <repo>]] [-d] [-m <arch>] [-n <name>] [<release>]\n"
+   printf "\t-a build docker image from a build artifact\n"
    printf "\t-b build docker image from the default repo, if not present build from a released version\n"
    printf "\t-d build debug image, router will run under control of heaptrack\n"
+   printf "\t-m override machine architecture. valid options are: amd64 or arm64 (DEFAULT: machine architecture)\n"
+   printf "\t-n override image name (DEFAULT: router)\n"
    printf "\t-r build docker image from a specified repo, only valid with -b flag\n"
    printf "\t<release> a valid release. If [-b] is specified, this is optional\n"
-   printf "\tExample 1: Building HEAD from the repo\n"
+   printf "\tExample 1: Building HEAD from the github repo\n"
    printf "\t\tbuild_docker_image.sh -b\n"
    printf "\tExample 2: Building HEAD from a different repo\n"
    printf "\t\tbuild_docker_image.sh -b -r /Users/anon/dev/router\n"
@@ -41,9 +55,13 @@ usage () {
    printf "\t\tbuild_docker_image.sh v0.9.1\n"
    printf "\tExample 6: Building a debug image with tag v0.9.1 from the released version\n"
    printf "\t\tbuild_docker_image.sh -d v0.9.1\n"
+   printf "\tExample 7: Building an amd64 image from a build artifact\n"
+   printf "\t\tbuild_docker_image.sh -m amd64 -a https://github.com/apollographql/router/releases/download/v1.22.0/router-v1.22.0-x86_64-unknown-linux-gnu.tar.gz v1.22.0\n"
+   printf "\tExample 8: Building an arm64 image from a build artifact with name my-test\n"
+   printf "\t\tbuild_docker_image.sh -m arm64 -n my-test -a https://github.com/apollographql/router/releases/download/v1.22.0/router-v1.22.0-aarch64-unknown-linux-gnu.tar.gz v1.22.0\n"
    exit 2
 }
-
+#
 ###
 # Terminate the build and clean up the build directory
 ###
@@ -65,11 +83,14 @@ BUILD_IMAGE=false
 DEBUG_IMAGE=false
 DEFAULT_REPO="https://github.com/apollographql/router.git"
 GIT_REPO=
+ARTIFACT_URL=
+IMAGE_NAME=router
+PLATFORM="linux/$(uname -m)"
 
 ###
 # Process Command Line
 ###
-if ! args=$(getopt bdhr: "$@"); then
+if ! args=$(getopt a:bdhm:n:r: "$@"); then
     usage
 fi
 
@@ -82,6 +103,10 @@ set -- $args
 # which is zero by definition.
 while :; do
        case "$1" in
+       -a)
+               ARTIFACT_URL="${2}"
+               shift; shift
+               ;;
        -b)
                BUILD_IMAGE=true
                shift
@@ -89,6 +114,14 @@ while :; do
        -d)
                DEBUG_IMAGE=true
                shift
+               ;;
+       -m)
+               PLATFORM="linux/${2}"
+               shift; shift
+               ;;
+       -n)
+               IMAGE_NAME="${2}"
+               shift; shift
                ;;
        -r)
                GIT_REPO="${2}"
@@ -132,6 +165,10 @@ fi
 
 echo "Building in: ${BUILD_DIR}"
 
+# Create a subshell to avoid having to cd back
+(
+cd "$(dirname "${0}")" || terminate "Couldn't cd to source location";
+
 # Copy in our dockerfiles, we'll need them later
 mkdir "${BUILD_DIR}/dockerfiles"
 cp dockerfiles/Dockerfile.repo "${BUILD_DIR}" || terminate "Couldn't copy dockerfiles to ${BUILD_DIR}"
@@ -143,30 +180,36 @@ cd "${BUILD_DIR}" || terminate "Couldn't cd to ${BUILD_DIR}";
 
 # If we are building, clone our repo
 if [ "${BUILD_IMAGE}" = true ]; then
-    git clone "${GIT_REPO}" > /dev/null 2>&1 || terminate "Couldn't clone repository"
+    git clone "${GIT_REPO}" router > /dev/null 2>&1 || terminate "Couldn't clone repository"
     cd router || terminate "Couldn't cd to router"
     # Either unset or blank (equivalent for our purposes)
     if [ -z "${ROUTER_VERSION}" ]; then
         ROUTER_VERSION=$(git rev-parse HEAD)
     fi
     # Let the user know what we are going to do
-    echo "Building image: ${ROUTER_VERSION}" from repo: ${GIT_REPO}""
+    echo "Building image: ${ROUTER_VERSION} from repo: ${GIT_REPO}"
     git checkout "${ROUTER_VERSION}" > /dev/null 2>&1 || terminate "Couldn't checkout ${ROUTER_VERSION}"
     # Build our docker images
-    docker build -q -t "router:${ROUTER_VERSION}" \
+    docker build --platform="${PLATFORM}" -q -t "${IMAGE_NAME}:${ROUTER_VERSION}" \
         --build-arg DEBUG_IMAGE="${DEBUG_IMAGE}" \
         --build-arg ROUTER_VERSION="${ROUTER_VERSION}" \
         --no-cache -f ../Dockerfile.repo . \
         || terminate "Couldn't build router image"
 else
     # Let the user know what we are going to do
-    echo "Building image: ${ROUTER_VERSION}" from released version""
-    docker build -q -t "router:${ROUTER_VERSION}" \
+    if [ -z "${ARTIFACT_URL}" ]; then
+        echo "Building image: ${ROUTER_VERSION} from release"
+    else
+        echo "Building image: ${ROUTER_VERSION} from artifact: ${ARTIFACT_URL}"
+    fi
+    docker build --platform="${PLATFORM}" -q -t "${IMAGE_NAME}:${ROUTER_VERSION}" \
         --build-arg DEBUG_IMAGE="${DEBUG_IMAGE}" \
         --build-arg ROUTER_RELEASE="${ROUTER_VERSION}" \
+        --build-arg ARTIFACT_URL="${ARTIFACT_URL}" \
         --no-cache -f Dockerfile.router . \
         || terminate "Couldn't build router image"
 fi
+) || terminate "sub-shell execution failed"
 
 echo "Image built!"
 

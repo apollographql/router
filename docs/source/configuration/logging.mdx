@@ -34,7 +34,32 @@ The default value is `info`.
 </tbody>
 </table>
 
-The router also accepts an `APOLLO_ROUTER_LOG` environment variable with the same possible values as the command-line argument. If you provide _both_, the command-line argument takes precedence.
+The router also accepts both `RUST_LOG` and `APOLLO_ROUTER_LOG` environment variables with the same possible values as the command-line argument. The precedence is as follows (top to bottom):
+ - RUST_LOG
+ - command-line argument
+ - APOLLO_ROUTER_LOG
+
+`RUST_LOG` is supported for advanced users with specific filtering requirements who may wish to see log messages from crates consumed by the router. Most users should use the command-line argument or APOLLO_ROUTER_LOG. Both of these options constrain log output to the router.
+
+To be clear:
+
+```
+RUST_LOG=apollo_router::debug
+APOLLO_ROUTER_LOG=debug
+--log=debug
+```
+
+are equivalent, as are:
+
+```
+RUST_LOG=hyper=debug,apollo_router::info,h2=trace
+APOLLO_ROUTER_LOG=hyper=debug,info,h2=trace
+--log=hyper=debug,info,h2=trace
+```
+
+In both examples, the actual filter used by the router is as defined in the RUST_LOG entry.
+
+For more information about specifying filters for more granular control over Apollo Router logging, see the [Env Logger documentation](https://docs.rs/env_logger/latest/env_logger/).
 
 ## Output formats
 
@@ -71,9 +96,13 @@ JSON-formatted logging provides compatibility with common searchable logging too
 > This is part of an experimental feature, it means any time until it's stabilized (without the prefix `experimental_`) we might change the configuration shape or adding/removing features.
 > If you want to give feedback or participate in that feature feel free to join [this discussion on GitHub](https://github.com/apollographql/router/discussions/1961).
 
-By default some of our logs containing sensitive data (like request body, response body, headers) are not displayed even if we are in the right log level.
-For example if you need to display raw responses from one of your subgraph it won't be displayed by default. To enable them you have to configure it thanks to the `contains_attributes` setting.
-Here is an example on how you can configure it:
+By default, the router _doesn't_ log certain values that might contain sensitive data, even if a sufficient log level is set:
+
+ - Request bodies
+ - Response bodies
+ - Headers 
+
+You can enable selective logging of these values via the `when_header` option:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -92,7 +121,3 @@ telemetry:
         match: ^Mozilla/5.0 (iPhone*
         headers: true
 ```
-
-## Advanced configuration
-
-For more granular control over Apollo Router logging, see the [Env Logger documentation](https://docs.rs/env_logger/latest/env_logger/).

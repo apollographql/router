@@ -6,12 +6,11 @@
 //! * Compression
 //! * Rate limiting
 //!
-// With regards to ELv2 licensing, this entire file is license key functionality
 mod cache;
 mod deduplication;
-mod rate;
+pub(crate) mod rate;
 mod retry;
-mod timeout;
+pub(crate) mod timeout;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
@@ -35,7 +34,7 @@ use self::cache::SubgraphCacheLayer;
 use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
 pub(crate) use self::rate::RateLimited;
-use self::retry::RetryPolicy;
+pub(crate) use self::retry::RetryPolicy;
 pub(crate) use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
 use crate::cache::redis::RedisCacheStorage;
@@ -418,6 +417,7 @@ impl TrafficShaping {
                     config.min_per_sec,
                     config.retry_percent,
                     config.retry_mutations,
+                    name.to_string(),
                 );
                 tower::retry::RetryLayer::new(retry_policy)
             });
@@ -450,11 +450,12 @@ impl TrafficShaping {
     }
 
     pub(crate) fn enable_subgraph_http2(&self, service_name: &str) -> bool {
-        self.config
-            .subgraphs
-            .get(service_name)
-            .and_then(|subgraph| subgraph.shaping.experimental_enable_http2)
-            .unwrap_or(true)
+        Self::merge_config(
+            self.config.all.as_ref(),
+            self.config.subgraphs.get(service_name),
+        )
+        .and_then(|config| config.shaping.experimental_enable_http2)
+        .unwrap_or(true)
     }
 }
 
@@ -476,13 +477,15 @@ mod test {
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
+    use crate::query_planner::BridgeQueryPlanner;
     use crate::router_factory::create_plugins;
+    use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::services::router;
     use crate::services::router_service::RouterCreator;
+    use crate::services::HasSchema;
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
-    use crate::spec::Schema;
     use crate::Configuration;
 
     static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
@@ -557,7 +560,6 @@ mod test {
         let schema = include_str!(
             "../../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql"
         );
-        let schema: Arc<Schema> = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
         let config: Configuration = serde_yaml::from_str(
             r#"
@@ -568,9 +570,13 @@ mod test {
         .unwrap();
 
         let config = Arc::new(config);
+        let planner = BridgeQueryPlanner::new(schema.to_string(), config.clone())
+            .await
+            .unwrap();
+        let schema = planner.schema();
 
-        let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone())
-            .with_configuration(config.clone());
+        let mut builder =
+            PluggableSupergraphServiceBuilder::new(planner).with_configuration(config.clone());
 
         for (name, plugin) in create_plugins(
             &config,
@@ -589,11 +595,16 @@ mod test {
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
+        let supergraph_creator = builder.build().await.expect("should build");
+
         RouterCreator::new(
-            Arc::new(builder.build().await.expect("should build")),
-            &Configuration::default(),
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
+            Arc::new(supergraph_creator),
+            Arc::new(Configuration::default()),
+            Default::default(),
         )
         .await
+        .unwrap()
         .make()
         .boxed()
     }
@@ -686,6 +697,72 @@ mod test {
             TrafficShaping::merge_config(None, config.subgraphs.get("products")).as_ref(),
             config.subgraphs.get("products")
         );
+    }
+
+    #[test]
+    fn test_merge_http2_all() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+          experimental_enable_http2: false
+        subgraphs: 
+          products:
+            experimental_enable_http2: true
+          reviews:
+            experimental_enable_http2: false
+        router:
+          timeout: 65s
+        "#,
+        )
+        .unwrap();
+
+        assert!(TrafficShaping::merge_config(
+            config.all.as_ref(),
+            config.subgraphs.get("products")
+        )
+        .unwrap()
+        .shaping
+        .experimental_enable_http2
+        .unwrap());
+        assert!(!TrafficShaping::merge_config(
+            config.all.as_ref(),
+            config.subgraphs.get("reviews")
+        )
+        .unwrap()
+        .shaping
+        .experimental_enable_http2
+        .unwrap());
+        assert!(!TrafficShaping::merge_config(config.all.as_ref(), None)
+            .unwrap()
+            .shaping
+            .experimental_enable_http2
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_enable_subgraph_http2() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+          experimental_enable_http2: false
+        subgraphs: 
+          products:
+            experimental_enable_http2: true
+          reviews:
+            experimental_enable_http2: false
+        router:
+          timeout: 65s
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert!(shaping_config.enable_subgraph_http2("products"));
+        assert!(!shaping_config.enable_subgraph_http2("reviews"));
+        assert!(!shaping_config.enable_subgraph_http2("this_doesnt_exist"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
