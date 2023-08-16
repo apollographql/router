@@ -1180,7 +1180,7 @@ async fn query_operation_id() {
             .as_str()
     );
 
-    let validation_error: router::Request = supergraph::Request::fake_builder()
+    let unknown_operation_name: router::Request = supergraph::Request::fake_builder()
         .query(
             r#"query Me {
                 me {
@@ -1195,8 +1195,34 @@ async fn query_operation_id() {
         .try_into()
         .unwrap();
 
+    let response = http_query_with_router(router.clone(), unknown_operation_name).await;
+    // "## GraphQLUnknownOperationName\n"
+    assert_eq!(
+        "823c4a30458fd62a49d2393a2777ddab1a9d43d3",
+        response
+            .context
+            .get::<_, String>("studio_operation_id".to_string())
+            .unwrap()
+            .unwrap()
+            .as_str()
+    );
+
+    let validation_error: router::Request = supergraph::Request::fake_builder()
+        .query(
+            r#"query Me {
+            me {
+                thisfielddoesntexist
+            }
+        }"#,
+        )
+        .operation_name("NotMe")
+        .method(Method::POST)
+        .build()
+        .expect("expecting valid request")
+        .try_into()
+        .unwrap();
+
     let response = http_query_with_router(router, validation_error).await;
-    dbg!(response.response.body());
     // "## GraphQLValidationFailure\n"
     assert_eq!(
         "15b0987fd8bb540379db0ecb6e5ab75f9f385b1d",

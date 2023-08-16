@@ -629,5 +629,9 @@ mod tests {
             "1f08e40c1ec077e7376b0f0945ba1bee09ba753b",
             stats_report_key_hash("## GraphQLParseFailure\n")
         );
+        assert_eq!(
+            "823c4a30458fd62a49d2393a2777ddab1a9d43d3",
+            stats_report_key_hash("## GraphQLUnknownOperationName\n")
+        )
     }
 }
