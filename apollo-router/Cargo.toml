@@ -99,7 +99,7 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "0.14.27", features = ["server", "client"] }
 hyper-rustls = { version = "0.23.2", features = ["http1", "http2"] }
-indexmap = { version = "1.9.3", features = ["serde-1"] }
+indexmap = { version = "2.0.0", features = ["serde-1"] }
 itertools = "0.10.5"
 jsonpath_lib = "0.3.0"
 jsonschema = { version = "0.16.1", default-features = false }
