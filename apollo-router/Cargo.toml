@@ -115,7 +115,7 @@ mime = "0.3.17"
 multer = "2.1.0"
 multimap = "0.8.3"
 # To avoid tokio issues
-notify = { version = "5.2.0", default-features = false, features=["macos_kqueue"] }
+notify = { version = "6.0.1", default-features = false, features=["macos_kqueue"] }
 nu-ansi-term = "0.47"
 once_cell = "1.18.0"
 
