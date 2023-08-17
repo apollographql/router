@@ -1,9 +1,9 @@
 ### Expose the stats_reports_key hash to plugins. ([Issue #2728](https://github.com/apollographql/router/issues/2728))
 
-This changeset exposes a new key in the context, `studio_operation_id`, which identifies operation you can find in studio:
+This changeset exposes a new key in the context, `apollo_operation_id`, which identifies operation you can find in studio:
 
 ```
-https://studio.apollographql.com/graph/<your_graph_variant>/variant/<your_graph_variant>/operations?query=<studio_operation_id>
+https://studio.apollographql.com/graph/<your_graph_variant>/variant/<your_graph_variant>/operations?query=<apollo_operation_id>
 ```
 
 This new context key is exposed at various stages of the operation pipeline:

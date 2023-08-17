@@ -199,7 +199,7 @@ where
                     context.private_entries.lock().get::<UsageReporting>()
                 {
                     let _ = response.context.insert(
-                        "studio_operation_id",
+                        "apollo_operation_id",
                         stats_report_key_hash(usage_reporting.stats_report_key.as_str()),
                     );
                 }
@@ -605,7 +605,7 @@ mod tests {
     }
 
     #[test]
-    fn studio_operation_id_hash() {
+    fn apollo_operation_id_hash() {
         assert_eq!(
             "d1554552698157b05c2a462827fb4367a4548ee5",
             stats_report_key_hash("# IgnitionMeQuery\nquery IgnitionMeQuery{me{id}}")

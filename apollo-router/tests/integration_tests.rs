@@ -1104,7 +1104,7 @@ async fn query_operation_id() {
         },
     });
 
-    let expected_studio_operation_id = "d1554552698157b05c2a462827fb4367a4548ee5";
+    let expected_apollo_operation_id = "d1554552698157b05c2a462827fb4367a4548ee5";
 
     let request: router::Request = supergraph::Request::fake_builder()
         .query(
@@ -1124,10 +1124,10 @@ async fn query_operation_id() {
 
     let response = http_query_with_router(router.clone(), request).await;
     assert_eq!(
-        expected_studio_operation_id,
+        expected_apollo_operation_id,
         response
             .context
-            .get::<_, String>("studio_operation_id".to_string())
+            .get::<_, String>("apollo_operation_id".to_string())
             .unwrap()
             .unwrap()
             .as_str()
@@ -1150,10 +1150,10 @@ async fn query_operation_id() {
 
     let response = http_query_with_router(router.clone(), request).await;
     assert_eq!(
-        expected_studio_operation_id,
+        expected_apollo_operation_id,
         response
             .context
-            .get::<_, String>("studio_operation_id".to_string())
+            .get::<_, String>("apollo_operation_id".to_string())
             .unwrap()
             .unwrap()
             .as_str()
@@ -1173,7 +1173,7 @@ async fn query_operation_id() {
         // "## GraphQLParseFailure\n"
         response
             .context
-            .get::<_, String>("studio_operation_id".to_string())
+            .get::<_, String>("apollo_operation_id".to_string())
             .unwrap()
             .is_none()
     );
@@ -1197,7 +1197,7 @@ async fn query_operation_id() {
     // "## GraphQLUnknownOperationName\n"
     assert!(response
         .context
-        .get::<_, String>("studio_operation_id".to_string())
+        .get::<_, String>("apollo_operation_id".to_string())
         .unwrap()
         .is_none());
 
@@ -1220,7 +1220,7 @@ async fn query_operation_id() {
     // "## GraphQLValidationFailure\n"
     assert!(response
         .context
-        .get::<_, String>("studio_operation_id".to_string())
+        .get::<_, String>("apollo_operation_id".to_string())
         .unwrap()
         .is_none());
 }
