@@ -318,7 +318,7 @@ dependencies = [
  "humantime-serde",
  "hyper",
  "hyper-rustls 0.23.2",
- "indexmap 1.9.3",
+ "indexmap 2.0.0",
  "insta",
  "introspector-gadget",
  "itertools",
@@ -3235,7 +3235,6 @@ checksum = "bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99"
 dependencies = [
  "autocfg",
  "hashbrown 0.12.3",
- "serde",
 ]
 
 [[package]]
@@ -3246,6 +3245,7 @@ checksum = "d5477fe2230a79769d8dc68e0eabf5437907c0457a5614a9e8dddb67f65eb65d"
 dependencies = [
  "equivalent",
  "hashbrown 0.14.0",
+ "serde",
 ]
 
 [[package]]
