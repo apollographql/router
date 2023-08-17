@@ -4,6 +4,9 @@ metadata:
   name: {{ include "router.fullname" . }}
   labels:
     {{- include "router.labels" . | nindent 4 }}
+    {{- if .Values.service.extraLabels }}
+    {{ include "common.templatizeExtraLabels" (dict "extraLabels" .Values.service.extraLabels "context" $) | indent 4 }}
+    {{- end }}
   {{- with .Values.service.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}

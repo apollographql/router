@@ -139,6 +139,7 @@ service:
   type: ClusterIP
   port: 80
   annotations: {}
+  extraLabels: {}
 
 serviceMonitor:
   enabled: false

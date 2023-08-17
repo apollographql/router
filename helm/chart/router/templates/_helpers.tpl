@@ -112,7 +112,9 @@ extraLabels:
 ```
 */}}
 {{- define "common.templatizeExtraLabels" -}}
-{{- range $key, $value := .Values.extraLabels }}
-{{ printf "%s: %s" $key (include  "common.tplvalues.render" ( dict "value" $value "context" $))}}
+{{- $extraLabels := .extraLabels -}}
+{{- $ctx := .context -}}
+{{- range $key, $value := $extraLabels }}
+{{ printf "%s: %s" $key (include "common.tplvalues.render" (dict "value" $value "context" $ctx)) }}
 {{- end -}}
 {{- end -}}
