@@ -101,8 +101,12 @@ where
     type Error = RedisError;
 
     fn try_into(self) -> Result<fred::types::RedisValue, Self::Error> {
-        let v = serde_json::to_vec(&self.0)
-            .expect("JSON serialization should not fail for redis values");
+        let v = serde_json::to_vec(&self.0).map_err(|e| {
+            RedisError::new(
+                RedisErrorKind::Parse,
+                format!("couldn't serialize value to redis {}. This is a bug in the router, please file an issue.", e),
+            )
+        })?;
 
         Ok(fred::types::RedisValue::Bytes(v.into()))
     }
