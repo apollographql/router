@@ -1,0 +1,13 @@
+subscription:
+  enabled: true
+  mode:
+    passthrough:
+      all:
+        protocol: graphql_ws
+    preview_callback:
+      path: /graphql
+      public_url: https://example.com
+  enable_deduplication: false
+  queue_capacity: 2
+  max_opened_subscriptions: 3
+
