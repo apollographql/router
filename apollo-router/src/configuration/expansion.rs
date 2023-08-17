@@ -103,7 +103,7 @@ impl Expansion {
             // Note that APOLLO_USAGE_REPORTING_OTLP_INGRESS_URL is experimental and subject to change without notice
             .override_config(
                 Override::builder()
-                    .config_path("telemetry.apollo.otlp_endpoint")
+                    .config_path("telemetry.apollo.experimental_otlp_endpoint")
                     .env_name("APOLLO_USAGE_REPORTING_OTLP_INGRESS_URL")
                     .value_type(ValueType::String)
                     .build(),
