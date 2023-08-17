@@ -179,7 +179,7 @@ impl PersistedQueryLayer {
             } else {
                 tracing::info!(
                     monotonic_counter.apollo.router.operations.persisted_queries = 1u64,
-                    persisted_query.not_found = true
+                    persisted_quieries.not_found = true
                 );
                 // if APQ is not enabled, return an error indicating the query was not found
                 Err(supergraph_err_operation_not_found(
@@ -219,8 +219,8 @@ impl PersistedQueryLayer {
                 if self.safelist_config.require_id {
                     tracing::info!(
                         monotonic_counter.apollo.router.operations.persisted_queries = 1u64,
-                        persisted_query.safelist.rejected.missing_id = true,
-                        persisted_query.logged = logged.or_empty()
+                        persisted_queries.safelist.rejected.missing_id = true,
+                        persisted_queries.logged = logged.or_empty()
                     );
                     Err(supergraph_err_pq_id_required(request))
                 } else if known {
@@ -233,8 +233,8 @@ impl PersistedQueryLayer {
                 } else {
                     tracing::info!(
                         monotonic_counter.apollo.router.operations.persisted_queries = 1u64,
-                        persisted_query.safelist.rejected.unknown = true,
-                        persisted_query.logged = logged.or_empty()
+                        persisted_queries.safelist.rejected.unknown = true,
+                        persisted_queries.logged = logged.or_empty()
                     );
                     Err(supergraph_err_operation_not_in_safelist(request))
                 }
