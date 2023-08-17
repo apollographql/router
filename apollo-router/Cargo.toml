@@ -69,7 +69,7 @@ axum = { version = "0.6.20", features = ["headers", "json", "original-uri"] }
 base64 = "0.20.0"
 buildstructor = "0.5.3"
 bytes = "1.4.0"
-clap = { version = "4.3.21", default-features = false, features = [
+clap = { version = "4.3.22", default-features = false, features = [
     "env",
     "derive",
     "std",
