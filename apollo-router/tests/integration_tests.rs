@@ -1169,15 +1169,13 @@ async fn query_operation_id() {
         .unwrap();
 
     let response = http_query_with_router(router.clone(), parse_failure).await;
-    assert_eq!(
+    assert!(
         // "## GraphQLParseFailure\n"
-        "1f08e40c1ec077e7376b0f0945ba1bee09ba753b",
         response
             .context
             .get::<_, String>("studio_operation_id".to_string())
             .unwrap()
-            .unwrap()
-            .as_str()
+            .is_none()
     );
 
     let unknown_operation_name: router::Request = supergraph::Request::fake_builder()
@@ -1197,15 +1195,11 @@ async fn query_operation_id() {
 
     let response = http_query_with_router(router.clone(), unknown_operation_name).await;
     // "## GraphQLUnknownOperationName\n"
-    assert_eq!(
-        "823c4a30458fd62a49d2393a2777ddab1a9d43d3",
-        response
-            .context
-            .get::<_, String>("studio_operation_id".to_string())
-            .unwrap()
-            .unwrap()
-            .as_str()
-    );
+    assert!(response
+        .context
+        .get::<_, String>("studio_operation_id".to_string())
+        .unwrap()
+        .is_none());
 
     let validation_error: router::Request = supergraph::Request::fake_builder()
         .query(
@@ -1224,15 +1218,11 @@ async fn query_operation_id() {
 
     let response = http_query_with_router(router, validation_error).await;
     // "## GraphQLValidationFailure\n"
-    assert_eq!(
-        "15b0987fd8bb540379db0ecb6e5ab75f9f385b1d",
-        response
-            .context
-            .get::<_, String>("studio_operation_id".to_string())
-            .unwrap()
-            .unwrap()
-            .as_str()
-    );
+    assert!(response
+        .context
+        .get::<_, String>("studio_operation_id".to_string())
+        .unwrap()
+        .is_none());
 }
 
 async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {

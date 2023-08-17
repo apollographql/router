@@ -216,13 +216,6 @@ pub(crate) enum CacheResolverError {
     RetrievalError(Arc<QueryPlannerError>),
 }
 
-impl CacheResolverError {
-    pub(crate) fn stats_report_key(&self) -> Option<&str> {
-        let Self::RetrievalError(error) = self;
-        error.stats_report_key()
-    }
-}
-
 impl IntoGraphQLErrors for CacheResolverError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         let CacheResolverError::RetrievalError(retrieval_error) = self;
@@ -376,33 +369,6 @@ impl IntoGraphQLErrors for QueryPlannerError {
                 Ok(errors)
             }
             err => Err(err),
-        }
-    }
-}
-
-impl QueryPlannerError {
-    pub(crate) fn stats_report_key(&self) -> Option<&str> {
-        match self {
-            QueryPlannerError::PlanningErrors(PlanErrors {
-                usage_reporting, ..
-            }) => Some(usage_reporting.stats_report_key.as_str()),
-            QueryPlannerError::EmptyPlan(usage_reporting) => {
-                Some(usage_reporting.stats_report_key.as_str())
-            }
-            QueryPlannerError::CacheResolverError(retrieval_error) => {
-                let CacheResolverError::RetrievalError(e) = retrieval_error.as_ref();
-                e.stats_report_key()
-            }
-            QueryPlannerError::SpecError(e) => Some(e.get_error_key()),
-            // TODO[igni]: check with the team and update the code path for LimitExceeded
-            // QueryPlannerError::LimitExceeded(_) => todo!(),
-            _ => None,
-            // These paths cannot be translated to a stats_report_key:
-            // QueryPlannerError::Introspection(_),
-            // QueryPlannerError::SchemaValidationErrors(_),
-            // QueryPlannerError::JoinError(_),
-            // QueryPlannerError::UnhandledPlannerResult,
-            // QueryPlannerError::RouterBridgeError(_),
         }
     }
 }
