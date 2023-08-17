@@ -50,6 +50,9 @@ impl<T: MeterProvider> FilterMeterProvider<T> {
                 Regex::new(r"apollo\.router\.(operations?|config)(\..*|$)")
                     .expect("regex should have been valid"),
             )
+            // You can add exceptions to the deny list here. Eventually we will want to allow most metrics to be public, but the rationale for
+            // making metrics public gradually is that we can make sure that we have got the naming conventions right.
+            // Our previous metrics suffered from inconsistency, and we don't want to repeat that mistake.
             .allow(
                 Regex::new(r"apollo\.router\.operations\.authentication")
                     .expect("regex should have been valid"),
