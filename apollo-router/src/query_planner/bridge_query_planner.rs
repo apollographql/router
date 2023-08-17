@@ -79,8 +79,9 @@ impl BridgeQueryPlanner {
 
                     if has_validation_errors && !schema.has_errors() {
                         tracing::warn!(
-                            monotonic_counter.apollo_router_schema_validation = 1,
-                            result = "false_negative",
+                            monotonic_counter.apollo.router.validation = 1,
+                            validation.source = "schema",
+                            validation.result = "false_negative",
                             "validation mismatch: JS query planner reported a schema validation error, but apollo-rs did not"
                         );
                     }
@@ -93,15 +94,17 @@ impl BridgeQueryPlanner {
         if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::Both {
             if schema.has_errors() {
                 tracing::warn!(
-                    monotonic_counter.apollo_router_schema_validation = 1,
-                    result = "false_positive",
+                    monotonic_counter.apollo.router.validation = 1,
+                    validation.source = "schema",
+                    validation.result = "false_positive",
                     "validation mismatch: apollo-rs reported a schema validation error, but JS query planner did not"
                 );
             } else {
                 // false_negative was an early return so we know it was correct here
                 tracing::info!(
-                    monotonic_counter.apollo_router_schema_validation = 1,
-                    result = "match"
+                    monotonic_counter.apollo.router.validation = 1,
+                    validation.source = "schema",
+                    validation.result = "match"
                 );
             }
         }
@@ -263,22 +266,25 @@ impl BridgeQueryPlanner {
                 match (is_validation_error, &selections.validation_error) {
                     (false, Some(_)) => {
                         tracing::warn!(
-                            monotonic_counter.apollo_router_query_validation = 1,
-                            result = "false_positive",
+                            monotonic_counter.apollo.router.validation = 1,
+                            validation.source = "operation",
+                            validation.result = "false_positive",
                             "validation mismatch: JS query planner did not report query validation error, but apollo-rs did"
                         );
                     }
                     (true, None) => {
                         tracing::warn!(
-                            monotonic_counter.apollo_router_query_validation = 1,
-                            result = "false_negative",
+                            monotonic_counter.apollo.router.validation = 1,
+                            validation.source = "operation",
+                            validation.result = "false_negative",
                             "validation mismatch: apollo-rs did not report query validation error, but JS query planner did"
                         );
                     }
                     // if JS and Rust implementations agree, we return the JS result for now.
                     _ => tracing::info!(
-                            monotonic_counter.apollo_router_query_validation = 1,
-                            result = "match",
+                            monotonic_counter.apollo.router.validation = 1,
+                            validation.source = "operation",
+                            validation.result = "match",
                     ),
                 }
 
