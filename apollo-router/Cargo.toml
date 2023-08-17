@@ -186,7 +186,7 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum_macros = "0.24.3"
 sys-info = "0.9.1"
-thiserror = "1.0.46"
+thiserror = "1.0.47"
 tokio = { version = "1.32.0", features = ["full"] }
 tokio-stream = { version = "0.1.14", features = ["sync", "net"] }
 tokio-util = { version = "0.7.8", features = ["net", "codec", "time"] }
