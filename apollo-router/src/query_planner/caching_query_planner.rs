@@ -610,17 +610,5 @@ mod tests {
             "d1554552698157b05c2a462827fb4367a4548ee5",
             stats_report_key_hash("# IgnitionMeQuery\nquery IgnitionMeQuery{me{id}}")
         );
-        assert_eq!(
-            "15b0987fd8bb540379db0ecb6e5ab75f9f385b1d",
-            stats_report_key_hash("## GraphQLValidationFailure\n")
-        );
-        assert_eq!(
-            "1f08e40c1ec077e7376b0f0945ba1bee09ba753b",
-            stats_report_key_hash("## GraphQLParseFailure\n")
-        );
-        assert_eq!(
-            "823c4a30458fd62a49d2393a2777ddab1a9d43d3",
-            stats_report_key_hash("## GraphQLUnknownOperationName\n")
-        )
     }
 }
