@@ -200,14 +200,6 @@ expression: get_spans()
                   [
                     "apollo_private.operation_signature",
                     "# -\n{topProducts{name reviews{author{id name}id product{name}}upc}}"
-                  ],
-                  [
-                    "monotonic_counter.apollo.router.operations",
-                    1
-                  ],
-                  [
-                    "http.response.status_code",
-                    200
                   ]
                 ],
                 "metadata": {
