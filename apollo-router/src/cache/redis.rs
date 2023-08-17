@@ -102,7 +102,7 @@ where
 
     fn try_into(self) -> Result<fred::types::RedisValue, Self::Error> {
         let v = serde_json::to_vec(&self.0).map_err(|e| {
-            println!("couldn't serialize value to redis {}. This is a bug in the router, please file an issue: https://github.com/apollographql/router/issues/new", e);
+            tracing::error!("couldn't serialize value to redis {}. This is a bug in the router, please file an issue: https://github.com/apollographql/router/issues/new", e);
             RedisError::new(
                 RedisErrorKind::Parse,
                 format!("couldn't serialize value to redis {}", e),
