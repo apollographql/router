@@ -106,6 +106,18 @@
       "groupSlug": "cargo-tracing-packages",
       "dependencyDashboardApproval": true
     },
+    // Our own `apollo-` packages deserve to get front-and-center treatment.
+    // We'll put them in their own PR to facilitate workflows that surface
+    // their changes earlier, and get us dog-fooding them quicker.
+    // They also have a small proclivity to require more hands-on changes
+    // since they're pre-0.x and we use them so extensively.
+    {
+      "matchPackagePatterns": ["^apollo-"],
+      "groupName": "apollo-rs crates",
+      "groupSlug": "rust-apollo-rs-updates",
+      "matchManagers": ["cargo"],
+      "automerge": false
+    },
     // We'll review these in a PR of their own since it has the most direct runtime
     // implications on users that we'd like to be very intentional about.
     {
