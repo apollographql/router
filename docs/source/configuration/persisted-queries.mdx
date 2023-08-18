@@ -1,0 +1,37 @@
+---
+title: Safelisting with persisted queries
+description: Secure your graph while minimizing request latency
+minVersion: 1.25.0
+---
+
+<GraphOSEnterpriseRequired />
+
+<FeatureInPreview />
+
+<PQIntro />
+
+## Differences from automatic persisted queries
+
+The Apollo Router also supports a related feature called [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQ). With APQ, clients can execute a GraphQL operation by sending the SHA256 hash of its operation string instead of the entire string. **APQ doesn't support safelisting** because the router dynamically populates its APQ cache over time with _any_ operations it receives.
+
+For more details on differences between APQ and this feature, see the [GraphOS persisted queries documentation](/graphos/operations/persisted-queries#differences-from-automatic-persisted-queries).
+
+## Implementation
+
+Enabling operation safelisting has a few steps:
+
+1. PQL creation and linking
+1. Router configuration
+1. Preregistering trusted operations
+1. Client updates
+
+This article details the router configuration step.
+For more information on other configuration aspects, see the [GraphOS persisted queries documentation](/graphos/operations/persisted-queries).
+
+## Router configuration
+
+<PQRouterConfiguration />
+
+### Router security levels
+
+<PQSecurityLevels />
