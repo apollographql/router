@@ -469,12 +469,14 @@ However, if you _do_ need to override a particular subgraph's routing URL (for e
 
 ```yaml title="router.yaml"
 override_subgraph_url:
-  accounts: http://localhost:8080
+  accounts: "${env.ACCOUNTS_SUBGRAPH_HOST_URL}"
 ```
 
-In this example, the `accounts` subgraph URL is overridden to point to `http://localhost:8080`. The URL specified in the supergraph schema is ignored.
+In this example, the `accounts` subgraph URL is overridden to point to a new URL using [variable expansion](#variable-expansion). The URL specified in the supergraph schema is ignored.
 
 Any subgraphs that are _omitted_ from `override_subgraph_url` continue to use the routing URL specified in the supergraph schema.
+
+If you need to override the subgraph URL at runtime on a per-request basis, you can use [request customizations](../customizations/overview).
 
 ### Caching
 
