@@ -1,5 +1,6 @@
 //! Authorization plugin
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_compiler::hir;
@@ -75,6 +76,49 @@ impl<'a> AuthenticatedVisitor<'a> {
             false
         }
     }
+
+    fn implementors_with_different_field_requirements(
+        &self,
+        t: &TypeDefinition,
+        fields: &[hir::Field],
+    ) -> bool {
+        if t.is_interface_type_definition() {
+            let mut field_authenticated_status: HashMap<&str, Option<bool>> =
+                fields.iter().map(|f| (f.name(), None)).collect();
+            for ty in self
+                .compiler
+                .db
+                .subtype_map()
+                .get(t.name())
+                .into_iter()
+                .flatten()
+                .cloned()
+                .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
+            {
+                for field in fields {
+                    if let Some(f) = ty.field(&self.compiler.db, field.name()) {
+                        let is_authenticated =
+                            f.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some();
+                        match field_authenticated_status.get(field.name()).unwrap() {
+                            None => {
+                                field_authenticated_status
+                                    .insert(field.name(), Some(is_authenticated));
+                            }
+                            Some(other) => {
+                                if is_authenticated != *other {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            false
+        } else {
+            false
+        }
+    }
 }
 
 impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
@@ -109,23 +153,31 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
             self.current_path.push(PathElement::Flatten);
         }
 
-        let implementors_with_different_requirements = if self
-            .implementors_with_different_requirements(
-                &get_field_type(self, parent_type, node.name())
-                    .and_then(|ty| self.compiler.db.find_type_definition_by_name(ty))
-                    .unwrap(),
-            ) {
-            let len = node.selection_set().fields().len();
-            println!(
+        let type_definition = get_field_type(self, parent_type, node.name())
+            .and_then(|ty| self.compiler.db.find_type_definition_by_name(ty))
+            .unwrap();
+        let implementors_with_different_requirements =
+            if self.implementors_with_different_requirements(&type_definition) {
+                let len = node.selection_set().fields().len();
+                println!(
                 "implementors with different reqs. Number of fields in subselection of'{}': {len}",
                 node.name()
             );
-            len > 0
-        } else {
-            false
-        };
+                len > 0
+            } else {
+                false
+            };
 
-        let res = if field_requires_authentication || implementors_with_different_requirements {
+        let implementors_with_different_field_requirements = self
+            .implementors_with_different_field_requirements(
+                &type_definition,
+                &node.selection_set().fields(),
+            );
+
+        let res = if field_requires_authentication
+            || implementors_with_different_requirements
+            || implementors_with_different_field_requirements
+        {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_authentication = true;
             Ok(None)
@@ -532,6 +584,73 @@ mod tests {
         "#;
 
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY2);
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+    }
+
+    static INTERFACE_FIELD_SCHEMA: &str = r#"
+    directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+
+    type Query {
+        test: String
+        itf: I!
+    }
+
+    interface I {
+        id: ID
+        other: String
+    }
+
+    type A implements I {
+        id: ID
+        other: String
+        a: String
+    }
+
+    type B implements I {
+        id: ID @authenticated
+        other: String
+        b: String
+    }
+    "#;
+
+    #[test]
+    fn interface_field() {
+        static QUERY: &str = r#"
+        query {
+            test
+            itf {
+                id
+                other
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY);
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        static QUERY2: &str = r#"
+        query {
+            test
+            itf {
+                ... on A {
+                    id
+                    other
+                }
+
+                ... on B {
+                    id
+                    other
+                }
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY2);
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
