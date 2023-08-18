@@ -1,6 +1,5 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::ops::Deref;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::Poll;
