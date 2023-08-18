@@ -1,5 +1,6 @@
 //! Configuration for the telemetry plugin.
 use std::collections::BTreeMap;
+use std::env;
 
 use axum::headers::HeaderName;
 use opentelemetry::sdk::resource::EnvResourceDetector;
@@ -79,7 +80,7 @@ pub(crate) struct Metrics {
     pub(crate) prometheus: Option<metrics::prometheus::Config>,
 }
 
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct MetricsCommon {
     /// Configuration to add custom labels/attributes to metrics
@@ -99,6 +100,18 @@ fn default_buckets() -> Vec<f64> {
     vec![
         0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
     ]
+}
+
+impl Default for MetricsCommon {
+    fn default() -> Self {
+        Self {
+            attributes: None,
+            service_name: None,
+            service_namespace: None,
+            resources: HashMap::new(),
+            buckets: default_buckets(),
+        }
+    }
 }
 
 /// Tracing configuration
@@ -554,11 +567,9 @@ impl From<&Trace> for opentelemetry::sdk::trace::Config {
             ));
         }
 
-        // Take the env variables first, and then layer on the rest of the resources, last entry wins
-        let resource = EnvResourceDetector::default()
-            .detect(Duration::from_secs(0))
-            .merge(&Resource::new(resource_defaults))
-            .merge(&mut Resource::new(
+        // Take the default first, then config, then env resources, then env variable. Last entry wins
+        let resource = Resource::new(resource_defaults)
+            .merge(&Resource::new(
                 config
                     .attributes
                     .iter()
@@ -569,6 +580,18 @@ impl From<&Trace> for opentelemetry::sdk::trace::Config {
                         )
                     })
                     .collect::<Vec<KeyValue>>(),
+            ))
+            .merge(&EnvResourceDetector::new().detect(Duration::from_secs(0)))
+            .merge(&Resource::new(
+                env::var("OTEL_SERVICE_NAME")
+                    .ok()
+                    .map(|v| {
+                        vec![KeyValue::new(
+                            opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                            v,
+                        )]
+                    })
+                    .unwrap_or_default(),
             ));
 
         trace_config = trace_config.with_resource(resource);
@@ -644,6 +667,8 @@ impl Conf {
 
 #[cfg(test)]
 mod tests {
+    use opentelemetry::sdk::trace::Config;
+    use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
     use serde_json::json;
 
     use super::*;
@@ -799,5 +824,36 @@ mod tests {
         AttributeValue::try_from(json!([1, true])).expect_err("mixed conversion must fail");
         AttributeValue::try_from(json!([1.1, true])).expect_err("mixed conversion must fail");
         AttributeValue::try_from(json!([true, "bar"])).expect_err("mixed conversion must fail");
+    }
+
+    #[test]
+    fn test_service_name() {
+        let router_config = Trace {
+            service_name: "foo".to_string(),
+            ..Default::default()
+        };
+        let otel_config: Config = (&router_config).into();
+        assert_eq!(
+            Some(Value::String("foo".into())),
+            otel_config.resource.get(SERVICE_NAME)
+        );
+
+        // Env should take precedence
+        env::set_var("OTEL_RESOURCE_ATTRIBUTES", "service.name=bar");
+        let otel_config: Config = (&router_config).into();
+        assert_eq!(
+            Some(Value::String("bar".into())),
+            otel_config.resource.get(SERVICE_NAME)
+        );
+
+        // Env should take precedence
+        env::set_var("OTEL_SERVICE_NAME", "bif");
+        let otel_config: Config = (&router_config).into();
+        assert_eq!(
+            Some(Value::String("bif".into())),
+            otel_config.resource.get(SERVICE_NAME)
+        );
+        env::remove_var("OTEL_SERVICE_NAME");
+        env::remove_var("OTEL_RESOURCE_ATTRIBUTES");
     }
 }

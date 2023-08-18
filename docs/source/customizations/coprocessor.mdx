@@ -37,17 +37,18 @@ flowchart TB;
   client --"<b>1.</b> Sends request"--> routerService;
   routerService -."<b>2.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;
   routerService --"<b>3</b>"--> supergraphService;
-  supergraphService --"<b>4</b>"--> executionService;
-  executionService --"<b>5</b>"--> subgraphService;
-  subgraphService -."<b>6.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;
-  subgraphService -- "<b>7</b>"--> subgraphs;
+  supergraphService --"<b>4.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;
+  supergraphService --"<b>5</b>"--> executionService;
+  executionService --"<b>6</b>"--> subgraphService;
+  subgraphService -."<b>7.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;
+  subgraphService -- "<b>8</b>"--> subgraphs;
 
   class client,subgraphs,coprocessing secondary;
 ```
 
 > This diagram shows request execution proceeding "down" from a client, through the router, to individual subgraphs. Execution then proceeds back "up" to the client in the reverse order.
 
-As shown in the diagram above, only the `RouterService` and `SubgraphService` of the [request-handling lifecycle](./rhai/#router-request-lifecycle) can send these POST requests (also called **coprocessor requests**).
+As shown in the diagram above, the `RouterService`, `SupergraphService` and `SubgraphService` steps of the [request-handling lifecycle](./rhai/#router-request-lifecycle) can send these POST requests (also called **coprocessor requests**).
 
 Each supported service can send its coprocessor requests at two different **stages**:
 
@@ -86,6 +87,20 @@ coprocessor:
       path: false
       method: false
     response: # By including this key, the `RouterService` sends a coprocessor request whenever it's about to send response data to a client (including incremental data via @defer).
+      headers: true
+      body: false
+      context: false
+      sdl: false
+      status_code: false
+  supergraph: # This coprocessor hooks into the `SupergraphService`
+    request: # By including this key, the `SupergraphService` sends a coprocessor request whenever it first receives a client request.
+      headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
+      body: false
+      context: false
+      sdl: false
+      path: false
+      method: false
+    response: # By including this key, the `SupergraphService` sends a coprocessor request whenever it's about to send response data to a client (including incremental data via @defer).
       headers: true
       body: false
       context: false
@@ -134,7 +149,7 @@ Properties of the JSON body are divided into two high-level categories:
     - These provide information about the context of the specific router request or response. They provide a mechanism to influence the router's execution flow.
     - The router always includes these properties in coprocessor requests.
 - Data properties
-    - These provide information about the substance of a request or response, such as the GraphQL query string and any HTTP headers. Aside from `sdl`, your coprocessor can modify all of these properties. 
+    - These provide information about the substance of a request or response, such as the GraphQL query string and any HTTP headers. Aside from `sdl`, your coprocessor can modify all of these properties.
     - You [configure which of these fields](#setup) the router includes in its coprocessor requests. By default, the router includes _none_ of them.
 
 ### Example requests by stage
@@ -295,7 +310,6 @@ Properties of the JSON body are divided into two high-level categories:
   },
   "context": {
     "entries": {
-      "content-negociation:accepts-wildcard": true,
       "apollo_telemetry::usage_reporting": {
         "statsReportKey": "# TopProducts\nquery TopProducts{topProducts{name price reviews{body id}}}",
         "referencedFieldsByType": {
@@ -324,9 +338,7 @@ Properties of the JSON body are divided into two high-level categories:
       },
       "apollo_telemetry::client_version": "",
       "apollo_telemetry::subgraph_metrics_attributes": {},
-      "content-negociation:accepts-json": false,
       "apollo_telemetry::client_name": "",
-      "content-negociation:accepts-multipart": false
     }
   },
   "uri": "https://reviews.demo.starstuff.dev/",
@@ -423,9 +435,6 @@ Properties of the JSON body are divided into two high-level categories:
   },
   "context": {
     "entries": {
-      "content-negociation:accepts-wildcard": true,
-      "content-negociation:accepts-json": false,
-      "content-negociation:accepts-multipart": false,
       "apollo_telemetry::usage_reporting": {
         "statsReportKey": "# TopProducts\nquery TopProducts{topProducts{name price reviews{body id}}}",
         "referencedFieldsByType": {
@@ -589,6 +598,8 @@ Currently, this value is always `1`.
 
 The body of the corresponding request or response.
 
+This field is populated when the underlying HTTP method is `POST`. If you are looking for operation data on `GET` requests, that info will be populated in the `path` parameter per the [GraphQL over HTTP spec](https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#get).
+
 If your coprocessor [returns a _different_ value](#responding-to-coprocessor-requests) for `body`, the router replaces the existing body with that value. This is common when [terminating a client request](#terminating-a-client-request).
 
 This field's type depends on the coprocessor request's [`stage`](#stage):
@@ -715,7 +726,7 @@ This value is present only for coprocessor requests from the router's `SubgraphS
 <tr>
 <td>
 
-##### `status_code`
+##### `statusCode`
 
 `number`
 

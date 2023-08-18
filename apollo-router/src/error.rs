@@ -3,10 +3,6 @@ use std::sync::Arc;
 
 use displaydoc::Display;
 use lazy_static::__Deref;
-use miette::Diagnostic;
-use miette::NamedSource;
-use miette::Report;
-use miette::SourceSpan;
 use router_bridge::introspect::IntrospectionError;
 use router_bridge::planner::PlannerError;
 use router_bridge::planner::UsageReporting;
@@ -30,7 +26,7 @@ use crate::spec::SpecError;
 ///
 /// Note that these are not actually returned to the client, but are instead converted to JSON for
 /// [`struct@Error`].
-#[derive(Error, Display, Debug, Clone, Serialize)]
+#[derive(Error, Display, Debug, Clone, Serialize, Eq, PartialEq)]
 #[serde(untagged)]
 #[ignore_extra_doc_attributes]
 #[non_exhaustive]
@@ -87,6 +83,16 @@ pub(crate) enum FetchError {
         /// The reason the fetch failed.
         reason: String,
     },
+    /// Websocket fetch failed from '{service}': {reason}
+    ///
+    /// note that this relates to a transport error and not a GraphQL error
+    SubrequestWsError {
+        /// The service failed.
+        service: String,
+
+        /// The reason the fetch failed.
+        reason: String,
+    },
 
     /// subquery requires field '{field}' but it was not found in the current response
     ExecutionFieldNotFound {
@@ -135,6 +141,7 @@ impl FetchError {
                 }
                 FetchError::SubrequestMalformedResponse { service, .. }
                 | FetchError::SubrequestUnexpectedPatchResponse { service }
+                | FetchError::SubrequestWsError { service, .. }
                 | FetchError::CompressionError { service, .. } => {
                     extensions
                         .entry("service")
@@ -181,6 +188,7 @@ impl ErrorExtension for FetchError {
                 "SUBREQUEST_UNEXPECTED_PATCH_RESPONSE"
             }
             FetchError::SubrequestHttpError { .. } => "SUBREQUEST_HTTP_ERROR",
+            FetchError::SubrequestWsError { .. } => "SUBREQUEST_WEBSOCKET_ERROR",
             FetchError::ExecutionFieldNotFound { .. } => "EXECUTION_FIELD_NOT_FOUND",
             FetchError::ExecutionPathNotFound { .. } => "EXECUTION_PATH_NOT_FOUND",
             FetchError::CompressionError { .. } => "COMPRESSION_ERROR",
@@ -313,6 +321,14 @@ impl IntoGraphQLErrors for QueryPlannerError {
                 .iter()
                 .map(|p_err| Error::from(p_err.clone()))
                 .collect()),
+            QueryPlannerError::Introspection(introspection_error) => Ok(vec![Error::builder()
+                .message(
+                    introspection_error
+                        .message
+                        .unwrap_or_else(|| "introspection error".to_string()),
+                )
+                .extension_code("INTROSPECTION_ERROR")
+                .build()]),
             QueryPlannerError::LimitExceeded(OperationLimits {
                 depth,
                 height,
@@ -483,54 +499,71 @@ pub(crate) enum SchemaError {
     UrlParse(String, http::uri::InvalidUri),
     /// Could not find an URL for subgraph {0}
     MissingSubgraphUrl(String),
-    /// Parsing error(s).
+    /// GraphQL parser error(s).
     Parse(ParseErrors),
+    /// GraphQL parser or validation error(s).
+    Validate(ValidationErrors),
     /// Api error(s): {0}
     Api(String),
 }
 
-/// Collection of schema parsing errors.
+/// Collection of schema validation errors.
 #[derive(Clone, Debug)]
 pub(crate) struct ParseErrors {
-    pub(crate) raw_schema: String,
     pub(crate) errors: Vec<apollo_parser::Error>,
 }
 
-#[derive(Error, Debug, Diagnostic)]
-#[error("{}", self.ty)]
-#[diagnostic(code("apollo-parser parsing error."))]
-struct ParserError {
-    ty: String,
-    #[source_code]
-    src: NamedSource,
-    #[label("{}", self.ty)]
-    span: SourceSpan,
+impl std::fmt::Display for ParseErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut errors = self.errors.iter();
+        if let Some(error) = errors.next() {
+            write!(f, "{}", error.message())?;
+        }
+        for error in errors {
+            write!(f, "\n{}", error.message())?;
+        }
+        Ok(())
+    }
 }
 
-impl ParseErrors {
+/// Collection of schema validation errors.
+#[derive(Clone, Debug)]
+pub(crate) struct ValidationErrors {
+    pub(crate) errors: Vec<apollo_compiler::ApolloDiagnostic>,
+}
+
+impl std::fmt::Display for ValidationErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut errors = self.errors.iter();
+        if let Some(error) = errors.next() {
+            write!(f, "{}", error.data)?;
+        }
+        for error in errors {
+            write!(f, "\n{}", error.data)?;
+        }
+        Ok(())
+    }
+}
+
+impl ValidationErrors {
     #[allow(clippy::needless_return)]
     pub(crate) fn print(&self) {
         if LevelFilter::current() == LevelFilter::OFF && cfg!(not(debug_assertions)) {
             return;
         } else if atty::is(atty::Stream::Stdout) {
-            // Fancy Miette reports for TTYs
+            // Fancy reports for TTYs
             self.errors.iter().for_each(|err| {
-                let report = Report::new(ParserError {
-                    src: NamedSource::new("supergraph_schema", self.raw_schema.clone()),
-                    span: (err.index(), err.data().len()).into(),
-                    ty: err.message().into(),
-                });
                 // `format!` works around https://github.com/rust-lang/rust/issues/107118
                 // to test the panic from https://github.com/apollographql/router/issues/2269
                 #[allow(clippy::format_in_format_args)]
                 {
-                    println!("{}", format!("{report:?}"));
+                    println!("{}", format!("{err}"));
                 }
             });
         } else {
             // Best effort to display errors
-            self.errors.iter().for_each(|r| {
-                println!("{r:#?}");
+            self.errors.iter().for_each(|diag| {
+                println!("{}", diag.data);
             });
         };
     }
@@ -560,5 +593,39 @@ mod tests {
             .build();
 
         assert_eq!(expected_gql_error, error.to_graphql_error(None));
+    }
+
+    #[test]
+    fn test_into_graphql_error_introspection_with_message_handled_correctly() {
+        let expected_message = "no can introspect".to_string();
+        let ie = IntrospectionError {
+            message: Some(expected_message.clone()),
+        };
+        let error = QueryPlannerError::Introspection(ie);
+        let mut graphql_errors = error.into_graphql_errors().expect("vec of graphql errors");
+        assert_eq!(graphql_errors.len(), 1);
+        let first_error = graphql_errors.pop().expect("has to be one error");
+        assert_eq!(first_error.message, expected_message);
+        assert_eq!(first_error.extensions.len(), 1);
+        assert_eq!(
+            first_error.extensions.get("code").expect("has code"),
+            "INTROSPECTION_ERROR"
+        );
+    }
+
+    #[test]
+    fn test_into_graphql_error_introspection_without_message_handled_correctly() {
+        let expected_message = "introspection error".to_string();
+        let ie = IntrospectionError { message: None };
+        let error = QueryPlannerError::Introspection(ie);
+        let mut graphql_errors = error.into_graphql_errors().expect("vec of graphql errors");
+        assert_eq!(graphql_errors.len(), 1);
+        let first_error = graphql_errors.pop().expect("has to be one error");
+        assert_eq!(first_error.message, expected_message);
+        assert_eq!(first_error.extensions.len(), 1);
+        assert_eq!(
+            first_error.extensions.get("code").expect("has code"),
+            "INTROSPECTION_ERROR"
+        );
     }
 }

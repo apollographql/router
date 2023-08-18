@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+subscription:
+  enabled: true
+

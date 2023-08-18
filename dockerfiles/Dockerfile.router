@@ -1,5 +1,6 @@
 FROM debian:bullseye-slim AS downloader
 ARG ROUTER_RELEASE=latest
+ARG ARTIFACT_URL=
 
 # Install curl
 RUN \
@@ -10,7 +11,13 @@ RUN \
 WORKDIR /dist
 
 # Run the Router downloader which puts Router into current working directory
-RUN curl -sSL https://router.apollo.dev/download/nix/${ROUTER_RELEASE}/ | sh
+RUN if [ -z "${ARTIFACT_URL}"]; then \
+    curl -sSL https://router.apollo.dev/download/nix/${ROUTER_RELEASE}/ | sh; \
+  else \
+    cd /; \
+    curl -sSL -o - ${ARTIFACT_URL} | tar -xzf -; \
+    cd -; \
+  fi
 
 FROM debian:bullseye-slim AS distro
 ARG DEBUG_IMAGE=false

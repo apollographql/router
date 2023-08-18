@@ -1,4 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
 #![allow(missing_docs)] // FIXME
 
 use std::collections::HashMap;
@@ -39,17 +38,12 @@ pub(crate) enum PipelineStep {
     SubgraphResponse,
 }
 
-#[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum Control {
+    #[default]
     Continue,
     Break(u16),
-}
-
-impl Default for Control {
-    fn default() -> Self {
-        Control::Continue
-    }
 }
 
 impl Control {
@@ -132,6 +126,42 @@ where
             sdl,
             uri: None,
             path,
+            method,
+            service_name: None,
+        }
+    }
+
+    #[builder(visibility = "pub(crate)")]
+    /// This is the constructor (or builder) to use when constructing a Supergraph
+    /// `Externalizable`.
+    ///
+    fn supergraph_new(
+        stage: PipelineStep,
+        control: Option<Control>,
+        id: Option<String>,
+        headers: Option<HashMap<String, Vec<String>>>,
+        body: Option<T>,
+        context: Option<Context>,
+        status_code: Option<u16>,
+        method: Option<String>,
+        sdl: Option<String>,
+    ) -> Self {
+        assert!(matches!(
+            stage,
+            PipelineStep::SupergraphRequest | PipelineStep::SupergraphResponse
+        ));
+        Externalizable {
+            version: EXTERNALIZABLE_VERSION,
+            stage: stage.to_string(),
+            control,
+            id,
+            headers,
+            body,
+            context,
+            status_code,
+            sdl,
+            uri: None,
+            path: None,
             method,
             service_name: None,
         }

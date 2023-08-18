@@ -1,5 +1,4 @@
 //! Configuration for apollo telemetry.
-// This entire file is license key functionality
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::num::NonZeroUsize;
@@ -266,50 +265,57 @@ pub(crate) enum SingleReport {
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct Report {
     pub(crate) traces_per_query: HashMap<String, TracesAndStats>,
-    #[serde(serialize_with = "serialize_operation_count_by_type")]
-    pub(crate) operation_count_by_type:
-        HashMap<(OperationKind, Option<OperationSubType>), OperationCountByType>,
+    #[serde(serialize_with = "serialize_licensed_operation_count_by_type")]
+    pub(crate) licensed_operation_count_by_type:
+        HashMap<(OperationKind, Option<OperationSubType>), LicensedOperationCountByType>,
 }
 
 #[derive(Clone, Default, Debug, Serialize, PartialEq, Eq, Hash)]
-pub(crate) struct OperationCountByType {
+pub(crate) struct LicensedOperationCountByType {
     pub(crate) r#type: OperationKind,
     pub(crate) subtype: Option<OperationSubType>,
-    pub(crate) operation_count: u64,
+    pub(crate) licensed_operation_count: u64,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq, Hash, Clone, Copy)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum OperationSubType {
-    // TODO
+    SubscriptionEvent,
+    SubscriptionRequest,
 }
 
 impl OperationSubType {
     pub(crate) const fn as_str(&self) -> &'static str {
-        ""
+        match self {
+            OperationSubType::SubscriptionEvent => "subscription-event",
+            OperationSubType::SubscriptionRequest => "subscription-request",
+        }
     }
 }
 
 impl Display for OperationSubType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "")
-    }
-}
-
-impl From<OperationCountByType>
-    for crate::plugins::telemetry::apollo_exporter::proto::reports::report::OperationCountByType
-{
-    fn from(value: OperationCountByType) -> Self {
-        Self {
-            r#type: value.r#type.as_apollo_operation_type().to_string(),
-            subtype: value.subtype.map(|s| s.to_string()).unwrap_or_default(),
-            operation_count: value.operation_count,
+        match self {
+            OperationSubType::SubscriptionEvent => write!(f, "subscription-event"),
+            OperationSubType::SubscriptionRequest => write!(f, "subscription-request"),
         }
     }
 }
 
-fn serialize_operation_count_by_type<S>(
-    elt: &HashMap<(OperationKind, Option<OperationSubType>), OperationCountByType>,
+impl From<LicensedOperationCountByType>
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::report::OperationCountByType
+{
+    fn from(value: LicensedOperationCountByType) -> Self {
+        Self {
+            r#type: value.r#type.as_apollo_operation_type().to_string(),
+            subtype: value.subtype.map(|s| s.to_string()).unwrap_or_default(),
+            operation_count: value.licensed_operation_count,
+        }
+    }
+}
+
+fn serialize_licensed_operation_count_by_type<S>(
+    elt: &HashMap<(OperationKind, Option<OperationSubType>), LicensedOperationCountByType>,
     serializer: S,
 ) -> Result<S::Ok, S::Error>
 where
@@ -349,7 +355,7 @@ impl Report {
             header: Some(header),
             end_time: Some(SystemTime::now().into()),
             operation_count_by_type: self
-                .operation_count_by_type
+                .licensed_operation_count_by_type
                 .values()
                 .cloned()
                 .map(|op| op.into())
@@ -395,17 +401,17 @@ impl AddAssign<SingleStatsReport> for Report {
             *self.traces_per_query.entry(k).or_default() += v;
         }
 
-        if let Some(operation_count_by_type) = report.operation_count_by_type {
+        if let Some(licensed_operation_count_by_type) = report.licensed_operation_count_by_type {
             let key = (
-                operation_count_by_type.r#type,
-                operation_count_by_type.subtype,
+                licensed_operation_count_by_type.r#type,
+                licensed_operation_count_by_type.subtype,
             );
-            self.operation_count_by_type
+            self.licensed_operation_count_by_type
                 .entry(key)
                 .and_modify(|e| {
-                    e.operation_count += 1;
+                    e.licensed_operation_count += 1;
                 })
-                .or_insert(operation_count_by_type);
+                .or_insert(licensed_operation_count_by_type);
         }
     }
 }

@@ -26,7 +26,7 @@ In these cases, you can create custom plugins for the Apollo Router.
 
 When designing a new plugin, you first want to determine which of the Apollo Router's **services** the plugin should hook into to achieve its use case.
 
-For descriptions of these services, see [How router plugins work](./overview/#how-customizations-work).
+For descriptions of these services, see [Router request lifecycle](./rhai#router-request-lifecycle).
 
 ## Building a plugin
 
@@ -96,21 +96,21 @@ impl Plugin for HelloWorld {
     // Only define the hooks you need to modify. Each default hook
     // implementation returns its associated service with no changes.
     fn router_service(
-        &mut self,
+        &self,
         service: router::BoxService,
     ) -> router::BoxService {
         service
     }
 
     fn supergraph_service(
-        &mut self,
+        &self,
         service: router::BoxService,
     ) -> router::BoxService {
         service
     }
 
     fn execution_service(
-        &mut self,
+        &self,
         service: execution::BoxService,
     ) -> execution::BoxService {
         service
@@ -120,7 +120,7 @@ impl Plugin for HelloWorld {
     // being invoked. That's because this service might invoke *multiple*
     // subgraphs for a single request, and this is called once for each.
     fn subgraph_service(
-        &mut self,
+        &self,
         name: &str,
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
@@ -141,7 +141,7 @@ use tower::ServiceBuilderExt;
 use apollo_router::ServiceBuilderExt as ApolloServiceBuilderExt;
 
 fn supergraph_service(
-    &mut self,
+    &self,
     service: router::BoxService,
 ) -> router::BoxService {
     // Always use service builder to compose your plugins.
@@ -229,7 +229,7 @@ Choose a group name that represents your organization and a name that represents
 
 ### 7. Configure your plugin
 
-After you register your plugin, you can add custom configuration for it to your [YAML configuration file](../configuration/overview/#yaml-config-file) in the `plugins:` section:
+After you register your plugin, you need to add configuration for it to your [YAML configuration file](../configuration/overview/#yaml-config-file) in the `plugins:` section:
 
 ```yaml
 plugins:
@@ -286,17 +286,25 @@ Like individual requests, plugins follow their own strict lifecycle that helps p
 
 ### Creation
 
-When the router starts, all plugins included in the executable are registered. At this time, the router calls the `new` method of all plugins. If any of these methods fail, the router terminates with helpful error messages.
+When the router starts or reloads, it calls `new` to create instances of plugins that have configuration in the `plugins:` section of the [YAML configuration file](../configuration/overview/#yaml-config-file). If any of these calls fail, the router terminates with helpful error messages.
 
 There is no sequencing for plugin registration, and registrations might even execute in parallel. A plugin should _never_ rely on the existence of _another_ plugin during initialization.
 
-### Activate
+### Request and response lifecycle
 
-Plugins are started in the same order they're declared in your [YAML configuration file](../configuration/overview/#yaml-config-file).
+Within a given service (router, subgraph, etc.), a _request_ is handled in the following order:
 
-Note that if a plugin is registered but is _not_ listed in the configuration file, the router does _not_ call `startup` on it. If any plugin fails to start, the router terminates with helpful error messages.
+* [Rhai script](../rhai)
+* [External coprocessor](../coprocessor)
+* Rust plugins, in the same order they're declared in your [YAML configuration file](../configuration/overview/#yaml-config-file).
 
-### Lifecycle notes
+The corresponding _response_ is handled in the opposite order.
+This ordering is relevant for communicating through [the `context` object](#5-define-necessary-context).
+
+When a single supergraph request involves multiple subgraph requests, the handling of each subgraph request and response is ordered as above but different subgraph requests may be handled in parallel, making their relative ordering non-deterministic.
+
+
+### Router lifecycle notes
 
 If a router is listening for dynamic changes to its configuration, it also triggers lifecycle events when those changes occur.
 

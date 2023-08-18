@@ -10,6 +10,8 @@ The Apollo Router supports request authentication and key rotation via the [JSON
 
 By enabling JWT authentication, you can block malicious traffic at the edge of your graph instead of relying on [header forwarding](./header-propagation/) to propagate tokens to your subgraphs.
 
+> ⚠️ Under all circumstances, your subgraphs should be accessible _only_ via the router—not directly by clients. This is especially true if you're relying on JWT authentication in the router. Make sure to [secure your subgraphs](/federation/building-supergraphs/subgraphs-overview/#securing-your-subgraphs).
+
 **To use this feature:**
 
 - You must have an identity provider (**IdP**) or similar service that issues JWTs to authenticated clients using one of the signature algorithms supported by the [jsonwebtoken Rust library](https://crates.io/crates/jsonwebtoken) (most popular signing algorithms are supported).
@@ -41,14 +43,15 @@ You enable JWT authentication for your router with the following steps:
 
     ```yaml title="router.yaml"
     authentication:
-     jwt:
-       jwks: # This key is required.
-         - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
-           issuer: <optional name of issuer>
+      router:
+        jwt:
+          jwks: # This key is required.
+          - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+            issuer: <optional name of issuer>
 
-       # These keys are optional. Default values are shown.
-       header_name: Authorization
-       header_value_prefix: Bearer
+          # These keys are optional. Default values are shown.
+          header_name: Authorization
+          header_value_prefix: Bearer
     ```
 
     These options are documented [below](#configuration-options).
@@ -56,7 +59,7 @@ You enable JWT authentication for your router with the following steps:
 2. Pass all of the following to the `router` executable on startup:
 
     - The path to the router's YAML configuration file (via the `--config` option)
-    - The graph ref for the [GraphOS variant](/graphos/graphs/overview#variants) your router should use (via the `APOLLO_GRAPH_REF` environment variable)
+    - The graph ref for the [GraphOS variant](/graphos/graphs/#variants) your router should use (via the `APOLLO_GRAPH_REF` environment variable)
     - A [graph API key](/graphos/api-keys/#graph-api-keys) that enables the router to authenticate with GraphOS to fetch its supergraph schema (via the `APOLLO_KEY` environment variable)
 
     ```bash
@@ -154,32 +157,54 @@ Because claims are added to the context, you can define custom logic for handlin
 
 Below are 2 example [Rhai script](../customizations/rhai/) customizations that demonstrate actions the router can perform based on a request's claims.
 
-### Example: Forwarding claims to subgraphs
+### Example: Forwarding claims to subgraphs as headers
 
-Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details.
+Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
-> This script hooks into the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+> This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
 
 <ExpansionPanel title="Click to expand">
 
 ```rhai title="claims_forwarding.rhai"
-fn subgraph_service(service, subgraph) {
-  let f = |request| {
-    // Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope
-    // constant with value `apollo_authentication::JWT::claims`
+fn process_request(request) {
     let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
     if claims ==() {
       throw #{
         status: 401
       };
     }
-    // Add each claim key-value pair as a separate HTTP header
-    for key in claims.keys() {
-      request.subgraph.headers[key] = claims[key].to_string();
+    // Add each claim key-value pair as a separate HTTP header.
+    // Note that that claims that are not present in the JWT will be added as empty strings.
+    let claim_names = ["claim_1", "claim_2", "claim_3"];
+    for claim_name in claim_names {
+      let claim = claims[claim_name];
+      claim = if claim == () {""} else {claim};
+      request.subgraph.headers[claim_name] = claim;
     }
-  };
+}
+```
 
-  service.map_request(f);
+</ExpansionPanel>
+
+> ⚠️ Explicitly listing claims and _always_ setting headers for them is strongly recommended to avoid possible security issues when [forwarding headers](./header-propagation/) to subgraphs.
+
+### Example: Forwarding claims to subgraphs as GraphQL extensions
+
+Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via GraphQL extension. This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
+
+> This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+
+<ExpansionPanel title="Click to expand">
+
+```rhai title="claims_forwarding.rhai"
+fn process_request(request) {
+    let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
+    if claims ==() {
+      throw #{
+        status: 401
+      };
+    }
+    request.subgraph.extensions["claims"] = claims;
 }
 ```
 
@@ -187,63 +212,101 @@ fn subgraph_service(service, subgraph) {
 
 ### Example: Throwing errors for invalid claims
 
-Below is an example [Rhai script](../customizations/rhai/) that throws distinct errors for different invalid JWT claim details.
+Below is an example [Rhai script](../customizations/rhai/) that throws distinct errors for different invalid JWT claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
-> This script hooks into the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+> This script should be run in the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
 
 <ExpansionPanel title="Click to expand">
 
 ```rhai title="claims_validation.rhai"
-fn supergraph_service(service) {
-    // Rhai mechanism for creating a function pointer
-    const request_callback = Fn("process_request");
-    service.map_request(request_callback); // Register the callback
-}
-
 fn process_request(request) {
-    try {
-        // Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope
-        // constant with value `apollo_authentication::JWT::claims`
-        let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
-        if claims == () {
-            throw #{
-                status: 401,
-                body: #{
-                    errors: [#{
-                        message: "No claims presented in this request"
-                    }]
-                }
-            };
-        }
-        if !claims.contains("iss") {
-            throw #{
-                status: 401,
-                message: "No issuer presented in this request"
-            };
-        }
-        if claims["iss"] != "https://idp.local" {
-            throw #{
-                status: 401,
-                body: #{
-                    errors: [#{
-                        message: `Issuer ${claims.iss} is not accepted here`
-                    }]
-                }
-            };
-        }
-        // Happy path: We have valid claims from the correct idP.
-        // Proceed accordingly (in this case, we just log the claims).
-        print(`claims: ${claims}`);
+    // Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope
+    // constant with value `apollo_authentication::JWT::claims`
+    let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
+    if claims == () || !claims.contains("iss") || claims["iss"] != "https://idp.local" {
+        throw #{
+            status: 401,
+            message: "Unauthorized"
+        };
     }
-    catch(err)
-    {
-        // log any errors
-        log_error(`Error during claims processing: ${err}`);
-        throw err;
-    }
+    // Happy path: We have valid claims from the correct idP.
 }
 ```
 
+</ExpansionPanel>
+
+### Example `main.rhai`
+
+In order to use the above Rhai examples, you must import them into your [`main.rhai`](../customizations/rhai#the-main-file) like this:
+
+<ExpansionPanel title="Click to expand">
+
+```rhai title="main.rhai"
+import "claims_validation" as claims_validation;
+import "claims_forwarding" as claims_forwarding;
+
+fn supergraph_service(service) {
+    let request_callback = |request| {
+        claims_validation::process_request(request);
+    };
+
+    service.map_request(request_callback);
+}
+
+fn subgraph_service(service, subgraph) {
+    let request_callback = |request| {
+        claims_forwarding::process_request(request);
+    };
+
+    service.map_request(request_callback);
+}
+```
+
+</ExpansionPanel>
+
+### Claim augmentation via coprocessors
+
+Tokens can come in with limited information, that is then used to look up user specific information like roles. This can be done with [coprocessors](/customizations/coprocessor).
+
+<ExpansionPanel title="Click to expand">
+
+The router level coprocessor is guaranteed to be called after the authentication plugin, so the coprocessor can receive the list of claims extracted from the token, use information like the `sub` (subject) claim to look up the user, insert its data in the claims list and return it to the router.
+
+If the router is configured with:
+
+```yaml title="router.yaml"
+authentication:
+  router:
+    jwt:
+      jwks:
+        - url: "file:///etc/router/jwks.json"
+
+coprocessor:
+  url: http://127.0.0.1:8081
+  router:
+    request:
+      context: true
+```
+
+The coprocessor will then receive a request with this format:
+
+```json
+{
+    "version": 1,
+    "stage": "RouterRequest",
+    "control": "continue",
+    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
+    "context": {
+        "entries": {
+            "apollo_authentication::JWT::claims": {
+                "exp": 10000000000,
+                "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a"
+            }
+        }
+    },
+    "method": "POST"
+}
+```
 </ExpansionPanel>
 
 ## Creating your own JWKS (advanced)

@@ -123,6 +123,9 @@ mod tests {
                 "sub": {
                     "experimental_trace_id": "ok"
                 }
+            },
+            "preview_subscription": {
+
             }
         });
 
@@ -132,6 +135,10 @@ mod tests {
                 "experimental_logging".to_string(),
                 "experimental_trace_id".to_string()
             ]
+        );
+        assert_eq!(
+            get_configurations(&val, "preview"),
+            vec!["preview_subscription".to_string(),]
         );
     }
 }

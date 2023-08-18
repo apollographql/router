@@ -4,9 +4,10 @@ homepage:
   enabled: true
 
 authentication:
-  jwt:
-    jwks:
-      - url: https://example.com
+  router:
+    jwt:
+      jwks:
+        - url: https://example.com
 
 coprocessor:
   url: https://example.com
@@ -20,7 +21,7 @@ supergraph:
       in_memory:
         limit: 1000
 
-preview_operation_limits:
+limits:
   max_depth: 20
   max_height: 100
   max_aliases: 100
@@ -44,6 +45,18 @@ traffic_shaping:
     urls:
       - https://example.com
 
+subscription:
+  enabled: true
+  mode:
+    passthrough:
+      subgraphs:
+        reviews:
+          path: /graphql
+    preview_callback:
+      public_url: "http://localhost:4040/"
+      listen: 0.0.0.0:4040
+      subgraphs:
+        - atestsubgraph
 plugins:
   experimental.restricted:
     enabled: true

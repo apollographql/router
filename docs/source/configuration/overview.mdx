@@ -139,7 +139,7 @@ If set, the Apollo Router runs in dev mode to help with local development.
 </td>
 <td>
 
-If set, the router watches for changes to its schema and configuration files and reloads them automatically without downtime.
+If set, the router watches for changes to its configuration file and any supergraph file passed with `--supergraph` and reloads them automatically without downtime.  This setting only affects local files provided to the router.  The supergraph and configuration provided from GraphOS via Launches (and delivered via Uplink) are _always_ loaded automatically, regardless of this setting.
 
 </td>
 </tr>
@@ -231,6 +231,22 @@ If set, disables sending anonymous usage information to Apollo.
 <tr>
 <td>
 
+##### `--listen`
+
+`APOLLO_ROUTER_LISTEN_ADDRESS`
+
+</td>
+<td>
+
+If set, the listen address of the router. 
+
+</td>
+</tr>
+
+
+<tr>
+<td>
+
 ##### `-V` / `--version`
 
 </td>
@@ -275,6 +291,7 @@ supergraph:
 include_subgraph_errors:
   all: true
 plugins:
+  # Enable with the header, Apollo-Expose-Query-Plan: true
   experimental.expose_query_plan: true
 ```
 
@@ -483,6 +500,10 @@ See [Configuring CORS in the Apollo Router](./cors).
 
 See [Apollo Router support for `@defer`](../executing-operations/defer-support/#disabling-defer).
 
+### Subscription support
+
+See [GraphQL subscriptions in the Apollo Router](../executing-operations/subscription-support/#router-setup).
+
 ### External coprocessing
 
 See [External coprocessing in the Apollo Router](../customizations/coprocessor/).
@@ -493,7 +514,49 @@ See [Tracing in the Apollo Router](./tracing/).
 
 ### TLS
 
-TLS connections to subgraphs are verified using the list of certificate authorities provided by the system. You can override this list with a combination of global and per-subgraph settings:
+The Apollo Router supports TLS to authenticate and encrypt communications, both on the client side and the subgraph side. It works automatically on the subgraph side if the subgraph URL starts with `https://`.
+
+TLS support is configured in the `tls` section, under the `supergraph` key for the client side, and the `subgraph` key for the subgraph side, with configuration possible for all subgraphs and overriding per subgraph.
+
+The list of supported TLS versions and algorithms is static, it cannot be configured.
+
+Supported TLS versions:
+* TLS 1.2
+* TLS 1.3
+
+Supported cipher suites:
+* TLS13_AES_256_GCM_SHA384
+* TLS13_AES_128_GCM_SHA256
+* TLS13_CHACHA20_POLY1305_SHA256
+* TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+* TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+* TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+* TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+* TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+* TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+
+Supported key exchange groups:
+* X25519
+* SECP256R1
+* SECP384R1
+
+#### TLS termination
+
+Clients can connect to the router directly over HTTPS, without terminating TLS in an intermediary. You can  configure this in the `tls` configuration section:
+
+```yaml
+tls:
+  supergraph:
+    certificate: ${file./path/to/certificate.pem}
+    certificate_chain: ${file./path/to/certificate_chain.pem}
+    key: ${file./path/to/key.pem}
+```
+
+The router expects the file referenced in the `certificate_chain` value to be a combination of several PEM certificates concatenated together into a single file (as is commonplace with Apache TLS configuration).
+
+#### Overriding certificate authorities for subgraphs
+
+The router verifies TLS connections to subgraphs using the list of certificate authorities the system provides. You can override this list with a combination of global and per-subgraph settings:
 
 ```yaml title="router.yaml"
 tls:
@@ -507,21 +570,51 @@ tls:
         certificate_authorities: "${file./path/to/product_ca.crt}"
 ```
 
+The router expects the file referenced in the `certificate_chain` value to be a combination of several PEM certificates concatenated together into a single file (as is commonplace with Apache TLS configuration).
+
+You can only configure these certificates via the router's configuration since using `SSL_CERT_FILE` also overrides certificates for sending telemetry and communicating with Apollo Uplink.
+
+> **Note**: If the subgraph is presenting a self-signed certificate, it must be generated with the proper file extension and with `basicConstraints` disabled.
+> You can generate it with the following command line command from a certificate signing request, in this example, `server.csr`:
+
+```
+openssl x509 -req -in server.csr -signkey server.key -out server.crt -extfile v3.ext
+```
+
+You can generate a `v3.ext` extension file like so:
+
+```
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always,issuer:always
+# this has to be disabled
+# basicConstraints       = CA:TRUE
+keyUsage               = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment, keyAgreement, keyCertSign
+subjectAltName         = DNS:local.apollo.dev
+issuerAltName          = issuer:copy
+```
+
+> Make sure to change the `subjectAltName` field to the subgraph's name.
+This produces the file as `server.crt` which can be used in `certificate_authorities`.
+
 ### Request limits
 
 > **Request limits are currently in [preview](/resources/product-launch-stages#preview).**
 >
 > To set request limits, you must run v1.17 or later of the Apollo Router. [Download the latest version.](../quickstart#download-options)
 
-The Apollo Router supports enforcing two types of request limits for enhanced security:
+The Apollo Router supports enforcing three types of request limits for enhanced security:
 
+- Network-based limits
 - Lexical, parser-based limits
 - Semantic, operation-based limits (this is an [Enterprise feature](../enterprise-features/))
 
 The router rejects any request that violates at least one of these limits.
 
 ```yaml title="router.yaml"
-preview_operation_limits:
+limits:
+  # Network-based limits
+  experimental_http_max_request_bytes: 2000000 # Default value: 2 MB
+
   # Parser-based limits
   parser_max_tokens: 15000 # Default value
   parser_max_recursion: 4096 # Default value
@@ -536,6 +629,23 @@ preview_operation_limits:
 #### Operation-based limits (Enterprise only)
 
 See [this article](./operation-limits/).
+
+#### Network-based limits
+
+##### `http_max_request_bytes`
+
+> **This configuration is currently [experimental](/resources/product-launch-stages#experimental-features).**
+
+Limits the amount of data read from the network for the body of HTTP requests,
+to protect against unbounded memory consumption.
+This limit is checked before JSON parsing.
+Both the GraphQL document and associated variables count toward it.
+
+The default value is `2000000` bytes, 2 MB.
+
+Before increasing this limit significantly consider testing performance
+in an environment similar to your production, especially if some clients are untrusted.
+Many concurrent large requests could cause the Router to run out of memory.
 
 #### Parser-based limits
 
@@ -573,6 +683,18 @@ fragment ProductVariation on Product {
 Note that the router calculates the recursion depth for each operation and fragment _separately_.  Even if a fragment is included in an operation, that fragment's recursion depth does not contribute to the _operation's_ recursion depth.
 
 > In versions of the Apollo Router prior to 1.17, this limit was defined via the config option `experimental_parser_recursion_limit`.
+
+### GraphQL Validation Mode
+
+We are experimenting with a new GraphQL validation implementation written in Rust. The legacy implementation is part of the JavaScript query planner. This is part of a project to remove JavaScript from the Router to improve performance and memory behavior.
+
+To opt in to the new validation implementation, set:
+
+```yaml {4,8} title="router.yaml"
+experimental_graphql_validation_mode: new
+```
+
+This is an experimental option while we are still finding edge cases in the new implementation, but it will become the default in the future.
 
 ### Plugins
 

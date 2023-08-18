@@ -9,7 +9,6 @@ use apollo_compiler::InputDatabase;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::spec::Query;
 use crate::Configuration;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -61,10 +60,11 @@ impl OperationLimits<bool> {
 /// Returns which limits are exceeded by the given query, if any
 pub(crate) fn check(
     configuration: &Configuration,
-    query: &mut Query,
+    query: &str,
+    compiler: &ApolloCompiler,
     operation_name: Option<String>,
 ) -> Result<(), OperationLimits<bool>> {
-    let config_limits = &configuration.preview_operation_limits;
+    let config_limits = &configuration.limits;
     let max = OperationLimits {
         depth: config_limits.max_depth,
         height: config_limits.max_height,
@@ -75,15 +75,6 @@ pub(crate) fn check(
         // No configured limit
         return Ok(());
     }
-
-    // We only need `&ApolloCompiler` but
-    // `get_mut` allows accessing a Tokio `Mutex` without awaiting.
-    #[allow(clippy::expect_used)] // can’t really avoid this one
-    let compiler = query
-        .compiler
-        .get_mut()
-        .expect("compiler must be already initialized")
-        .get_mut();
 
     let ids = compiler.db.executable_definition_files();
     // We create a new compiler for each query
@@ -122,7 +113,6 @@ pub(crate) fn check(
             }
         });
         let message = messages.join(", ");
-        let query = &query.string;
         tracing::warn!(
             "request exceeded complexity limits: {message}, \
             query: {query:?}, operation name: {operation_name:?}"

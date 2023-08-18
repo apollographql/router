@@ -4,7 +4,7 @@
 
 replicaCount: 1
 
-# -- See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure
+# -- See https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file for yaml structure
 router:
   configuration:
     supergraph:
@@ -86,12 +86,28 @@ containerPorts:
 #       - containerPort: 4001
 extraContainers: []
 
+# -- An array of init containers to include in the router pod
+# Example:
+# initContainers:
+#   - name: init-myservice
+#     image: busybox:1.28
+#     command: ["sh"]
+initContainers: []
+
 # -- A map of extra labels to apply to the router deploment and containers
 # Example:
 # extraLabels:
 #   label_one_name: "label_one_value"
 #   label_two_name: "label_two_value"
 extraLabels: {}
+
+lifecycle: {}
+#  preStop:
+#    exec:
+#      command:
+#        - /bin/bash
+#        - -c
+#        - sleep 10
 
 imagePullSecrets: []
 nameOverride: ""
@@ -199,6 +215,9 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+# -- Sets the [pod disruption budget](https://kubernetes.io/docs/tasks/run-application/configure-pdb/) for Deployment pods
+podDisruptionBudget: {}
 
 # -- Set to existing PriorityClass name to control pod preemption by the scheduler
 priorityClassName: ""
