@@ -69,7 +69,7 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) and [@BlenderDude](https://g
 
 ### Helm: add init containers to deployemt ([Issue #3248](https://github.com/apollographql/router/issues/3248))
 
-This is a new option when starting the router, so that before starting another container runs and performs necessary tasks.
+This is a new option when deploying the router, so that containers may be specified which execute before the Router container (or any extra Containers) begin executing. You can read more about [init containers](https://kubernetes.io/docs/concepts/workloads/pods/init-containers/) in the kubernetes documentation.
 
 By [@laszlorostas](https://github.com/laszlorostas) in https://github.com/apollographql/router/pull/3444
 
