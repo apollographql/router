@@ -31,8 +31,6 @@ pub(super) struct SupergraphRequestConf {
     pub(super) body: bool,
     /// Send the SDL
     pub(super) sdl: bool,
-    /// Send the path
-    pub(super) path: bool,
     /// Send the method
     pub(super) method: bool,
 }
@@ -190,6 +188,8 @@ where
         .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
         .transpose()?;
     let context_to_send = request_config.context.then(|| request.context.clone());
+    let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
+    let method = request_config.method.then(|| parts.method.to_string());
 
     let payload = Externalizable::supergraph_builder()
         .stage(PipelineStep::SupergraphRequest)
@@ -198,8 +198,8 @@ where
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)
-        .method(parts.method.to_string())
-        .sdl(sdl.to_string())
+        .and_method(method)
+        .and_sdl(sdl_to_send)
         .build();
 
     tracing::debug!(?payload, "externalized output");
