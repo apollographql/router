@@ -447,6 +447,15 @@ where
     fn start_send(self: Pin<&mut Self>, item: graphql::Request) -> Result<(), Self::Error> {
         let mut this = self.project();
 
+        tracing::info!(
+            monotonic_counter
+                .apollo
+                .router
+                .operations
+                .subscriptions
+                .events = 1u64,
+            subscriptions.mode = "passthrough"
+        );
         Pin::new(&mut this.stream)
             .start_send(this.protocol.subscribe(this.id.to_string(), item))
             .map_err(|_err| {
@@ -474,6 +483,16 @@ where
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
+        tracing::info!(
+            monotonic_counter
+                .apollo
+                .router
+                .operations
+                .subscriptions
+                .events = 1u64,
+            subscriptions.mode = "passthrough",
+            subscriptions.complete = true
+        );
         let mut this = self.project();
         if !*this.completed {
             match Pin::new(

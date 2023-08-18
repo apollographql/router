@@ -126,6 +126,7 @@ impl PersistedQueryLayer {
                     .private_entries
                     .lock()
                     .insert(UsedQueryIdFromManifest);
+                tracing::info!(monotonic_counter.apollo.router.operations.persisted_queries = 1u64);
                 Ok(request)
             } else if manifest_poller.augmenting_apq_with_pre_registration_and_no_safelisting() {
                 // The query ID isn't in our manifest, but we have APQ enabled
@@ -134,6 +135,10 @@ impl PersistedQueryLayer {
                 // safelist later for log_unknown!)
                 Ok(request)
             } else {
+                tracing::info!(
+                    monotonic_counter.apollo.router.operations.persisted_queries = 1u64,
+                    persisted_quieries.not_found = true
+                );
                 // if APQ is not enabled, return an error indicating the query was not found
                 Err(supergraph_err_operation_not_found(
                     request,
@@ -216,14 +221,32 @@ impl PersistedQueryLayer {
         }
 
         match manifest_poller.action_for_freeform_graphql(operation_body, db.ast(file_id)) {
-            FreeformGraphQLAction::Allow => Ok(request),
-            FreeformGraphQLAction::Deny => Err(supergraph_err_operation_not_in_safelist(request)),
+            FreeformGraphQLAction::Allow => {
+                tracing::info!(monotonic_counter.apollo.router.operations.persisted_queries = 1u64,);
+                Ok(request)
+            }
+            FreeformGraphQLAction::Deny => {
+                tracing::info!(
+                    monotonic_counter.apollo.router.operations.persisted_queries = 1u64,
+                    persisted_queries.safelist.rejected.unknown = false,
+                );
+                Err(supergraph_err_operation_not_in_safelist(request))
+            }
             // Note that this might even include complaining about an operation that came via APQs.
             FreeformGraphQLAction::AllowAndLog => {
+                tracing::info!(
+                    monotonic_counter.apollo.router.operations.persisted_queries = 1u64,
+                    persisted_queries.logged = true
+                );
                 log_unknown_operation(operation_body);
                 Ok(request)
             }
             FreeformGraphQLAction::DenyAndLog => {
+                tracing::info!(
+                    monotonic_counter.apollo.router.operations.persisted_queries = 1u64,
+                    persisted_queries.safelist.rejected.unknown = true,
+                    persisted_queries.logged = true
+                );
                 log_unknown_operation(operation_body);
                 Err(supergraph_err_operation_not_in_safelist(request))
             }
