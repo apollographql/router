@@ -50,8 +50,10 @@ pub(crate) enum FreeformGraphQLBehavior {
     },
 }
 
-/// Describes what the router should do for a given request: allow it, deny it
-/// with an error, or allow it but log the operation as unknown.
+/// How we should treat requests containing freeform GraphQL rather than a PQ ID.
+/// (This also includes the results of APQ lookups, for the purpose of differenting
+/// between Allow and AllowAndLog; APQ cannot be enabled in any mode that allows
+/// freeform requests to be denied.)
 pub(crate) enum FreeformGraphQLAction {
     Allow,
     Deny,
