@@ -102,7 +102,8 @@ spec:
               containerPort: {{ .Values.containerPorts.metrics }}
               protocol: TCP
             {{- end }}
-
+          lifecycle:
+            {{- toYaml .Values.lifecycle | nindent 12 }}
           livenessProbe:
             httpGet:
               path: "/health?live"
@@ -129,6 +130,10 @@ spec:
         {{- if .Values.extraContainers }}
           {{- include "common.tplvalues.render" (dict "value" .Values.extraContainers "context" $) | nindent 8 }}
         {{- end }}
+      {{- if .Values.initContainers }}
+      initContainers:
+        {{- include "common.tplvalues.render" (dict "value" .Values.initContainers "context" $) | nindent 8 }}
+      {{- end }}
       {{- if or .Values.router.configuration .Values.extraVolumes }}
       volumes:
         {{- if .Values.router.configuration }}

@@ -364,7 +364,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             )
             .await
             .map_err(ServiceCreationError)?;
-
         // used to track if there are still in flight connections when shutting down
         let (all_connections_stopped_sender, all_connections_stopped_signal) =
             mpsc::channel::<()>(1);
@@ -595,6 +594,8 @@ mod tests {
     use crate::services::router;
     use crate::services::RouterRequest;
 
+    type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
+
     fn example_schema() -> String {
         include_str!("testdata/supergraph.graphql").to_owned()
     }
@@ -679,7 +680,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -701,7 +702,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -723,7 +724,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -748,7 +749,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -770,7 +771,7 @@ mod tests {
             .await,
             Err(ApolloRouterError::LicenseViolation)
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 0);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 0);
     }
 
     #[test(tokio::test)]
@@ -794,7 +795,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -834,7 +835,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -857,7 +858,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -880,7 +881,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -903,7 +904,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -935,7 +936,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -957,7 +958,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -983,7 +984,7 @@ mod tests {
             .await,
             Err(ApolloRouterError::ServiceCreationError(_))
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 0);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 0);
     }
 
     #[test(tokio::test)]
@@ -1024,7 +1025,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -1082,7 +1083,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     mock! {
@@ -1179,21 +1180,28 @@ mod tests {
         ready_false_times: usize,
     ) -> (
         MockMyHttpServerFactory,
-        Arc<Mutex<Vec<oneshot::Receiver<()>>>>,
+        (SharedOneShotReceiver, SharedOneShotReceiver),
     ) {
         let mut server_factory = MockMyHttpServerFactory::new();
         let shutdown_receivers = Arc::new(Mutex::new(vec![]));
+        let extra_shutdown_receivers = Arc::new(Mutex::new(vec![]));
         let shutdown_receivers_clone = shutdown_receivers.to_owned();
+        let extra_shutdown_receivers_clone = extra_shutdown_receivers.to_owned();
         server_factory
             .expect_create_server()
             .times(expect_times_called)
             .returning(
                 move |configuration: Arc<Configuration>, mut main_listener: Option<Listener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
+                    let (extra_shutdown_sender, extra_shutdown_receiver) = oneshot::channel();
                     shutdown_receivers_clone
                         .lock()
                         .unwrap()
                         .push(shutdown_receiver);
+                    extra_shutdown_receivers_clone
+                        .lock()
+                        .unwrap()
+                        .push(extra_shutdown_receiver);
 
                     let server = async move {
                         let main_listener = match main_listener.take() {
@@ -1203,14 +1211,16 @@ mod tests {
                             ),
                         };
 
-                        Ok((main_listener, vec![]))
+                        Ok(main_listener)
                     };
 
                     let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
 
                     Ok(HttpServerHandle::new(
                         shutdown_sender,
+                        extra_shutdown_sender,
                         Box::pin(server),
+                        Box::pin(async { Ok(vec![]) }),
                         Some(configuration.supergraph.listen.clone()),
                         vec![],
                         all_connections_stopped_sender,
@@ -1237,7 +1247,10 @@ mod tests {
             .with(eq(false))
             .times(ready_false_times)
             .return_const(());
-        (server_factory, shutdown_receivers)
+        (
+            server_factory,
+            (shutdown_receivers, extra_shutdown_receivers),
+        )
     }
 
     fn create_mock_router_configurator(expect_times_called: usize) -> MockMyRouterConfigurator {

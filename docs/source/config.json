@@ -41,7 +41,8 @@
           [
             "enterprise"
           ]
-        ],
+        ],        
+        "Subgraph Authentication": "/configuration/authn-subgraph",
         "Operation limits": [
           "/configuration/operation-limits",
           [

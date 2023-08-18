@@ -32,6 +32,7 @@ type Mutation {
 
 type Subscription {
   userWasCreated: User @join__field(graph: ACCOUNTS)
+  reviewAdded: Review @join__field(graph: REVIEWS)
 }
 
 type Product
