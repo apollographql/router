@@ -344,6 +344,7 @@ mod tests {
     }
     "#;
 
+    #[track_caller]
     fn filter(schema: &str, query: &str) -> (apollo_encoder::Document, Vec<Path>) {
         let mut compiler = ApolloCompiler::new();
 
@@ -651,6 +652,48 @@ mod tests {
         "#;
 
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY2);
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+    }
+
+    #[test]
+    fn union() {
+        static UNION_MEMBERS_SCHEMA: &str = r#"
+        directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+
+        type Query {
+            test: String
+            uni: I!
+        }
+
+        union I = A | B
+
+        type A {
+            id: ID
+        }
+
+        type B @authenticated {
+            id: ID
+        }
+        "#;
+
+        static QUERY: &str = r#"
+        query {
+            test
+            uni {
+                ... on A {
+                    id
+                }
+                ... on B {
+                    id
+                }
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(UNION_MEMBERS_SCHEMA, QUERY);
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
