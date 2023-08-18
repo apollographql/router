@@ -216,6 +216,9 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### self is immutable in the Plugin trait's methods ([Issue #3539](https://github.com/apollographql/router/issues/3539))
 
+The documentation previously displayed plugin's methods as taking a mutable reference to self, while they actually take a non mutable reference to it.
+
+This changeset fixes the documentation.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3555
 
