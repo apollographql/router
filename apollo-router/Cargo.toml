@@ -69,7 +69,7 @@ axum = { version = "0.6.20", features = ["headers", "json", "original-uri"] }
 base64 = "0.20.0"
 buildstructor = "0.5.3"
 bytes = "1.4.0"
-clap = { version = "4.3.21", default-features = false, features = [
+clap = { version = "4.3.22", default-features = false, features = [
     "env",
     "derive",
     "std",
@@ -99,9 +99,10 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "0.14.27", features = ["server", "client"] }
 hyper-rustls = { version = "0.23.2", features = ["http1", "http2"] }
-indexmap = { version = "1.9.3", features = ["serde-1"] }
+indexmap = { version = "2.0.0", features = ["serde"] }
 itertools = "0.10.5"
 jsonpath_lib = "0.3.0"
+jsonpath-rust = "0.3.1"
 jsonschema = { version = "0.16.1", default-features = false }
 jsonwebtoken = "8.3.0"
 lazy_static = "1.4.0"

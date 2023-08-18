@@ -1,0 +1,5 @@
+traffic_shaping:
+  all:
+    experimental_entity_caching:
+      ttl: 10s
+
