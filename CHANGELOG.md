@@ -4,6 +4,223 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.27.0] - 2023-08-18
+
+## 🚀 Features
+
+### add a metric tracking coprocessor latency ([Issue #2924](https://github.com/apollographql/router/issues/2924))
+
+Introduces a new metric for the router:
+
+```
+apollo.router.operations.coprocessor.duration
+```
+
+It has one attributes:
+
+```
+coprocessor.stage: string (RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse)
+```
+
+It is an histogram metric tracking the time spent calling into the coprocessor
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3513
+
+### Supergraph coprocessor implementation ([PR #3408](https://github.com/apollographql/router/pull/3408))
+
+This adds support for coprocessors at the supergraph service level. Supergraph plugins work on the request side with a parsed GraphQL request object, so the query and operation name, variables and extensions are directly accessible. On the response side, they handle GraphQL response objects, with label, data, path, errors, extensions. The supergraph response contains a stream of GraphQL responses, which can contain multiple elements if the query uses `@defer` or subscriptions. When configured to observe the responses, the coprocessor will be called for each of the deferred responses.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3408
+
+### Configure AWS sigv4 authentication for subgraph requests ([PR #3365](https://github.com/apollographql/router/pull/3365))
+
+Secure your router to subgraph communication on AWS using [Signature Version 4](https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html) (Sigv4)!
+This changeset provides you with a way to set up hardcoded credentials, as well as a default provider chain.
+We recommend using the default provider chain configuration.
+
+Full use example:
+
+```yaml
+    authentication:
+      subgraph:
+        all: # configuration that will apply to all subgraphs
+          aws_sig_v4:
+            default_chain:
+              profile_name: "my-test-profile" # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html#ec2-instance-profile
+              region: "us-east-1" # https://docs.aws.amazon.com/general/latest/gr/rande.html
+              service_name: "lambda" # https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_aws-services-that-work-with-iam.html
+              assume_role: # https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles.html
+                role_arn: "test-arn"
+                session_name: "test-session"
+                external_id: "test-id"
+        subgraphs:
+          products:
+            aws_sig_v4:
+              hardcoded: # Not recommended, prefer using default_chain as shown above
+                access_key_id: "my-access-key"
+                secret_access_key: "my-secret-access-key"
+                region: "us-east-1"
+                service_name: "vpc-lattice-svcs" # "s3", "lambda" etc.
+```
+
+The full documentation can be found in the [router documentation](https://www.apollographql.com/docs/router/configuration/authn-subgraph).
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) and [@BlenderDude](https://github.com/BlenderDude) in https://github.com/apollographql/router/pull/3365
+
+### Helm: add init containers to deployemt ([Issue #3248](https://github.com/apollographql/router/issues/3248))
+
+This is a new option when starting the router, so that before starting another container runs and performs necessary tasks.
+
+By [@laszlorostas](https://github.com/laszlorostas) in https://github.com/apollographql/router/pull/3444
+
+### Helm: exposes the lifecycle object on the router container ([Issue #3563](https://github.com/apollographql/router/issues/3563))
+
+You can now set the kubernetes lifecycle object on the router container in the helm chart.
+
+By [@bjoernw](https://github.com/bjoernw) in https://github.com/apollographql/router/pull/3570
+
+## 🐛 Fixes
+
+### Require the main (GraphQL) route to shutdown before other routes ([Issue #3521](https://github.com/apollographql/router/issues/3521))
+
+This changes router execution so that there is more control over the sequencing of server shutdown. In particular, this modifies how different routes are shutdown so that the main (GraphQL) route is shutdown before other routes are shutdown. Prior to this change all routes shut down in parallel and this would mean that, for example, health checks stopped responding prematurely.
+
+This is particularly undesirable when the router is executing in Kubernetes, since continuing to report live/ready checks during shutdown is a requirement.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3557
+
+### spelling of content_negociation corrected to content_negotiation ([Issue #3204](https://github.com/apollographql/router/issues/3204))
+
+spelling mistake in content_negociation is fixed
+
+By [@krishna15898](https://github.com/krishna15898) in https://github.com/apollographql/router/pull/3162
+
+### Fix redis reconnections ([Issue #3045](https://github.com/apollographql/router/issues/3045))
+
+The reconnection policy was using an exponential backoff delay with a maximum number of attempts. Once that maximum is reached, reconnection was never tried again (there's no baseline retry). We change that behaviour by adding infinite retries with a maximum delay of 2 seconds, and a timeout of 1 millisecond on redis commands, so that the router can continue serving requests in the meantime.
+
+This commit contains additional fixes:
+- release the lock on the in memory cache while waiting for redis, to let the in memory cache serve other requests
+- add a custom serializer for `SubSelectionKey`: this type is used as key in a `HashMap`, which is converted to a JSON object, and object keys must be strings, so a specific serializer is needed instead of the derived one
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3509
+
+### Close the subscription when a new schema has been detected during hot reload ([Issue #3320](https://github.com/apollographql/router/issues/3320))
+
+Router hot reloads on schema updates didn't close running subscriptions, which could imply out of date query plans.
+This changeset allows the router to signal clients that a `SUBSCRIPTION_SCHEMA_RELOAD` happened, and close the running subscription, so the clients can subscribe again:
+
+
+```json
+{
+  "errors": [
+    {
+      "message": "subscription has been closed due to a schema reload",
+      "extensions": {
+        "code": "SUBSCRIPTION_SCHEMA_RELOAD"
+      }
+    }
+  ]
+}
+```
+
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3341
+
+### Redis storage: return an error instead if a non serializable value is sent. ([#3594](https://github.com/apollographql/router/issues/3594))
+
+This changeset returns an error if a value couldn't be serialized before being sent to the redis storage backend.
+It also logs the error in console and prompts you to open an issue (This message showing up would be a router bug!).
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3597
+
+### Fix: handle ping/pong websocket messages before the Ack message is received. ([PR #3562](https://github.com/apollographql/router/pull/3562))
+
+Websocket servers will sometimes send Ping() messages before they Ack the connection initialization. This changeset allows the router to send Pong() messages, while still waiting until either `CONNECTION_ACK_TIMEOUT` elapsed, or the server successfully Acked the websocket connection start.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3562
+
+### Fix the error count for subscription requests for apollo telemetry ([PR #3500](https://github.com/apollographql/router/pull/3500))
+
+Count subscription requests only if the feature is enabled.
+
+The router would previously count subscription requests regardless of whether the feature is enabled or not. This changeset will only count subscription requests if the feature has been enabled.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3500
+
+## 🛠 Maintenance
+
+### Update datadog-subgraph npm dependencies ([PR #3560](https://github.com/apollographql/router/pull/3560))
+
+This changeset updates the dd-trace dependency and the nodeJS version of the example Dockerfile.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3560
+
+### Remove some panic! calls from the pq code. ([PR #3527](https://github.com/apollographql/router/pull/3527))
+
+Replace a few `panic!` calls with `expect()` in the persisted query code for code clarity.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3527
+
+### Add a warning if we think istio-proxy injection is causing problems ([Issue #3533](https://github.com/apollographql/router/issues/3533))
+
+We have encountered situations where the injection of istio-proxy in a router pod (executing in Kubernetes) causes networking errors during uplink retrieval.
+
+The root cause is that the router is executing and attempting to retrieve uplink schemas while the istio-proxy is simultaneously modifying network configuration.
+
+This new warning message directs users to information which should help them to configure their Kubernetes cluster or pod to avoid this problem.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3545
+
+### Add a message to the logs indicating when custom plugins are detected and there is a possibility that log entries may be silenced ([Issue #3526](https://github.com/apollographql/router/issues/3526))
+
+Since [#3477](https://github.com/apollographql/router/pull/3477), users who have created custom plugins no longer see their log entries.
+This is because the default logging filter now restricts log entries to those that are in the apollo module.
+
+Users that have custom plugins will need to configure the logging filter to include their modules, but they may not realise this.
+
+Now, if a custom plugin is detected then a message will be logged to the console indicating that the logging filter may need to be configured.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3540
+
+### Parent based sampling tests ([PR #3136](https://github.com/apollographql/router/pull/3136))
+
+This adds test for OpenTelemetry sampling defined either in the configuration or in headers carried by the request
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3136
+
+## 📚 Documentation
+
+### Document the Redis URL format ([Issue #3534](https://github.com/apollographql/router/issues/3534))
+
+The Redis client used in the Router follows a convention on Redis server URLs to indicate TLS, cluster or sentinel usage
+
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3556
+
+### Document the request lifecycle ([PR #3391](https://github.com/apollographql/router/pull/3391))
+
+This adds in-depth documentation of:
+- the entire request lifecycle
+- which services exist in the router
+- the request and response types they use
+- where plugins can attach themselves
+
+By [@Geal](https://github.com/Geal) [@Meschreiber](https://github.com/Meschreiber) in https://github.com/apollographql/router/pull/3391
+
+### document TLS termination and subgraph override ([Issue #3100](https://github.com/apollographql/router/issues/3100))
+
+TLS termination was added in #2614 but never documented, and subgraph certificate override was added in #2008 but the documentation was missing some details on self signed certificates.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3436
+
+### self is immutable in the Plugin trait's methods ([Issue #3539](https://github.com/apollographql/router/issues/3539))
+
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3555
+
+
+
 # [1.26.0] - 2023-07-28
 
 ## 🚀 Features
