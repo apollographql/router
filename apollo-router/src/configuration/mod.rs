@@ -2,6 +2,7 @@
 pub(crate) mod cors;
 pub(crate) mod expansion;
 mod experimental;
+pub(crate) mod metrics;
 mod persisted_queries;
 mod schema;
 pub(crate) mod subgraph;

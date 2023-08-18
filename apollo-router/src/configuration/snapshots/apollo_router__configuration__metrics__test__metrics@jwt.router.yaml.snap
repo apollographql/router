@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/configuration/metrics.rs
+expression: "&metrics.metrics"
+---
+value.apollo.router.config.authentication.jwt:
+  - 1
+  - {}
+
