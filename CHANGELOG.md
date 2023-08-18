@@ -38,7 +38,7 @@ Supergraph request contains:
 * variables
 * extensions
 
-Supergraph reqponse contains:
+Supergraph response contains:
 * label
 * data
 * path
