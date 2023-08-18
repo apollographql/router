@@ -53,7 +53,6 @@ use crate::query_planner::QueryPlanResult;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::persisted_queries::PersistedQueryManifestPoller;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphRequest;
@@ -124,7 +123,6 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
         QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
         Arc::new(supergraph_creator),
         configuration,
-        None,
     )
     .await
     .unwrap()
@@ -174,7 +172,6 @@ pub(crate) async fn empty() -> impl Service<
         QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
         Arc::new(supergraph_creator),
         Arc::new(Configuration::default()),
-        None,
     )
     .await
     .unwrap()
@@ -241,7 +238,14 @@ impl RouterService {
             Err(response) => response,
             Ok(request) => match self.query_analysis_layer.supergraph_request(request).await {
                 Err(response) => response,
-                Ok(request) => self.supergraph_creator.create().oneshot(request).await?,
+                Ok(request) => match self
+                    .persisted_query_layer
+                    .supergraph_request_with_analyzed_query(request)
+                    .await
+                {
+                    Err(response) => response,
+                    Ok(request) => self.supergraph_creator.create().oneshot(request).await?,
+                },
             },
         };
 
@@ -488,7 +492,6 @@ impl RouterCreator {
         query_analysis_layer: QueryAnalysisLayer,
         supergraph_creator: Arc<SupergraphCreator>,
         configuration: Arc<Configuration>,
-        persisted_query_manifest_poller: Option<Arc<PersistedQueryManifestPoller>>,
     ) -> Result<Self, BoxError> {
         let static_page = StaticPageLayer::new(&configuration);
         let apq_layer = if configuration.apq.enabled {
@@ -500,9 +503,7 @@ impl RouterCreator {
             APQLayer::disabled()
         };
 
-        let persisted_query_layer = Arc::new(
-            PersistedQueryLayer::new(&configuration, persisted_query_manifest_poller).await?,
-        );
+        let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
 
         Ok(Self {
             supergraph_creator,
