@@ -1,0 +1,7 @@
+preview_persisted_queries:
+  enabled: true
+  log_unknown: true
+  safelist:
+    require_id: true
+    enabled: true
+

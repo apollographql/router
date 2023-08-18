@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/configuration/metrics.rs
+expression: "&metrics.metrics"
+---
+value.apollo.router.config.authorization:
+  - 1
+  - opt__require_authentication__: "true"
+
