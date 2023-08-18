@@ -47,14 +47,7 @@ impl<T: MeterProvider> FilterMeterProvider<T> {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .deny(
-                Regex::new(r"apollo\.router\.(operations?|config)(\..*|$)")
-                    .expect("regex should have been valid"),
-            )
-            // You can add exceptions to the deny list here. Eventually we will want to allow most metrics to be public, but the rationale for
-            // making metrics public gradually is that we can make sure that we have got the naming conventions right.
-            // Our previous metrics suffered from inconsistency, and we don't want to repeat that mistake.
-            .allow(
-                Regex::new(r"apollo\.router\.operations\.authentication")
+                Regex::new(r"apollo\.router\.(config|entities)(\..*|$)")
                     .expect("regex should have been valid"),
             )
             .build()
@@ -245,40 +238,34 @@ mod test {
         let delegate = MockMeterProvider::default();
         let filtered = FilterMeterProvider::public_metrics(delegate.clone())
             .versioned_meter("filtered", None, None);
-        filtered.u64_counter("apollo.router.operations").init();
-        filtered.u64_counter("apollo.router.operations.test").init();
-        filtered.u64_counter("apollo.router.unknown.test").init();
-        filtered
-            .u64_counter("apollo.router.operations.authentication.aws.sigv4")
-            .init();
+        filtered.u64_counter("apollo.router.config").init();
+        filtered.u64_counter("apollo.router.config.test").init();
+        filtered.u64_counter("apollo.router.entities").init();
+        filtered.u64_counter("apollo.router.entities.test").init();
         assert!(!delegate
             .instrument_provider
             .counters_created
             .lock()
             .unwrap()
-            .contains(&("apollo.router.operations.test".to_string(), None, None)));
+            .contains(&("apollo.router.config".to_string(), None, None)));
         assert!(!delegate
             .instrument_provider
             .counters_created
             .lock()
             .unwrap()
-            .contains(&("apollo.router.operations".to_string(), None, None)));
-        assert!(delegate
+            .contains(&("apollo.router.config.test".to_string(), None, None)));
+        assert!(!delegate
             .instrument_provider
             .counters_created
             .lock()
             .unwrap()
-            .contains(&("apollo.router.unknown.test".to_string(), None, None)));
-        assert!(delegate
+            .contains(&("apollo.router.entities".to_string(), None, None)));
+        assert!(!delegate
             .instrument_provider
             .counters_created
             .lock()
             .unwrap()
-            .contains(&(
-                "apollo.router.operations.authentication.aws.sigv4".to_string(),
-                None,
-                None
-            )));
+            .contains(&("apollo.router.entities.test".to_string(), None, None)));
     }
 
     #[test]
