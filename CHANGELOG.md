@@ -22,7 +22,9 @@ It has one attributes:
 coprocessor.stage: string (RouterRequest, RouterResponse, SubgraphRequest, SubgraphResponse)
 ```
 
-It is a histogram metric tracking the time spent calling into the coprocessor
+It is a histogram metric tracking the time spent calling into the coprocessor.
+
+Note that the name of this metric may change in the future.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3513
 
