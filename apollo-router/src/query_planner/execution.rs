@@ -75,6 +75,9 @@ impl QueryPlan {
                 sender,
             )
             .await;
+        if !deferred_fetches.is_empty() {
+            tracing::info!(monotonic_counter.apollo.router.operations.defer = 1);
+        }
 
         Response::builder().data(value).errors(errors).build()
     }
