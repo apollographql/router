@@ -38,11 +38,11 @@ use crate::spec::SpecError;
 use crate::Configuration;
 
 // For reporting validation results with `experimental_graphql_validation_mode: both`.
-const VALIDATION_SOURCE_SCHEMA: &'static str = "schema";
-const VALIDATION_SOURCE_OPERATION: &'static str = "operation";
-const VALIDATION_FALSE_NEGATIVE: &'static str = "false_negative";
-const VALIDATION_FALSE_POSITIVE: &'static str = "false_positive";
-const VALIDATION_MATCH: &'static str = "match";
+const VALIDATION_SOURCE_SCHEMA: &str = "schema";
+const VALIDATION_SOURCE_OPERATION: &str = "operation";
+const VALIDATION_FALSE_NEGATIVE: &str = "false_negative";
+const VALIDATION_FALSE_POSITIVE: &str = "false_positive";
+const VALIDATION_MATCH: &str = "match";
 
 #[derive(Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
