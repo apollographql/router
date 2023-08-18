@@ -551,7 +551,6 @@ mod tests {
                 body: true,
                 sdl: false,
                 method: false,
-                path: false,
             },
             response: Default::default(),
         };
@@ -685,7 +684,6 @@ mod tests {
                 body: true,
                 sdl: false,
                 method: false,
-                path: false,
             },
             response: Default::default(),
         };
