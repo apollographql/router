@@ -230,13 +230,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "apollo-encoder"
-version = "0.4.0"
+name = "apollo-compiler"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "555c85cfb5672ee5d5925db34c15b8bc53e97bf5c67eb0a75d54ee9fe51ec8f0"
+checksum = "be4cd82e027ec461e1f8485051d9a599e1ab46dfe368b2eaaf5631bf170b9c34"
 dependencies = [
- "apollo-parser 0.4.1",
+ "apollo-parser 0.6.0",
+ "ariadne",
+ "indexmap 2.0.0",
+ "ordered-float 3.7.0",
+ "rowan",
+ "salsa",
  "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -250,12 +256,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "apollo-parser"
-version = "0.4.1"
+name = "apollo-encoder"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8efddeb45af3f03212f39365abbeb0572fabc87a619efaedac38d40a9d604a9e"
+checksum = "b323dfc43b95a8806a401aed913e84db297162c6295bca620c0f57956cdb52cf"
 dependencies = [
- "rowan",
+ "apollo-compiler 0.11.0",
+ "apollo-parser 0.6.0",
  "thiserror",
 ]
 
@@ -270,14 +277,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "apollo-parser"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "865fe2127e11400df5917c287f3ccd30494114b1df65b20c60beddc4822fc250"
+dependencies = [
+ "rowan",
+ "thiserror",
+]
+
+[[package]]
 name = "apollo-router"
 version = "1.27.0"
 dependencies = [
  "access-json",
  "anyhow",
- "apollo-compiler",
- "apollo-encoder 0.5.1",
- "apollo-parser 0.5.3",
+ "apollo-compiler 0.11.0",
+ "apollo-encoder 0.7.0",
+ "apollo-parser 0.6.0",
  "arc-swap",
  "askama",
  "async-compression",
@@ -418,7 +435,7 @@ dependencies = [
 name = "apollo-router-benchmarks"
 version = "1.27.0"
 dependencies = [
- "apollo-parser 0.4.1",
+ "apollo-parser 0.6.0",
  "apollo-router",
  "apollo-smith",
  "arbitrary",
@@ -446,12 +463,12 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.3.2"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b4ab369b6c748e8e1ea87733a7f98d8e8671bf848cd8a8290308d5b0f90299b"
+checksum = "13ed94bb9de9f24da12ca2122b8eeaa7484d17b090dc84daaaba6b6ac2bee89b"
 dependencies = [
- "apollo-encoder 0.4.0",
- "apollo-parser 0.4.1",
+ "apollo-encoder 0.7.0",
+ "apollo-parser 0.6.0",
  "arbitrary",
  "once_cell",
  "thiserror",
@@ -5230,7 +5247,7 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
- "apollo-parser 0.4.1",
+ "apollo-parser 0.6.0",
  "apollo-smith",
  "env_logger 0.10.0",
  "libfuzzer-sys",
@@ -6027,7 +6044,7 @@ name = "supergraph_sdl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-compiler",
+ "apollo-compiler 0.10.0",
  "apollo-router",
  "async-trait",
  "tower",

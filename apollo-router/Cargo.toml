@@ -53,9 +53,9 @@ features = ["docs_rs"]
 askama = "0.11.1"
 access-json = "0.1.0"
 anyhow = "1.0.75"
-apollo-compiler = "0.10.0"
-apollo-encoder = "0.5.1"
-apollo-parser = "0.5.3"
+apollo-compiler = "0.11.0"
+apollo-encoder = "0.7.0"
+apollo-parser = "0.6.0"
 arc-swap = "1.6.0"
 async-compression = { version = "0.3.15", features = [
     "tokio",
