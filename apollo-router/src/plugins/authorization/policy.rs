@@ -5,7 +5,6 @@
 //! ```graphql
 //! directive @policy(policies: [String!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 //! ```
-use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_compiler::hir;
@@ -224,20 +223,13 @@ impl<'a> PolicyFilteringVisitor<'a> {
                 );
                 return true;
             }
-
-            if self.implementors_with_different_field_requirements(
-                &type_definition,
-                &node.selection_set().fields(),
-            ) {
-                return true;
-            }
         }
         false
     }
 
     fn implementors_with_different_type_requirements(&self, t: &TypeDefinition) -> bool {
         if t.is_interface_type_definition() {
-            let mut scope_sets = None;
+            let mut policies: Option<Vec<String>> = None;
 
             for ty in self
                 .compiler
@@ -252,7 +244,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
                 // aggregate the list of scope sets
                 // we transform to a common representation of sorted vectors because the element order
                 // of hashsets is not stable
-                let ty_scope_sets = ty
+                let field_policies = ty
                     .directive_by_name(POLICY_DIRECTIVE_NAME)
                     .map(|directive| {
                         let mut v = policy_argument(Some(directive))
@@ -263,10 +255,10 @@ impl<'a> PolicyFilteringVisitor<'a> {
                     })
                     .unwrap_or_default();
 
-                match &scope_sets {
-                    None => scope_sets = Some(ty_scope_sets),
-                    Some(other_scope_sets) => {
-                        if ty_scope_sets != *other_scope_sets {
+                match &policies {
+                    None => policies = Some(field_policies),
+                    Some(other_policies) => {
+                        if field_policies != *other_policies {
                             return true;
                         }
                     }
@@ -280,10 +272,10 @@ impl<'a> PolicyFilteringVisitor<'a> {
     fn implementors_with_different_field_requirements(
         &self,
         t: &TypeDefinition,
-        fields: &[hir::Field],
+        field: &hir::Field,
     ) -> bool {
         if t.is_interface_type_definition() {
-            let mut all_fields_policies: HashMap<&str, Option<Vec<_>>> = HashMap::new();
+            let mut policies: Option<Vec<String>> = None;
 
             for ty in self
                 .compiler
@@ -295,30 +287,26 @@ impl<'a> PolicyFilteringVisitor<'a> {
                 .cloned()
                 .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
             {
-                for field in fields {
-                    if let Some(f) = ty.field(&self.compiler.db, field.name()) {
-                        // aggregate the list of scope sets
-                        // we transform to a common representation of sorted vectors because the element order
-                        // of hashsets is not stable
-                        let field_policies = f
-                            .directive_by_name(POLICY_DIRECTIVE_NAME)
-                            .map(|directive| {
-                                let mut v = policy_argument(Some(directive))
-                                    .cloned()
-                                    .collect::<Vec<_>>();
-                                v.sort();
-                                v
-                            })
-                            .unwrap_or_default();
+                if let Some(f) = ty.field(&self.compiler.db, field.name()) {
+                    // aggregate the list of scope sets
+                    // we transform to a common representation of sorted vectors because the element order
+                    // of hashsets is not stable
+                    let field_policies = f
+                        .directive_by_name(POLICY_DIRECTIVE_NAME)
+                        .map(|directive| {
+                            let mut v = policy_argument(Some(directive))
+                                .cloned()
+                                .collect::<Vec<_>>();
+                            v.sort();
+                            v
+                        })
+                        .unwrap_or_default();
 
-                        match all_fields_policies.get(field.name()) {
-                            Some(Some(other)) => {
-                                if field_policies != *other {
-                                    return true;
-                                }
-                            }
-                            _ => {
-                                all_fields_policies.insert(field.name(), Some(field_policies));
+                    match &policies {
+                        None => policies = Some(field_policies),
+                        Some(other_policies) => {
+                            if field_policies != *other_policies {
+                                return true;
                             }
                         }
                     }
@@ -361,18 +349,23 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
 
         let implementors_with_different_requirements =
             self.implementors_with_different_requirements(parent_type, node);
-        println!(
-            "implementors with different requirements for node {} of type {parent_type}: {}",
-            node.name(),
-            implementors_with_different_requirements
-        );
+
+        let implementors_with_different_field_requirements = self
+            .compiler
+            .db
+            .find_type_definition_by_name(parent_type.to_string())
+            .map(|ty| self.implementors_with_different_field_requirements(&ty, node))
+            .unwrap_or(false);
 
         self.current_path.push(PathElement::Key(field_name.into()));
         if is_field_list {
             self.current_path.push(PathElement::Flatten);
         }
 
-        let res = if is_authorized && !implementors_with_different_requirements {
+        let res = if is_authorized
+            && !implementors_with_different_requirements
+            && !implementors_with_different_field_requirements
+        {
             transform::field(self, parent_type, node)
         } else {
             self.unauthorized_paths.push(self.current_path.clone());

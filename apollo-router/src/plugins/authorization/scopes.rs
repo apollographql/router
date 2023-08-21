@@ -5,7 +5,6 @@
 //! ```graphql
 //! directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 //! ```
-use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_compiler::hir;
@@ -266,13 +265,6 @@ impl<'a> ScopeFilteringVisitor<'a> {
                 );
                 return true;
             }
-
-            if self.implementors_with_different_field_requirements(
-                &type_definition,
-                &node.selection_set().fields(),
-            ) {
-                return true;
-            }
         }
         false
     }
@@ -326,10 +318,10 @@ impl<'a> ScopeFilteringVisitor<'a> {
     fn implementors_with_different_field_requirements(
         &self,
         t: &TypeDefinition,
-        fields: &[hir::Field],
+        field: &hir::Field,
     ) -> bool {
         if t.is_interface_type_definition() {
-            let mut all_fields_scope_sets: HashMap<&str, Option<Vec<Vec<String>>>> = HashMap::new();
+            let mut scope_sets = None;
 
             for ty in self
                 .compiler
@@ -341,34 +333,30 @@ impl<'a> ScopeFilteringVisitor<'a> {
                 .cloned()
                 .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
             {
-                for field in fields {
-                    if let Some(f) = ty.field(&self.compiler.db, field.name()) {
-                        // aggregate the list of scope sets
-                        // we transform to a common representation of sorted vectors because the element order
-                        // of hashsets is not stable
-                        let field_scope_sets = f
-                            .directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)
-                            .map(|directive| {
-                                let mut v = scopes_sets_argument(directive)
-                                    .map(|h| {
-                                        let mut v = h.into_iter().collect::<Vec<_>>();
-                                        v.sort();
-                                        v
-                                    })
-                                    .collect::<Vec<_>>();
-                                v.sort();
-                                v
-                            })
-                            .unwrap_or_default();
+                if let Some(f) = ty.field(&self.compiler.db, field.name()) {
+                    // aggregate the list of scope sets
+                    // we transform to a common representation of sorted vectors because the element order
+                    // of hashsets is not stable
+                    let field_scope_sets = f
+                        .directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)
+                        .map(|directive| {
+                            let mut v = scopes_sets_argument(directive)
+                                .map(|h| {
+                                    let mut v = h.into_iter().collect::<Vec<_>>();
+                                    v.sort();
+                                    v
+                                })
+                                .collect::<Vec<_>>();
+                            v.sort();
+                            v
+                        })
+                        .unwrap_or_default();
 
-                        match all_fields_scope_sets.get(field.name()) {
-                            Some(Some(other)) => {
-                                if field_scope_sets != *other {
-                                    return true;
-                                }
-                            }
-                            _ => {
-                                all_fields_scope_sets.insert(field.name(), Some(field_scope_sets));
+                    match &scope_sets {
+                        None => scope_sets = Some(field_scope_sets),
+                        Some(other_scope_sets) => {
+                            if field_scope_sets != *other_scope_sets {
+                                return true;
                             }
                         }
                     }
@@ -417,12 +405,22 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
             implementors_with_different_requirements
         );
 
+        let implementors_with_different_field_requirements = self
+            .compiler
+            .db
+            .find_type_definition_by_name(parent_type.to_string())
+            .map(|ty| self.implementors_with_different_field_requirements(&ty, node))
+            .unwrap_or(false);
+
         self.current_path.push(PathElement::Key(field_name.into()));
         if is_field_list {
             self.current_path.push(PathElement::Flatten);
         }
 
-        let res = if is_authorized && !implementors_with_different_requirements {
+        let res = if is_authorized
+            && !implementors_with_different_requirements
+            && !implementors_with_different_field_requirements
+        {
             transform::field(self, parent_type, node)
         } else {
             self.unauthorized_paths.push(self.current_path.clone());

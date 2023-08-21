@@ -4,5 +4,8 @@ expression: doc
 ---
 query {
   test
+  itf {
+    other
+  }
 }
 

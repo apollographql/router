@@ -1,7 +1,5 @@
 //! Authorization plugin
 
-use std::collections::HashMap;
-
 use apollo_compiler::hir;
 use apollo_compiler::hir::FieldDefinition;
 use apollo_compiler::hir::TypeDefinition;
@@ -66,18 +64,11 @@ impl<'a> AuthenticatedVisitor<'a> {
             .and_then(|ty| self.compiler.db.find_type_definition_by_name(ty))
         {
             if self.implementors_with_different_type_requirements(&type_definition) {
-                /*let len = node.selection_set().fields().len();
-                    println!(
+                let len = node.selection_set().fields().len();
+                println!(
                     "implementors with different reqs. Number of fields in subselection of'{}': {len}",
                     node.name()
-                );*/
-                return true;
-            }
-
-            if self.implementors_with_different_field_requirements(
-                &type_definition,
-                &node.selection_set().fields(),
-            ) {
+                );
                 return true;
             }
         }
@@ -86,7 +77,7 @@ impl<'a> AuthenticatedVisitor<'a> {
 
     fn implementors_with_different_type_requirements(&self, t: &TypeDefinition) -> bool {
         if t.is_interface_type_definition() {
-            let mut is_authenticated = None;
+            let mut is_authenticated: Option<bool> = None;
 
             for ty in self
                 .compiler
@@ -117,10 +108,11 @@ impl<'a> AuthenticatedVisitor<'a> {
     fn implementors_with_different_field_requirements(
         &self,
         t: &TypeDefinition,
-        fields: &[hir::Field],
+        field: &hir::Field,
     ) -> bool {
         if t.is_interface_type_definition() {
-            let mut field_authenticated_status: HashMap<&str, Option<bool>> = HashMap::new();
+            let mut is_authenticated: Option<bool> = None;
+
             for ty in self
                 .compiler
                 .db
@@ -131,20 +123,17 @@ impl<'a> AuthenticatedVisitor<'a> {
                 .cloned()
                 .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
             {
-                for field in fields {
-                    if let Some(f) = ty.field(&self.compiler.db, field.name()) {
-                        let is_authenticated =
-                            f.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some();
-                        match field_authenticated_status.get(field.name()) {
-                            Some(Some(other)) => {
-                                if is_authenticated != *other {
-                                    return true;
-                                }
+                if let Some(f) = ty.field(&self.compiler.db, field.name()) {
+                    let field_is_authenticated =
+                        f.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some();
+                    match is_authenticated {
+                        Some(other) => {
+                            if field_is_authenticated != other {
+                                return true;
                             }
-                            _ => {
-                                field_authenticated_status
-                                    .insert(field.name(), Some(is_authenticated));
-                            }
+                        }
+                        _ => {
+                            is_authenticated = Some(field_is_authenticated);
                         }
                     }
                 }
@@ -192,7 +181,17 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         let implementors_with_different_requirements =
             self.implementors_with_different_requirements(parent_type, node);
 
-        let res = if field_requires_authentication || implementors_with_different_requirements {
+        let implementors_with_different_field_requirements = self
+            .compiler
+            .db
+            .find_type_definition_by_name(parent_type.to_string())
+            .map(|ty| self.implementors_with_different_field_requirements(&ty, node))
+            .unwrap_or(false);
+
+        let res = if field_requires_authentication
+            || implementors_with_different_requirements
+            || implementors_with_different_field_requirements
+        {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_authentication = true;
             Ok(None)
