@@ -232,6 +232,7 @@ aws-sigv4 = "0.55.3"
 aws-credential-types = "0.55.3"
 aws-config = "0.55.3"
 aws-types = "0.55.3"
+sha1 = "0.10.5"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
