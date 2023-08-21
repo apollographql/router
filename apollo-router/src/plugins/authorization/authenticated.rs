@@ -56,7 +56,7 @@ impl<'a> AuthenticatedVisitor<'a> {
     ) -> bool {
         // if all selections under the interface field are fragments with type conditions
         // then we don't need to check that they have the same authorization requirements
-        if node.selection_set().fields().len() == 0 {
+        if node.selection_set().fields().is_empty() {
             return false;
         }
 
@@ -64,11 +64,6 @@ impl<'a> AuthenticatedVisitor<'a> {
             .and_then(|ty| self.compiler.db.find_type_definition_by_name(ty))
         {
             if self.implementors_with_different_type_requirements(&type_definition) {
-                let len = node.selection_set().fields().len();
-                println!(
-                    "implementors with different reqs. Number of fields in subselection of'{}': {len}",
-                    node.name()
-                );
                 return true;
             }
         }
@@ -107,42 +102,45 @@ impl<'a> AuthenticatedVisitor<'a> {
 
     fn implementors_with_different_field_requirements(
         &self,
-        t: &TypeDefinition,
+        parent_type: &str,
         field: &hir::Field,
     ) -> bool {
-        if t.is_interface_type_definition() {
-            let mut is_authenticated: Option<bool> = None;
+        if let Some(t) = self
+            .compiler
+            .db
+            .find_type_definition_by_name(parent_type.to_string())
+        {
+            if t.is_interface_type_definition() {
+                let mut is_authenticated: Option<bool> = None;
 
-            for ty in self
-                .compiler
-                .db
-                .subtype_map()
-                .get(t.name())
-                .into_iter()
-                .flatten()
-                .cloned()
-                .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
-            {
-                if let Some(f) = ty.field(&self.compiler.db, field.name()) {
-                    let field_is_authenticated =
-                        f.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some();
-                    match is_authenticated {
-                        Some(other) => {
-                            if field_is_authenticated != other {
-                                return true;
+                for ty in self
+                    .compiler
+                    .db
+                    .subtype_map()
+                    .get(t.name())
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
+                {
+                    if let Some(f) = ty.field(&self.compiler.db, field.name()) {
+                        let field_is_authenticated =
+                            f.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some();
+                        match is_authenticated {
+                            Some(other) => {
+                                if field_is_authenticated != other {
+                                    return true;
+                                }
                             }
-                        }
-                        _ => {
-                            is_authenticated = Some(field_is_authenticated);
+                            _ => {
+                                is_authenticated = Some(field_is_authenticated);
+                            }
                         }
                     }
                 }
             }
-
-            false
-        } else {
-            false
         }
+        false
     }
 }
 
@@ -181,12 +179,8 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         let implementors_with_different_requirements =
             self.implementors_with_different_requirements(parent_type, node);
 
-        let implementors_with_different_field_requirements = self
-            .compiler
-            .db
-            .find_type_definition_by_name(parent_type.to_string())
-            .map(|ty| self.implementors_with_different_field_requirements(&ty, node))
-            .unwrap_or(false);
+        let implementors_with_different_field_requirements =
+            self.implementors_with_different_field_requirements(parent_type, node);
 
         let res = if field_requires_authentication
             || implementors_with_different_requirements

@@ -208,7 +208,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
     ) -> bool {
         // if all selections under the interface field are fragments with type conditions
         // then we don't need to check that they have the same authorization requirements
-        if node.selection_set().fields().len() == 0 {
+        if node.selection_set().fields().is_empty() {
             return false;
         }
 
@@ -216,11 +216,6 @@ impl<'a> PolicyFilteringVisitor<'a> {
             .and_then(|ty| self.compiler.db.find_type_definition_by_name(ty))
         {
             if self.implementors_with_different_type_requirements(&type_definition) {
-                let len = node.selection_set().fields().len();
-                println!(
-                    "implementors with different reqs. Number of fields in subselection of'{}': {len}",
-                    node.name()
-                );
                 return true;
             }
         }
@@ -271,49 +266,54 @@ impl<'a> PolicyFilteringVisitor<'a> {
 
     fn implementors_with_different_field_requirements(
         &self,
-        t: &TypeDefinition,
+        parent_type: &str,
         field: &hir::Field,
     ) -> bool {
-        if t.is_interface_type_definition() {
-            let mut policies: Option<Vec<String>> = None;
+        if let Some(t) = self
+            .compiler
+            .db
+            .find_type_definition_by_name(parent_type.to_string())
+        {
+            if t.is_interface_type_definition() {
+                let mut policies: Option<Vec<String>> = None;
 
-            for ty in self
-                .compiler
-                .db
-                .subtype_map()
-                .get(t.name())
-                .into_iter()
-                .flatten()
-                .cloned()
-                .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
-            {
-                if let Some(f) = ty.field(&self.compiler.db, field.name()) {
-                    // aggregate the list of scope sets
-                    // we transform to a common representation of sorted vectors because the element order
-                    // of hashsets is not stable
-                    let field_policies = f
-                        .directive_by_name(POLICY_DIRECTIVE_NAME)
-                        .map(|directive| {
-                            let mut v = policy_argument(Some(directive))
-                                .cloned()
-                                .collect::<Vec<_>>();
-                            v.sort();
-                            v
-                        })
-                        .unwrap_or_default();
+                for ty in self
+                    .compiler
+                    .db
+                    .subtype_map()
+                    .get(t.name())
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
+                {
+                    if let Some(f) = ty.field(&self.compiler.db, field.name()) {
+                        // aggregate the list of scope sets
+                        // we transform to a common representation of sorted vectors because the element order
+                        // of hashsets is not stable
+                        let field_policies = f
+                            .directive_by_name(POLICY_DIRECTIVE_NAME)
+                            .map(|directive| {
+                                let mut v = policy_argument(Some(directive))
+                                    .cloned()
+                                    .collect::<Vec<_>>();
+                                v.sort();
+                                v
+                            })
+                            .unwrap_or_default();
 
-                    match &policies {
-                        None => policies = Some(field_policies),
-                        Some(other_policies) => {
-                            if field_policies != *other_policies {
-                                return true;
+                        match &policies {
+                            None => policies = Some(field_policies),
+                            Some(other_policies) => {
+                                if field_policies != *other_policies {
+                                    return true;
+                                }
                             }
                         }
                     }
                 }
             }
         }
-
         false
     }
 }
@@ -350,12 +350,8 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
         let implementors_with_different_requirements =
             self.implementors_with_different_requirements(parent_type, node);
 
-        let implementors_with_different_field_requirements = self
-            .compiler
-            .db
-            .find_type_definition_by_name(parent_type.to_string())
-            .map(|ty| self.implementors_with_different_field_requirements(&ty, node))
-            .unwrap_or(false);
+        let implementors_with_different_field_requirements =
+            self.implementors_with_different_field_requirements(parent_type, node);
 
         self.current_path.push(PathElement::Key(field_name.into()));
         if is_field_list {

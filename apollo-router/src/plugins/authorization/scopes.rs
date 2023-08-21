@@ -250,7 +250,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
     ) -> bool {
         // if all selections under the interface field are fragments with type conditions
         // then we don't need to check that they have the same authorization requirements
-        if node.selection_set().fields().len() == 0 {
+        if node.selection_set().fields().is_empty() {
             return false;
         }
 
@@ -258,11 +258,6 @@ impl<'a> ScopeFilteringVisitor<'a> {
             .and_then(|ty| self.compiler.db.find_type_definition_by_name(ty))
         {
             if self.implementors_with_different_type_requirements(&type_definition) {
-                let len = node.selection_set().fields().len();
-                println!(
-                    "implementors with different reqs. Number of fields in subselection of'{}': {len}",
-                    node.name()
-                );
                 return true;
             }
         }
@@ -317,46 +312,52 @@ impl<'a> ScopeFilteringVisitor<'a> {
 
     fn implementors_with_different_field_requirements(
         &self,
-        t: &TypeDefinition,
+        parent_type: &str,
         field: &hir::Field,
     ) -> bool {
-        if t.is_interface_type_definition() {
-            let mut scope_sets = None;
+        if let Some(t) = self
+            .compiler
+            .db
+            .find_type_definition_by_name(parent_type.to_string())
+        {
+            if t.is_interface_type_definition() {
+                let mut scope_sets = None;
 
-            for ty in self
-                .compiler
-                .db
-                .subtype_map()
-                .get(t.name())
-                .into_iter()
-                .flatten()
-                .cloned()
-                .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
-            {
-                if let Some(f) = ty.field(&self.compiler.db, field.name()) {
-                    // aggregate the list of scope sets
-                    // we transform to a common representation of sorted vectors because the element order
-                    // of hashsets is not stable
-                    let field_scope_sets = f
-                        .directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)
-                        .map(|directive| {
-                            let mut v = scopes_sets_argument(directive)
-                                .map(|h| {
-                                    let mut v = h.into_iter().collect::<Vec<_>>();
-                                    v.sort();
-                                    v
-                                })
-                                .collect::<Vec<_>>();
-                            v.sort();
-                            v
-                        })
-                        .unwrap_or_default();
+                for ty in self
+                    .compiler
+                    .db
+                    .subtype_map()
+                    .get(t.name())
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
+                {
+                    if let Some(f) = ty.field(&self.compiler.db, field.name()) {
+                        // aggregate the list of scope sets
+                        // we transform to a common representation of sorted vectors because the element order
+                        // of hashsets is not stable
+                        let field_scope_sets = f
+                            .directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)
+                            .map(|directive| {
+                                let mut v = scopes_sets_argument(directive)
+                                    .map(|h| {
+                                        let mut v = h.into_iter().collect::<Vec<_>>();
+                                        v.sort();
+                                        v
+                                    })
+                                    .collect::<Vec<_>>();
+                                v.sort();
+                                v
+                            })
+                            .unwrap_or_default();
 
-                    match &scope_sets {
-                        None => scope_sets = Some(field_scope_sets),
-                        Some(other_scope_sets) => {
-                            if field_scope_sets != *other_scope_sets {
-                                return true;
+                        match &scope_sets {
+                            None => scope_sets = Some(field_scope_sets),
+                            Some(other_scope_sets) => {
+                                if field_scope_sets != *other_scope_sets {
+                                    return true;
+                                }
                             }
                         }
                     }
@@ -379,6 +380,7 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
         node: &hir::Field,
     ) -> Result<Option<apollo_encoder::Field>, BoxError> {
         let field_name = node.name();
+
         let mut is_field_list = false;
 
         let is_authorized = self
@@ -399,18 +401,9 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
 
         let implementors_with_different_requirements =
             self.implementors_with_different_requirements(parent_type, node);
-        println!(
-            "implementors with different requirements for node {} of type {parent_type}: {}",
-            node.name(),
-            implementors_with_different_requirements
-        );
 
-        let implementors_with_different_field_requirements = self
-            .compiler
-            .db
-            .find_type_definition_by_name(parent_type.to_string())
-            .map(|ty| self.implementors_with_different_field_requirements(&ty, node))
-            .unwrap_or(false);
+        let implementors_with_different_field_requirements =
+            self.implementors_with_different_field_requirements(parent_type, node);
 
         self.current_path.push(PathElement::Key(field_name.into()));
         if is_field_list {
