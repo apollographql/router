@@ -224,7 +224,7 @@ dependencies = [
  "apollo-parser 0.6.0",
  "ariadne",
  "indexmap 2.0.0",
- "ordered-float 3.7.0",
+ "ordered-float 3.9.0",
  "rowan",
  "salsa",
  "thiserror",
