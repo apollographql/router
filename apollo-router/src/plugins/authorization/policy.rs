@@ -1,5 +1,10 @@
 //! Authorization plugin
-
+//!
+//! Implementation of the `@policy` directive:
+//!
+//! ```graphql
+//! directive @policy(policies: [String!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+//! ```
 use std::collections::HashSet;
 
 use apollo_compiler::hir;

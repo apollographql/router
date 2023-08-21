@@ -4,5 +4,10 @@ expression: doc
 ---
 query {
   test
+  itf {
+    ... on A {
+      id
+    }
+  }
 }
 

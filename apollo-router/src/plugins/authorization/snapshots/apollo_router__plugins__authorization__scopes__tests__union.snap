@@ -4,5 +4,10 @@ expression: doc
 ---
 query {
   test
+  uni {
+    ... on A {
+      id
+    }
+  }
 }
 

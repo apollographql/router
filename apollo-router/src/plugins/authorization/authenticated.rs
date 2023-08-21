@@ -56,6 +56,12 @@ impl<'a> AuthenticatedVisitor<'a> {
         parent_type: &str,
         node: &hir::Field,
     ) -> bool {
+        // if all selections under the interface field are fragments with type conditions
+        // then we don't need to check that they have the same authorization requirements
+        if node.selection_set().fields().len() == 0 {
+            return false;
+        }
+
         if let Some(type_definition) = get_field_type(self, parent_type, node.name())
             .and_then(|ty| self.compiler.db.find_type_definition_by_name(ty))
         {

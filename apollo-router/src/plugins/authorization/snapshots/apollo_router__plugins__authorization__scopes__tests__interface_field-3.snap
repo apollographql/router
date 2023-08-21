@@ -4,5 +4,13 @@ expression: doc
 ---
 query {
   test
+  itf {
+    ... on A {
+      other
+    }
+    ... on B {
+      other
+    }
+  }
 }
 

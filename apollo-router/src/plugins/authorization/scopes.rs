@@ -1,10 +1,11 @@
 //! Authorization plugin
 //!
-//! Implementation of the `@policy` directive:
+//! Implementation of the `@requiresScopes` directive:
 //!
 //! ```graphql
 //! directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 //! ```
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_compiler::hir;
@@ -19,6 +20,7 @@ use tower::BoxError;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
+use crate::spec::query::transform::get_field_type;
 use crate::spec::query::traverse;
 
 pub(crate) struct ScopeExtractionVisitor<'a> {
@@ -241,6 +243,141 @@ impl<'a> ScopeFilteringVisitor<'a> {
             }
         }
     }
+
+    fn implementors_with_different_requirements(
+        &self,
+        parent_type: &str,
+        node: &hir::Field,
+    ) -> bool {
+        // if all selections under the interface field are fragments with type conditions
+        // then we don't need to check that they have the same authorization requirements
+        if node.selection_set().fields().len() == 0 {
+            return false;
+        }
+
+        if let Some(type_definition) = get_field_type(self, parent_type, node.name())
+            .and_then(|ty| self.compiler.db.find_type_definition_by_name(ty))
+        {
+            if self.implementors_with_different_type_requirements(&type_definition) {
+                let len = node.selection_set().fields().len();
+                println!(
+                    "implementors with different reqs. Number of fields in subselection of'{}': {len}",
+                    node.name()
+                );
+                return true;
+            }
+
+            if self.implementors_with_different_field_requirements(
+                &type_definition,
+                &node.selection_set().fields(),
+            ) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn implementors_with_different_type_requirements(&self, t: &TypeDefinition) -> bool {
+        if t.is_interface_type_definition() {
+            let mut scope_sets = None;
+
+            for ty in self
+                .compiler
+                .db
+                .subtype_map()
+                .get(t.name())
+                .into_iter()
+                .flatten()
+                .cloned()
+                .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
+            {
+                // aggregate the list of scope sets
+                // we transform to a common representation of sorted vectors because the element order
+                // of hashsets is not stable
+                let ty_scope_sets = ty
+                    .directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)
+                    .map(|directive| {
+                        let mut v = scopes_sets_argument(directive)
+                            .map(|h| {
+                                let mut v = h.into_iter().collect::<Vec<_>>();
+                                v.sort();
+                                v
+                            })
+                            .collect::<Vec<_>>();
+                        v.sort();
+                        v
+                    })
+                    .unwrap_or_default();
+
+                match &scope_sets {
+                    None => scope_sets = Some(ty_scope_sets),
+                    Some(other_scope_sets) => {
+                        if ty_scope_sets != *other_scope_sets {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    fn implementors_with_different_field_requirements(
+        &self,
+        t: &TypeDefinition,
+        fields: &[hir::Field],
+    ) -> bool {
+        if t.is_interface_type_definition() {
+            let mut all_fields_scope_sets: HashMap<&str, Option<Vec<Vec<String>>>> = HashMap::new();
+
+            for ty in self
+                .compiler
+                .db
+                .subtype_map()
+                .get(t.name())
+                .into_iter()
+                .flatten()
+                .cloned()
+                .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
+            {
+                for field in fields {
+                    if let Some(f) = ty.field(&self.compiler.db, field.name()) {
+                        // aggregate the list of scope sets
+                        // we transform to a common representation of sorted vectors because the element order
+                        // of hashsets is not stable
+                        let field_scope_sets = f
+                            .directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)
+                            .map(|directive| {
+                                let mut v = scopes_sets_argument(directive)
+                                    .map(|h| {
+                                        let mut v = h.into_iter().collect::<Vec<_>>();
+                                        v.sort();
+                                        v
+                                    })
+                                    .collect::<Vec<_>>();
+                                v.sort();
+                                v
+                            })
+                            .unwrap_or_default();
+
+                        match all_fields_scope_sets.get(field.name()) {
+                            Some(Some(other)) => {
+                                if field_scope_sets != *other {
+                                    return true;
+                                }
+                            }
+                            _ => {
+                                all_fields_scope_sets.insert(field.name(), Some(field_scope_sets));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
 }
 
 impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
@@ -272,18 +409,23 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
                 }
             });
 
+        let implementors_with_different_requirements =
+            self.implementors_with_different_requirements(parent_type, node);
+        println!(
+            "implementors with different requirements for node {} of type {parent_type}: {}",
+            node.name(),
+            implementors_with_different_requirements
+        );
+
         self.current_path.push(PathElement::Key(field_name.into()));
         if is_field_list {
             self.current_path.push(PathElement::Flatten);
         }
 
-        if !is_authorized {
-            self.unauthorized_paths.push(self.current_path.clone());
-        }
-
-        let res = if is_authorized {
+        let res = if is_authorized && !implementors_with_different_requirements {
             transform::field(self, parent_type, node)
         } else {
+            self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_scopes = true;
             Ok(None)
         };
@@ -925,10 +1067,10 @@ mod tests {
             uni: I!
         }
         union I = A | B
-        type A {
+        type A @requiresScopes(scopes: [["a", "b"]]) {
             id: ID
         }
-        type B @authenticated {
+        type B @requiresScopes(scopes: [["c", "d"]]) {
             id: ID
         }
         "#;
@@ -947,7 +1089,11 @@ mod tests {
         }
         "#;
 
-        let (doc, paths) = filter(UNION_MEMBERS_SCHEMA, QUERY, HashSet::new());
+        let (doc, paths) = filter(
+            UNION_MEMBERS_SCHEMA,
+            QUERY,
+            ["a".to_string(), "b".to_string()].into_iter().collect(),
+        );
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
