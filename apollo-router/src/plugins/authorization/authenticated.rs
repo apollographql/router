@@ -1,7 +1,6 @@
 //! Authorization plugin
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use apollo_compiler::hir;
 use apollo_compiler::hir::FieldDefinition;
@@ -44,12 +43,7 @@ impl<'a> AuthenticatedVisitor<'a> {
             || field
                 .ty()
                 .type_def(&self.compiler.db)
-                .map(|t| {
-                    self.is_type_authenticated(&t) /* ||
-                                                   if self.implementors_with_different_requirements(&t) {
-                                                       field.
-                                                   }*/
-                })
+                .map(|t| self.is_type_authenticated(&t))
                 .unwrap_or(false)
     }
 
@@ -59,7 +53,9 @@ impl<'a> AuthenticatedVisitor<'a> {
 
     fn implementors_with_different_requirements(&self, t: &TypeDefinition) -> bool {
         if t.is_interface_type_definition() {
-            let set = self
+            let mut is_authenticated = None;
+
+            for ty in self
                 .compiler
                 .db
                 .subtype_map()
@@ -68,13 +64,21 @@ impl<'a> AuthenticatedVisitor<'a> {
                 .flatten()
                 .cloned()
                 .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
-                .map(|t| t.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some())
-                .collect::<HashSet<_>>();
-
-            set.len() > 1
-        } else {
-            false
+            {
+                let ty_is_authenticated =
+                    ty.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some();
+                match is_authenticated {
+                    None => is_authenticated = Some(ty_is_authenticated),
+                    Some(other_ty_is_authenticated) => {
+                        if ty_is_authenticated != other_ty_is_authenticated {
+                            return true;
+                        }
+                    }
+                }
+            }
         }
+
+        false
     }
 
     fn implementors_with_different_field_requirements(
@@ -83,8 +87,7 @@ impl<'a> AuthenticatedVisitor<'a> {
         fields: &[hir::Field],
     ) -> bool {
         if t.is_interface_type_definition() {
-            let mut field_authenticated_status: HashMap<&str, Option<bool>> =
-                fields.iter().map(|f| (f.name(), None)).collect();
+            let mut field_authenticated_status: HashMap<&str, Option<bool>> = HashMap::new();
             for ty in self
                 .compiler
                 .db
@@ -99,15 +102,15 @@ impl<'a> AuthenticatedVisitor<'a> {
                     if let Some(f) = ty.field(&self.compiler.db, field.name()) {
                         let is_authenticated =
                             f.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some();
-                        match field_authenticated_status.get(field.name()).unwrap() {
-                            None => {
-                                field_authenticated_status
-                                    .insert(field.name(), Some(is_authenticated));
-                            }
-                            Some(other) => {
+                        match field_authenticated_status.get(field.name()) {
+                            Some(Some(other)) => {
                                 if is_authenticated != *other {
                                     return true;
                                 }
+                            }
+                            _ => {
+                                field_authenticated_status
+                                    .insert(field.name(), Some(is_authenticated));
                             }
                         }
                     }
