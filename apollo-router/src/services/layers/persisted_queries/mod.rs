@@ -116,7 +116,7 @@ impl PersistedQueryLayer {
             if let Some(persisted_query_body) =
                 manifest_poller.get_operation_body(persisted_query_id)
             {
-                let mut body = request.supergraph_request.body_mut();
+                let body = request.supergraph_request.body_mut();
                 body.query = Some(persisted_query_body);
                 body.extensions.remove("persistedQuery");
                 // Record that we actually used our ID, so we can skip the

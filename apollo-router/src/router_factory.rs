@@ -416,7 +416,7 @@ fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
 pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
     let config: Configuration = serde_yaml::from_str(configuration).unwrap();
 
-    let service = YamlRouterFactory::default()
+    let service = YamlRouterFactory
         .create(Arc::new(config), schema.to_string(), None, None)
         .await;
     assert_eq!(
@@ -720,7 +720,7 @@ mod test {
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
         let schema = include_str!("testdata/supergraph.graphql");
 
-        let service = YamlRouterFactory::default()
+        let service = YamlRouterFactory
             .create(Arc::new(config), schema.to_string(), None, None)
             .await;
         service.map(|_| ())
