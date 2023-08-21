@@ -51,7 +51,34 @@ impl<'a> AuthenticatedVisitor<'a> {
         t.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some()
     }
 
-    fn implementors_with_different_requirements(&self, t: &TypeDefinition) -> bool {
+    fn implementors_with_different_requirements(
+        &self,
+        parent_type: &str,
+        node: &hir::Field,
+    ) -> bool {
+        if let Some(type_definition) = get_field_type(self, parent_type, node.name())
+            .and_then(|ty| self.compiler.db.find_type_definition_by_name(ty))
+        {
+            if self.implementors_with_different_type_requirements(&type_definition) {
+                /*let len = node.selection_set().fields().len();
+                    println!(
+                    "implementors with different reqs. Number of fields in subselection of'{}': {len}",
+                    node.name()
+                );*/
+                return true;
+            }
+
+            if self.implementors_with_different_field_requirements(
+                &type_definition,
+                &node.selection_set().fields(),
+            ) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn implementors_with_different_type_requirements(&self, t: &TypeDefinition) -> bool {
         if t.is_interface_type_definition() {
             let mut is_authenticated = None;
 
@@ -156,31 +183,10 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
             self.current_path.push(PathElement::Flatten);
         }
 
-        let type_definition = get_field_type(self, parent_type, node.name())
-            .and_then(|ty| self.compiler.db.find_type_definition_by_name(ty))
-            .unwrap();
         let implementors_with_different_requirements =
-            if self.implementors_with_different_requirements(&type_definition) {
-                let len = node.selection_set().fields().len();
-                println!(
-                "implementors with different reqs. Number of fields in subselection of'{}': {len}",
-                node.name()
-            );
-                len > 0
-            } else {
-                false
-            };
+            self.implementors_with_different_requirements(parent_type, node);
 
-        let implementors_with_different_field_requirements = self
-            .implementors_with_different_field_requirements(
-                &type_definition,
-                &node.selection_set().fields(),
-            );
-
-        let res = if field_requires_authentication
-            || implementors_with_different_requirements
-            || implementors_with_different_field_requirements
-        {
+        let res = if field_requires_authentication || implementors_with_different_requirements {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_authentication = true;
             Ok(None)
