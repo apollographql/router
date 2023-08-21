@@ -405,6 +405,26 @@ mod tests {
     }
 
     #[test]
+    fn query_field_alias() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+            }
+
+            moi: me {
+                name
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+    }
+
+    #[test]
     fn scalar() {
         static QUERY: &str = r#"
         query {
