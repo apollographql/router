@@ -1,6 +1,6 @@
 ---
 title: Authorization in the Apollo Router
-description: Enhance your services' security with an overlying governance layer
+description: Strengthen service security with a centralized governance layer
 minVersion: 1.27.0
 ---
 
@@ -12,48 +12,47 @@ APIs provide access to business-critical data. Unrestricted access can result in
 
 Enforcing authorization _in the Apollo Router_ is valuable for a few reasons:
 
-- **Optimized query execution**: Validating authorization _before_ processing requests allows for early termination. Terminating unauthorized requests at the edge of your graph reduces the load on your services and improves performance.
+- **Optimal query execution**: Validating authorization _before_ processing requests allows for early request termination. Stopping unauthorized requests at the edge of your graph reduces the load on your services and enhances performance.
 
 ```mermaid
 flowchart LR;
   clients(Client);
   subgraph Router[" "]
     router(["<b>Apollo Router</b>"]);
-    serviceB[Products<br/>API];
-    serviceC[Reviews<br/>API];
+    serviceB[Users<br/>API];
+    serviceC[Posts<br/>API];
   end
-  router -.->|"❌ Sub-query"| serviceB & serviceC;
+  router -.->|"❌ Subquery"| serviceB & serviceC;
   clients -->|"⚠️Unauthorized <br/>request"| router;
 ```
 
-- **Principled architecture**: Authorization at the router level supports a defense-in-depth strategy by creating an initial checkpoint that other service layers can reinforce.
+  - If every field in a particular subquery requires authorization, the router's [query planner](../customizations/overview#request-path) can _eliminate entire subgraph requests_ for unauthorized requests. For example, a request may have permission to view a particular user's posts on a social media platform but not have permission to view any of that user's PII.
 
 ```mermaid
 flowchart LR;
-  clients(Clients);
-  Level2:::padding
-  subgraph Level1["<br>🔐 Router layer&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp"]
+  clients(Client);
+  subgraph Router[" "]
     router(["<b>Apollo Router</b>"]);
-      subgraph Level2["🔐 Service layer"]
-        serviceB[Products<br/>API];
-        serviceC[Reviews<br/>API];
-        end
+    serviceB[Users<br/>API];
+    serviceC[Posts<br/>API];
   end
-
-  router -->|"Sub-query"| serviceB & serviceC;
-  clients -->|"Request"| router;
-
-classDef padding padding-left:1em, padding-right:1em
+  router -->|"✅ Authorized <br/> subquery"| serviceC;
+    router -.->|"❌ Unauthorized <br/> subquery"| serviceB;
+  clients -->|"⚠️ Partially authorized <br/>request"| router;
 ```
 
-- **Declarative access rules**: You define access controls at the field level and GraphOS [composes](#composition-and-federation) them _across_ all your services. Composition creates graph-native governance without you having to create an additional orchestration layer.
+- **Declarative access rules**: You define access controls at the field level, and GraphOS [composes](#composition-and-federation) them across your services. These rules create graph-native governance without the need for an extra orchestration layer.
+
+- **Principled architecture**: Through composition, the router centralizes authorization logic while allowing for auditing at the service level. [Query deduplication](./traffic-shaping/#query-deduplication) also accounts for authorization by grouping requested fields based on their required authorization.
 
 ## How it works
 
-The Apollo Router provides fine-grained access controls at your graph's edge via **authorization directives**. Using the `@authenticated` and `@requiresScopes` directives, you can define access to specific fields and types across your supergraph:
+The Apollo Router provides access controls via **authorization directives**. Using the `@authenticated` and `@requiresScopes` directives, you can define access to specific fields and types across your supergraph:
 
 - The [`@authenticated`](#authenticated) directive works in a binary way: authenticated requests can access the specified field or type, and unauthenticated requests can't.
-- The [`@requiresScopes`](#requiresscopes) directive allows granular access control through the scopes you define. For example, you may declare that querying a user's information requires a `read:user` scope, while mutating a user's information requires an `update:user` scope. You can require scopes on individual fields.
+- The [`@requiresScopes`](#requiresscopes) directive allows granular access control through the scopes you define.
+
+For example, imagine you're building a social media platform that includes a `Users` service. You can use the [`@requiresScopes`](#requiresscopes) directive to declare that viewing other users' information requires the `read:user` scope. You can use the [`@authenticated`](#authenticated) directive to declare that users must be logged in to update their own information. And you can use both directives—together or separately—at the field level to fine-tune these access controls.
 
 The authorization directives use a request's **claims** to evaluate which fields and types are authorized. Claims are the individual details of a request's authentication and scope. They might include details like the ID of the associated user and any authorization scopes assigned to that user.
 
@@ -65,7 +64,7 @@ The router then enforces these directives on all incoming requests.
 To provide the router with the claims it needs to evaluate authorization directives, you must either configure JSON Web Token (JWT) authentication or add an external coprocessor that adds claims to a request's context. In some cases (explained below), you may require both.
 
 - **JWT authentication configuration**: If you configure [JWT authentication](./authn-jwt), the Apollo Router [automatically adds a JWT token's claims](./authn-jwt#working-with-jwt-claims) to the request's context at the `apollo_authentication::JWT::claims` key.
-- **Adding claims via coprocessor**:  If you can't use JWT authentiation, you can [add claims with a coprocessor](/customizations/coprocessor#adding-authorization-claims-via-coprocessor). Coprocessors let you hook into the Apollo Router's request-handling lifecycle with custom code.
+- **Adding claims via coprocessor**:  If you can't use JWT authentication, you can [add claims with a coprocessor](/customizations/coprocessor#adding-authorization-claims-via-coprocessor). Coprocessors let you hook into the Apollo Router's request-handling lifecycle with custom code.
 - **Augmenting JWT claims via coprocessor**: Your authorization policies may require information beyond what your JSON web tokens provide. For example, a token's claims may include user IDs, which you then use to look up user roles. For situations like this, you can [augment the claims](./authn-jwt#claim-augmentation-via-coprocessors) from your JSON web tokens with coprocessors.
 
 ## Authorization directives
@@ -74,10 +73,8 @@ To provide the router with the claims it needs to evaluate authorization directi
 
 The `@authenticated` directive marks specific fields and types as requiring authentication.
 It works by checking for the `apollo_authentication::JWT::claims` key in a request's context.
-If the key exists, it means the request is authenticated and the router executes the query in its entirety.
-
+If the key exists, it means the request is authenticated, and the router executes the query in its entirety.
 If the request is unauthenticated, the router removes `@authenticated` fields before planning the query and only executes the parts of the query that don't require authentication.
-If every field in a particular subgraph's query is marked as requiring authentication, this can eliminate entire subgraph requests, thereby increasing router efficiency.
 
 #### Usage
 
@@ -92,7 +89,7 @@ extend schema
 
 #### Example `@authenticated` use case
 
-Suppose you're building a social media platform. Unauthenticated users can view a public post's title, author, and content.
+Diving deeper into the [social media example](#how-it-works): let's say unauthenticated users can view a post's title, author, and content.
 However, you only want authenticated users to see the number of views a post has received.
 You also need to be able to query for an authenticated user's information.
 
@@ -134,7 +131,7 @@ query {
 }
 ```
 
-The router would execute the entire query in an authenticated request.
+The router would execute the entire query for an authenticated request.
 For an unauthenticated request, the router would remove the `@authenticated` fields and execute the filtered query.
 
 <CodeColumns>
@@ -164,7 +161,7 @@ query {
 For an unauthenticated request, the router doesn't attempt to resolve the top-level `me` query, nor the views for the post with `id: "1234"`.
 The response retains the initial request's shape but returns `null` for unauthorized fields and applies the [standard GraphQL null propagation rules](https://www.apollographql.com/blog/graphql/basics/using-nullability-in-graphql/#what-happens-if-you-try-to-return-null-for-a-non-null-field).
 
-```json title="Unauthenticated request's response"
+```json title="Unauthenticated request response"
 {
   "data": {
     "me": null,
@@ -252,8 +249,6 @@ fn router_service(service) {
 
 </ExpansionPanel>
 
-Like the efficiencies gained via the `@authenticated` directive, if every field on a particular subgraph query requires scopes that aren't present, this can eliminate entire subgraph requests.
-
 #### Usage
 
 To use the `@requiresScopes` directive in a subgraph, you can [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
@@ -323,11 +318,11 @@ query {
 
 The response would include an error at the `/users/@/email` path since that field requires the `read:emails` scope.
 
-If the request includes the `read:others read:emails` scope set, the router can execute the entire query successfully.
+The router can execute the entire query successfully if the request includes the `read:others read:emails` scope set.
 
 ## Composition and federation
 
-Authorization directives are defined at the subgraph level, and GraphOS composes them in the supergraph schema. In other words, if subgraph fields or types include `@authenticated` or `@requiresScopes` directives, they are set on the supergraph too.
+GraphOS's composition strategy for authorization directives is intentionally accumulative. When you define authorization directives on fields and types in subgraphs, GraphOS composes them into the supergraph schema. In other words, if subgraph fields or types include `@authenticated` or `@requiresScopes` directives, they are set on the supergraph too.
 
 If multiple shared subgraph fields include `@requiresScopes`, the supergraph schema merges the sets of scopes required by each subgraph. For example, imagine one subgraph requires the `read:others` scope on the `users` query:
 
@@ -352,6 +347,8 @@ type Query {
   users: [User!]! @requiresScopes(scopes: ["read:others", "read:profiles"])
 }
 ```
+
+This accumulative approach ensures that each subgraph's restrictions are respected, even if they apply to the same type or field.
 
 ### Authorization and `@key` fields
 
@@ -413,7 +410,7 @@ This behavior resembles what you can create with [contracts](/graphos/delivery/c
 
 If a type [implementing an interface](https://www.apollographql.com/docs/apollo-server/schema/unions-interfaces/#interface-type) requires authorization, unauthorized requests can query the interface, but not any parts of the type that require authorization.
 
-For example, consider this schema where the `Post` interface doesn't require authentication, but the `PrivateBlog` type, which implements `Post` does:
+For example, consider this schema where the `Post` interface doesn't require authentication, but the `PrivateBlog` type, which implements `Post`, does:
 
 ```graphql
 type Query {
@@ -472,17 +469,21 @@ query {
 
 The response would include an `"UNAUTHORIZED_FIELD_OR_TYPE"` error at the `/posts/@/allowedViewers` path.
 
+## Query deduplication
+
+You can enable [query deduplication](../configuration/traffic-shaping/#query-deduplication) in the router to reduce redundant requests to a subgraph. The router does this by buffering similar queries and reusing the result.
+
+**Query deduplication takes authorization into account.** First, the router groups unauthenticated queries together. Then it groups authenticated queries by their required scope set. It uses these groups to execute queries as efficiently as possible when fulfilling requests.
+
 ## Introspection
 
-Authorization directives don't affect introspection; all fields that require authorization remain visible. However, directives applied to fields _aren't_ visible. If introspection might reveal too much information about internal types, then be sure to deactivate it:
+The Apollo Router enforces authorization directives on queries at runtime. **Authorization directives don't affect introspection**; all fields that require authorization remain visible. However, directives applied to fields _aren't_ visible. If introspection might reveal too much information about internal types, then be sure it's deactivated in your [router configuration](./overview/#introspection):
 
 ```yaml
 supergraph:
   introspection: false
 ```
 
-You can also hide fields using [contracts](/graphos/delivery/contracts/).
+> Introspection is turned off in the router by default.
 
-## Query deduplication
-
-When [query deduplication](../configuration/traffic-shaping/#query-deduplication) is activated for subgraphs, the authorization status is accounted for: the router groups unauthenticated queries together, and authenticated queries are grouped by scope set.
+With introspection turned off ([as is best practice in production](https://www.apollographql.com/blog/graphql/security/why-you-should-disable-graphql-introspection-in-production/)), you can use GraphOS's [schema registry](/graphos/delivery/) to explore your supergraph schema and empower your teammates to do the same.
