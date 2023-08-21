@@ -366,12 +366,12 @@ async fn subscription_task(
 
     let limit_is_set = subscription_config.max_opened_subscriptions.is_some();
     let mut subscription_handle = subscription_handle.clone();
-    let operation_signature =
-        if let Some(usage_reporting) = context.private_entries.lock().get::<UsageReporting>() {
-            usage_reporting.stats_report_key.clone()
-        } else {
-            String::new()
-        };
+    let operation_signature = context
+        .private_entries
+        .lock()
+        .get::<UsageReporting>()
+        .map(|usage_reporting| usage_reporting.stats_report_key.clone())
+        .unwrap_or_default();
 
     let operation_name = context
         .get::<_, String>(OPERATION_NAME)
