@@ -2320,7 +2320,6 @@ async fn test_supergraph_timeout() {
         QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&conf)).await,
         Arc::new(supergraph_creator),
         conf.clone(),
-        Default::default(),
     )
     .await
     .unwrap()
