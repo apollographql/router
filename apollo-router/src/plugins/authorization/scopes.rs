@@ -1,6 +1,6 @@
 //! Authorization plugin
 //!
-//! Implementation of the `@policy` directive:
+//! Implementation of the `@requiresScopes` directive:
 //!
 //! ```graphql
 //! directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
@@ -19,6 +19,7 @@ use tower::BoxError;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
+use crate::spec::query::transform::get_field_type;
 use crate::spec::query::traverse;
 
 pub(crate) struct ScopeExtractionVisitor<'a> {
@@ -241,6 +242,131 @@ impl<'a> ScopeFilteringVisitor<'a> {
             }
         }
     }
+
+    fn implementors_with_different_requirements(
+        &self,
+        parent_type: &str,
+        node: &hir::Field,
+    ) -> bool {
+        // if all selections under the interface field are fragments with type conditions
+        // then we don't need to check that they have the same authorization requirements
+        if node.selection_set().fields().is_empty() {
+            return false;
+        }
+
+        if let Some(type_definition) = get_field_type(self, parent_type, node.name())
+            .and_then(|ty| self.compiler.db.find_type_definition_by_name(ty))
+        {
+            if self.implementors_with_different_type_requirements(&type_definition) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn implementors_with_different_type_requirements(&self, t: &TypeDefinition) -> bool {
+        if t.is_interface_type_definition() {
+            let mut scope_sets = None;
+
+            for ty in self
+                .compiler
+                .db
+                .subtype_map()
+                .get(t.name())
+                .into_iter()
+                .flatten()
+                .cloned()
+                .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
+            {
+                // aggregate the list of scope sets
+                // we transform to a common representation of sorted vectors because the element order
+                // of hashsets is not stable
+                let ty_scope_sets = ty
+                    .directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)
+                    .map(|directive| {
+                        let mut v = scopes_sets_argument(directive)
+                            .map(|h| {
+                                let mut v = h.into_iter().collect::<Vec<_>>();
+                                v.sort();
+                                v
+                            })
+                            .collect::<Vec<_>>();
+                        v.sort();
+                        v
+                    })
+                    .unwrap_or_default();
+
+                match &scope_sets {
+                    None => scope_sets = Some(ty_scope_sets),
+                    Some(other_scope_sets) => {
+                        if ty_scope_sets != *other_scope_sets {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    fn implementors_with_different_field_requirements(
+        &self,
+        parent_type: &str,
+        field: &hir::Field,
+    ) -> bool {
+        if let Some(t) = self
+            .compiler
+            .db
+            .find_type_definition_by_name(parent_type.to_string())
+        {
+            if t.is_interface_type_definition() {
+                let mut scope_sets = None;
+
+                for ty in self
+                    .compiler
+                    .db
+                    .subtype_map()
+                    .get(t.name())
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
+                {
+                    if let Some(f) = ty.field(&self.compiler.db, field.name()) {
+                        // aggregate the list of scope sets
+                        // we transform to a common representation of sorted vectors because the element order
+                        // of hashsets is not stable
+                        let field_scope_sets = f
+                            .directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)
+                            .map(|directive| {
+                                let mut v = scopes_sets_argument(directive)
+                                    .map(|h| {
+                                        let mut v = h.into_iter().collect::<Vec<_>>();
+                                        v.sort();
+                                        v
+                                    })
+                                    .collect::<Vec<_>>();
+                                v.sort();
+                                v
+                            })
+                            .unwrap_or_default();
+
+                        match &scope_sets {
+                            None => scope_sets = Some(field_scope_sets),
+                            Some(other_scope_sets) => {
+                                if field_scope_sets != *other_scope_sets {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
 }
 
 impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
@@ -254,6 +380,7 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
         node: &hir::Field,
     ) -> Result<Option<apollo_encoder::Field>, BoxError> {
         let field_name = node.name();
+
         let mut is_field_list = false;
 
         let is_authorized = self
@@ -272,18 +399,24 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
                 }
             });
 
+        let implementors_with_different_requirements =
+            self.implementors_with_different_requirements(parent_type, node);
+
+        let implementors_with_different_field_requirements =
+            self.implementors_with_different_field_requirements(parent_type, node);
+
         self.current_path.push(PathElement::Key(field_name.into()));
         if is_field_list {
             self.current_path.push(PathElement::Flatten);
         }
 
-        if !is_authorized {
-            self.unauthorized_paths.push(self.current_path.clone());
-        }
-
-        let res = if is_authorized {
+        let res = if is_authorized
+            && !implementors_with_different_requirements
+            && !implementors_with_different_field_requirements
+        {
             transform::field(self, parent_type, node)
         } else {
+            self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_scopes = true;
             Ok(None)
         };
@@ -481,10 +614,11 @@ mod tests {
         insta::assert_debug_snapshot!(doc);
     }
 
-    fn filter(query: &str, scopes: HashSet<String>) -> (Document, Vec<Path>) {
+    #[track_caller]
+    fn filter(schema: &str, query: &str, scopes: HashSet<String>) -> (Document, Vec<Path>) {
         let mut compiler = ApolloCompiler::new();
 
-        let _schema_id = compiler.add_type_system(BASIC_SCHEMA, "schema.graphql");
+        let _schema_id = compiler.add_type_system(schema, "schema.graphql");
         let file_id = compiler.add_executable(query, "query.graphql");
 
         let diagnostics = compiler.validate();
@@ -519,11 +653,12 @@ mod tests {
         let doc = extract(QUERY);
         insta::assert_debug_snapshot!(doc);
 
-        let (doc, paths) = filter(QUERY, HashSet::new());
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
 
         let (doc, paths) = filter(
+            BASIC_SCHEMA,
             QUERY,
             ["profile".to_string(), "internal".to_string()]
                 .into_iter()
@@ -533,6 +668,7 @@ mod tests {
         insta::assert_debug_snapshot!(paths);
 
         let (doc, paths) = filter(
+            BASIC_SCHEMA,
             QUERY,
             [
                 "profile".to_string(),
@@ -547,6 +683,7 @@ mod tests {
         insta::assert_debug_snapshot!(paths);
 
         let (doc, paths) = filter(
+            BASIC_SCHEMA,
             QUERY,
             [
                 "profile".to_string(),
@@ -573,7 +710,7 @@ mod tests {
         let doc = extract(QUERY);
         insta::assert_debug_snapshot!(doc);
 
-        let (doc, paths) = filter(QUERY, HashSet::new());
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -596,7 +733,30 @@ mod tests {
         let doc = extract(QUERY);
         insta::assert_debug_snapshot!(doc);
 
-        let (doc, paths) = filter(QUERY, HashSet::new());
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+    }
+
+    #[test]
+    fn query_field_alias() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+            }
+
+            moi: me {
+                name
+            }
+        }
+        "#;
+
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
+
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -616,7 +776,7 @@ mod tests {
         let doc = extract(QUERY);
         insta::assert_debug_snapshot!(doc);
 
-        let (doc, paths) = filter(QUERY, HashSet::new());
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -641,7 +801,7 @@ mod tests {
         let doc = extract(QUERY);
         insta::assert_debug_snapshot!(doc);
 
-        let (doc, paths) = filter(QUERY, HashSet::new());
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -667,17 +827,22 @@ mod tests {
         let doc = extract(QUERY);
         insta::assert_debug_snapshot!(doc);
 
-        let (doc, paths) = filter(QUERY, HashSet::new());
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
-
-        let (doc, paths) = filter(QUERY, ["read:user".to_string()].into_iter().collect());
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
 
         let (doc, paths) = filter(
+            BASIC_SCHEMA,
+            QUERY,
+            ["read:user".to_string()].into_iter().collect(),
+        );
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        let (doc, paths) = filter(
+            BASIC_SCHEMA,
             QUERY,
             ["read:user".to_string(), "read:username".to_string()]
                 .into_iter()
@@ -710,21 +875,216 @@ mod tests {
         let doc = extract(QUERY);
         insta::assert_debug_snapshot!(doc);
 
-        let (doc, paths) = filter(QUERY, HashSet::new());
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
-
-        let (doc, paths) = filter(QUERY, ["read:user".to_string()].into_iter().collect());
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
 
         let (doc, paths) = filter(
+            BASIC_SCHEMA,
+            QUERY,
+            ["read:user".to_string()].into_iter().collect(),
+        );
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        let (doc, paths) = filter(
+            BASIC_SCHEMA,
             QUERY,
             ["read:user".to_string(), "read:username".to_string()]
                 .into_iter()
                 .collect(),
+        );
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+    }
+
+    static INTERFACE_SCHEMA: &str = r#"
+    directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+    type Query {
+        test: String
+        itf: I!
+    }
+    interface I @requiresScopes(scopes: [["itf"]]) {
+        id: ID
+    }
+    type A implements I @requiresScopes(scopes: [["a", "b"]]) {
+        id: ID
+        a: String
+    }
+    type B implements I @requiresScopes(scopes: [["c", "d"]]) {
+        id: ID
+        b: String
+    }
+    "#;
+
+    #[test]
+    fn interface_type() {
+        static QUERY: &str = r#"
+        query {
+            test
+            itf {
+                id
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        let (doc, paths) = filter(
+            INTERFACE_SCHEMA,
+            QUERY,
+            ["itf".to_string()].into_iter().collect(),
+        );
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        static QUERY2: &str = r#"
+        query {
+            test
+            itf {
+                ... on A {
+                    id
+                }
+                ... on B {
+                    id
+                }
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY2, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        let (doc, paths) = filter(
+            INTERFACE_SCHEMA,
+            QUERY2,
+            ["itf".to_string()].into_iter().collect(),
+        );
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        let (doc, paths) = filter(
+            INTERFACE_SCHEMA,
+            QUERY2,
+            ["itf".to_string(), "a".to_string(), "b".to_string()]
+                .into_iter()
+                .collect(),
+        );
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+    }
+
+    static INTERFACE_FIELD_SCHEMA: &str = r#"
+    directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+    type Query {
+        test: String
+        itf: I!
+    }
+    interface I {
+        id: ID
+        other: String
+    }
+    type A implements I {
+        id: ID @requiresScopes(scopes: [["a", "b"]])
+        other: String
+        a: String
+    }
+    type B implements I {
+        id: ID @requiresScopes(scopes: [["c", "d"]])
+        other: String
+        b: String
+    }
+    "#;
+
+    #[test]
+    fn interface_field() {
+        static QUERY: &str = r#"
+        query {
+            test
+            itf {
+                id
+                other
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        static QUERY2: &str = r#"
+        query {
+            test
+            itf {
+                ... on A {
+                    id
+                    other
+                }
+                ... on B {
+                    id
+                    other
+                }
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY2, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+    }
+
+    #[test]
+    fn union() {
+        static UNION_MEMBERS_SCHEMA: &str = r#"
+        directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+
+        directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+        type Query {
+            test: String
+            uni: I!
+        }
+        union I = A | B
+        type A @requiresScopes(scopes: [["a", "b"]]) {
+            id: ID
+        }
+        type B @requiresScopes(scopes: [["c", "d"]]) {
+            id: ID
+        }
+        "#;
+
+        static QUERY: &str = r#"
+        query {
+            test
+            uni {
+                ... on A {
+                    id
+                }
+                ... on B {
+                    id
+                }
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(
+            UNION_MEMBERS_SCHEMA,
+            QUERY,
+            ["a".to_string(), "b".to_string()].into_iter().collect(),
         );
 
         insta::assert_display_snapshot!(doc);

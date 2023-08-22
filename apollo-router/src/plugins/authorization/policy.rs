@@ -1,5 +1,10 @@
 //! Authorization plugin
-
+//!
+//! Implementation of the `@policy` directive:
+//!
+//! ```graphql
+//! directive @policy(policies: [String!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+//! ```
 use std::collections::HashSet;
 
 use apollo_compiler::hir;
@@ -14,6 +19,7 @@ use tower::BoxError;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
+use crate::spec::query::transform::get_field_type;
 use crate::spec::query::traverse;
 
 pub(crate) struct PolicyExtractionVisitor<'a> {
@@ -194,6 +200,122 @@ impl<'a> PolicyFilteringVisitor<'a> {
                 .next()
                 .is_some()
     }
+
+    fn implementors_with_different_requirements(
+        &self,
+        parent_type: &str,
+        node: &hir::Field,
+    ) -> bool {
+        // if all selections under the interface field are fragments with type conditions
+        // then we don't need to check that they have the same authorization requirements
+        if node.selection_set().fields().is_empty() {
+            return false;
+        }
+
+        if let Some(type_definition) = get_field_type(self, parent_type, node.name())
+            .and_then(|ty| self.compiler.db.find_type_definition_by_name(ty))
+        {
+            if self.implementors_with_different_type_requirements(&type_definition) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn implementors_with_different_type_requirements(&self, t: &TypeDefinition) -> bool {
+        if t.is_interface_type_definition() {
+            let mut policies: Option<Vec<String>> = None;
+
+            for ty in self
+                .compiler
+                .db
+                .subtype_map()
+                .get(t.name())
+                .into_iter()
+                .flatten()
+                .cloned()
+                .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
+            {
+                // aggregate the list of scope sets
+                // we transform to a common representation of sorted vectors because the element order
+                // of hashsets is not stable
+                let field_policies = ty
+                    .directive_by_name(POLICY_DIRECTIVE_NAME)
+                    .map(|directive| {
+                        let mut v = policy_argument(Some(directive))
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        v.sort();
+                        v
+                    })
+                    .unwrap_or_default();
+
+                match &policies {
+                    None => policies = Some(field_policies),
+                    Some(other_policies) => {
+                        if field_policies != *other_policies {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    fn implementors_with_different_field_requirements(
+        &self,
+        parent_type: &str,
+        field: &hir::Field,
+    ) -> bool {
+        if let Some(t) = self
+            .compiler
+            .db
+            .find_type_definition_by_name(parent_type.to_string())
+        {
+            if t.is_interface_type_definition() {
+                let mut policies: Option<Vec<String>> = None;
+
+                for ty in self
+                    .compiler
+                    .db
+                    .subtype_map()
+                    .get(t.name())
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
+                {
+                    if let Some(f) = ty.field(&self.compiler.db, field.name()) {
+                        // aggregate the list of scope sets
+                        // we transform to a common representation of sorted vectors because the element order
+                        // of hashsets is not stable
+                        let field_policies = f
+                            .directive_by_name(POLICY_DIRECTIVE_NAME)
+                            .map(|directive| {
+                                let mut v = policy_argument(Some(directive))
+                                    .cloned()
+                                    .collect::<Vec<_>>();
+                                v.sort();
+                                v
+                            })
+                            .unwrap_or_default();
+
+                        match &policies {
+                            None => policies = Some(field_policies),
+                            Some(other_policies) => {
+                                if field_policies != *other_policies {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
 }
 
 impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
@@ -225,18 +347,24 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
                 }
             });
 
+        let implementors_with_different_requirements =
+            self.implementors_with_different_requirements(parent_type, node);
+
+        let implementors_with_different_field_requirements =
+            self.implementors_with_different_field_requirements(parent_type, node);
+
         self.current_path.push(PathElement::Key(field_name.into()));
         if is_field_list {
             self.current_path.push(PathElement::Flatten);
         }
 
-        if !is_authorized {
-            self.unauthorized_paths.push(self.current_path.clone());
-        }
-
-        let res = if is_authorized {
+        let res = if is_authorized
+            && !implementors_with_different_requirements
+            && !implementors_with_different_field_requirements
+        {
             transform::field(self, parent_type, node)
         } else {
+            self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_policies = true;
             Ok(None)
         };
@@ -428,10 +556,11 @@ mod tests {
         insta::assert_debug_snapshot!(doc);
     }
 
-    fn filter(query: &str, policies: HashSet<String>) -> (Document, Vec<Path>) {
+    #[track_caller]
+    fn filter(schema: &str, query: &str, policies: HashSet<String>) -> (Document, Vec<Path>) {
         let mut compiler = ApolloCompiler::new();
 
-        let _schema_id = compiler.add_type_system(BASIC_SCHEMA, "schema.graphql");
+        let _schema_id = compiler.add_type_system(schema, "schema.graphql");
         let file_id = compiler.add_executable(query, "query.graphql");
 
         let diagnostics = compiler.validate();
@@ -466,11 +595,12 @@ mod tests {
         let doc = extract(QUERY);
         insta::assert_debug_snapshot!(doc);
 
-        let (doc, paths) = filter(QUERY, HashSet::new());
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
 
         let (doc, paths) = filter(
+            BASIC_SCHEMA,
             QUERY,
             ["profile".to_string(), "internal".to_string()]
                 .into_iter()
@@ -480,6 +610,7 @@ mod tests {
         insta::assert_debug_snapshot!(paths);
 
         let (doc, paths) = filter(
+            BASIC_SCHEMA,
             QUERY,
             [
                 "profile".to_string(),
@@ -493,6 +624,7 @@ mod tests {
         insta::assert_debug_snapshot!(paths);
 
         let (doc, paths) = filter(
+            BASIC_SCHEMA,
             QUERY,
             [
                 "profile".to_string(),
@@ -519,7 +651,7 @@ mod tests {
         let doc = extract(QUERY);
         insta::assert_debug_snapshot!(doc);
 
-        let (doc, paths) = filter(QUERY, HashSet::new());
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -542,7 +674,30 @@ mod tests {
         let doc = extract(QUERY);
         insta::assert_debug_snapshot!(doc);
 
-        let (doc, paths) = filter(QUERY, HashSet::new());
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+    }
+
+    #[test]
+    fn query_field_alias() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+            }
+
+            moi: me {
+                name
+            }
+        }
+        "#;
+
+        let doc = extract(QUERY);
+        insta::assert_debug_snapshot!(doc);
+
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -562,7 +717,7 @@ mod tests {
         let doc = extract(QUERY);
         insta::assert_debug_snapshot!(doc);
 
-        let (doc, paths) = filter(QUERY, HashSet::new());
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -587,7 +742,7 @@ mod tests {
         let doc = extract(QUERY);
         insta::assert_debug_snapshot!(doc);
 
-        let (doc, paths) = filter(QUERY, HashSet::new());
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -612,7 +767,7 @@ mod tests {
         let doc = extract(QUERY);
         insta::assert_debug_snapshot!(doc);
 
-        let (doc, paths) = filter(QUERY, HashSet::new());
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -639,16 +794,204 @@ mod tests {
         let doc = extract(QUERY);
         insta::assert_debug_snapshot!(doc);
 
-        let (doc, paths) = filter(QUERY, HashSet::new());
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
 
         let (doc, paths) = filter(
+            BASIC_SCHEMA,
             QUERY,
             ["read user".to_string(), "read username".to_string()]
                 .into_iter()
                 .collect(),
+        );
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+    }
+
+    static INTERFACE_SCHEMA: &str = r#"
+    directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+    type Query {
+        test: String
+        itf: I!
+    }
+    interface I @policy(policies: ["itf"]) {
+        id: ID
+    }
+    type A implements I @policy(policies: ["a"]) {
+        id: ID
+        a: String
+    }
+    type B implements I @policy(policies: ["b"]) {
+        id: ID
+        b: String
+    }
+    "#;
+
+    #[test]
+    fn interface_type() {
+        static QUERY: &str = r#"
+        query {
+            test
+            itf {
+                id
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        let (doc, paths) = filter(
+            INTERFACE_SCHEMA,
+            QUERY,
+            ["itf".to_string()].into_iter().collect(),
+        );
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        static QUERY2: &str = r#"
+        query {
+            test
+            itf {
+                ... on A {
+                    id
+                }
+                ... on B {
+                    id
+                }
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY2, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        let (doc, paths) = filter(
+            INTERFACE_SCHEMA,
+            QUERY2,
+            ["itf".to_string()].into_iter().collect(),
+        );
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        let (doc, paths) = filter(
+            INTERFACE_SCHEMA,
+            QUERY2,
+            ["itf".to_string(), "a".to_string()].into_iter().collect(),
+        );
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+    }
+
+    static INTERFACE_FIELD_SCHEMA: &str = r#"
+    directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+    type Query {
+        test: String
+        itf: I!
+    }
+    interface I {
+        id: ID
+        other: String
+    }
+    type A implements I {
+        id: ID @policy(policies: ["a"])
+        other: String
+        a: String
+    }
+    type B implements I {
+        id: ID @policy(policies: ["b"])
+        other: String
+        b: String
+    }
+    "#;
+
+    #[test]
+    fn interface_field() {
+        static QUERY: &str = r#"
+        query {
+            test
+            itf {
+                id
+                other
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        static QUERY2: &str = r#"
+        query {
+            test
+            itf {
+                ... on A {
+                    id
+                    other
+                }
+                ... on B {
+                    id
+                    other
+                }
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY2, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+    }
+
+    #[test]
+    fn union() {
+        static UNION_MEMBERS_SCHEMA: &str = r#"
+        directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+        type Query {
+            test: String
+            uni: I!
+        }
+        union I = A | B
+        type A @policy(policies: ["a"]) {
+            id: ID
+        }
+        type B @policy(policies: ["b"]) {
+            id: ID
+        }
+        "#;
+
+        static QUERY: &str = r#"
+        query {
+            test
+            uni {
+                ... on A {
+                    id
+                }
+                ... on B {
+                    id
+                }
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(
+            UNION_MEMBERS_SCHEMA,
+            QUERY,
+            ["a".to_string()].into_iter().collect(),
         );
 
         insta::assert_display_snapshot!(doc);
