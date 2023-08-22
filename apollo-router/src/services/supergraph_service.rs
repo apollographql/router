@@ -27,7 +27,7 @@ use tracing_futures::Instrument;
 
 use super::execution::QueryPlan;
 use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
-use super::layers::content_negociation;
+use super::layers::content_negotiation;
 use super::layers::query_analysis::Compiler;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
@@ -366,12 +366,12 @@ async fn subscription_task(
 
     let limit_is_set = subscription_config.max_opened_subscriptions.is_some();
     let mut subscription_handle = subscription_handle.clone();
-    let operation_signature =
-        if let Some(usage_reporting) = context.private_entries.lock().get::<UsageReporting>() {
-            usage_reporting.stats_report_key.clone()
-        } else {
-            String::new()
-        };
+    let operation_signature = context
+        .private_entries
+        .lock()
+        .get::<UsageReporting>()
+        .map(|usage_reporting| usage_reporting.stats_report_key.clone())
+        .unwrap_or_default();
 
     let operation_name = context
         .get::<_, String>(OPERATION_NAME)
@@ -736,7 +736,7 @@ impl SupergraphCreator {
             .layer(shaping.supergraph_service_internal(supergraph_service));
 
         ServiceBuilder::new()
-            .layer(content_negociation::SupergraphLayer::default())
+            .layer(content_negotiation::SupergraphLayer::default())
             .service(
                 self.plugins
                     .iter()
@@ -803,7 +803,7 @@ mod tests {
    type Subscription @join__type(graph: USER) {
         userWasCreated: User
    }
-   
+
    type User
    @join__owner(graph: USER)
    @join__type(graph: ORGA, key: "id")

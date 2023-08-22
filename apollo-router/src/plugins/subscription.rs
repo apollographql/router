@@ -447,6 +447,10 @@ impl Service<router::Request> for CallbackService {
                                 };
                                 // Keep the subscription to the client opened
                                 payload.subscribed = Some(true);
+                                tracing::info!(
+                                        monotonic_counter.apollo.router.operations.subscriptions.events = 1u64,
+                                        subscriptions.mode="callback"
+                                    );
                                 handle.send_sync(payload)?;
 
                                 Ok(router::Response {
@@ -545,6 +549,11 @@ impl Service<router::Request> for CallbackService {
                                 if let Some(errors) = errors {
                                     let mut handle =
                                         notify.subscribe(id.clone()).await?.into_sink();
+                                    tracing::info!(
+                                        monotonic_counter.apollo.router.operations.subscriptions.events = 1u64,
+                                        subscriptions.mode="callback",
+                                        subscriptions.complete=true
+                                    );
                                     handle.send_sync(
                                         graphql::Response::builder().errors(errors).build(),
                                     )?;

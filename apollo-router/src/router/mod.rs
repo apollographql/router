@@ -140,7 +140,7 @@ impl RouterHttpServer {
             shutdown_receiver,
         );
         let server_factory = AxumHttpServerFactory::new();
-        let router_factory = OrbiterRouterSuperServiceFactory::new(YamlRouterFactory::default());
+        let router_factory = OrbiterRouterSuperServiceFactory::new(YamlRouterFactory);
         let state_machine = StateMachine::new(server_factory, router_factory);
         let listen_addresses = state_machine.listen_addresses.clone();
         let result = spawn(
@@ -271,7 +271,7 @@ impl TestRouterHttpServer {
 
         let server_factory = AxumHttpServerFactory::new();
         let router_factory: OrbiterRouterSuperServiceFactory =
-            OrbiterRouterSuperServiceFactory::new(YamlRouterFactory::default());
+            OrbiterRouterSuperServiceFactory::new(YamlRouterFactory);
         let state_machine = StateMachine::for_tests(
             server_factory,
             router_factory,
