@@ -770,113 +770,6 @@ expression: "&schema"
           },
           "additionalProperties": false
         },
-        "supergraph": {
-          "description": "The supergraph stage request/response configuration",
-          "default": {
-            "request": {
-              "headers": false,
-              "context": false,
-              "body": false,
-              "sdl": false,
-              "path": false,
-              "method": false
-            },
-            "response": {
-              "headers": false,
-              "context": false,
-              "body": false,
-              "sdl": false,
-              "status_code": false
-            }
-          },
-          "type": "object",
-          "properties": {
-            "request": {
-              "description": "The request configuration",
-              "default": {
-                "headers": false,
-                "context": false,
-                "body": false,
-                "sdl": false,
-                "path": false,
-                "method": false
-              },
-              "type": "object",
-              "properties": {
-                "body": {
-                  "description": "Send the body",
-                  "default": false,
-                  "type": "boolean"
-                },
-                "context": {
-                  "description": "Send the context",
-                  "default": false,
-                  "type": "boolean"
-                },
-                "headers": {
-                  "description": "Send the headers",
-                  "default": false,
-                  "type": "boolean"
-                },
-                "method": {
-                  "description": "Send the method",
-                  "default": false,
-                  "type": "boolean"
-                },
-                "path": {
-                  "description": "Send the path",
-                  "default": false,
-                  "type": "boolean"
-                },
-                "sdl": {
-                  "description": "Send the SDL",
-                  "default": false,
-                  "type": "boolean"
-                }
-              },
-              "additionalProperties": false
-            },
-            "response": {
-              "description": "What information is passed to a router request/response stage",
-              "default": {
-                "headers": false,
-                "context": false,
-                "body": false,
-                "sdl": false,
-                "status_code": false
-              },
-              "type": "object",
-              "properties": {
-                "body": {
-                  "description": "Send the body",
-                  "default": false,
-                  "type": "boolean"
-                },
-                "context": {
-                  "description": "Send the context",
-                  "default": false,
-                  "type": "boolean"
-                },
-                "headers": {
-                  "description": "Send the headers",
-                  "default": false,
-                  "type": "boolean"
-                },
-                "sdl": {
-                  "description": "Send the SDL",
-                  "default": false,
-                  "type": "boolean"
-                },
-                "status_code": {
-                  "description": "Send the HTTP status",
-                  "default": false,
-                  "type": "boolean"
-                }
-              },
-              "additionalProperties": false
-            }
-          }
-        },
         "timeout": {
           "description": "The timeout for external requests",
           "default": {
@@ -1689,7 +1582,7 @@ expression: "&schema"
           "type": "object",
           "properties": {
             "enabled": {
-              "description": "Enables using the peristed query list as a safelist (disabled by default)",
+              "description": "Enables using the persisted query list as a safelist (disabled by default)",
               "default": false,
               "type": "boolean"
             },
@@ -2158,6 +2051,11 @@ expression: "&schema"
                 }
               },
               "additionalProperties": false
+            },
+            "experimental_otlp_endpoint": {
+              "description": "The Apollo Studio endpoint for exporting traces and metrics.",
+              "default": "http://0.0.0.0:4317/",
+              "type": "string"
             },
             "field_level_instrumentation_sampler": {
               "description": "Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.",

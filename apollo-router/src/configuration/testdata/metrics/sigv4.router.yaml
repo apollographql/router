@@ -1,0 +1,7 @@
+authentication:
+  subgraph:
+    all:
+      aws_sig_v4:
+        default_chain:
+            service_name: "Foo"
+            region: "us-east-1"

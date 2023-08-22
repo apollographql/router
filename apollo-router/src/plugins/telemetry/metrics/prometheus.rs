@@ -22,6 +22,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::router_factory::Endpoint;
@@ -123,7 +124,9 @@ impl MetricsConfigurator for Config {
                     .boxed(),
                 ),
             );
-            builder = builder.with_meter_provider(exporter.meter_provider()?);
+            builder = builder.with_meter_provider(FilterMeterProvider::public_metrics(
+                exporter.meter_provider()?,
+            ));
             builder = builder.with_exporter(exporter);
             tracing::info!(
                 "Prometheus endpoint exposed at {}{}",
