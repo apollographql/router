@@ -684,7 +684,7 @@ async fn missing_variables() {
 
 const PARSER_LIMITS_TEST_QUERY: &str =
     r#"{ me { reviews { author { reviews { author { name } } } } } }"#;
-const PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT: usize = 35;
+const PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT: usize = 36;
 const PARSER_LIMITS_TEST_QUERY_RECURSION: usize = 6;
 
 #[tokio::test(flavor = "multi_thread")]
