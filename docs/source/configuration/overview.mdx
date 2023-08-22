@@ -488,6 +488,12 @@ You can configure certain caching behaviors for generated query plans and APQ (b
 
 **If you have a GraphOS Enterprise plan,** you can also configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/).
 
+### Safelisting with persisted queries
+
+You can enhance your graph's security by maintaining a persisted query list (PQL), an operation safelist made by your first-party apps. As opposed to automatic persisted queries (APQ) where operations are automatically cached, operations must be preregistered to the PQL. The router than checks incoming requests against the PQL.
+
+See [Safelisting with persisted queries](./persisted-queries) for more information.
+
 ### HTTP header rules
 
 See [Sending HTTP headers to subgraphs](./header-propagation/).
@@ -683,10 +689,6 @@ fragment ProductVariation on Product {
 Note that the router calculates the recursion depth for each operation and fragment _separately_.  Even if a fragment is included in an operation, that fragment's recursion depth does not contribute to the _operation's_ recursion depth.
 
 > In versions of the Apollo Router prior to 1.17, this limit was defined via the config option `experimental_parser_recursion_limit`.
-
-### Safelisting
-
-See [Safelisting with persisted queries](./persisted-queries).
 
 ### GraphQL Validation Mode
 

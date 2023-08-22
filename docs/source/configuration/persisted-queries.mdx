@@ -51,7 +51,7 @@ preview_persisted_queries:
 
 #### `log_unknown`
 
-Adding `log_unknown: true` to `preview_persisted_queries` causes the router to log any operations not preregistered to the PQL.
+Adding `log_unknown: true` to `preview_persisted_queries` configures the router to log any incoming operations not preregistered to the PQL.
 
 ```yaml title="router.yaml"
 preview_persisted_queries:
@@ -59,7 +59,7 @@ preview_persisted_queries:
   log_unknown: true
 ```
 
-If used with the [`safelist`](#safelist) option, the router logs unregistered and rejected operations. If [`safelist.required_id`](#require_id) is turned on, operations can be rejected even when preregistered because they use operation IDs rather than operation strings.
+If used with the [`safelist`](#safelist) option, the router logs unregistered and rejected operations. With [`safelist.required_id`](#require_id) off, the only rejected operations are unregistered ones. If [`safelist.required_id`](#require_id) is turned on, operations can be rejected even when preregistered because they use operation IDs rather than operation strings.
 
 #### `safelist`
 
@@ -72,7 +72,7 @@ preview_persisted_queries:
     enabled: true
 ```
 
-By default, the [`require_id`](#required_id) suboption is `false`, meaning both operation IDs and operation strings are accepted.
+By default, the [`require_id`](#required_id) suboption is `false`, meaning the router accepts both operation IDs and operation strings as long as the operation is preregistered.
 
 #### `require_id`
 
