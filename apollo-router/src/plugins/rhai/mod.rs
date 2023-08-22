@@ -501,7 +501,6 @@ macro_rules! gen_map_router_deferred_response {
                     let $base::Response { response, context } = mapped_response;
                     let (parts, stream) = response.into_parts();
 
-
                     let response = $base::FirstResponse {
                         context,
                         response: http::Response::from_parts(

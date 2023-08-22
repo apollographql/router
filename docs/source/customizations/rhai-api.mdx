@@ -295,11 +295,10 @@ All callback functions registered via `map_request` are passed a `request` objec
 request.context
 request.headers
 request.method
-request.body (router_service only)
-request.body.query (not on router_service)
-request.body.operation_name (not on router_service)
-request.body.variables (not on router_service)
-request.body.extensions (not on router_service)
+request.body.query
+request.body.operation_name
+request.body.variables
+request.body.extensions
 request.uri.host
 request.uri.path
 ```
@@ -392,10 +391,6 @@ This is the HTTP method of the client request.
 print(`${request.method}`); // Log the HTTP method
 ```
 
-### `request.body`
-
-At the router_service, the `router_body` is simply a String and can be manipulated as such. This is not so convenient as working with GraphQL objects, such as are available at the `supergraph_service`.
-
 ### `request.body.query`
 
 This is the client-provided GraphQL operation string to execute.
@@ -483,11 +478,10 @@ The `response` object includes the following fields:
 ```
 response.context
 response.headers
-response.body (router_service only)
-response.body.label (not on router_service)
-response.body.data (not on router_service)
-response.body.errors (not on router_service)
-response.body.extensions (not on router_service)
+response.body.label
+response.body.data
+response.body.errors
+response.body.extensions
 ```
 
 All of the above fields are read/write.
