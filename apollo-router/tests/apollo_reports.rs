@@ -13,6 +13,8 @@ use axum::body::Bytes;
 use axum::routing::post;
 use axum::Extension;
 use axum::Json;
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine as _;
 use flate2::read::GzDecoder;
 use http::header::ACCEPT;
 use once_cell::sync::Lazy;
@@ -113,7 +115,7 @@ async fn get_router_service(mocked: bool) -> BoxCloneService {
 }
 
 fn encode_ftv1(trace: Trace) -> String {
-    base64::encode(trace.encode_to_vec())
+    BASE64_STANDARD.encode(trace.encode_to_vec())
 }
 
 macro_rules! assert_report {
