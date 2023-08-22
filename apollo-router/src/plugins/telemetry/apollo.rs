@@ -33,7 +33,7 @@ use crate::services::apollo_key;
 pub(crate) const ENDPOINT_DEFAULT: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 
-pub(crate) const OTLP_ENDPOINT_DEFAULT: &str = "http://0.0.0.0:4317";
+pub(crate) const OTLP_ENDPOINT_DEFAULT: &str = "https://usage-reporting.api.apollographql.com";
 
 #[derive(Derivative)]
 #[derivative(Debug)]
