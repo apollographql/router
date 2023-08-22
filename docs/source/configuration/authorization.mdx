@@ -26,7 +26,7 @@ Services may have their own access controls, but enforcing authorization _in the
     clients -->|"⚠️Unauthorized <br/>request"| router;
   ```
 
-  - If every field in a particular subquery requires authorization, the router's [query planner](../customizations/overview#request-path) can _eliminate entire subgraph requests_ for unauthorized requests. For example, a request may have permission to view a particular user's posts on a social media platform but not have permission to view any of that user's PII.
+  - If every field in a particular subquery requires authorization, the router's [query planner](../customizations/overview#request-path) can _eliminate entire subgraph requests_ for unauthorized requests. For example, a request may have permission to view a particular user's posts on a social media platform but not have permission to view any of that user's PII. Check out [How it works](#how-it-works) to learn more.
 
   ```mermaid
   flowchart LR;
@@ -114,7 +114,7 @@ To declare which scopes are required, the directive should include a `scopes` ar
 
 Depending on the scopes present on the request, the router filters out unauthorized fields and types.
 
-> If a field's required `scopes` array includes multiple scopes, the request must include _all_ required scopes to resolve it.
+> You can use Boolean logic to define the required scopes. See [Combining required scopes](#combining-required-scopes-with-andor-logic) for details.
 
 The directive validates the required scopes by loading the claims object at the `apollo_authentication::JWT::claims` key in a request's context.
 The claims object's `scope` key's value should be a space-separated string of scopes in the format defined by the [OAuth2 RFC for access token scopes](https://datatracker.ietf.org/doc/html/rfc6749#section-3.3).
@@ -124,7 +124,7 @@ claims = context["apollo_authentication::JWT::claims"]
 claims["scope"] = "scope1 scope2 scope3"
 ```
 
-<ExpansionPanel title="What if my scopes aren't in this format?">
+<ExpansionPanel title="What if my request scopes aren't in this format?">
 
 If the `apollo_authentication::JWT::claims` object holds scopes in another format, for example, an array of strings, or at a key other than `"scope"`, you can edit the claims with a [Rhai script](../customizations/rhai).
 
@@ -167,6 +167,33 @@ extend schema
     url: "https://specs.apollo.dev/federation/v2.5",
     import: [..., "@requiresScopes"])
 ```
+
+#### Combining required scopes with `AND`/`OR` logic
+
+A request must include _all_ elements in the top-level `scopes` array to resolve the associated field or type. In other words, the authorization validation uses **AND** logic between the elements in the top-level `scopes` array.
+
+```graphql
+@requiresScopes(scopes: ["scope1", "scope2", "scope3"])
+```
+
+For the preceding example, a request would need `scope1` **AND** `scope2` **AND** `scope3` to be authorized.
+
+You can use nested arrays to introduce **OR** logic:
+
+```graphql
+@requiresScopes(scopes: [["scope1"], ["scope2"], ["scope3"]])
+```
+
+For the preceding example, a request would need `scope1` **OR** `scope2` **OR** `scope3` to be authorized.
+
+You can nest arrays and elements as needed to achieve your desired logic. For example:
+
+```graphql
+@requiresScopes(scopes: [["scope1", "scope2"], ["scope3"]])
+```
+
+This syntax requires requests to have either (`scope1` **AND** `scope2`) **OR** just `scope3` to be authorized.
+
 
 #### Example `@requiresScopes` use case
 
@@ -354,9 +381,42 @@ If _every_ requested field requires authentication and a request is unauthentica
 
 ## Composition and federation
 
-GraphOS's composition strategy for authorization directives is intentionally accumulative. When you define authorization directives on fields and types in subgraphs, GraphOS composes them into the supergraph schema. In other words, if subgraph fields or types include `@authenticated` or `@requiresScopes` directives, they are set on the supergraph too.
+GraphOS's composition strategy for authorization directives is intentionally accumulative. When you define authorization directives on fields and types in subgraphs, GraphOS composes them into the supergraph schema. In other words, if subgraph fields or types include `@requiresScopes` or `@authenticated` directives, they are set on the supergraph too.
 
-If multiple shared subgraph fields include `@requiresScopes`, the supergraph schema merges the sets of scopes required by each subgraph. For example, imagine one subgraph requires the `read:others` scope on the `users` query:
+#### Composition with `AND`/`OR` logic
+
+If shared subgraph fields include multiple directives, composition merges them. For example, suppose the `me` query requires `@authentication` in one subgraph:
+
+
+```graphql title="Subgraph A"
+type Query {
+  me: User @authenticated
+}
+
+type User {
+  id: ID!
+  username: String
+  email: String
+}
+```
+
+and the `read:user` scope in another subgraph:
+
+```graphql title="Subgraph B"
+type Query {
+  me: User @requiresScopes(scopes: ["read:user"])
+}
+
+type User {
+  id: ID!
+  username: String
+  email: String
+}
+```
+
+A request would need to both be authenticated **AND** have the required scope. Recall that the `@authenticated` directive only checks for the existence of the `apollo_authentication::JWT::claims` key in a request's context, so authentication is guaranteed if the request includes scopes.
+
+If multiple shared subgraph fields include `@requiresScopes`, the supergraph schema merges them with the same logic used to [combine scopes for a single use of `@requiresScopes`](#combining-required-scopes-with-andor-logic). For example, if one subgraph requires the `read:others` scope on the `users` query:
 
 ```graphql title="Subgraph A"
 type Query {
@@ -364,7 +424,7 @@ type Query {
 }
 ```
 
-And another subgraph requires the `read:profiles` scope on `users` query:
+and another subgraph requires the `read:profiles` scope on `users` query:
 
 ```graphql title="Subgraph B"
 type Query {
@@ -380,7 +440,29 @@ type Query {
 }
 ```
 
-This accumulative approach ensures that each subgraph's restrictions are respected, even if they apply to the same type or field.
+As with [combining scopes for a single use of `@requiresScopes`](#combining-required-scopes-with-andor-logic), you can use nested arrays to introduce **OR** logic:
+
+```graphql title="Subgraph A"
+type Query {
+  users: [User!]! @requiresScopes(scopes: [["read:others", "read:users"]])
+}
+```
+
+```graphql title="Subgraph B"
+type Query {
+  users: [User!]! @requiresScopes(scopes: [["read:profiles"]])
+}
+```
+
+Since both `scopes` arrays are nested arrays, they would be composed using **OR** logic into the supergraph schema:
+
+```graphql title="Supergraph"
+type Query {
+  users: [User!]! @requiresScopes(scopes: [["read:others", "read:users"], ["read:profiles"]])
+}
+```
+
+This syntax means a request needs either (`read:others` **AND** `read:users`) scopes **OR** just the `read:profiles` scope to be authorized.
 
 ### Authorization and `@key` fields
 
