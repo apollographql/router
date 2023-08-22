@@ -4,10 +4,10 @@ use std::ops::ControlFlow;
 
 use tower::BoxError;
 
-pub(crate) use crate::services::router::*;
-use crate::{graphql::Error, Context};
-
 use super::ErrorDetails;
+use crate::graphql::Error;
+pub(crate) use crate::services::router::*;
+use crate::Context;
 
 pub(crate) type FirstRequest = super::engine::RhaiRouterFirstRequest;
 pub(crate) type ChunkedRequest = super::engine::RhaiRouterChunkedRequest;

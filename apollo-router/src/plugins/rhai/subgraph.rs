@@ -4,10 +4,10 @@ use std::ops::ControlFlow;
 
 use tower::BoxError;
 
-pub(crate) use crate::services::subgraph::*;
-use crate::{graphql::Error, Context};
-
 use super::ErrorDetails;
+use crate::graphql::Error;
+pub(crate) use crate::services::subgraph::*;
+use crate::Context;
 
 pub(super) fn request_failure(
     context: Context,

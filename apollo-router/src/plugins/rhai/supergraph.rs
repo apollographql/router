@@ -4,10 +4,10 @@ use std::ops::ControlFlow;
 
 use tower::BoxError;
 
-pub(crate) use crate::services::supergraph::*;
-use crate::{graphql::Error, Context};
-
 use super::ErrorDetails;
+use crate::graphql::Error;
+pub(crate) use crate::services::supergraph::*;
+use crate::Context;
 
 pub(crate) type FirstResponse = super::engine::RhaiSupergraphResponse;
 pub(crate) type DeferredResponse = super::engine::RhaiSupergraphDeferredResponse;
