@@ -13,7 +13,6 @@ use arc_swap::ArcSwap;
 use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
-use futures::TryStreamExt;
 use http::StatusCode;
 use notify::event::DataChange;
 use notify::event::MetadataKind;
@@ -42,7 +41,6 @@ use tower::ServiceExt;
 use self::engine::RhaiService;
 use self::engine::SharedMut;
 use crate::error::Error;
-use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -396,8 +394,13 @@ macro_rules! gen_map_router_deferred_request {
                     request_opt.unwrap();
                     let (parts, _body) = http::Request::from(request).into_parts();
 
+                    // Finally, return a response which has a Body that wraps our stream of response chunks.
+                    Ok(ControlFlow::Continue($base::Request {
+                        context,
+                        router_request: http::Request::from_parts(parts, stream),
+                    }))
 
-                    //let mut first = true;
+                    /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
                     let ctx = context.clone();
                     let rhai_service = $rhai_service.clone();
                     let callback = $callback.clone();
@@ -447,6 +450,7 @@ macro_rules! gen_map_router_deferred_request {
                         context,
                         router_request: http::Request::from_parts(parts, hyper::Body::wrap_stream(mapped_stream)),
                     }))
+                    */
                 })
                 .service(service)
                 .boxed()
@@ -496,45 +500,13 @@ macro_rules! gen_map_router_deferred_response {
                     // for which we will implement mapping later
                     let $base::Response { response, context } = mapped_response;
                     let (parts, stream) = response.into_parts();
-                    let (first, rest) = stream.into_future().await;
 
-                    let body = match first {
-                        Some(body_result) => {
-                            match body_result {
-                                Ok(body) => body,
-                                Err(e) => {
-                                    let error_details = ErrorDetails {
-                                        status: StatusCode::INTERNAL_SERVER_ERROR,
-                                        message: Some(format!("rhai execution error: {e}")),
-                                        position: None,
-                                        body: None
-                                    };
-                                    return Ok($base::response_failure(
-                                        context,
-                                        error_details
-                                    ));
-                                }
-                            }
-                        },
-                        None => {
-                            let error_details = ErrorDetails {
-                                status: StatusCode::INTERNAL_SERVER_ERROR,
-                                message: Some("rhai execution error: empty response".to_string()),
-                                position: None,
-                                body: None
-                            };
-                            return Ok($base::response_failure(
-                                context,
-                                error_details
-                            ));
-                        }
-                    };
 
                     let response = $base::FirstResponse {
                         context,
                         response: http::Response::from_parts(
                             parts,
-                            body.into(),
+                            (),
                         )
                         .into(),
                     };
@@ -556,8 +528,16 @@ macro_rules! gen_map_router_deferred_response {
 
                     let $base::FirstResponse { context, response } =
                         response_opt.unwrap();
-                    let (parts, body) = http::Response::from(response).into_parts();
+                    let (parts, _body) = http::Response::from(response).into_parts();
 
+
+                    // Finally, return a response which has a Body that wraps our stream of response chunks.
+                    Ok($base::Response {
+                        context,
+                        response: http::Response::from_parts(parts, stream),
+                    })
+
+                    /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
                     let ctx = context.clone();
 
                     let mapped_stream = rest
@@ -608,8 +588,7 @@ macro_rules! gen_map_router_deferred_response {
                     Ok($base::Response {
                         context,
                         response: http::Response::from_parts(parts, hyper::Body::wrap_stream(final_stream)),
-                    })
-
+                    })*/
                 },
             ))
         })

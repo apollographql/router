@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
-use bytes::Bytes;
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine as _;
+use bytes::Bytes;
 use http::header::InvalidHeaderName;
 use http::uri::Authority;
 use http::uri::Parts;
@@ -629,12 +629,13 @@ mod router_plugin {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
+    /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_router_response(
         obj: &mut SharedMut<router::FirstResponse>,
     ) -> Result<Vec<u8>, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.body().to_vec()))
-    }
+    }*/
 
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_supergraph_response(
@@ -657,6 +658,7 @@ mod router_plugin {
         Ok(obj.with_mut(|response| response.response.body().clone()))
     }
 
+    /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_router_deferred_response(
         obj: &mut SharedMut<router::DeferredResponse>,
@@ -670,7 +672,7 @@ mod router_plugin {
         })?;
 
         String::from_utf8(bytes.to_vec()).map_err(|err| err.to_string().into())
-    }
+    }*/
 
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_supergraph_deferred_response(
@@ -746,6 +748,7 @@ mod router_plugin {
         Ok(())
     }
 
+    /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
     #[rhai_fn(set = "body", return_raw)]
     pub(crate) fn set_originating_body_router_response(
         obj: &mut SharedMut<router::FirstResponse>,
@@ -754,7 +757,7 @@ mod router_plugin {
         let bytes = Bytes::from(body);
         obj.with_mut(|response| *response.response.body_mut() = bytes);
         Ok(())
-    }
+    }*/
 
     #[rhai_fn(set = "body", return_raw)]
     pub(crate) fn set_originating_body_supergraph_response(
@@ -783,6 +786,7 @@ mod router_plugin {
         Ok(())
     }
 
+    /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
     #[rhai_fn(set = "body", return_raw)]
     pub(crate) fn set_originating_body_router_deferred_response(
         obj: &mut SharedMut<router::DeferredResponse>,
@@ -791,7 +795,7 @@ mod router_plugin {
         let bytes = Bytes::from(body);
         obj.with_mut(|response| response.response = bytes);
         Ok(())
-    }
+    }*/
 
     #[rhai_fn(set = "body", return_raw)]
     pub(crate) fn set_originating_body_supergraph_deferred_response(
@@ -841,10 +845,11 @@ mod router_plugin {
         true
     }
 
+    /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
     #[rhai_fn(name = "headers_are_available", pure)]
     pub(crate) fn router_deferred_response(_: &mut SharedMut<router::DeferredResponse>) -> bool {
         false
-    }
+    }*/
 
     #[rhai_fn(name = "headers_are_available", pure)]
     pub(crate) fn supergraph_response(_: &mut SharedMut<supergraph::FirstResponse>) -> bool {
@@ -1107,6 +1112,8 @@ pub(crate) struct RhaiRouterFirstRequest {
     pub(crate) context: Context,
     pub(crate) request: http::Request<()>,
 }
+
+#[allow(dead_code)]
 #[derive(Default)]
 pub(crate) struct RhaiRouterChunkedRequest {
     pub(crate) context: Context,
@@ -1116,9 +1123,10 @@ pub(crate) struct RhaiRouterChunkedRequest {
 #[derive(Default)]
 pub(crate) struct RhaiRouterResponse {
     pub(crate) context: Context,
-    pub(crate) response: http::Response<Bytes>,
+    pub(crate) response: http::Response<()>,
 }
 
+#[allow(dead_code)]
 #[derive(Default)]
 pub(crate) struct RhaiRouterChunkedResponse {
     pub(crate) context: Context,
@@ -1255,6 +1263,7 @@ macro_rules! register_rhai_router_interface {
                 }
             );
 
+            /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
             $engine.register_get(
                 "body",
                 |obj: &mut SharedMut<$base::ChunkedRequest>| -> Result<Vec<u8>, Box<EvalAltResult>> {
@@ -1276,7 +1285,7 @@ macro_rules! register_rhai_router_interface {
                         }
                     }
                 }
-            );
+            );*/
 
             $engine.register_get(
                 "uri",
