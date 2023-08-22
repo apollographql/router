@@ -138,19 +138,22 @@ impl AuthorizationPlugin {
             context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
         }
 
-        let mut visitor = PolicyExtractionVisitor::new(&compiler, file_id);
+        // TODO: @policy is out of scope for preview, this will be reactivated later
+        if false {
+            let mut visitor = PolicyExtractionVisitor::new(&compiler, file_id);
 
-        // if this fails, the query is invalid and will fail at the query planning phase.
-        // We do not return validation errors here for now because that would imply a huge
-        // refactoring of telemetry and tests
-        if traverse::document(&mut visitor, file_id).is_ok() {
-            let policies: HashMap<String, Option<bool>> = visitor
-                .extracted_policies
-                .into_iter()
-                .map(|policy| (policy, None))
-                .collect();
+            // if this fails, the query is invalid and will fail at the query planning phase.
+            // We do not return validation errors here for now because that would imply a huge
+            // refactoring of telemetry and tests
+            if traverse::document(&mut visitor, file_id).is_ok() {
+                let policies: HashMap<String, Option<bool>> = visitor
+                    .extracted_policies
+                    .into_iter()
+                    .map(|policy| (policy, None))
+                    .collect();
 
-            context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
+                context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
+            }
         }
     }
 

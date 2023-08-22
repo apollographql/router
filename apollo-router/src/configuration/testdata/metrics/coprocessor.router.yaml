@@ -1,0 +1,31 @@
+coprocessor:
+  timeout: 10s
+  url: http://example.com
+  router:
+    request:
+      headers: true
+      body: true
+      context: true
+      method: true
+      path: true
+      sdl: true
+    response:
+      sdl: true
+      context: true
+      body: true
+      headers: true
+      status_code: true
+  subgraph:
+    all:
+      request:
+        headers: true
+        body: true
+        context: true
+        method: true
+      response:
+        status_code: true
+        headers: true
+        body: true
+        context: true
+        service_name: true
+

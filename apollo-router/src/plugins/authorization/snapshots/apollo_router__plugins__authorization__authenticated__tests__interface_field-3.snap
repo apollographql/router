@@ -1,0 +1,17 @@
+---
+source: apollo-router/src/plugins/authorization/authenticated.rs
+expression: doc
+---
+query {
+  test
+  itf {
+    ... on A {
+      id
+      other
+    }
+    ... on B {
+      other
+    }
+  }
+}
+

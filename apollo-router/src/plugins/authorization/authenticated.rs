@@ -11,6 +11,7 @@ use tower::BoxError;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
+use crate::spec::query::transform::get_field_type;
 
 pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: &str = "authenticated";
 
@@ -47,6 +48,100 @@ impl<'a> AuthenticatedVisitor<'a> {
     fn is_type_authenticated(&self, t: &TypeDefinition) -> bool {
         t.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some()
     }
+
+    fn implementors_with_different_requirements(
+        &self,
+        parent_type: &str,
+        node: &hir::Field,
+    ) -> bool {
+        // if all selections under the interface field are fragments with type conditions
+        // then we don't need to check that they have the same authorization requirements
+        if node.selection_set().fields().is_empty() {
+            return false;
+        }
+
+        if let Some(type_definition) = get_field_type(self, parent_type, node.name())
+            .and_then(|ty| self.compiler.db.find_type_definition_by_name(ty))
+        {
+            if self.implementors_with_different_type_requirements(&type_definition) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn implementors_with_different_type_requirements(&self, t: &TypeDefinition) -> bool {
+        if t.is_interface_type_definition() {
+            let mut is_authenticated: Option<bool> = None;
+
+            for ty in self
+                .compiler
+                .db
+                .subtype_map()
+                .get(t.name())
+                .into_iter()
+                .flatten()
+                .cloned()
+                .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
+            {
+                let ty_is_authenticated =
+                    ty.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some();
+                match is_authenticated {
+                    None => is_authenticated = Some(ty_is_authenticated),
+                    Some(other_ty_is_authenticated) => {
+                        if ty_is_authenticated != other_ty_is_authenticated {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    fn implementors_with_different_field_requirements(
+        &self,
+        parent_type: &str,
+        field: &hir::Field,
+    ) -> bool {
+        if let Some(t) = self
+            .compiler
+            .db
+            .find_type_definition_by_name(parent_type.to_string())
+        {
+            if t.is_interface_type_definition() {
+                let mut is_authenticated: Option<bool> = None;
+
+                for ty in self
+                    .compiler
+                    .db
+                    .subtype_map()
+                    .get(t.name())
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
+                {
+                    if let Some(f) = ty.field(&self.compiler.db, field.name()) {
+                        let field_is_authenticated =
+                            f.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some();
+                        match is_authenticated {
+                            Some(other) => {
+                                if field_is_authenticated != other {
+                                    return true;
+                                }
+                            }
+                            _ => {
+                                is_authenticated = Some(field_is_authenticated);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
 }
 
 impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
@@ -81,7 +176,16 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
             self.current_path.push(PathElement::Flatten);
         }
 
-        let res = if field_requires_authentication {
+        let implementors_with_different_requirements =
+            self.implementors_with_different_requirements(parent_type, node);
+
+        let implementors_with_different_field_requirements =
+            self.implementors_with_different_field_requirements(parent_type, node);
+
+        let res = if field_requires_authentication
+            || implementors_with_different_requirements
+            || implementors_with_different_field_requirements
+        {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_authentication = true;
             Ok(None)
@@ -248,10 +352,11 @@ mod tests {
     }
     "#;
 
-    fn filter(query: &str) -> (apollo_encoder::Document, Vec<Path>) {
+    #[track_caller]
+    fn filter(schema: &str, query: &str) -> (apollo_encoder::Document, Vec<Path>) {
         let mut compiler = ApolloCompiler::new();
 
-        let _schema_id = compiler.add_type_system(BASIC_SCHEMA, "schema.graphql");
+        let _schema_id = compiler.add_type_system(schema, "schema.graphql");
         let file_id = compiler.add_executable(query, "query.graphql");
 
         let diagnostics = compiler.validate();
@@ -278,7 +383,7 @@ mod tests {
         }
         "#;
 
-        let (doc, paths) = filter(QUERY);
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -298,7 +403,27 @@ mod tests {
         }
         "#;
 
-        let (doc, paths) = filter(QUERY);
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+    }
+
+    #[test]
+    fn query_field_alias() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+            }
+
+            moi: me {
+                name
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -315,7 +440,7 @@ mod tests {
         }
         "#;
 
-        let (doc, paths) = filter(QUERY);
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -337,7 +462,7 @@ mod tests {
         }
         "#;
 
-        let (doc, paths) = filter(QUERY);
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -359,7 +484,7 @@ mod tests {
         }
         "#;
 
-        let (doc, paths) = filter(QUERY);
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -383,7 +508,7 @@ mod tests {
         }
         "#;
 
-        let (doc, paths) = filter(QUERY);
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -403,7 +528,7 @@ mod tests {
         }
         "#;
 
-        let (doc, paths) = filter(QUERY);
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
@@ -426,7 +551,177 @@ mod tests {
         }
         "#;
 
-        let (doc, paths) = filter(QUERY);
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+    }
+
+    static INTERFACE_SCHEMA: &str = r#"
+    directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+
+    type Query {
+        test: String
+        itf: I!
+    }
+
+    interface I {
+        id: ID
+    }
+
+    type A implements I {
+        id: ID
+        a: String
+    }
+
+    type B implements I @authenticated {
+        id: ID
+        b: String
+    }
+    "#;
+
+    #[test]
+    fn interface_type() {
+        static QUERY: &str = r#"
+        query {
+            test
+            itf {
+                id
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY);
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        static QUERY2: &str = r#"
+        query {
+            test
+            itf {
+                ... on A {
+                    id
+                }
+
+                ... on B {
+                    id
+                }
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY2);
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+    }
+
+    static INTERFACE_FIELD_SCHEMA: &str = r#"
+    directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+
+    type Query {
+        test: String
+        itf: I!
+    }
+
+    interface I {
+        id: ID
+        other: String
+    }
+
+    type A implements I {
+        id: ID
+        other: String
+        a: String
+    }
+
+    type B implements I {
+        id: ID @authenticated
+        other: String
+        b: String
+    }
+    "#;
+
+    #[test]
+    fn interface_field() {
+        static QUERY: &str = r#"
+        query {
+            test
+            itf {
+                id
+                other
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY);
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        static QUERY2: &str = r#"
+        query {
+            test
+            itf {
+                ... on A {
+                    id
+                    other
+                }
+
+                ... on B {
+                    id
+                    other
+                }
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY2);
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+    }
+
+    #[test]
+    fn union() {
+        static UNION_MEMBERS_SCHEMA: &str = r#"
+        directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+
+        type Query {
+            test: String
+            uni: I!
+        }
+
+        union I = A | B
+
+        type A {
+            id: ID
+        }
+
+        type B @authenticated {
+            id: ID
+        }
+        "#;
+
+        static QUERY: &str = r#"
+        query {
+            test
+            uni {
+                ... on A {
+                    id
+                }
+                ... on B {
+                    id
+                }
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(UNION_MEMBERS_SCHEMA, QUERY);
 
         insta::assert_display_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);

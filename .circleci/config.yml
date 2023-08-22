@@ -21,8 +21,8 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
-      - image: cimg/redis:7.0.11
-      - image: jaegertracing/all-in-one:1.45.0
+      - image: cimg/redis:7.2.0
+      - image: jaegertracing/all-in-one:1.48.0
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -373,6 +373,10 @@ commands:
             # Use helm to template our chart against all kube versions
             TEMPLATE_DIR=$(mktemp -d)
             for kube_version in ${CURRENT_KUBE_VERSIONS}; do
+              # Skip 1.28.0 until supported by kubeconform
+              if [[ "${kube_version}" == "1.28.0" ]]; then
+                  continue
+              fi
               # Use helm to template our chart against kube_version
               helm template --kube-version "${kube_version}" router helm/chart/router --set autoscaling.enabled=true > "${TEMPLATE_DIR}/router-${kube_version}.yaml"
 
@@ -690,6 +694,9 @@ jobs:
       VERSION: << pipeline.git.tag >>
     steps:
       - checkout
+      - setup_remote_docker:
+          version: 20.10.11
+          docker_layer_caching: true
       - attach_workspace:
           at: artifacts
       - gh/setup
@@ -715,10 +722,6 @@ jobs:
               *) gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/* ;;
 
             esac
-
-      - setup_remote_docker:
-          version: 20.10.11
-          docker_layer_caching: true
       - run:
           name: Docker build
           command: |

@@ -274,7 +274,6 @@ impl<'a> TestHarness<'a> {
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
             Arc::new(supergraph_creator),
             config,
-            None,
         )
         .await
         .unwrap();
@@ -299,7 +298,6 @@ impl<'a> TestHarness<'a> {
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
             Arc::new(supergraph_creator),
             config.clone(),
-            None,
         )
         .await?;
 

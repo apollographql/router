@@ -40,7 +40,7 @@ impl PersistedQueries {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedQueriesSafelist {
-    /// Enables using the peristed query list as a safelist (disabled by default)
+    /// Enables using the persisted query list as a safelist (disabled by default)
     #[serde(default = "default_safelist")]
     pub enabled: bool,
 
