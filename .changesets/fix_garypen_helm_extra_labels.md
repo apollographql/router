@@ -4,4 +4,4 @@ This extends the functionality of `extraLabels` so that, if they are defined, th
     
 Previously, they were only templated onto the `Deployment` resource.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3622
+By [@garypen](https://github.com/garypen) and [@bjoernw](https://github.com/bjoernw) in https://github.com/apollographql/router/pull/3622
