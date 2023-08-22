@@ -527,7 +527,7 @@ impl Plugin for Telemetry {
                             subgraph_attribute,
                             subgraph_metrics_conf,
                             now,
-                            counters,
+                            &counters,
                             cache_attributes,
                             &result,
                         );
@@ -1073,7 +1073,7 @@ impl Telemetry {
         counters.record_representations(
             cache_attributes.hashed_query.clone(),
             cache_attributes.subgraph_name.clone(),
-            hashed_headers.clone(),
+            hashed_headers,
             cache_attributes.representations,
         );
     }
@@ -1606,12 +1606,13 @@ struct CountersKey {
     hashed_headers: Arc<String>,
 }
 
+#[derive(Default, Clone)]
 struct CacheCounters {
-    counters: DashMap<CountersKey, Arc<Mutex<CacheCounter>>>,
+    counters: Arc<DashMap<CountersKey, Arc<Mutex<CacheCounter>>>>,
 }
 
 impl CacheCounters {
-    async fn record_representations(
+    fn record_representations(
         &self,
         query: Arc<String>,
         subgraph_name: Arc<String>,
@@ -1643,10 +1644,11 @@ impl CacheCounters {
 
             let distinct = c.distinct();
             ::tracing::info!(
-                gauge.apollo.router.operations.entity.distinct = distinct,
+                gauge.apollo.router.operations.entity = distinct,
                 entity_type = %key.typename,
                 subgraph = %key.subgraph_name,
                 vary = %key.hashed_headers,
+                entity_state = %"distinct",
             );
         }
     }
@@ -1703,7 +1705,7 @@ impl CacheCounter {
         // The histogram receives a range of values, and for sub-ranges, calculates how
         // many times they were received
         // Let's say we have N different entities. To make a histogram of entity frequencies,
-        // e want each entity frequency to be sent roughly as often as every other entity
+        // we want each entity frequency to be sent roughly as often as every other entity
         // frequency, as 1/N of all values sent.
         // Unfortunately, if we send a value on each time we see an entity, high frequency
         // entities will be overrepresented: if a single entity appears in all requests,
@@ -1740,21 +1742,23 @@ impl CacheCounter {
 
             if sample < rate {
                 ::tracing::info!(
-                    histogram.apollo.router.operations.entity.cacheable = frequency,
+                    histogram.apollo.router.operations.entity = frequency,
                     entity_type = %key.typename,
                     subgraph = %key.subgraph_name,
                     vary = %key.hashed_headers,
+                    entity_state = %"cacheable",
                 );
             }
-        // account for low frequency entities s eparately
+        // account for low frequency entities separately
         } else {
             self.low_frequency_entities.push(representation);
             let uncacheable = self.low_frequency_entities.len() / self.distinct_entities.len();
             ::tracing::info!(
-                gauge.apollo.router.operations.entity.uncacheable = frequency,
+                gauge.apollo.router.operations.entity = uncacheable,
                 entity_type = %key.typename,
                 subgraph = %key.subgraph_name,
                 vary = %key.hashed_headers,
+                entity_state = %"uncacheable",
             );
         }
     }
