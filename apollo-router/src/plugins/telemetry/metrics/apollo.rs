@@ -62,9 +62,9 @@ impl MetricsConfigurator for Config {
                     batch_processor,
                 )?;
                 // env variable EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED will disappear without warning in future
-                if let Some("true") = std::env::var("EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED")
-                    .ok()
-                    .as_deref()
+                if std::env::var("EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED")
+                    .unwrap_or_else(|_| "true".to_string())
+                    == "true"
                 {
                     builder = Self::configure_apollo_otlp_metrics(
                         builder,
