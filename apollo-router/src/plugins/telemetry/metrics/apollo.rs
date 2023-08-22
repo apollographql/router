@@ -94,7 +94,7 @@ impl Config {
         schema_id: &str,
         batch_processor: &BatchProcessorConfig,
     ) -> Result<MetricsBuilder, BoxError> {
-        tracing::debug!("creating otlp metrics exporter");
+        tracing::debug!("creating apollo otlp metrics {}", endpoint);
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
 
@@ -142,7 +142,7 @@ impl Config {
         batch_processor: &BatchProcessorConfig,
     ) -> Result<MetricsBuilder, BoxError> {
         let batch_processor_config = batch_processor;
-        tracing::debug!("creating metrics exporter");
+        tracing::debug!("creating apollo metrics exporter {}", endpoint);
         let exporter =
             ApolloExporter::new(endpoint, batch_processor_config, key, reference, schema_id)?;
 
