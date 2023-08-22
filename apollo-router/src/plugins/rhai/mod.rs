@@ -47,22 +47,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::rhai::engine::OptionDance;
-use crate::plugins::rhai::engine::RhaiExecutionDeferredResponse;
-use crate::plugins::rhai::engine::RhaiExecutionResponse;
-use crate::plugins::rhai::engine::RhaiRouterChunkedRequest;
-use crate::plugins::rhai::engine::RhaiRouterChunkedResponse;
-use crate::plugins::rhai::engine::RhaiRouterFirstRequest;
-use crate::plugins::rhai::engine::RhaiRouterResponse;
-use crate::plugins::rhai::engine::RhaiSupergraphDeferredResponse;
-use crate::plugins::rhai::engine::RhaiSupergraphResponse;
 use crate::register_plugin;
-use crate::services::ExecutionRequest;
-use crate::services::ExecutionResponse;
-use crate::services::RouterRequest;
-use crate::services::RouterResponse;
-use crate::services::SupergraphRequest;
-use crate::services::SupergraphResponse;
-use crate::Context;
 
 mod engine;
 
@@ -346,35 +331,6 @@ macro_rules! gen_map_request {
             ServiceBuilder::new()
                 .instrument(rhai_service_span())
                 .checkpoint(move |request: $base::Request| {
-                    // Let's define a local function to build an error response
-                    fn failure_message(
-                        context: Context,
-                        error_details: ErrorDetails,
-                    ) -> Result<ControlFlow<$base::Response, $base::Request>, BoxError>
-                    {
-                        let res = if let Some(body) = error_details.body {
-                            $base::Response::builder()
-                                .extensions(body.extensions)
-                                .errors(body.errors)
-                                .status_code(error_details.status)
-                                .context(context)
-                                .and_data(body.data)
-                                .and_label(body.label)
-                                .and_path(body.path)
-                                .build()
-                        } else {
-                            $base::Response::error_builder()
-                                .errors(vec![Error {
-                                    message: error_details.message.unwrap_or_default(),
-                                    ..Default::default()
-                                }])
-                                .context(context)
-                                .status_code(error_details.status)
-                                .build()?
-                        };
-
-                        Ok(ControlFlow::Break(res))
-                    }
                     let shared_request = Shared::new(Mutex::new(Some(request)));
                     let result: Result<Dynamic, Box<EvalAltResult>> =
                         execute(&$rhai_service, &$callback, (shared_request.clone(),));
@@ -383,71 +339,7 @@ macro_rules! gen_map_request {
                         tracing::error!("map_request callback failed: {error_details:#?}");
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
-                        return failure_message(request_opt.unwrap().context, error_details);
-                    }
-                    let mut guard = shared_request.lock().unwrap();
-                    let request_opt = guard.take();
-                    Ok(ControlFlow::Continue(request_opt.unwrap()))
-                })
-                .service(service)
-                .boxed()
-        })
-    };
-}
-
-// Actually use the checkpoint function so that we can shortcut requests which fail
-macro_rules! gen_map_deferred_request {
-    ($request: ident, $response: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
-        $borrow.replace(|service| {
-            fn rhai_service_span() -> impl Fn(&$request) -> tracing::Span + Clone {
-                move |_request: &$request| {
-                    tracing::info_span!(
-                        RHAI_SPAN_NAME,
-                        "rhai service" = stringify!($request),
-                        "otel.kind" = "INTERNAL"
-                    )
-                }
-            }
-            ServiceBuilder::new()
-                .instrument(rhai_service_span())
-                .checkpoint(move |request: $request| {
-                    // Let's define a local function to build an error response
-                    fn failure_message(
-                        context: Context,
-                        error_details: ErrorDetails,
-                    ) -> Result<ControlFlow<$response, $request>, BoxError> {
-                        let res = if let Some(body) = error_details.body {
-                            $response::builder()
-                                .extensions(body.extensions)
-                                .errors(body.errors)
-                                .status_code(error_details.status)
-                                .context(context)
-                                .and_data(body.data)
-                                .and_label(body.label)
-                                .and_path(body.path)
-                                .build()?
-                        } else {
-                            $response::error_builder()
-                                .errors(vec![Error {
-                                    message: error_details.message.unwrap_or_default(),
-                                    ..Default::default()
-                                }])
-                                .context(context)
-                                .status_code(error_details.status)
-                                .build()?
-                        };
-
-                        Ok(ControlFlow::Break(res))
-                    }
-                    let shared_request = Shared::new(Mutex::new(Some(request)));
-                    let result = execute(&$rhai_service, &$callback, (shared_request.clone(),));
-
-                    if let Err(error) = result {
-                        tracing::error!("map_request callback failed: {error}");
-                        let error_details = process_error(error);
-                        let mut guard = shared_request.lock().unwrap();
-                        let request_opt = guard.take();
-                        return failure_message(request_opt.unwrap().context, error_details);
+                        return $base::request_failure(request_opt.unwrap().context, error_details);
                     }
                     let mut guard = shared_request.lock().unwrap();
                     let request_opt = guard.take();
@@ -461,55 +353,26 @@ macro_rules! gen_map_deferred_request {
 
 // Actually use the checkpoint function so that we can shortcut requests which fail
 macro_rules! gen_map_router_deferred_request {
-    ($request: ident, $response: ident,  $rhai_first_request: ident, $rhai_deferred_request: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
         $borrow.replace(|service| {
-            fn rhai_service_span() -> impl Fn(&$request) -> tracing::Span + Clone {
-                move |_request: &$request| {
+            fn rhai_service_span() -> impl Fn(&$base::Request) -> tracing::Span + Clone {
+                move |_request: &$base::Request| {
                     tracing::info_span!(
                         RHAI_SPAN_NAME,
-                        "rhai service" = stringify!($request),
+                        "rhai service" = stringify!($base::Request),
                         "otel.kind" = "INTERNAL"
                     )
                 }
             }
             ServiceBuilder::new()
                 .instrument(rhai_service_span())
-                .checkpoint( move |chunked_request: $request|  {
-                    // Let's define a local function to build an error response
-                    fn failure_message(
-                        context: Context,
-                        error_details: ErrorDetails,
-                    ) -> Result<ControlFlow<$response, $request>, BoxError> {
-                        let res = if let Some(body) = error_details.body {
-                            $response::builder()
-                                .extensions(body.extensions)
-                                .errors(body.errors)
-                                .status_code(error_details.status)
-                                .context(context)
-                                .and_data(body.data)
-                                .and_label(body.label)
-                                .and_path(body.path)
-                                .build()?
-                        } else {
-                            $response::error_builder()
-                                .errors(vec![Error {
-                                    message: error_details.message.unwrap_or_default(),
-                                    ..Default::default()
-                                }])
-                                .context(context)
-                                .status_code(error_details.status)
-                                .build()?
-                        };
-
-                        Ok(ControlFlow::Break(res))
-                    }
-
+                .checkpoint( move |chunked_request: $base::Request|  {
                     // we split the request stream into headers+first body chunk, then a stream of chunks
                     // for which we will implement mapping later
-                    let $request { router_request, context } = chunked_request;
+                    let $base::Request { router_request, context } = chunked_request;
                     let (parts, stream) = router_request.into_parts();
 
-                    let request = $rhai_first_request {
+                    let request = $base::FirstRequest {
                         context,
                         request: http::Request::from_parts(
                             parts,
@@ -524,12 +387,12 @@ macro_rules! gen_map_router_deferred_request {
                         let error_details = process_error(error);
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
-                        return failure_message(request_opt.unwrap().context, error_details);
+                        return $base::request_failure(request_opt.unwrap().context, error_details);
                     }
 
                     let request_opt = shared_request.lock().unwrap().take();
 
-                    let $rhai_first_request { context, request } =
+                    let $base::FirstRequest { context, request } =
                     request_opt.unwrap();
                     let (parts, _body) = http::Request::from(request).into_parts();
 
@@ -542,12 +405,11 @@ macro_rules! gen_map_router_deferred_request {
                     let mapped_stream = stream
                         .map_err(BoxError::from)
                         .and_then(move |chunk| {
-                            //let rhai_service = $rhai_service.clone();
                             let context = ctx.clone();
                             let rhai_service = rhai_service.clone();
                             let callback = callback.clone();
                             async move {
-                                let request = $rhai_deferred_request {
+                                let request = $base::ChunkedRequest {
                                     context,
                                     request: chunk.into(),
                                 };
@@ -574,14 +436,14 @@ macro_rules! gen_map_router_deferred_request {
                                 }
 
                                 let request_opt = shared_request.lock().unwrap().take();
-                                let $rhai_deferred_request { request, .. } =
+                                let $base::ChunkedRequest { request, .. } =
                                     request_opt.unwrap();
                                 Ok(request)
                             }
                         });
 
                     // Finally, return a response which has a Body that wraps our stream of response chunks.
-                    Ok(ControlFlow::Continue($request {
+                    Ok(ControlFlow::Continue($base::Request {
                         context,
                         router_request: http::Request::from_parts(parts, hyper::Body::wrap_stream(mapped_stream)),
                     }))
@@ -597,60 +459,19 @@ macro_rules! gen_map_response {
         $borrow.replace(|service| {
             service
                 .map_response(move |response: $base::Response| {
-                    // Let's define a local function to build an error response
-                    // XXX: This isn't ideal. We already have a response, so ideally we'd
-                    // like to append this error into the existing response. However,
-                    // the significantly different treatment of errors in different
-                    // response types makes this extremely painful. This needs to be
-                    // re-visited at some point post GA.
-                    fn failure_message(
-                        context: Context,
-                        error_details: ErrorDetails,
-                    ) -> $base::Response {
-                        if let Some(body) = error_details.body {
-                            $base::Response::builder()
-                                .extensions(body.extensions)
-                                .errors(body.errors)
-                                .status_code(error_details.status)
-                                .context(context)
-                                .and_data(body.data)
-                                .and_label(body.label)
-                                .and_path(body.path)
-                                .build()
-                        } else {
-                            $base::Response::error_builder()
-                                .errors(vec![Error {
-                                    message: error_details.message.unwrap_or_default(),
-                                    ..Default::default()
-                                }])
-                                .status_code(error_details.status)
-                                .context(context)
-                                .build()
-                                .expect("can't fail to build our error message")
-                        }
-                    }
                     let shared_response = Shared::new(Mutex::new(Some(response)));
-                    let result: Result<Dynamic, Box<EvalAltResult>> = if $callback.is_curried() {
-                        $callback.call(
-                            &$rhai_service.engine,
-                            &$rhai_service.ast,
-                            (shared_response.clone(),),
-                        )
-                    } else {
-                        let mut guard = $rhai_service.scope.lock().unwrap();
-                        $rhai_service.engine.call_fn(
-                            &mut guard,
-                            &$rhai_service.ast,
-                            $callback.fn_name(),
-                            (shared_response.clone(),),
-                        )
-                    };
+                    let result: Result<Dynamic, Box<EvalAltResult>> =
+                        execute(&$rhai_service, &$callback, (shared_response.clone(),));
+
                     if let Err(error) = result {
                         tracing::error!("map_response callback failed: {error}");
                         let error_details = process_error(error);
                         let mut guard = shared_response.lock().unwrap();
                         let response_opt = guard.take();
-                        return failure_message(response_opt.unwrap().context, error_details);
+                        return $base::response_failure(
+                            response_opt.unwrap().context,
+                            error_details,
+                        );
                     }
                     let mut guard = shared_response.lock().unwrap();
                     let response_opt = guard.take();
@@ -667,45 +488,13 @@ macro_rules! gen_map_response {
 // I can't easily unify the macros because the router response processing is quite different to
 // other service in terms of payload.
 macro_rules! gen_map_router_deferred_response {
-    ($response: ident, $rhai_response: ident, $rhai_deferred_response: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
         $borrow.replace(|service| {
             BoxService::new(service.and_then(
-                |mapped_response: $response| async move {
-                    // Let's define a local function to build an error response
-                    // XXX: This isn't ideal. We already have a response, so ideally we'd
-                    // like to append this error into the existing response. However,
-                    // the significantly different treatment of errors in different
-                    // response types makes this extremely painful. This needs to be
-                    // re-visited at some point post GA.
-                    fn failure_message(
-                        context: Context,
-                        error_details: ErrorDetails,
-                    ) -> $response {
-                        if let Some(body) = error_details.body {
-                            $response::builder()
-                                .extensions(body.extensions)
-                                .errors(body.errors)
-                                .status_code(error_details.status)
-                                .context(context)
-                                .and_data(body.data)
-                                .and_label(body.label)
-                                .and_path(body.path)
-                                .build()
-                        } else {
-                            $response::error_builder()
-                                .errors(vec![Error {
-                                    message: error_details.message.unwrap_or_default(),
-                                    ..Default::default()
-                                }])
-                                .status_code(error_details.status)
-                                .context(context)
-                                .build()
-                        }.expect("can't fail to build our error message")
-                    }
-
+                |mapped_response: $base::Response| async move {
                     // we split the response stream into headers+first response, then a stream of deferred responses
                     // for which we will implement mapping later
-                    let $response { response, context } = mapped_response;
+                    let $base::Response { response, context } = mapped_response;
                     let (parts, stream) = response.into_parts();
                     let (first, rest) = stream.into_future().await;
 
@@ -720,7 +509,7 @@ macro_rules! gen_map_router_deferred_response {
                                         position: None,
                                         body: None
                                     };
-                                    return Ok(failure_message(
+                                    return Ok($base::response_failure(
                                         context,
                                         error_details
                                     ));
@@ -734,14 +523,14 @@ macro_rules! gen_map_router_deferred_response {
                                 position: None,
                                 body: None
                             };
-                            return Ok(failure_message(
+                            return Ok($base::response_failure(
                                 context,
                                 error_details
                             ));
                         }
                     };
 
-                    let response = $rhai_response {
+                    let response = $base::FirstResponse {
                         context,
                         response: http::Response::from_parts(
                             parts,
@@ -757,7 +546,7 @@ macro_rules! gen_map_router_deferred_response {
                         tracing::error!("map_response callback failed: {error}");
                         let error_details = process_error(error);
                         let response_opt = shared_response.lock().unwrap().take();
-                        return Ok(failure_message(
+                        return Ok($base::response_failure(
                             response_opt.unwrap().context,
                             error_details
                         ));
@@ -765,7 +554,7 @@ macro_rules! gen_map_router_deferred_response {
 
                     let response_opt = shared_response.lock().unwrap().take();
 
-                    let $rhai_response { context, response } =
+                    let $base::FirstResponse { context, response } =
                         response_opt.unwrap();
                     let (parts, body) = http::Response::from(response).into_parts();
 
@@ -778,7 +567,7 @@ macro_rules! gen_map_router_deferred_response {
                         let context = ctx.clone();
                         let callback = $callback.clone();
                         async move {
-                            let response = $rhai_deferred_response {
+                            let response = $base::DeferredResponse {
                                 context,
                                 response: deferred_response.into(),
                             };
@@ -805,7 +594,7 @@ macro_rules! gen_map_router_deferred_response {
                             }
 
                             let response_opt = shared_response.lock().unwrap().take();
-                            let $rhai_deferred_response { response, .. } =
+                            let $base::DeferredResponse { response, .. } =
                                 response_opt.unwrap();
                             Ok(response)
                         }
@@ -816,7 +605,7 @@ macro_rules! gen_map_router_deferred_response {
                     let final_stream = once(ready(Ok(body))).chain(mapped_stream).boxed();
 
                     // Finally, return a response which has a Body that wraps our stream of response chunks.
-                    Ok($response {
+                    Ok($base::Response {
                         context,
                         response: http::Response::from_parts(parts, hyper::Body::wrap_stream(final_stream)),
                     })
@@ -828,45 +617,13 @@ macro_rules! gen_map_router_deferred_response {
 }
 
 macro_rules! gen_map_deferred_response {
-    ($response: ident, $rhai_response: ident, $rhai_deferred_response: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
+    ($base: ident, $borrow: ident, $rhai_service: ident, $callback: ident) => {
         $borrow.replace(|service| {
             BoxService::new(service.and_then(
-                |mapped_response: $response| async move {
-                    // Let's define a local function to build an error response
-                    // XXX: This isn't ideal. We already have a response, so ideally we'd
-                    // like to append this error into the existing response. However,
-                    // the significantly different treatment of errors in different
-                    // response types makes this extremely painful. This needs to be
-                    // re-visited at some point post GA.
-                    fn failure_message(
-                        context: Context,
-                        error_details: ErrorDetails,
-                    ) -> $response {
-                        if let Some(body) = error_details.body {
-                            $response::builder()
-                                .extensions(body.extensions)
-                                .errors(body.errors)
-                                .status_code(error_details.status)
-                                .context(context)
-                                .and_data(body.data)
-                                .and_label(body.label)
-                                .and_path(body.path)
-                                .build()
-                        } else {
-                            $response::error_builder()
-                                .errors(vec![Error {
-                                    message: error_details.message.unwrap_or_default(),
-                                    ..Default::default()
-                                }])
-                                .status_code(error_details.status)
-                                .context(context)
-                                .build()
-                        }.expect("can't fail to build our error message")
-                    }
-
+                |mapped_response: $base::Response| async move {
                     // we split the response stream into headers+first response, then a stream of deferred responses
                     // for which we will implement mapping later
-                    let $response { response, context } = mapped_response;
+                    let $base::Response { response, context } = mapped_response;
                     let (parts, stream) = response.into_parts();
                     let (first, rest) = stream.into_future().await;
 
@@ -877,13 +634,13 @@ macro_rules! gen_map_deferred_response {
                             position: None,
                             body: None
                         };
-                        return Ok(failure_message(
+                        return Ok($base::response_failure(
                             context,
                             error_details
                         ));
                     }
 
-                    let response = $rhai_response {
+                    let response = $base::FirstResponse {
                         context,
                         response: http::Response::from_parts(
                             parts,
@@ -900,7 +657,7 @@ macro_rules! gen_map_deferred_response {
                         let error_details = process_error(error);
                         let mut guard = shared_response.lock().unwrap();
                         let response_opt = guard.take();
-                        return Ok(failure_message(
+                        return Ok($base::response_failure(
                             response_opt.unwrap().context,
                             error_details
                         ));
@@ -908,7 +665,7 @@ macro_rules! gen_map_deferred_response {
 
                     let mut guard = shared_response.lock().unwrap();
                     let response_opt = guard.take();
-                    let $rhai_response { context, response } =
+                    let $base::FirstResponse { context, response } =
                         response_opt.unwrap();
                     let (parts, body) = http::Response::from(response).into_parts();
 
@@ -919,7 +676,7 @@ macro_rules! gen_map_deferred_response {
                         let context = context.clone();
                         let callback = $callback.clone();
                         async move {
-                            let response = $rhai_deferred_response {
+                            let response = $base::DeferredResponse {
                                 context,
                                 response: deferred_response,
                             };
@@ -935,7 +692,7 @@ macro_rules! gen_map_deferred_response {
                                 let error_details = process_error(error);
                                 let mut guard = shared_response.lock().unwrap();
                                 let response_opt = guard.take();
-                                let $rhai_deferred_response { mut response, .. } = response_opt.unwrap();
+                                let $base::DeferredResponse { mut response, .. } = response_opt.unwrap();
                                 let error = Error {
                                     message: error_details.message.unwrap_or_default(),
                                     ..Default::default()
@@ -946,7 +703,7 @@ macro_rules! gen_map_deferred_response {
 
                             let mut guard = shared_response.lock().unwrap();
                             let response_opt = guard.take();
-                            let $rhai_deferred_response { response, .. } =
+                            let $base::DeferredResponse { response, .. } =
                                 response_opt.unwrap();
                             Some(response)
                         }
@@ -957,7 +714,7 @@ macro_rules! gen_map_deferred_response {
                         once(ready(body)).chain(mapped_stream).boxed(),
                     )
                     .into();
-                    Ok($response {
+                    Ok($base::Response {
                         context: ctx,
                         response,
                     })
@@ -971,33 +728,13 @@ impl ServiceStep {
     fn map_request(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
             ServiceStep::Router(service) => {
-                gen_map_router_deferred_request!(
-                    RouterRequest,
-                    RouterResponse,
-                    RhaiRouterFirstRequest,
-                    RhaiRouterChunkedRequest,
-                    service,
-                    rhai_service,
-                    callback
-                );
+                gen_map_router_deferred_request!(router, service, rhai_service, callback);
             }
             ServiceStep::Supergraph(service) => {
-                gen_map_deferred_request!(
-                    SupergraphRequest,
-                    SupergraphResponse,
-                    service,
-                    rhai_service,
-                    callback
-                );
+                gen_map_request!(supergraph, service, rhai_service, callback);
             }
             ServiceStep::Execution(service) => {
-                gen_map_deferred_request!(
-                    ExecutionRequest,
-                    ExecutionResponse,
-                    service,
-                    rhai_service,
-                    callback
-                );
+                gen_map_request!(execution, service, rhai_service, callback);
             }
             ServiceStep::Subgraph(service) => {
                 gen_map_request!(subgraph, service, rhai_service, callback);
@@ -1008,34 +745,13 @@ impl ServiceStep {
     fn map_response(&mut self, rhai_service: RhaiService, callback: FnPtr) {
         match self {
             ServiceStep::Router(service) => {
-                gen_map_router_deferred_response!(
-                    RouterResponse,
-                    RhaiRouterResponse,
-                    RhaiRouterChunkedResponse,
-                    service,
-                    rhai_service,
-                    callback
-                );
+                gen_map_router_deferred_response!(router, service, rhai_service, callback);
             }
             ServiceStep::Supergraph(service) => {
-                gen_map_deferred_response!(
-                    SupergraphResponse,
-                    RhaiSupergraphResponse,
-                    RhaiSupergraphDeferredResponse,
-                    service,
-                    rhai_service,
-                    callback
-                );
+                gen_map_deferred_response!(supergraph, service, rhai_service, callback);
             }
             ServiceStep::Execution(service) => {
-                gen_map_deferred_response!(
-                    ExecutionResponse,
-                    RhaiExecutionResponse,
-                    RhaiExecutionDeferredResponse,
-                    service,
-                    rhai_service,
-                    callback
-                );
+                gen_map_deferred_response!(execution, service, rhai_service, callback);
             }
             ServiceStep::Subgraph(service) => {
                 gen_map_response!(subgraph, service, rhai_service, callback);
