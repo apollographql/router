@@ -23,8 +23,9 @@ spec:
       {{- include "router.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- if or .Values.podAnnotations .Values.supergraphFile }}
       annotations:
+        kubectl.kubernetes.io/default-container: {{ .Chart.Name }}
+      {{- if or .Values.podAnnotations .Values.supergraphFile }}
         {{- if .Values.supergraphFile }}
         checksum/supergraph-config-map: {{ .Values.supergraphFile | sha256sum }}
         {{- end }}
