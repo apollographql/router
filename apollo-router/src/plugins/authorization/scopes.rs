@@ -538,7 +538,8 @@ mod tests {
     use crate::spec::query::traverse;
 
     static BASIC_SCHEMA: &str = r#"
-    directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    scalar federation__Scope @specifiedBy(url: "http://apollographql.com")
+    directive @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 
     type Query {
       topProducts: Product
