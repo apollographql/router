@@ -32,6 +32,7 @@ use crate::ListenAddr;
 
 pub(crate) mod aggregation;
 pub(crate) mod apollo;
+pub(crate) mod filter;
 pub(crate) mod layer;
 pub(crate) mod otlp;
 pub(crate) mod prometheus;

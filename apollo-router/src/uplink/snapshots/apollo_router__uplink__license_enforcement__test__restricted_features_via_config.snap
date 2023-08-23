@@ -7,7 +7,7 @@ Configuration yaml:
   .plugins.['experimental.restricted'].enabled
 
 * Authentication plugin
-  .authentication
+  .authentication.router
 
 * Coprocessor plugin
   .coprocessor

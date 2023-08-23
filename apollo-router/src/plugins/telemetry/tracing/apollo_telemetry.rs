@@ -7,6 +7,8 @@ use std::time::SystemTime;
 use std::time::SystemTimeError;
 
 use async_trait::async_trait;
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine as _;
 use derivative::Derivative;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -642,7 +644,7 @@ fn preprocess_errors(t: &mut proto::reports::trace::Node, error_config: &ErrorCo
 }
 
 pub(crate) fn decode_ftv1_trace(string: &str) -> Option<proto::reports::Trace> {
-    let bytes = base64::decode(string).ok()?;
+    let bytes = BASE64_STANDARD.decode(string).ok()?;
     proto::reports::Trace::decode(Cursor::new(bytes)).ok()
 }
 
@@ -840,6 +842,8 @@ impl ChildNodes for Vec<TreeData> {
 
 #[cfg(test)]
 mod test {
+    use base64::prelude::BASE64_STANDARD;
+    use base64::Engine as _;
     use opentelemetry::Value;
     use prost::Message;
     use serde_json::json;
@@ -1001,7 +1005,7 @@ mod test {
     #[test]
     fn test_extract_ftv1_trace() {
         let trace = Trace::default();
-        let encoded = base64::encode(trace.encode_to_vec());
+        let encoded = BASE64_STANDARD.encode(trace.encode_to_vec());
         assert_eq!(
             *extract_ftv1_trace(
                 &Value::String(encoded.into()),
