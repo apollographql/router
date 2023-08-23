@@ -867,7 +867,9 @@ mod tests {
                 "all": true
             },
             "authorization": {
-                "experimental_enable_authorization_directives": true
+                "preview_directives": {
+                    "enable": true
+                }
             }}))
             .unwrap()
             .schema(SCHEMA)
@@ -940,7 +942,9 @@ mod tests {
                 "all": true
             },
             "authorization": {
-                "experimental_enable_authorization_directives": true
+                "preview_directives": {
+                    "enable": true
+                }
             }}))
             .unwrap()
             .schema(SCHEMA)
@@ -1013,7 +1017,9 @@ mod tests {
                 "all": true
             },
             "authorization": {
-                "experimental_enable_authorization_directives": true
+                "preview_directives": {
+                    "enable": true
+                }
             }}))
             .unwrap()
             .schema(SCHEMA)

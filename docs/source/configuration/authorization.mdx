@@ -103,6 +103,14 @@ To provide the router with the claims it needs to evaluate authorization directi
 
 ## Authorization directives
 
+Authorization directives are enabled in the configuration through the following option:
+
+```yaml title="router.yaml"
+authorization:
+  preview_directives:
+    enable: true
+```
+
 ### `@requiresScopes`
 
 The `@requiresScopes` directive marks fields and types as restricted based on required scopes.

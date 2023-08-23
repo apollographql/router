@@ -271,7 +271,9 @@ async fn authenticated_directive() {
             "all": true
         },
         "authorization": {
-            "experimental_enable_authorization_directives": true
+            "preview_directives": {
+                "enable": true
+            }
         }}))
         .unwrap()
         .schema(AUTHENTICATED_SCHEMA)
@@ -423,7 +425,9 @@ async fn scopes_directive() {
             "all": true
         },
         "authorization": {
-            "experimental_enable_authorization_directives": true
+            "preview_directives": {
+                "enable": true
+            }
         }}))
         .unwrap()
         .schema(SCOPES_SCHEMA)

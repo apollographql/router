@@ -513,10 +513,16 @@ expression: "&schema"
       "description": "Authorization plugin",
       "type": "object",
       "properties": {
-        "experimental_enable_authorization_directives": {
-          "description": "enables the `@authenticated`, `@requiresScopes` and `@policy` directives",
-          "default": false,
-          "type": "boolean"
+        "preview_directives": {
+          "description": "`@authenticated` and `@requiresScopes` directives",
+          "type": "object",
+          "properties": {
+            "enable": {
+              "description": "enables the `@authenticated` and `@requiresScopes` directives",
+              "default": false,
+              "type": "boolean"
+            }
+          }
         },
         "require_authentication": {
           "description": "Reject unauthenticated requests",

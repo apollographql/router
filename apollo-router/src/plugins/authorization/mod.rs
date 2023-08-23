@@ -68,9 +68,17 @@ pub(crate) struct Conf {
     /// Reject unauthenticated requests
     #[serde(default)]
     require_authentication: bool,
-    /// enables the `@authenticated`, `@requiresScopes` and `@policy` directives
+    /// `@authenticated` and `@requiresScopes` directives
     #[serde(default)]
-    experimental_enable_authorization_directives: bool,
+    preview_directives: Directives,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[allow(dead_code)]
+pub(crate) struct Directives {
+    /// enables the `@authenticated` and `@requiresScopes` directives
+    #[serde(default)]
+    enable: bool,
 }
 
 pub(crate) struct AuthorizationPlugin {
@@ -87,10 +95,8 @@ impl AuthorizationPlugin {
             .plugins
             .iter()
             .find(|(s, _)| s.as_str() == "authorization")
-            .and_then(|(_, v)| {
-                v.get("experimental_enable_authorization_directives")
-                    .and_then(|v| v.as_bool())
-            });
+            .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
+            .and_then(|v| v.get("enable").and_then(|v| v.as_bool()));
         let has_authorization_directives = schema
             .type_system
             .definitions
