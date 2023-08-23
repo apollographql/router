@@ -28,27 +28,6 @@ Note that the name of this metric may change in the future.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3513
 
-### Supergraph coprocessor implementation ([PR #3408](https://github.com/apollographql/router/pull/3408))
-
-Coprocessors now support supergraph service interception. 
-
-Supergraph request contains:
-* query
-* operation name
-* variables
-* extensions
-
-Supergraph response contains:
-* label
-* data
-* path
-* errors
-* extensions
-
-When using `@defer` or subscriptions a supergraph response may contain multiple GraphQL responses, and the coprocessor will be called for each.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3408
-
 ### Configure AWS SigV4 authentication for subgraph requests ([PR #3365](https://github.com/apollographql/router/pull/3365))
 
 Secure your router to subgraph communication on AWS using [Signature Version 4](https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html) (Sigv4)!
