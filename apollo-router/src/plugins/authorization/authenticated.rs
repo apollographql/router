@@ -373,6 +373,24 @@ mod tests {
         )
     }
 
+    struct TestResult<'a> {
+        query: &'a str,
+        result: apollo_encoder::Document,
+        paths: Vec<Path>,
+    }
+
+    impl<'a> std::fmt::Display for TestResult<'a> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "query:\n{}\nfiltered:\n{}\npaths: {:?}",
+                self.query,
+                self.result,
+                self.paths.iter().map(|p| p.to_string()).collect::<Vec<_>>()
+            )
+        }
+    }
+
     #[test]
     fn mutation() {
         static QUERY: &str = r#"
@@ -385,8 +403,11 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -405,8 +426,11 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -425,8 +449,11 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -442,8 +469,11 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -464,8 +494,11 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -486,8 +519,11 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -510,8 +546,11 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -530,8 +569,11 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -553,8 +595,11 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
     }
 
     static INTERFACE_SCHEMA: &str = r#"
@@ -594,8 +639,11 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
 
         static QUERY2: &str = r#"
         query {
@@ -614,8 +662,11 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY2);
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY2,
+            result: doc,
+            paths
+        });
     }
 
     static INTERFACE_FIELD_SCHEMA: &str = r#"
@@ -659,8 +710,11 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
 
         static QUERY2: &str = r#"
         query {
@@ -681,8 +735,11 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY2);
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY2,
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -723,8 +780,11 @@ mod tests {
 
         let (doc, paths) = filter(UNION_MEMBERS_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
     }
 
     const SCHEMA: &str = r#"schema
@@ -988,7 +1048,6 @@ mod tests {
                     .unwrap()
                     .clone(),
             )
-            //.headers(headers)
             .context(context)
             .build()
             .unwrap();

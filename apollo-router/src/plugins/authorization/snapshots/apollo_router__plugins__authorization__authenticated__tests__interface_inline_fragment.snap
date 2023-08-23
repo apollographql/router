@@ -1,7 +1,22 @@
 ---
 source: apollo-router/src/plugins/authorization/authenticated.rs
-expression: doc
+expression: "TestResult { query: QUERY, result: doc, paths }"
 ---
+query:
+
+        query {
+            topProducts {
+                type
+            }
+            itf {
+                id
+                ... on User {
+                    name
+                }
+            }
+        }
+        
+filtered:
 query {
   topProducts {
     type
@@ -11,3 +26,4 @@ query {
   }
 }
 
+paths: ["/itf/... on User"]

@@ -1,9 +1,17 @@
 ---
 source: apollo-router/src/plugins/authorization/scopes.rs
-expression: doc
+expression: "TestResult {\n    query: QUERY,\n    extracted_scopes: &extracted_scopes,\n    scopes: Vec::new(),\n    result: doc,\n    paths,\n}"
 ---
-{
-    "ping",
-    "read:user",
-    "read:username",
-}
+query:
+
+        mutation {
+            ping {
+                name
+            }
+        }
+        
+extracted_scopes: {"ping", "read:user", "read:username"}
+request scopes: []
+filtered:
+
+paths: ["/ping"]
