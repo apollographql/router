@@ -78,7 +78,7 @@ pub(crate) struct Conf {
 pub(crate) struct Directives {
     /// enables the `@authenticated` and `@requiresScopes` directives
     #[serde(default)]
-    enable: bool,
+    enabled: bool,
 }
 
 pub(crate) struct AuthorizationPlugin {
@@ -96,7 +96,7 @@ impl AuthorizationPlugin {
             .iter()
             .find(|(s, _)| s.as_str() == "authorization")
             .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
-            .and_then(|v| v.get("enable").and_then(|v| v.as_bool()));
+            .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()));
         let has_authorization_directives = schema
             .type_system
             .definitions

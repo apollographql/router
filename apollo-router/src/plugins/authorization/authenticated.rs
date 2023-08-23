@@ -868,7 +868,7 @@ mod tests {
             },
             "authorization": {
                 "preview_directives": {
-                    "enable": true
+                    "enabled": true
                 }
             }}))
             .unwrap()
@@ -943,7 +943,7 @@ mod tests {
             },
             "authorization": {
                 "preview_directives": {
-                    "enable": true
+                    "enabled": true
                 }
             }}))
             .unwrap()
@@ -1018,7 +1018,7 @@ mod tests {
             },
             "authorization": {
                 "preview_directives": {
-                    "enable": true
+                    "enabled": true
                 }
             }}))
             .unwrap()

@@ -517,7 +517,7 @@ expression: "&schema"
           "description": "`@authenticated` and `@requiresScopes` directives",
           "type": "object",
           "properties": {
-            "enable": {
+            "enabled": {
               "description": "enables the `@authenticated` and `@requiresScopes` directives",
               "default": false,
               "type": "boolean"
