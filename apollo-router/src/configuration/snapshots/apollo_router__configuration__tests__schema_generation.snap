@@ -778,7 +778,6 @@ expression: "&schema"
               "context": false,
               "body": false,
               "sdl": false,
-              "path": false,
               "method": false
             },
             "response": {
@@ -798,7 +797,6 @@ expression: "&schema"
                 "context": false,
                 "body": false,
                 "sdl": false,
-                "path": false,
                 "method": false
               },
               "type": "object",
@@ -820,11 +818,6 @@ expression: "&schema"
                 },
                 "method": {
                   "description": "Send the method",
-                  "default": false,
-                  "type": "boolean"
-                },
-                "path": {
-                  "description": "Send the path",
                   "default": false,
                   "type": "boolean"
                 },
