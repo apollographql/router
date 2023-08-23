@@ -145,7 +145,7 @@ impl Metrics {
             "$.authorization",
             opt.require_authentication,
             "$[?(@.require_authentication == true)]",
-            opt.preview_directives,
+            opt.directives,
             "$.preview_directives[?(@.enabled == true)]"
         );
         log_usage_metrics!(
