@@ -29,6 +29,7 @@ use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::metrics::controllers::BasicController;
 use opentelemetry::sdk::propagation::TextMapCompositePropagator;
+use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
@@ -623,7 +624,13 @@ impl Telemetry {
         builder = setup_tracing(builder, &tracing_config.otlp, trace_config)?;
         builder = setup_tracing(builder, &config.apollo, trace_config)?;
         // For metrics
-        builder = builder.with_simple_exporter(metrics::span_metrics_exporter::Exporter::default());
+        builder = builder.with_span_processor(
+            BatchSpanProcessor::builder(
+                metrics::span_metrics_exporter::Exporter::default(),
+                opentelemetry::runtime::Tokio,
+            )
+            .build(),
+        );
 
         let tracer_provider = builder.build();
         Ok(tracer_provider)

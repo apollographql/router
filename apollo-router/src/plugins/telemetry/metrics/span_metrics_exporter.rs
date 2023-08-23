@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -13,27 +15,37 @@ use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
 use crate::services::QUERY_PLANNING_SPAN_NAME;
 
-const SPAN_NAMES: &[&str] = &[
-    REQUEST_SPAN_NAME,
-    SUPERGRAPH_SPAN_NAME,
-    SUBGRAPH_SPAN_NAME,
-    QUERY_PLANNING_SPAN_NAME,
-    EXECUTION_SPAN_NAME,
-];
-
 const BUSY_NS_ATTRIBUTE_NAME: Key = Key::from_static_str("busy_ns");
 const IDLE_NS_ATTRIBUTE_NAME: Key = Key::from_static_str("idle_ns");
 const SUBGRAPH_ATTRIBUTE_NAME: Key = Key::from_static_str("apollo.subgraph.name");
 
-#[derive(Debug, Default)]
-pub(crate) struct Exporter {}
+#[derive(Debug)]
+pub(crate) struct Exporter {
+    span_names: HashSet<&'static str>,
+}
+
+impl Default for Exporter {
+    fn default() -> Self {
+        Self {
+            span_names: [
+                REQUEST_SPAN_NAME,
+                SUPERGRAPH_SPAN_NAME,
+                SUBGRAPH_SPAN_NAME,
+                QUERY_PLANNING_SPAN_NAME,
+                EXECUTION_SPAN_NAME,
+            ]
+            .into(),
+        }
+    }
+}
+
 #[async_trait]
 impl SpanExporter for Exporter {
     /// Export spans metrics to real metrics
     fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
         for span in batch
             .into_iter()
-            .filter(|s| SPAN_NAMES.contains(&s.name.as_ref()))
+            .filter(|s| self.span_names.contains(&s.name.as_ref()))
         {
             let busy = span
                 .attributes
