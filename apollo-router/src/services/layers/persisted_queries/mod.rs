@@ -116,7 +116,7 @@ impl PersistedQueryLayer {
             if let Some(persisted_query_body) =
                 manifest_poller.get_operation_body(persisted_query_id)
             {
-                let mut body = request.supergraph_request.body_mut();
+                let body = request.supergraph_request.body_mut();
                 body.query = Some(persisted_query_body);
                 body.extensions.remove("persistedQuery");
                 // Record that we actually used our ID, so we can skip the
@@ -749,9 +749,9 @@ mod tests {
             r#"fragment F on Query { __typename foo: __schema { __typename } } query Q { __type(name: "foo") { name } ...F }"#,
         ).await;
 
-        // This should actually be allowed, but is denied due to https://github.com/apollographql/apollo-rs/issues/613;
-        // when that bug is fixed, switch this to allowed_by_safelist.
-        denied_by_safelist(
+        // Multiple spreads of the same fragment are also allowed
+        // (https://github.com/apollographql/apollo-rs/issues/613)
+        allowed_by_safelist(
             &pq_layer,
             &query_analysis_layer,
             r#"fragment F on Query { __typename foo: __schema { __typename } } query Q { __type(name: "foo") { name } ...F ...F }"#,

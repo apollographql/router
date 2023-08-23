@@ -27,6 +27,7 @@ use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapPropagator;
+use opentelemetry::sdk::metrics::controllers::BasicController;
 use opentelemetry::sdk::propagation::TextMapCompositePropagator;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::SpanContext;
@@ -35,6 +36,7 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry::Context as OtelContext;
 use opentelemetry::KeyValue;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
@@ -146,10 +148,10 @@ const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 pub(crate) struct Telemetry {
     config: Arc<config::Conf>,
     metrics: BasicMetrics,
-    // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.
+    // Do not remove metrics_exporters. Metrics will not be exported if it is removed.
     // Typically the handles are a PushController but may be something else. Dropping the handle will
     // shutdown exporter.
-    _metrics_exporters: Vec<MetricsExporterHandle>,
+    metrics_exporters: Vec<MetricsExporterHandle>,
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
@@ -193,6 +195,21 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
 
 impl Drop for Telemetry {
     fn drop(&mut self) {
+        // If we can downcast the metrics exporter to be a `BasicController`, then we
+        // should stop it to ensure metrics are transmitted before the exporter is dropped.
+        for exporter in self.metrics_exporters.drain(..) {
+            if let Ok(controller) = MetricsExporterHandle::downcast::<BasicController>(exporter) {
+                ::tracing::debug!("stopping basic controller: {controller:?}");
+                let cx = OtelContext::current();
+
+                thread::spawn(move || {
+                    if let Err(e) = controller.stop(&cx) {
+                        ::tracing::error!("error during basic controller stop: {e}");
+                    }
+                    ::tracing::debug!("stopped basic controller: {controller:?}");
+                });
+            }
+        }
         // If for some reason we didn't use the trace provider then safely discard it e.g. some other plugin failed `new`
         // To ensure we don't hang tracing providers are dropped in a blocking task.
         // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
@@ -225,7 +242,7 @@ impl Plugin for Telemetry {
         let meter_provider = metrics_builder.meter_provider();
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints(),
-            _metrics_exporters: metrics_builder.exporters(),
+            metrics_exporters: metrics_builder.exporters(),
             metrics: BasicMetrics::new(&meter_provider),
             apollo_metrics_sender: metrics_builder.apollo_metrics_provider(),
             field_level_instrumentation_ratio,

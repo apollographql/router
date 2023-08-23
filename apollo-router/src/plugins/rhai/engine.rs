@@ -4,6 +4,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine as _;
 use http::header::InvalidHeaderName;
 use http::uri::Authority;
 use http::uri::Parts;
@@ -84,13 +86,17 @@ impl<T> OptionDance<T> for SharedMut<T> {
 mod router_base64 {
     #[rhai_fn(pure, return_raw)]
     pub(crate) fn decode(input: &mut ImmutableString) -> Result<String, Box<EvalAltResult>> {
-        String::from_utf8(base64::decode(input.as_bytes()).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string().into())
+        String::from_utf8(
+            BASE64_STANDARD
+                .decode(input.as_bytes())
+                .map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string().into())
     }
 
     #[rhai_fn(pure)]
     pub(crate) fn encode(input: &mut ImmutableString) -> String {
-        base64::encode(input.as_bytes())
+        BASE64_STANDARD.encode(input.as_bytes())
     }
 }
 
