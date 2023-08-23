@@ -520,7 +520,7 @@ where
         // Process all the events in turn until we get to error state or we run out of events.
         while let Some(event) = messages.next().await {
             let event_name = format!("{event:?}");
-            let last_state = format!("{state:?}");
+            let previous_state = format!("{state:?}");
 
             state = match event {
                 UpdateConfiguration(configuration) => {
@@ -550,7 +550,11 @@ where
             self.notify_updated.notify_one();
 
             tracing::debug!(
-                "state machine event: {event_name}, transitioned from: {last_state} to: {state:?}"
+                monotonic_counter.apollo_router_state_change_total = 1u64,
+                event = event_name,
+                state = ?state,
+                previous_state,
+                "state machine transitioned"
             );
 
             // If we've errored then exit even if there are potentially more messages
