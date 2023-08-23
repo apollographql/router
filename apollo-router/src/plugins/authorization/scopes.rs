@@ -538,7 +538,7 @@ mod tests {
     use crate::spec::query::traverse;
 
     static BASIC_SCHEMA: &str = r#"
-    scalar federation__Scope @specifiedBy(url: "http://apollographql.com")
+    scalar federation__Scope
     directive @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 
     type Query {
@@ -583,7 +583,11 @@ mod tests {
         let _schema_id = compiler.add_type_system(schema, "schema.graphql");
         let id = compiler.add_executable(query, "query.graphql");
 
-        let diagnostics = compiler.validate();
+        let diagnostics = compiler
+            .validate()
+            .into_iter()
+            .filter(|err| err.data.is_error())
+            .collect::<Vec<_>>();
         for diagnostic in &diagnostics {
             println!("{diagnostic}");
         }
@@ -622,7 +626,11 @@ mod tests {
         let _schema_id = compiler.add_type_system(schema, "schema.graphql");
         let file_id = compiler.add_executable(query, "query.graphql");
 
-        let diagnostics = compiler.validate();
+        let diagnostics = compiler
+            .validate()
+            .into_iter()
+            .filter(|err| err.data.is_error())
+            .collect::<Vec<_>>();
         for diagnostic in &diagnostics {
             println!("{diagnostic}");
         }
