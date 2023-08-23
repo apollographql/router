@@ -7,7 +7,8 @@ They are defined as follows:
 ```graphql
 directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 
-directive @requiresScopes(scopes: [String!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+scalar federation__Scope
+directive @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
 
 They are implemented by hooking the request lifecycle at multiple steps:
