@@ -20,6 +20,8 @@ use tracing::Instrument;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
+use crate::plugins::authorization::AuthorizationPlugin;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
@@ -50,6 +52,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     delegate: T,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
+    enable_authorization_directives: bool,
 }
 
 impl<T: Clone + 'static> CachingQueryPlanner<T>
@@ -75,26 +78,34 @@ where
             )
             .await,
         );
+
+        let enable_authorization_directives =
+            AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
         Self {
             cache,
             delegate,
             schema,
             plugins: Arc::new(plugins),
+            enable_authorization_directives,
         }
     }
 
-    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<WarmUpCachingQueryKey> {
         let keys = self.cache.in_memory_keys().await;
         keys.into_iter()
             .take(count)
-            .map(|key| (key.query, key.operation))
+            .map(|key| WarmUpCachingQueryKey {
+                query: key.query,
+                operation: key.operation,
+                metadata: key.metadata,
+            })
             .collect()
     }
 
     pub(crate) async fn warm_up(
         &mut self,
         query_analysis: &QueryAnalysisLayer,
-        cache_keys: Vec<(String, Option<String>)>,
+        cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
         let schema_id = self.schema.schema_id.clone();
 
@@ -108,11 +119,17 @@ where
         );
 
         let mut count = 0usize;
-        for (mut query, operation) in cache_keys {
+        for WarmUpCachingQueryKey {
+            mut query,
+            operation,
+            metadata,
+        } in cache_keys
+        {
             let caching_key = CachingQueryKey {
                 schema_id: schema_id.clone(),
                 query: query.clone(),
                 operation: operation.clone(),
+                metadata,
             };
             let context = Context::new();
 
@@ -134,6 +151,8 @@ where
                     .private_entries
                     .lock()
                     .insert(Compiler(Arc::new(Mutex::new(compiler))));
+
+                context.private_entries.lock().insert(caching_key.metadata);
 
                 let request = QueryPlannerRequest {
                     query,
@@ -226,10 +245,21 @@ where
     ) -> Result<<T as tower::Service<QueryPlannerRequest>>::Response, CacheResolverError> {
         let schema_id = self.schema.schema_id.clone();
 
+        if self.enable_authorization_directives {
+            AuthorizationPlugin::update_cache_key(&request.context);
+        }
+
         let caching_key = CachingQueryKey {
             schema_id,
             query: request.query.clone(),
             operation: request.operation_name.to_owned(),
+            metadata: request
+                .context
+                .private_entries
+                .lock()
+                .get::<CacheKeyMetadata>()
+                .cloned()
+                .unwrap_or_default(),
         };
 
         let context = request.context.clone();
@@ -399,6 +429,7 @@ pub(crate) struct CachingQueryKey {
     pub(crate) schema_id: Option<String>,
     pub(crate) query: String,
     pub(crate) operation: Option<String>,
+    pub(crate) metadata: CacheKeyMetadata,
 }
 
 impl std::fmt::Display for CachingQueryKey {
@@ -411,14 +442,26 @@ impl std::fmt::Display for CachingQueryKey {
         hasher.update(self.operation.as_deref().unwrap_or("-"));
         let operation = hex::encode(hasher.finalize());
 
+        let mut hasher = Sha256::new();
+        hasher.update(&serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
+        let metadata = hex::encode(hasher.finalize());
+
         write!(
             f,
-            "plan.{}.{}.{}",
+            "plan.{}.{}.{}.{}",
             self.schema_id.as_deref().unwrap_or("-"),
             query,
-            operation
+            operation,
+            metadata,
         )
     }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub(crate) struct WarmUpCachingQueryKey {
+    pub(crate) query: String,
+    pub(crate) operation: Option<String>,
+    pub(crate) metadata: CacheKeyMetadata,
 }
 
 #[cfg(test)]
