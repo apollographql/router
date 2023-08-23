@@ -75,7 +75,7 @@ For example, imagine you're building a social media platform that includes a `Us
 
 ```graphql
 type Query {
-  users: [User!]! @requiresScopes(scopes: ["read:users"])
+  users: [User!]! @requiresScopes(scopes: [["read:users"]])
 }
 ```
 
@@ -117,7 +117,7 @@ The `@requiresScopes` directive marks fields and types as restricted based on re
 To declare which scopes are required, the directive should include a `scopes` argument with an array of the required scopes.
 
 ```graphql
-@requiresScopes(scopes: ["scope1", "scope2", "scope3"])
+@requiresScopes(scopes: [["scope1", "scope2", "scope3"]])
 ```
 
 Depending on the scopes present on the request, the router filters out unauthorized fields and types.
@@ -178,10 +178,10 @@ extend schema
 
 #### Combining required scopes with `AND`/`OR` logic
 
-A request must include _all_ elements in the top-level `scopes` array to resolve the associated field or type. In other words, the authorization validation uses **AND** logic between the elements in the top-level `scopes` array.
+A request must include _all_ elements in the inner-level `scopes` array to resolve the associated field or type. In other words, the authorization validation uses **AND** logic between the elements in the inner-level `scopes` array.
 
 ```graphql
-@requiresScopes(scopes: ["scope1", "scope2", "scope3"])
+@requiresScopes(scopes: [["scope1", "scope2", "scope3"]])
 ```
 
 For the preceding example, a request would need `scope1` **AND** `scope2` **AND** `scope3` to be authorized.
@@ -210,15 +210,15 @@ Your schema may look something like this:
 
 ```graphql
 type Query {
-  user(id: ID!): User @requiresScopes(scopes: ["read:others"])
-  users: [User!]! @requiresScopes(scopes: ["read:others"])
+  user(id: ID!): User @requiresScopes(scopes: [["read:others"]])
+  users: [User!]! @requiresScopes(scopes: [["read:others"]])
   post(id: ID!): Post
 }
 
 type User {
   id: ID!
   username: String
-  email: String @requiresScopes(scopes: ["read:email"])
+  email: String @requiresScopes(scopes: [["read:email"]])
   profileImage: String
   posts: [Post!]!
 }
@@ -263,7 +263,7 @@ The router can execute the entire query successfully if the request includes the
 ### `@authenticated`
 
 The `@authenticated` directive marks specific fields and types as requiring authentication.
-It works by checking for the `apollo_authentication::JWT::claims` key in a request's context.
+It works by checking for the `apollo_authentication::JWT::claims` key in a request's context, that is added either by the JWT authentication plugin, when the request contains a valid JWT, or by an authentication coprocessor.
 If the key exists, it means the request is authenticated, and the router executes the query in its entirety.
 If the request is unauthenticated, the router removes `@authenticated` fields before planning the query and only executes the parts of the query that don't require authentication.
 
@@ -412,7 +412,7 @@ and the `read:user` scope in another subgraph:
 
 ```graphql title="Subgraph B"
 type Query {
-  me: User @requiresScopes(scopes: ["read:user"])
+  me: User @requiresScopes(scopes: [["read:user"]])
 }
 
 type User {
@@ -428,7 +428,7 @@ If multiple shared subgraph fields include `@requiresScopes`, the supergraph sch
 
 ```graphql title="Subgraph A"
 type Query {
-  users: [User!]! @requiresScopes(scopes: ["read:others"])
+  users: [User!]! @requiresScopes(scopes: [["read:others"]])
 }
 ```
 
@@ -436,7 +436,7 @@ and another subgraph requires the `read:profiles` scope on `users` query:
 
 ```graphql title="Subgraph B"
 type Query {
-  users: [User!]! @requiresScopes(scopes: ["read:profiles"])
+  users: [User!]! @requiresScopes(scopes: [["read:profiles"]])
 }
 ```
 
@@ -444,7 +444,7 @@ Then the supergraph schema would require _both_ scopes for it.
 
 ```graphql title="Supergraph"
 type Query {
-  users: [User!]! @requiresScopes(scopes: ["read:others", "read:profiles"])
+  users: [User!]! @requiresScopes(scopes: [["read:others", "read:profiles"]])
 }
 ```
 
