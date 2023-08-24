@@ -4,6 +4,118 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.28.0] - 2023-08-24
+
+## 🚀 Features
+
+### Expose the stats_reports_key hash to plugins. ([Issue #2728](https://github.com/apollographql/router/issues/2728))
+
+This changeset exposes a new key in the context, `apollo_operation_id`, which identifies operation you can find in studio:
+
+```
+https://studio.apollographql.com/graph/<your_graph_variant>/variant/<your_graph_variant>/operations?query=<apollo_operation_id>
+```
+
+This new context key is exposed at various stages of the operation pipeline:
+
+- Execution service request
+- Subgraph service request
+
+- Subgraph service response
+- Execution service response
+- Supergraph service response
+- Router service response
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3586
+
+### Adds some new (unstable) metrics ([PR #3609](https://github.com/apollographql/router/pull/3609))
+
+Many of our existing metrics are poorly and inconsistently named. In addition they follow prometheus style rather than otel style.
+
+This PR adds some new metrics that will hopefully give us a good foundation to build upon.
+New metrics are namespaced `apollo.router.operations.*`.
+
+Until officially documented the metrics should be treated as unstable, as we may need change the names to ensure consistency.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3609
+
+## 🐛 Fixes
+
+### Try to stop OTLP controllers when Telemetry is dropped ([Issue #3140](https://github.com/apollographql/router/issues/3140))
+
+We already have code to specifically drop tracers and we are adding some additional logic to do the same thing with metrics exporters.
+
+This will improve the transmission of metrics from OTLP controllers when a router is shut down.
+
+fixes: #3140
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3143
+
+## 🛠 Maintenance
+
+### Enable checking for kubernetes 1.28.0 in kubeconform ([Issue #3587](https://github.com/apollographql/router/issues/3587))
+
+Support has now been added for kubernetes `1.28.0` and we can re-enable checking.
+
+This is reverting the change from #3584.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3638
+
+### Upgrade to Rust 1.71.1 ([PR #3536](https://github.com/apollographql/router/pull/3536))
+
+This includes the fix for [CVE-2023-38497](https://blog.rust-lang.org/2023/08/03/cve-2023-38497.html).
+
+We’re applying the upgrade as a precaution, but we don’t have any shared multi-user environments which  build the Router (whether developer workstations or other environments). This CVE would only affect users who were building the Router themselves using Cargo on such shared multi-user machines and wouldn’t affect our published binaries, the use of our Docker images, etc.
+
+Users building custom binaries should consider their own build environments to determine if they were impacted.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/3536
+
+### Add OTLP exporter for Apollo metrics ([PR #3354](https://github.com/apollographql/router/pull/3354), [PR #3651](https://github.com/apollographql/router/pull/3651))
+
+This PR adds an OTLP metrics exporter for a Apollo pipeline that can compliment the existing protobuf format.
+
+Note that new metrics of the format `apollo.router.*` are currently not stable.
+Once we have added enough metrics to ensure that we are consistent then they will be stabilized and documented.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3354 and https://github.com/apollographql/router/pull/3651
+
+## 📚 Documentation
+
+### Clarify that hot-reload does not affect Uplink-delivered config/schema ([PR #3596](https://github.com/apollographql/router/pull/3596))
+
+This documentation adjustment (and small CLI help change) tries to clarify some confusion around the `--hot-reload` command line argument and the scope of it's operation.
+
+Concretely, the supergraph and configuration that is delivered through a [GraphOS Launch](https://www.apollographql.com/docs/graphos/delivery/launches/) (and delivered through Uplink) is _always_ loaded immediately and will take effect as soon as possible.
+
+On the other hand, files that are provided locally - e.g., `--config ./file.yaml` and `--supergraph ./supergraph.graphql` - are only reloaded:
+
+- If `--hot-reload` is passed (or if another flag infers `--hot-reload`, as is the case with `--dev`) and a supergraph or configuration is changed; or
+- When the router process is sent a SIGHUP.
+
+Otherwise, files provided locally to the router are only re-started if the router process is completely restarted.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/3596
+
+## 🧪 Experimental
+
+### Improvements to safelisting with Persisted Queries (preview)
+
+(The Persisted Queries feature was initially released in Router v1.25.0, as part of a private preview requiring enablement by Apollo support. The feature is now in public preview and is accessible to any enterprise GraphOS organization.)
+
+Several improvements to safelisting behavior based on preview feedback:
+
+* When the safelist is enabled (but `require_id` is not), matching now ignores the order of top-level definitions (operations and fragments) and ignored tokens (whitespace, comments, commas, etc), so that differences in these purely syntactic elements do not affect whether an operation is considered to be in the safelist.
+* If introspection is enabled on the server, any operation whose top-level fields are introspection fields (`__type`, `__schema`, or `__typename`) is considered to be in the safelist. (Previously, Router instead looked for two specific introspection queries from a particular version of Apollo Sandbox if sandbox was enabled; this hard-coded check is removed.) This special case is not applied if `require_id` is enabled, so that Router never parses freeform GraphQL in this mode.
+* When `log_unknown` is enabled and `apq` has not been disabled, Router now logs any operation not in the safelist as unknown, even those sent via IDs if the operation was found in the APQ cache rather than the manifest.
+* When `log_unknown` and `require_id` are both enabled, Router now logs all operations that rejects (i.e., all operations sent as freeform GraphQL). Previously, Router only logged the operations that would have been rejected by the safelist feature with `require_id` disabled (i.e., operations sent as freeform GraphQL that do not match an operation in the manifest).
+
+As a side effect of this change, Router now re-downloads the PQ manifest when reloading configuration dynamically rather than caching it across reloads. If this causes a notable performance regression for your use case, please file an issue.
+
+By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/3566
+
+
+
 # [1.27.0] - 2023-08-18
 
 ## 🚀 Features
