@@ -1,4 +1,4 @@
-### GraphOS Enterprise: authorization directives ([PR #3397](https://github.com/apollographql/router/pull/3397))
+### GraphOS Enterprise: authorization directives ([PR #3397](https://github.com/apollographql/router/pull/3397), [PR #3662](https://github.com/apollographql/router/pull/3662))
 
 We introduce two new directives, `@authenticated` and `requiresScopes`, that define authorization policies for field and types in the supergraph schema.
 
@@ -19,4 +19,4 @@ They are implemented by hooking the request lifecycle at multiple steps:
 - at the execution service level, the response is formatted according to the filtered query first, which will remove any unauthorized information, then to the shape of the original query, which will propagate nulls as needed
 - at the execution service level, errors are added to the response indicating which fields were removed because they were not authorized
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3397
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3397 https://github.com/apollographql/router/pull/3662

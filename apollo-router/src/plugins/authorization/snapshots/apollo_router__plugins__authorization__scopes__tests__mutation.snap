@@ -8,10 +8,11 @@ query:
             ping {
                 name
             }
+            other
         }
         
-extracted_scopes: {"ping", "read:user", "read:username"}
+extracted_scopes: {"mut", "ping", "read:user", "read:username"}
 request scopes: []
 filtered:
 
-paths: ["/ping"]
+paths: [""]
