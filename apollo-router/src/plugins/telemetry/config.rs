@@ -105,7 +105,7 @@ pub(crate) struct ExperimentalCacheMetricsConf {
     pub(crate) enabled: bool,
     #[serde(with = "humantime_serde")]
     #[schemars(with = "String")]
-    /// Potential TTL for a cache if we had one
+    /// Potential TTL for a cache if we had one (default: 5secs)
     pub(crate) ttl: Duration,
 }
 
@@ -113,7 +113,7 @@ impl Default for ExperimentalCacheMetricsConf {
     fn default() -> Self {
         Self {
             enabled: false,
-            ttl: Duration::from_secs(10),
+            ttl: Duration::from_secs(5),
         }
     }
 }
