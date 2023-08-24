@@ -83,6 +83,16 @@ impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
         self.compiler
     }
 
+    fn operation(&mut self, node: &hir::OperationDefinition) -> Result<(), BoxError> {
+        if let Some(ty) = node.object_type(&self.compiler.db) {
+            self.extracted_scopes.extend(
+                scopes_argument(ty.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)).cloned(),
+            );
+        }
+
+        traverse::operation(self, node)
+    }
+
     fn field(&mut self, parent_type: &str, node: &hir::Field) -> Result<(), BoxError> {
         if let Some(ty) = self
             .compiler
@@ -372,6 +382,41 @@ impl<'a> ScopeFilteringVisitor<'a> {
 impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
     fn compiler(&self) -> &ApolloCompiler {
         self.compiler
+    }
+
+    fn operation(
+        &mut self,
+        node: &hir::OperationDefinition,
+    ) -> Result<Option<apollo_encoder::OperationDefinition>, BoxError> {
+        let is_authorized = if let Some(ty) = node.object_type(&self.compiler.db) {
+            match ty.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME) {
+                None => true,
+                Some(directive) => {
+                    let mut type_scopes_sets = scopes_sets_argument(directive);
+
+                    // The outer array acts like a logical OR: if any of the inner arrays of scopes matches, the field
+                    // is authorized.
+                    // On an empty set, any returns false, so we must check that case separately
+                    let mut empty = true;
+                    let res = type_scopes_sets.any(|scopes_set| {
+                        empty = false;
+                        self.request_scopes.is_superset(&scopes_set)
+                    });
+
+                    empty || res
+                }
+            }
+        } else {
+            false
+        };
+
+        if is_authorized {
+            transform::operation(self, node)
+        } else {
+            self.unauthorized_paths.push(self.current_path.clone());
+            self.query_requires_scopes = true;
+            Ok(None)
+        }
     }
 
     fn field(

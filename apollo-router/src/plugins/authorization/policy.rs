@@ -75,6 +75,15 @@ impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
         self.compiler
     }
 
+    fn operation(&mut self, node: &hir::OperationDefinition) -> Result<(), BoxError> {
+        if let Some(ty) = node.object_type(&self.compiler.db) {
+            self.extracted_policies
+                .extend(policy_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned());
+        }
+
+        traverse::operation(self, node)
+    }
+
     fn field(&mut self, parent_type: &str, node: &hir::Field) -> Result<(), BoxError> {
         if let Some(ty) = self
             .compiler
@@ -321,6 +330,39 @@ impl<'a> PolicyFilteringVisitor<'a> {
 impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
     fn compiler(&self) -> &ApolloCompiler {
         self.compiler
+    }
+
+    fn operation(
+        &mut self,
+        node: &hir::OperationDefinition,
+    ) -> Result<Option<apollo_encoder::OperationDefinition>, BoxError> {
+        let is_authorized = if let Some(ty) = node.object_type(&self.compiler.db) {
+            match ty.directive_by_name(POLICY_DIRECTIVE_NAME) {
+                None => true,
+                Some(directive) => {
+                    let type_policies = policy_argument(Some(directive))
+                        .cloned()
+                        .collect::<HashSet<_>>();
+                    // The field is authorized if any of the policies succeeds
+                    type_policies.is_empty()
+                        || self
+                            .request_policies
+                            .intersection(&type_policies)
+                            .next()
+                            .is_some()
+                }
+            }
+        } else {
+            false
+        };
+
+        if is_authorized {
+            transform::operation(self, node)
+        } else {
+            self.unauthorized_paths.push(self.current_path.clone());
+            self.query_requires_policies = true;
+            Ok(None)
+        }
     }
 
     fn field(
