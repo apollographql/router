@@ -437,6 +437,12 @@ impl From<SpecError> for QueryPlannerError {
     }
 }
 
+impl From<ValidationErrors> for QueryPlannerError {
+    fn from(err: ValidationErrors) -> Self {
+        QueryPlannerError::SpecError(SpecError::ValidationError(err.to_string()))
+    }
+}
+
 impl From<router_bridge::error::Error> for QueryPlannerError {
     fn from(error: router_bridge::error::Error) -> Self {
         QueryPlannerError::RouterBridgeError(error)
