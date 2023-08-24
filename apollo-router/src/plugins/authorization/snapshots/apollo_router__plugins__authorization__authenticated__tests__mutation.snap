@@ -1,0 +1,15 @@
+---
+source: apollo-router/src/plugins/authorization/authenticated.rs
+expression: "TestResult { query: QUERY, result: doc, paths }"
+---
+query:
+
+        mutation {
+            ping {
+                name
+            }
+        }
+        
+filtered:
+
+paths: ["/ping"]
