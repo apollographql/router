@@ -1062,7 +1062,7 @@ impl Telemetry {
         subgraph_name: Arc<String>,
         sub_request: &mut Request,
     ) -> Option<CacheAttributes> {
-        let body = sub_request.subgraph_request.body_mut();
+        let body = dbg!(sub_request.subgraph_request.body_mut());
         let hashed_query = hash_request(body);
         let representations = body
             .variables
@@ -1700,27 +1700,6 @@ struct CacheCounter {
     ttl: Duration,
 }
 
-struct CacheHitCounter {
-    total_requests: usize,
-    cache_hit: usize,
-}
-
-impl Default for CacheCounter {
-    fn default() -> Self {
-        Self {
-            potential_cache_entries: CountMinSketch::new(
-                0.01, // probability calculate k_num
-                0.01, // error tolerance to calculate width
-                (),
-            ),
-            potential_cache_hit: HashMap::new(),
-            nb_requests: HashMap::new(),
-            created_at: Instant::now(),
-            ttl: Duration::from_millis(5000),
-        }
-    }
-}
-
 impl CacheCounter {
     fn new(ttl: Duration) -> Self {
         Self {
@@ -1746,6 +1725,9 @@ impl CacheCounter {
         if self.created_at.elapsed() >= self.ttl {
             self.clear();
         }
+
+        // I record the total number of requests (asking for _entities) to a specific subgraph
+        // in order to know the frequency of potential cache hit we could have for a subgraph
         let nb_requests = *self
             .nb_requests
             .entry(subgraph_name.clone())
@@ -1763,6 +1745,7 @@ impl CacheCounter {
                 },
                 &1,
             ) > 1;
+            // I record the number of potential cache hit we would have for a subgraph and an entity
             let potential_cache_hit = *self
                 .potential_cache_hit
                 .entry((subgraph_name.clone(), typename.clone()))
@@ -1773,6 +1756,7 @@ impl CacheCounter {
                 })
                 .or_insert(1);
 
+            // Here I'm computing the percentage of potential cache hit I could have for a subgraph given its entity name
             ::tracing::info!(
                 value.apollo.router.operations.entity = (potential_cache_hit as f64 / nb_requests as f64) * 100f64,
                 entity_type = %typename,
