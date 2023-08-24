@@ -548,8 +548,9 @@ mod tests {
       itf: I
     }
 
-    type Mutation {
+    type Mutation @requiresScopes(scopes: [["mut"]]) {
         ping: User @requiresScopes(scopes: [["ping"]])
+        other: String
     }
 
     interface I {
@@ -770,6 +771,7 @@ mod tests {
             ping {
                 name
             }
+            other
         }
         "#;
 

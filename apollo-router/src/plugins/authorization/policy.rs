@@ -490,8 +490,9 @@ mod tests {
       itf: I
     }
 
-    type Mutation {
+    type Mutation @policy(policies: ["mut"]) {
         ping: User @policy(policies: ["ping"])
+        other: String
     }
 
     interface I {
@@ -645,6 +646,7 @@ mod tests {
             ping {
                 name
             }
+            other
         }
         "#;
 
