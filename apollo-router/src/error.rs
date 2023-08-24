@@ -555,26 +555,15 @@ impl std::fmt::Display for ValidationErrors {
 }
 
 impl ValidationErrors {
-    #[allow(clippy::needless_return)]
     pub(crate) fn print(&self) {
         if LevelFilter::current() == LevelFilter::OFF && cfg!(not(debug_assertions)) {
             return;
-        } else if atty::is(atty::Stream::Stdout) {
-            // Fancy reports for TTYs
-            self.errors.iter().for_each(|err| {
-                // `format!` works around https://github.com/rust-lang/rust/issues/107118
-                // to test the panic from https://github.com/apollographql/router/issues/2269
-                #[allow(clippy::format_in_format_args)]
-                {
-                    eprintln!("{}", format!("{err}"));
-                }
-            });
-        } else {
-            // Best effort to display errors
-            self.errors.iter().for_each(|diag| {
-                eprintln!("{}", diag.data);
-            });
-        };
+        }
+
+        self.errors.iter().for_each(|err| {
+            // Outputs a pretty colourised report on TTYs
+            eprintln!("{err}");
+        });
     }
 }
 
