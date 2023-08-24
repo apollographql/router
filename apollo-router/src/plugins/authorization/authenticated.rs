@@ -12,8 +12,122 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
 use crate::spec::query::transform::get_field_type;
+use crate::spec::query::traverse;
 
 pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: &str = "authenticated";
+
+pub(crate) struct AuthenticatedCheckVisitor<'a> {
+    compiler: &'a ApolloCompiler,
+    file_id: FileId,
+    pub(crate) found: bool,
+}
+
+impl<'a> AuthenticatedCheckVisitor<'a> {
+    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Self {
+        Self {
+            compiler,
+            file_id,
+            found: false,
+        }
+    }
+
+    fn is_field_authenticated(&self, field: &FieldDefinition) -> bool {
+        field
+            .directive_by_name(AUTHENTICATED_DIRECTIVE_NAME)
+            .is_some()
+            || field
+                .ty()
+                .type_def(&self.compiler.db)
+                .map(|t| self.is_type_authenticated(&t))
+                .unwrap_or(false)
+    }
+
+    fn is_type_authenticated(&self, t: &TypeDefinition) -> bool {
+        t.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some()
+    }
+}
+
+impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
+    fn compiler(&self) -> &ApolloCompiler {
+        self.compiler
+    }
+
+    fn operation(&mut self, node: &hir::OperationDefinition) -> Result<(), BoxError> {
+        traverse::operation(self, node)
+    }
+
+    fn field(&mut self, parent_type: &str, node: &hir::Field) -> Result<(), BoxError> {
+        let field_name = node.name();
+
+        if self
+            .compiler
+            .db
+            .types_definitions_by_name()
+            .get(parent_type)
+            .and_then(|def| def.field(&self.compiler.db, field_name))
+            .is_some_and(|field| self.is_field_authenticated(field))
+        {
+            self.found = true;
+            return Ok(());
+        }
+        traverse::field(self, parent_type, node)
+    }
+
+    fn fragment_definition(&mut self, node: &hir::FragmentDefinition) -> Result<(), BoxError> {
+        if self
+            .compiler
+            .db
+            .types_definitions_by_name()
+            .get(node.type_condition())
+            .is_some_and(|type_definition| self.is_type_authenticated(type_definition))
+        {
+            self.found = true;
+            return Ok(());
+        }
+        traverse::fragment_definition(self, node)
+    }
+
+    fn fragment_spread(&mut self, node: &hir::FragmentSpread) -> Result<(), BoxError> {
+        let fragments = self.compiler.db.fragments(self.file_id);
+        let condition = fragments
+            .get(node.name())
+            .ok_or("MissingFragmentDefinition")?
+            .type_condition();
+
+        if self
+            .compiler
+            .db
+            .types_definitions_by_name()
+            .get(condition)
+            .is_some_and(|type_definition| self.is_type_authenticated(type_definition))
+        {
+            self.found = true;
+            return Ok(());
+        }
+        traverse::fragment_spread(self, node)
+    }
+
+    fn inline_fragment(
+        &mut self,
+        parent_type: &str,
+        node: &hir::InlineFragment,
+    ) -> Result<(), BoxError> {
+        if let Some(name) = node.type_condition() {
+            if self
+                .compiler
+                .db
+                .types_definitions_by_name()
+                .get(name)
+                .is_some_and(|type_definition| self.is_type_authenticated(type_definition))
+            {
+                self.found = true;
+                return Ok(());
+            }
+        }
+
+        traverse::inline_fragment(self, parent_type, node)
+    }
+}
 
 pub(crate) struct AuthenticatedVisitor<'a> {
     compiler: &'a ApolloCompiler,
@@ -147,6 +261,24 @@ impl<'a> AuthenticatedVisitor<'a> {
 impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
     fn compiler(&self) -> &ApolloCompiler {
         self.compiler
+    }
+
+    fn operation(
+        &mut self,
+        node: &hir::OperationDefinition,
+    ) -> Result<Option<apollo_encoder::OperationDefinition>, BoxError> {
+        let operation_requires_authentication = node
+            .object_type(&self.compiler.db)
+            .map(|ty| ty.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some())
+            .unwrap_or(false);
+
+        if operation_requires_authentication {
+            self.unauthorized_paths.push(self.current_path.clone());
+            self.query_requires_authentication = true;
+            Ok(None)
+        } else {
+            transform::operation(self, node)
+        }
     }
 
     fn field(
@@ -322,6 +454,7 @@ mod tests {
 
     type Mutation @authenticated {
         ping: User
+        other: String
     }
 
     interface I {
@@ -395,9 +528,7 @@ mod tests {
     fn mutation() {
         static QUERY: &str = r#"
         mutation {
-            ping {
-                name
-            }
+            other
         }
         "#;
 
