@@ -10,12 +10,19 @@ use super::subscription::SubscriptionNode;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::spec::Query;
 
 /// A planner key.
 ///
-/// This type consists of a query string and an optional operation string
-pub(crate) type QueryKey = (String, Option<String>);
+/// This type contains everything needed to separate query plan cache entries
+#[derive(Clone)]
+pub(crate) struct QueryKey {
+    pub(crate) filtered_query: String,
+    pub(crate) original_query: String,
+    pub(crate) operation_name: Option<String>,
+    pub(crate) metadata: CacheKeyMetadata,
+}
 
 /// A plan for a given GraphQL query
 #[derive(Debug, Serialize, Deserialize)]
