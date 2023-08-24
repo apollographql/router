@@ -237,7 +237,7 @@ commands:
                 name: Install CMake
                 command: |
                   choco install cmake -y
-                  [Environment]::SetEnvironmentVariable("Path",  'C:\Program Files\CMake\bin;' + $env:Path, [System.EnvironmentVariableTarget]::User)
+                  echo 'export PATH="/c/Program Files/CMake/bin:$PATH"' >> "$BASH_ENV"
                   exit $LASTEXITCODE
       - when:
           condition:
