@@ -10,17 +10,16 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ### Expose the stats_reports_key hash to plugins. ([Issue #2728](https://github.com/apollographql/router/issues/2728))
 
-This changeset exposes a new key in the context, `apollo_operation_id`, which identifies operation you can find in studio:
+This changeset exposes a new key in the Context, `apollo_operation_id`, which identifies operation you can find in studio:
 
 ```
 https://studio.apollographql.com/graph/<your_graph_variant>/variant/<your_graph_variant>/operations?query=<apollo_operation_id>
 ```
 
-This new context key is exposed at various stages of the operation pipeline:
+The `apollo_operation_id` context key is exposed during:
 
 - Execution service request
 - Subgraph service request
-
 - Subgraph service response
 - Execution service response
 - Supergraph service response
@@ -28,26 +27,23 @@ This new context key is exposed at various stages of the operation pipeline:
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3586
 
-### Adds some new (unstable) metrics ([PR #3609](https://github.com/apollographql/router/pull/3609))
+### Add new (unstable) metrics ([PR #3609](https://github.com/apollographql/router/pull/3609))
 
-Many of our existing metrics are poorly and inconsistently named. In addition they follow prometheus style rather than otel style.
+Many of our existing metrics are poorly and inconsistently named. In addition, they follow Prometheus style rather than Otel style.
 
-This PR adds some new metrics that will hopefully give us a good foundation to build upon.
+This changeset adds some new metrics that will give us a good foundation to build upon.
 New metrics are namespaced `apollo.router.operations.*`.
 
-Until officially documented the metrics should be treated as unstable, as we may need change the names to ensure consistency.
+These metrics should be treated as unstable and may change in the future.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3609
 
 ## 🐛 Fixes
 
-### Try to stop OTLP controllers when Telemetry is dropped ([Issue #3140](https://github.com/apollographql/router/issues/3140))
+### Flush metrics when Router reloads or shuts down ([Issue #3140](https://github.com/apollographql/router/issues/3140))
 
-We already have code to specifically drop tracers and we are adding some additional logic to do the same thing with metrics exporters.
-
-This will improve the transmission of metrics from OTLP controllers when a router is shut down.
-
-fixes: #3140
+When the Router either reloads or shuts down it now flushes metrics.
+Push metrics exporters such as OTLP would have previously missed some metrics, in particular thouse related to reload events.  
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3143
 
@@ -55,9 +51,9 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Enable checking for kubernetes 1.28.0 in kubeconform ([Issue #3587](https://github.com/apollographql/router/issues/3587))
 
-Support has now been added for kubernetes `1.28.0` and we can re-enable checking.
+Kubeconform now supports kubernetes `1.28.0` and we have re-enabled manifest verification in CI.
 
-This is reverting the change from #3584.
+This reverts #3584.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3638
 
@@ -65,9 +61,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 This includes the fix for [CVE-2023-38497](https://blog.rust-lang.org/2023/08/03/cve-2023-38497.html).
 
-We’re applying the upgrade as a precaution, but we don’t have any shared multi-user environments which  build the Router (whether developer workstations or other environments). This CVE would only affect users who were building the Router themselves using Cargo on such shared multi-user machines and wouldn’t affect our published binaries, the use of our Docker images, etc.
-
-Users building custom binaries should consider their own build environments to determine if they were impacted.
+Although Apollo was not affecter, users building custom binaries should consider their own build environments to determine if they were impacted.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/3536
 
@@ -75,16 +69,13 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 
 This PR adds an OTLP metrics exporter for a Apollo pipeline that can compliment the existing protobuf format.
 
-Note that new metrics of the format `apollo.router.*` are currently not stable.
-Once we have added enough metrics to ensure that we are consistent then they will be stabilized and documented.
-
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3354 and https://github.com/apollographql/router/pull/3651
 
 ## 📚 Documentation
 
 ### Clarify that hot-reload does not affect Uplink-delivered config/schema ([PR #3596](https://github.com/apollographql/router/pull/3596))
 
-This documentation adjustment (and small CLI help change) tries to clarify some confusion around the `--hot-reload` command line argument and the scope of it's operation.
+This documentation adjustment (and small CLI help change) tries to clarify some confusion around the `--hot-reload` command line argument and the scope of its operation.
 
 Concretely, the supergraph and configuration that is delivered through a [GraphOS Launch](https://www.apollographql.com/docs/graphos/delivery/launches/) (and delivered through Uplink) is _always_ loaded immediately and will take effect as soon as possible.
 
@@ -93,7 +84,7 @@ On the other hand, files that are provided locally - e.g., `--config ./file.yaml
 - If `--hot-reload` is passed (or if another flag infers `--hot-reload`, as is the case with `--dev`) and a supergraph or configuration is changed; or
 - When the router process is sent a SIGHUP.
 
-Otherwise, files provided locally to the router are only re-started if the router process is completely restarted.
+Otherwise, files provided locally to the router are only re-reloaded if the router process is completely restarted.
 
 By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/3596
 
