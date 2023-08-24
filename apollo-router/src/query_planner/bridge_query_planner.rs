@@ -987,7 +987,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn router_bridge_dependency_is_pinned() {
         let cargo_manifest: toml::Value =
             fs::read_to_string(PathBuf::from(&env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
