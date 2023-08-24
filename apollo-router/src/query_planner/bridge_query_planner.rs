@@ -284,13 +284,14 @@ impl BridgeQueryPlanner {
             .map_err(|err| {
                 let is_validation_error = err.errors.iter().all(|err| err.validation_error);
                 match (is_validation_error, &selections.validation_error) {
-                    (false, Some(_)) => {
+                    (false, Some(validation_error)) => {
                         tracing::warn!(
                             monotonic_counter.apollo.router.validation = 1,
                             validation.source = VALIDATION_SOURCE_OPERATION,
                             validation.result = VALIDATION_FALSE_POSITIVE,
                             "validation mismatch: JS query planner did not report query validation error, but apollo-rs did"
                         );
+                        tracing::warn!("validation mismatch: Rust validation reported: {validation_error}");
                     }
                     (true, None) => {
                         tracing::warn!(
@@ -299,6 +300,7 @@ impl BridgeQueryPlanner {
                             validation.result = VALIDATION_FALSE_NEGATIVE,
                             "validation mismatch: apollo-rs did not report query validation error, but JS query planner did"
                         );
+                        tracing::warn!("validation mismatch: JS validation reported: {err}");
                     }
                     // if JS and Rust implementations agree, we return the JS result for now.
                     _ => tracing::info!(

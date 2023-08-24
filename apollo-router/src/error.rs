@@ -566,13 +566,13 @@ impl ValidationErrors {
                 // to test the panic from https://github.com/apollographql/router/issues/2269
                 #[allow(clippy::format_in_format_args)]
                 {
-                    println!("{}", format!("{err}"));
+                    eprintln!("{}", format!("{err}"));
                 }
             });
         } else {
             // Best effort to display errors
             self.errors.iter().for_each(|diag| {
-                println!("{}", diag.data);
+                eprintln!("{}", diag.data);
             });
         };
     }
