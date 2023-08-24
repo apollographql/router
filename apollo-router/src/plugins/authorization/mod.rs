@@ -37,6 +37,7 @@ use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::query_planner::FilteredQuery;
 use crate::query_planner::QueryKey;
 use crate::register_plugin;
+use crate::services::execution;
 use crate::services::supergraph;
 use crate::spec::query::transform;
 use crate::spec::query::traverse;
@@ -141,7 +142,9 @@ impl AuthorizationPlugin {
         if traverse::document(&mut visitor, file_id).is_ok() {
             let scopes: Vec<String> = visitor.extracted_scopes.into_iter().collect();
 
-            context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
+            if !scopes.is_empty() {
+                context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
+            }
         }
 
         // TODO: @policy is out of scope for preview, this will be reactivated later
@@ -158,7 +161,9 @@ impl AuthorizationPlugin {
                     .map(|policy| (policy, None))
                     .collect();
 
-                context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
+                if !policies.is_empty() {
+                    context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
+                }
             }
         }
     }
@@ -454,6 +459,29 @@ impl Plugin for AuthorizationPlugin {
         } else {
             service
         }
+    }
+
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        ServiceBuilder::new()
+            .map_request(|request: execution::Request| {
+                let filtered = !request.query_plan.query.unauthorized_paths.is_empty();
+                //TODO: extract info about @authenticated
+                let needs_requires_scopes = request.context.contains_key(REQUIRED_SCOPES_KEY);
+                let needs_policy = request.context.contains_key(REQUIRED_POLICIES_KEY);
+
+                if needs_requires_scopes || needs_policy {
+                    tracing::info!(
+                        monotonic_counter.apollo.router.operations.authorization = 1u64,
+                        filtered = filtered,
+                        requiresscopes = needs_requires_scopes,
+                        policy = needs_policy
+                    );
+                }
+
+                request
+            })
+            .service(service)
+            .boxed()
     }
 }
 
