@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
@@ -39,9 +38,7 @@ use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::Context as OtelContext;
 use opentelemetry::KeyValue;
-use rand::distributions::Uniform;
-use rand::rngs::ThreadRng;
-use rand::thread_rng;
+use parking_lot::Mutex;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
 use serde_json_bytes::json;
@@ -49,7 +46,6 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use streaming_algorithms::CountMinSketch;
-use streaming_algorithms::HyperLogLog;
 use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -168,7 +164,7 @@ pub(crate) struct Telemetry {
 
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
     meter_provider: AggregateMeterProvider,
-    counters: CacheCounters,
+    counter: Option<Arc<Mutex<CacheCounter>>>,
 }
 
 #[derive(Debug)]
@@ -251,6 +247,20 @@ impl Plugin for Telemetry {
             config.calculate_field_level_instrumentation_ratio()?;
         let mut metrics_builder = Self::create_metrics_builder(&config)?;
         let meter_provider = metrics_builder.meter_provider();
+        let counter = config
+            .metrics
+            .as_ref()
+            .and_then(|m| m.common.as_ref())
+            .and_then(|c| {
+                if c.experimental_cache_metrics.enabled {
+                    Some(Arc::new(Mutex::new(CacheCounter::new(
+                        c.experimental_cache_metrics.ttl,
+                    ))))
+                } else {
+                    None
+                }
+            });
+
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints(),
             metrics_exporters: metrics_builder.exporters(),
@@ -260,7 +270,7 @@ impl Plugin for Telemetry {
             tracer_provider: Some(Self::create_tracer_provider(&config)?),
             meter_provider,
             config: Arc::new(config),
-            counters: CacheCounters::default(),
+            counter,
         })
     }
 
@@ -483,14 +493,8 @@ impl Plugin for Telemetry {
         let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
         let subgraph_name = ByteString::from(name);
-        let cache_metrics_enabled = self
-            .config
-            .metrics
-            .as_ref()
-            .and_then(|m| m.common.as_ref())
-            .map(|c| c.experimental_enable_cache_metrics)
-            .unwrap_or_default();
-        let counters = self.counters.clone();
+        let cache_metrics_enabled = self.counter.is_some();
+        let counter = self.counter.clone();
         let name = name.to_owned();
         let subgraph_name_arc = Arc::new(name.to_owned());
         ServiceBuilder::new()
@@ -543,7 +547,7 @@ impl Plugin for Telemetry {
                     let metrics = metrics.clone();
                     let subgraph_attribute = subgraph_attribute.clone();
                     let subgraph_metrics_conf = subgraph_metrics_conf_resp.clone();
-                    let counters = counters.clone();
+                    let counter = counter.clone();
                     // Using Instant because it is guaranteed to be monotonically increasing.
                     let now = Instant::now();
                     f.map(move |result: Result<SubgraphResponse, BoxError>| {
@@ -553,7 +557,7 @@ impl Plugin for Telemetry {
                             subgraph_attribute,
                             subgraph_metrics_conf,
                             now,
-                            &counters,
+                            counter,
                             cache_attributes,
                             &result,
                         );
@@ -1076,7 +1080,7 @@ impl Telemetry {
     }
 
     fn update_cache_metrics(
-        counters: &CacheCounters,
+        counter: Arc<Mutex<CacheCounter>>,
         sub_response: &SubgraphResponse,
         cache_attributes: CacheAttributes,
     ) {
@@ -1103,8 +1107,7 @@ impl Telemetry {
         } else {
             Arc::new(hash_vary_headers(&cache_attributes.headers))
         };
-
-        counters.record_representations(
+        counter.lock().record(
             cache_attributes.hashed_query.clone(),
             cache_attributes.subgraph_name.clone(),
             hashed_headers,
@@ -1139,7 +1142,7 @@ impl Telemetry {
         subgraph_attribute: KeyValue,
         attribute_forward_config: Arc<Option<AttributesForwardConf>>,
         now: Instant,
-        counters: &CacheCounters,
+        counter: Option<Arc<Mutex<CacheCounter>>>,
         cache_attributes: Option<CacheAttributes>,
         result: &Result<Response, BoxError>,
     ) {
@@ -1182,7 +1185,9 @@ impl Telemetry {
                         metric_attrs.push(KeyValue::new("cache_control", cache_control));
                     }
 
-                    Self::update_cache_metrics(counters, response, cache_attributes)
+                    if let Some(counter) = counter {
+                        Self::update_cache_metrics(counter, response, cache_attributes)
+                    }
                 }
                 metric_attrs.push(KeyValue::new(
                     "status",
@@ -1656,20 +1661,22 @@ struct CacheAttributes {
     headers: http::HeaderMap,
     hashed_query: Arc<String>,
     // Typename + hashed_representation
-    representations: Vec<(String, Value)>,
+    representations: Vec<(Arc<String>, Value)>,
 }
 
 #[derive(Debug, Hash, Clone)]
 struct CacheKey {
     representation: Value,
-    typename: String,
+    typename: Arc<String>,
     query: Arc<String>,
     subgraph_name: Arc<String>,
     hashed_headers: Arc<String>,
 }
 
 // Get typename and hashed representation for each representations in the subgraph query
-fn extract_cache_attributes(representations: &[Value]) -> Result<Vec<(String, Value)>, BoxError> {
+fn extract_cache_attributes(
+    representations: &[Value],
+) -> Result<Vec<(Arc<String>, Value)>, BoxError> {
     let mut res = Vec::new();
     for representation in representations {
         let opt_type = representation
@@ -1678,181 +1685,111 @@ fn extract_cache_attributes(representations: &[Value]) -> Result<Vec<(String, Va
             .ok_or("missing __typename in representation")?;
         let typename = opt_type.as_str().unwrap_or("");
 
-        res.push((typename.to_string(), representation.clone()));
+        res.push((Arc::new(typename.to_string()), representation.clone()));
     }
     Ok(res)
 }
 
-// A gauge to see the number of potential cache hit for a subgraph with a TTL of 10secs, which means every 10sec we clear the data to know if we already saw that operation or no
-// The reason why I would like to put a TTL is because at the end every requests will be a potential cache hit and so it won't give us more insights
-
-// In order to have more details about these potential cache hits we could add also the typename information to know which typename would benefit from caching
-
-// Would it be valuable if we are able to know the caching potential per subgraph per entity ?
-
-#[derive(Debug, Hash, Clone, PartialEq, Eq, Default)]
-struct CountersKey {
-    typename: String,
-    query: Arc<String>,
-    subgraph_name: Arc<String>,
-    hashed_headers: Arc<String>,
-}
-
-#[derive(Default, Clone)]
-struct CacheCounters {
-    counters: Arc<DashMap<CountersKey, Arc<Mutex<CacheCounter>>>>,
-}
-
-impl CacheCounters {
-    fn record_representations(
-        &self,
-        query: Arc<String>,
-        subgraph_name: Arc<String>,
-        hashed_headers: Arc<String>,
-        representations: Vec<(String, Value)>,
-    ) {
-        let mut representations_by_type: HashMap<String, Vec<Value>> = HashMap::new();
-        for (typename, representation) in representations.into_iter() {
-            representations_by_type
-                .entry(typename)
-                .or_default()
-                .push(representation);
-        }
-
-        for (typename, representations) in representations_by_type.into_iter() {
-            let key = CountersKey {
-                typename,
-                query: query.clone(),
-                subgraph_name: subgraph_name.clone(),
-                hashed_headers: hashed_headers.clone(),
-            };
-            let counter = self.counters.entry(key.clone()).or_default();
-            let mut c = counter.lock().unwrap();
-            c.incr_requests();
-            let mut rng = thread_rng();
-            for representation in representations {
-                c.record_representation(&key, &representation, &mut rng);
-            }
-
-            let distinct = c.distinct();
-            ::tracing::info!(
-                gauge.apollo.router.operations.entity = distinct,
-                entity_type = %key.typename,
-                subgraph = %key.subgraph_name,
-                vary = %key.hashed_headers,
-                entity_state = %"distinct",
-            );
-        }
-    }
-}
-
 struct CacheCounter {
-    counts: CountMinSketch<Value, u64>,
-    distinct_entities: HyperLogLog<Value>,
-    low_frequency_entities: HyperLogLog<Value>,
-    requests: usize,
+    potential_cache_entries: CountMinSketch<CacheKey, usize>,
+    // By subgraph
+    nb_requests: HashMap<Arc<String>, usize>,
+    // By subgraph and typename
+    potential_cache_hit: HashMap<(Arc<String>, Arc<String>), usize>,
+    created_at: Instant,
+    ttl: Duration,
+}
+
+struct CacheHitCounter {
+    total_requests: usize,
+    cache_hit: usize,
 }
 
 impl Default for CacheCounter {
     fn default() -> Self {
         Self {
-            counts: CountMinSketch::new(
+            potential_cache_entries: CountMinSketch::new(
                 0.01, // probability calculate k_num
                 0.01, // error tolerance to calculate width
                 (),
             ),
-            distinct_entities: HyperLogLog::new(0.01),
-            low_frequency_entities: HyperLogLog::new(0.01),
-            requests: 0,
+            potential_cache_hit: HashMap::new(),
+            nb_requests: HashMap::new(),
+            created_at: Instant::now(),
+            ttl: Duration::from_millis(5000),
         }
     }
 }
 
 impl CacheCounter {
-    fn incr_requests(&mut self) {
-        self.requests += 1;
+    fn new(ttl: Duration) -> Self {
+        Self {
+            potential_cache_entries: CountMinSketch::new(
+                0.01, // probability calculate k_num
+                0.01, // error tolerance to calculate width
+                (),
+            ),
+            potential_cache_hit: HashMap::new(),
+            nb_requests: HashMap::new(),
+            created_at: Instant::now(),
+            ttl,
+        }
     }
 
-    fn distinct(&self) -> f64 {
-        self.distinct_entities.len()
-    }
-
-    fn record_representation(
+    fn record(
         &mut self,
-        key: &CountersKey,
-        representation: &Value,
-        rng: &mut ThreadRng,
+        query: Arc<String>,
+        subgraph_name: Arc<String>,
+        hashed_headers: Arc<String>,
+        representations: Vec<(Arc<String>, Value)>,
     ) {
-        // This function will send histogram metrics to generate a distribution of frequencies
-        // of entities. In other words, we want to know how many entities appear in 10% of
-        // requests, how many in 30%, etc. It will also create metrics measuring the number of
-        // different entities, and the proportion of entities with low frequency (<0.01).
-        //
-        // Explanations:
-        // The frequency distribution is easy to calculate if we can store, for each entity
-        // key, how many time we have seen it, and calculate the entire distribution at once.
-        // But here, we do not want to store all the tntiy keys (too much memory usage), we
-        // want to calculate it incrementally, and have the result stored in a histogram in an
-        // observability tool.
-        // The histogram receives a range of values, and for sub-ranges, calculates how
-        // many times they were received
-        // Let's say we have N different entities. To make a histogram of entity frequencies,
-        // we want each entity frequency to be sent roughly as often as every other entity
-        // frequency, as 1/N of all values sent.
-        // Unfortunately, if we send a value on each time we see an entity, high frequency
-        // entities will be overrepresented: if a single entity appears in all requests,
-        // the frequency '1' would have the highest amount of events in the histogram,
-        // even if all the other entities have much lower frequencies. In the same way,
-        // entities with lower frequencies would be underrepresented.
-        //
-        // We solve that with sampling. With `f` the frequency of an entity, and `s(f)` its
-        // sampling rate, the probability of sending `f` to the histogram would be `f*s(f)`.
-        // If we want every frequency to appear in the same proportion, then `s(f) = c/f`,
-        // with `c` a constant.
-        // We want the sampling rate to be between 0 and 1, but as `f` gets smaller, `1/f`
-        // becomes larger. So we have to set a bound. We want to know if some entities appear
-        // often enough to warrant caching. So we will ignore entities appearing in less
-        // than 1% of requests. Which means `1/f <= 100`, so `c = 1/100` and `s(f) = 0.01/f`.
-        // Now we still want to count the low frequency entities: if a few entities appear
-        // frequently, but the largest part are rare, then caching is less useful.
-        // So we will measure them separately. First we count the number of distinct entities
-        // we have seen. Then we count the number of distinct entities we see with a frequency
-        // lower than 0.01. We assume that those frequencies are stable over the time of
-        // measurement, so the calculated frequency of rare entities will get progressively lower,
-        // until it reaches the threashold, and stay under 0.01.
-        let count = self.counts.push(representation, &1);
-        self.distinct_entities.push(representation);
+        if self.created_at.elapsed() >= self.ttl {
+            self.clear();
+        }
+        let nb_requests = *self
+            .nb_requests
+            .entry(subgraph_name.clone())
+            .and_modify(|e| *e += 1)
+            .or_insert(1);
 
-        let frequency = count as f64 / self.requests as f64;
+        for (typename, representation) in representations {
+            let cache_hit = self.potential_cache_entries.push(
+                &CacheKey {
+                    representation,
+                    typename: typename.clone(),
+                    query: query.clone(),
+                    subgraph_name: subgraph_name.clone(),
+                    hashed_headers: hashed_headers.clone(),
+                },
+                &1,
+            ) > 1;
+            let potential_cache_hit = *self
+                .potential_cache_hit
+                .entry((subgraph_name.clone(), typename.clone()))
+                .and_modify(|e| {
+                    if cache_hit {
+                        *e += 1;
+                    }
+                })
+                .or_insert(1);
 
-        // ignore entities appearing 1% of the time
-        if frequency >= 0.01 {
-            let rate = 0.01 / frequency;
-
-            let distrib = Uniform::new(0.0, 1.0);
-            let sample = rng.sample(distrib);
-
-            if sample < rate {
-                ::tracing::info!(
-                    histogram.apollo.router.operations.entity = frequency,
-                    entity_type = %key.typename,
-                    subgraph = %key.subgraph_name,
-                    vary = %key.hashed_headers,
-                    entity_state = %"cacheable",
-                );
-            }
-        // account for low frequency entities separately
-        } else {
-            self.low_frequency_entities.push(representation);
-            let uncacheable = self.low_frequency_entities.len() / self.distinct_entities.len();
             ::tracing::info!(
-                gauge.apollo.router.operations.entity = uncacheable,
-                entity_type = %key.typename,
-                subgraph = %key.subgraph_name,
-                vary = %key.hashed_headers,
-                entity_state = %"uncacheable",
+                value.apollo.router.operations.entity = (potential_cache_hit as f64 / nb_requests as f64) * 100f64,
+                entity_type = %typename,
+                subgraph = %subgraph_name,
             );
         }
+    }
+
+    fn clear(&mut self) {
+        self.potential_cache_entries = CountMinSketch::new(
+            0.01, // probability calculate k_num
+            0.01, // error tolerance to calculate width
+            (),
+        );
+        self.created_at = Instant::now();
+        self.nb_requests = HashMap::new();
+        self.potential_cache_hit = HashMap::new();
     }
 }
 

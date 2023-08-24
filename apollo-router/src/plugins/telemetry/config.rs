@@ -94,8 +94,28 @@ pub(crate) struct MetricsCommon {
     /// Custom buckets for histograms
     #[serde(default = "default_buckets")]
     pub(crate) buckets: Vec<f64>,
-    /// Enable experimental metrics to know more about caching strategies
-    pub(crate) experimental_enable_cache_metrics: bool,
+    /// Experimental metrics to know more about caching strategies
+    pub(crate) experimental_cache_metrics: ExperimentalCacheMetricsConf,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", default)]
+pub(crate) struct ExperimentalCacheMetricsConf {
+    /// Enable experimental metrics
+    pub(crate) enabled: bool,
+    #[serde(with = "humantime_serde")]
+    #[schemars(with = "String")]
+    /// Potential TTL for a cache if we had one
+    pub(crate) ttl: Duration,
+}
+
+impl Default for ExperimentalCacheMetricsConf {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            ttl: Duration::from_secs(10),
+        }
+    }
 }
 
 fn default_buckets() -> Vec<f64> {
@@ -112,7 +132,7 @@ impl Default for MetricsCommon {
             service_namespace: None,
             resources: HashMap::new(),
             buckets: default_buckets(),
-            experimental_enable_cache_metrics: false,
+            experimental_cache_metrics: ExperimentalCacheMetricsConf::default(),
         }
     }
 }
