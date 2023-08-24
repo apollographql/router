@@ -22,7 +22,12 @@ use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::metrics::layer::MetricsLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 
-type LayeredTracer = Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>;
+use super::metrics::span_metrics_exporter::SpanMetricsLayer;
+
+pub(crate) type LayeredRegistry = Layered<SpanMetricsLayer, Registry>;
+
+type LayeredTracer =
+    Layered<OpenTelemetryLayer<LayeredRegistry, ReloadTracer<Tracer>>, LayeredRegistry>;
 
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
 // generic types in the layer definition.
@@ -96,6 +101,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
             // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
             // the tracing registry is only created once
             tracing_subscriber::registry()
+                .with(SpanMetricsLayer::default())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
                 .with(metrics_layer)
@@ -128,8 +134,9 @@ pub(super) fn reload_metrics(layer: MetricsLayer) {
 #[allow(clippy::type_complexity)]
 pub(super) fn reload_fmt(
     layer: Box<
-        dyn Layer<Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>>
-            + Send
+        dyn Layer<
+                Layered<OpenTelemetryLayer<LayeredRegistry, ReloadTracer<Tracer>>, LayeredRegistry>,
+            > + Send
             + Sync,
     >,
 ) {
