@@ -480,15 +480,13 @@ impl Plugin for AuthorizationPlugin {
                 let filtered = !request.query_plan.query.unauthorized_paths.is_empty();
                 let needs_authenticated = request.context.contains_key(AUTHENTICATED_KEY);
                 let needs_requires_scopes = request.context.contains_key(REQUIRED_SCOPES_KEY);
-                let needs_policy = request.context.contains_key(REQUIRED_POLICIES_KEY);
 
-                if needs_authenticated || needs_requires_scopes || needs_policy {
+                if needs_authenticated || needs_requires_scopes {
                     tracing::info!(
                         monotonic_counter.apollo.router.operations.authorization = 1u64,
                         filtered = filtered,
                         authenticated = needs_authenticated,
                         requiresscopes = needs_requires_scopes,
-                        policy = needs_policy
                     );
                 }
 
