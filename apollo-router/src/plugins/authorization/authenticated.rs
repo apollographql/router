@@ -322,6 +322,7 @@ mod tests {
 
     type Mutation @authenticated {
         ping: User
+        other: String
     }
 
     interface I {
@@ -395,9 +396,7 @@ mod tests {
     fn mutation() {
         static QUERY: &str = r#"
         mutation {
-            ping {
-                name
-            }
+            other
         }
         "#;
 
