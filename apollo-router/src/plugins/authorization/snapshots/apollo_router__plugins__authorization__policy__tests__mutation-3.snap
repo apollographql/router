@@ -4,10 +4,6 @@ expression: paths
 ---
 [
     Path(
-        [
-            Key(
-                "ping",
-            ),
-        ],
+        [],
     ),
 ]
