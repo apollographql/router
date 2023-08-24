@@ -199,8 +199,9 @@ impl PlanNode {
                         .map(|n| n.node.as_ref().map_or(0, |n| n.subgraph_fetches()))
                         .sum::<usize>()
             }
+            // A `SubscriptionNode` makes a request to a subgraph, so counting it as 1
             PlanNode::Subscription { rest, .. } => {
-                rest.as_ref().map_or(0, |n| n.subgraph_fetches())
+                rest.as_ref().map_or(0, |n| n.subgraph_fetches()) + 1
             }
             // Compute the highest possible value for condition nodes
             PlanNode::Condition {
