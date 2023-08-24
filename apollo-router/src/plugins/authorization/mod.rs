@@ -484,7 +484,7 @@ impl Plugin for AuthorizationPlugin {
                         monotonic_counter.apollo.router.operations.authorization = 1u64,
                         filtered = filtered,
                         authenticated = needs_authenticated,
-                        requiresscopes = needs_requires_scopes,
+                        requires_scopes = needs_requires_scopes,
                     );
                 }
 
