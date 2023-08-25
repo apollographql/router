@@ -1691,11 +1691,8 @@ fn extract_cache_attributes(
 }
 
 struct CacheCounter {
-    potential_cache_entries: CountMinSketch<CacheKey, usize>,
-    // By subgraph
-    nb_requests: HashMap<Arc<String>, usize>,
-    // By subgraph and typename
-    potential_cache_hit: HashMap<(Arc<String>, Arc<String>), usize>,
+    primary: CountMinSketch<CacheKey, usize>,
+    secondary: CountMinSketch<CacheKey, usize>,
     created_at: Instant,
     ttl: Duration,
 }
@@ -1703,13 +1700,16 @@ struct CacheCounter {
 impl CacheCounter {
     fn new(ttl: Duration) -> Self {
         Self {
-            potential_cache_entries: CountMinSketch::new(
+            primary: CountMinSketch::new(
                 0.01, // probability calculate k_num
                 0.01, // error tolerance to calculate width
                 (),
             ),
-            potential_cache_hit: HashMap::new(),
-            nb_requests: HashMap::new(),
+            secondary: CountMinSketch::new(
+                0.01, // probability calculate k_num
+                0.01, // error tolerance to calculate width
+                (),
+            ),
             created_at: Instant::now(),
             ttl,
         }
@@ -1726,54 +1726,49 @@ impl CacheCounter {
             self.clear();
         }
 
-        // I record the total number of requests (asking for _entities) to a specific subgraph
-        // in order to know the frequency of potential cache hit we could have for a subgraph
-        let nb_requests = *self
-            .nb_requests
-            .entry(subgraph_name.clone())
-            .and_modify(|e| *e += 1)
-            .or_insert(1);
-
+        // typename -> (nb of cache hits, nb of entities)
+        let mut seen: HashMap<Arc<String>, (usize, usize)> = HashMap::new();
         for (typename, representation) in representations {
-            let cache_hit = self.potential_cache_entries.push(
-                &CacheKey {
-                    representation,
-                    typename: typename.clone(),
-                    query: query.clone(),
-                    subgraph_name: subgraph_name.clone(),
-                    hashed_headers: hashed_headers.clone(),
-                },
-                &1,
-            ) > 1;
-            // I record the number of potential cache hit we would have for a subgraph and an entity
-            let potential_cache_hit = *self
-                .potential_cache_hit
-                .entry((subgraph_name.clone(), typename.clone()))
-                .and_modify(|e| {
-                    if cache_hit {
-                        *e += 1;
-                    }
-                })
-                .or_insert(1);
+            let cache_hit = self.count(&CacheKey {
+                representation,
+                typename: typename.clone(),
+                query: query.clone(),
+                subgraph_name: subgraph_name.clone(),
+                hashed_headers: hashed_headers.clone(),
+            });
 
-            // Here I'm computing the percentage of potential cache hit I could have for a subgraph given its entity name
+            let seen_entry = seen.entry(typename.clone()).or_default();
+            if cache_hit {
+                seen_entry.0 += 1;
+            }
+            seen_entry.1 += 1;
+        }
+
+        for (typename, (cache_hit, total_entities)) in seen.into_iter() {
             ::tracing::info!(
-                value.apollo.router.operations.entity = (potential_cache_hit as f64 / nb_requests as f64) * 100f64,
+                value.apollo.router.operations.entity = (cache_hit as f64 / total_entities as f64) * 100f64,
                 entity_type = %typename,
                 subgraph = %subgraph_name,
             );
         }
     }
 
+    fn count(&mut self, key: &CacheKey) -> bool {
+        self.primary.push(key, &1) > 1 || self.secondary.get(key) > 1
+    }
+
     fn clear(&mut self) {
-        self.potential_cache_entries = CountMinSketch::new(
-            0.01, // probability calculate k_num
-            0.01, // error tolerance to calculate width
-            (),
+        let secondary = std::mem::replace(
+            &mut self.primary,
+            CountMinSketch::new(
+                0.01, // probability calculate k_num
+                0.01, // error tolerance to calculate width
+                (),
+            ),
         );
+        self.secondary = secondary;
+
         self.created_at = Instant::now();
-        self.nb_requests = HashMap::new();
-        self.potential_cache_hit = HashMap::new();
     }
 }
 
