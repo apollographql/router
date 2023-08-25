@@ -1,15 +1,23 @@
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+
 use anyhow::anyhow;
 use anyhow::Result;
 use once_cell::sync::OnceCell;
 use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
+use rand::thread_rng;
+use rand::Rng;
 use tower::BoxError;
+use tracing_core::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::fmt::FormatFields;
+use tracing_subscriber::layer::Filter;
 use tracing_subscriber::layer::Layer;
 use tracing_subscriber::layer::Layered;
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
@@ -47,6 +55,8 @@ static METRICS_LAYER_HANDLE: OnceCell<
 static FMT_LAYER_HANDLE: OnceCell<
     Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
 > = OnceCell::new();
+
+pub(super) static SPAN_SAMPLING_RATE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = ReloadTracer::new(
@@ -140,6 +150,7 @@ pub(super) fn reload_fmt(
 
 pub(crate) struct SamplingFilter {}
 
+#[allow(dead_code)]
 impl SamplingFilter {
     pub(crate) fn new() -> Self {
         Self {}
