@@ -85,6 +85,10 @@ impl QueryPlan {
     pub fn contains_mutations(&self) -> bool {
         self.root.contains_mutations()
     }
+
+    pub fn subgraph_fetches(&self) -> usize {
+        self.root.subgraph_fetches()
+    }
 }
 
 // holds the query plan executon arguments that do not change between calls
