@@ -8,9 +8,9 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Expose the stats_reports_key hash to plugins. ([Issue #2728](https://github.com/apollographql/router/issues/2728))
+### Expose the `stats_reports_key` hash to plugins. ([Issue #2728](https://github.com/apollographql/router/issues/2728))
 
-This changeset exposes a new key in the Context, `apollo_operation_id`, which identifies operation you can find in studio:
+This exposes a new key in the `Context`, `apollo_operation_id`, which identifies operation you can find in studio:
 
 ```
 https://studio.apollographql.com/graph/<your_graph_variant>/variant/<your_graph_variant>/operations?query=<apollo_operation_id>
@@ -43,19 +43,11 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 ### Flush metrics when Router reloads or shuts down ([Issue #3140](https://github.com/apollographql/router/issues/3140))
 
 When the Router either reloads or shuts down it now flushes metrics.
-Push metrics exporters such as OTLP would have previously missed some metrics, in particular thouse related to reload events.  
+Push metrics exporters, such as OTLP, would have previously missed some metrics — in particular those related to _reload_ events.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3143
 
 ## 🛠 Maintenance
-
-### Enable checking for kubernetes 1.28.0 in kubeconform ([Issue #3587](https://github.com/apollographql/router/issues/3587))
-
-Kubeconform now supports kubernetes `1.28.0` and we have re-enabled manifest verification in CI.
-
-This reverts #3584.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3638
 
 ### Upgrade to Rust 1.71.1 ([PR #3536](https://github.com/apollographql/router/pull/3536))
 
@@ -65,9 +57,9 @@ Although Apollo was not affected, users building custom binaries should consider
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/3536
 
-### Add OTLP exporter for Apollo metrics ([PR #3354](https://github.com/apollographql/router/pull/3354), [PR #3651](https://github.com/apollographql/router/pull/3651))
+### Add Apollo OpenTelemetry metrics ([PR #3354](https://github.com/apollographql/router/pull/3354), [PR #3651](https://github.com/apollographql/router/pull/3651))
 
-This PR adds an OTLP metrics exporter for a Apollo pipeline that can compliment the existing protobuf format.
+We've added an OpenTelemetry metrics exporter which compliments and builds upon our existing Apollo Studio Protobuf format for metric transmission.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3354 and https://github.com/apollographql/router/pull/3651
 
