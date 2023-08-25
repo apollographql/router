@@ -1,116 +1,423 @@
 use std::collections::HashMap;
-// This entire file is license key functionality
+use std::io;
 use std::sync::Arc;
 
-use futures::stream::BoxStream;
+use axum::response::IntoResponse;
+use futures::future::BoxFuture;
+use http::StatusCode;
+use indexmap::IndexMap;
+use multimap::MultiMap;
+use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
+use tower::retry::Retry;
+use tower::service_fn;
+use tower::util::Either;
+use tower::util::Oneshot;
 use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
-use crate::graphql;
-use crate::http_ext::Request;
-use crate::http_ext::Response;
+use crate::configuration::TlsSubgraph;
+use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
-use crate::services::new_service::NewService;
-use crate::services::RouterCreator;
+use crate::plugin::PluginFactory;
+use crate::plugins::subscription::Subscription;
+use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
+use crate::plugins::traffic_shaping::rate;
+use crate::plugins::traffic_shaping::timeout;
+use crate::plugins::traffic_shaping::RetryPolicy;
+use crate::plugins::traffic_shaping::TrafficShaping;
+use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
+use crate::query_planner::BridgeQueryPlanner;
+use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::new_service::ServiceFactory;
+use crate::services::router;
+use crate::services::router_service::RouterCreator;
+use crate::services::subgraph;
+use crate::services::transport;
+use crate::services::HasConfig;
+use crate::services::HasSchema;
+use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::SubgraphService;
-use crate::PluggableRouterServiceBuilder;
-use crate::Schema;
+use crate::services::SupergraphCreator;
+use crate::spec::Schema;
+use crate::ListenAddr;
 
+#[derive(Clone)]
+/// A path and a handler to be exposed as a web_endpoint for plugins
+pub struct Endpoint {
+    pub(crate) path: String,
+    // Plugins need to be Send + Sync
+    // BoxCloneService isn't enough
+    handler: Handler,
+}
+
+impl std::fmt::Debug for Endpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Endpoint")
+            .field("path", &self.path)
+            .finish()
+    }
+}
+
+impl Endpoint {
+    /// Creates an Endpoint given a path and a Boxed Service
+    #[deprecated = "use `from_router_service` instead"]
+    #[allow(deprecated)]
+    pub fn new(path: String, handler: transport::BoxService) -> Self {
+        let router_service = ServiceBuilder::new()
+            .map_request(|request: router::Request| request.router_request)
+            .map_response(|response: transport::Response| response.into())
+            .service(handler)
+            .boxed();
+        Self {
+            path,
+            handler: Handler::new(router_service),
+        }
+    }
+
+    /// Creates an Endpoint given a path and a Boxed Service
+    pub fn from_router_service(path: String, handler: router::BoxService) -> Self {
+        Self {
+            path,
+            handler: Handler::new(handler),
+        }
+    }
+    pub(crate) fn into_router(self) -> axum::Router {
+        let handler = move |req: http::Request<hyper::Body>| {
+            let endpoint = self.handler.clone();
+            async move {
+                Ok(endpoint
+                    .oneshot(req.into())
+                    .await
+                    .map(|res| res.response)
+                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+                    .into_response())
+            }
+        };
+        axum::Router::new().route_service(self.path.as_str(), service_fn(handler))
+    }
+}
 /// Factory for creating a RouterService
 ///
 /// Instances of this traits are used by the HTTP server to generate a new
 /// RouterService on each request
-pub(crate) trait RouterServiceFactory:
-    NewService<Request<graphql::Request>, Service = Self::RouterService> + Clone + Send + Sync + 'static
+pub(crate) trait RouterFactory:
+    ServiceFactory<router::Request, Service = Self::RouterService> + Clone + Send + Sync + 'static
 {
     type RouterService: Service<
-            Request<graphql::Request>,
-            Response = Response<BoxStream<'static, graphql::Response>>,
+            router::Request,
+            Response = router::Response,
             Error = BoxError,
             Future = Self::Future,
         > + Send;
     type Future: Send;
 
-    fn custom_endpoints(&self) -> HashMap<String, Handler>;
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 }
 
-/// Factory for creating a RouterServiceFactory
+/// Factory for creating a RouterFactory
 ///
 /// Instances of this traits are used by the StateMachine to generate a new
-/// RouterServiceFactory from configuration when it changes
+/// RouterFactory from configuration when it changes
 #[async_trait::async_trait]
-pub(crate) trait RouterServiceConfigurator: Send + Sync + 'static {
-    type RouterServiceFactory: RouterServiceFactory;
+pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
+    type RouterFactory: RouterFactory;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: Arc<crate::Schema>,
-        previous_router: Option<&'a Self::RouterServiceFactory>,
-    ) -> Result<Self::RouterServiceFactory, BoxError>;
+        schema: String,
+        previous_router: Option<&'a Self::RouterFactory>,
+        extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+    ) -> Result<Self::RouterFactory, BoxError>;
 }
 
-/// Main implementation of the RouterService factory, supporting the extensions system
+/// Main implementation of the SupergraphService factory, supporting the extensions system
 #[derive(Default)]
-pub(crate) struct YamlRouterServiceFactory;
+pub(crate) struct YamlRouterFactory;
 
 #[async_trait::async_trait]
-impl RouterServiceConfigurator for YamlRouterServiceFactory {
-    type RouterServiceFactory = RouterCreator;
+impl RouterSuperServiceFactory for YamlRouterFactory {
+    type RouterFactory = RouterCreator;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: Arc<Schema>,
-        _previous_router: Option<&'a Self::RouterServiceFactory>,
-    ) -> Result<Self::RouterServiceFactory, BoxError> {
-        let mut builder = PluggableRouterServiceBuilder::new(schema.clone());
-        if configuration.server.introspection {
-            builder = builder.with_naive_introspection();
+        schema: String,
+        previous_router: Option<&'a Self::RouterFactory>,
+        extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+    ) -> Result<Self::RouterFactory, BoxError> {
+        // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
+        let bridge_query_planner = match previous_router.as_ref().map(|router| router.planner()) {
+            None => BridgeQueryPlanner::new(schema.clone(), configuration.clone()).await?,
+            Some(planner) => {
+                BridgeQueryPlanner::new_from_planner(planner, schema.clone(), configuration.clone())
+                    .await?
+            }
+        };
+
+        let schema_changed = previous_router
+            .map(|router| router.supergraph_creator.schema().raw_sdl.as_ref() == &schema)
+            .unwrap_or_default();
+
+        let config_changed = previous_router
+            .map(|router| router.supergraph_creator.config() == configuration)
+            .unwrap_or_default();
+
+        if config_changed {
+            configuration
+                .notify
+                .broadcast_configuration(configuration.clone());
         }
 
-        for (name, _) in schema.subgraphs() {
-            builder = builder.with_subgraph_service(name, SubgraphService::new(name));
+        let schema = bridge_query_planner.schema();
+        if schema_changed {
+            configuration.notify.broadcast_schema(schema.clone());
         }
 
         // Process the plugins.
-        let plugins = create_plugins(&configuration, &schema).await?;
+        let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
+        let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
+        builder = builder.with_configuration(configuration.clone());
+        let subgraph_services = create_subgraph_services(&plugins, &schema, &configuration).await?;
+        for (name, subgraph_service) in subgraph_services {
+            builder = builder.with_subgraph_service(&name, subgraph_service);
+        }
         for (plugin_name, plugin) in plugins {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
-        // We're good to go with the new service. Let the plugins know that this is about to happen.
-        // This is needed so that the Telemetry plugin can swap in the new propagator.
-        // The alternative is that we introduce another service on Plugin that wraps the request
-        // at a much earlier stage.
-        for (_, plugin) in builder.plugins_mut() {
-            tracing::debug!("activating plugin {}", plugin.name());
-            plugin.activate();
-            tracing::debug!("activated plugin {}", plugin.name());
+        // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
+        let mut supergraph_creator = builder.build().await?;
+
+        // Instantiate the parser here so we can use it to warm up the planner below
+        let query_parsing_layer =
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
+
+        if let Some(previous_router) = previous_router {
+            if configuration.supergraph.query_planning.warmed_up_queries > 0 {
+                let cache_keys = previous_router
+                    .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
+                    .await;
+
+                if !cache_keys.is_empty() {
+                    tracing::info!(
+                        "warming up the query plan cache with {} queries, this might take a while",
+                        cache_keys.len()
+                    );
+
+                    supergraph_creator
+                        .warm_up_query_planner(&query_parsing_layer, cache_keys)
+                        .await;
+                }
+            }
+        };
+
+        Ok(Self::RouterFactory::new(
+            query_parsing_layer,
+            Arc::new(supergraph_creator),
+            configuration,
+        )
+        .await?)
+    }
+}
+
+pub(crate) async fn create_subgraph_services(
+    plugins: &[(String, Box<dyn DynPlugin>)],
+    schema: &Schema,
+    configuration: &Configuration,
+) -> Result<
+    IndexMap<
+        String,
+        impl Service<
+                subgraph::Request,
+                Response = subgraph::Response,
+                Error = BoxError,
+                Future = Either<
+                    Either<
+                        BoxFuture<'static, Result<subgraph::Response, BoxError>>,
+                        Either<
+                            BoxFuture<'static, Result<subgraph::Response, BoxError>>,
+                            timeout::future::ResponseFuture<
+                                Oneshot<
+                                    Either<
+                                        Retry<
+                                            RetryPolicy,
+                                            Either<
+                                                rate::service::RateLimit<SubgraphService>,
+                                                SubgraphService,
+                                            >,
+                                        >,
+                                        Either<
+                                            rate::service::RateLimit<SubgraphService>,
+                                            SubgraphService,
+                                        >,
+                                    >,
+                                    subgraph::Request,
+                                >,
+                            >,
+                        >,
+                    >,
+                    <SubgraphService as Service<subgraph::Request>>::Future,
+                >,
+            > + Clone
+            + Send
+            + Sync
+            + 'static,
+    >,
+    BoxError,
+> {
+    let tls_root_store: Option<RootCertStore> = configuration
+        .tls
+        .subgraph
+        .all
+        .create_certificate_store()
+        .transpose()?;
+
+    let subscription_plugin_conf = plugins
+        .iter()
+        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
+        .map(|p| p.config.clone());
+
+    let shaping = plugins
+        .iter()
+        .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
+        .expect("traffic shaping should always be part of the plugin list");
+
+    let mut subgraph_services = IndexMap::new();
+    for (name, _) in schema.subgraphs() {
+        let subgraph_root_store = configuration
+            .tls
+            .subgraph
+            .subgraphs
+            .get(name)
+            .as_ref()
+            .and_then(|subgraph| subgraph.create_certificate_store())
+            .transpose()?
+            .or_else(|| tls_root_store.clone());
+
+        let subgraph_service = shaping.subgraph_service_internal(
+            name,
+            SubgraphService::new(
+                name,
+                configuration
+                    .apq
+                    .subgraph
+                    .subgraphs
+                    .get(name)
+                    .map(|apq| apq.enabled)
+                    .unwrap_or(configuration.apq.subgraph.all.enabled),
+                subgraph_root_store,
+                shaping.enable_subgraph_http2(name),
+                subscription_plugin_conf.clone(),
+                configuration.notify.clone(),
+            ),
+        );
+        subgraph_services.insert(name.clone(), subgraph_service);
+    }
+
+    Ok(subgraph_services)
+}
+
+impl YamlRouterFactory {
+    pub(crate) async fn create_supergraph<'a>(
+        &'a mut self,
+        configuration: Arc<Configuration>,
+        schema: String,
+        previous_router: Option<&'a SupergraphCreator>,
+        extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+    ) -> Result<SupergraphCreator, BoxError> {
+        // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
+        let bridge_query_planner = match previous_router.as_ref().map(|router| router.planner()) {
+            None => BridgeQueryPlanner::new(schema.clone(), configuration.clone()).await?,
+            Some(planner) => {
+                BridgeQueryPlanner::new_from_planner(planner, schema.clone(), configuration.clone())
+                    .await?
+            }
+        };
+
+        let schema = bridge_query_planner.schema();
+
+        // Process the plugins.
+        let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
+
+        let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
+        builder = builder.with_configuration(configuration.clone());
+        let subgraph_services = create_subgraph_services(&plugins, &schema, &configuration).await?;
+        for (name, subgraph_service) in subgraph_services {
+            builder = builder.with_subgraph_service(&name, subgraph_service);
+        }
+        for (plugin_name, plugin) in plugins {
+            builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
-        let pluggable_router_service = builder.build().await?;
-
-        Ok(pluggable_router_service)
+        builder.build().await.map_err(BoxError::from)
     }
+}
+
+impl TlsSubgraph {
+    fn create_certificate_store(&self) -> Option<Result<RootCertStore, ConfigurationError>> {
+        self.certificate_authorities
+            .as_deref()
+            .map(create_certificate_store)
+    }
+}
+
+fn create_certificate_store(
+    certificate_authorities: &str,
+) -> Result<RootCertStore, ConfigurationError> {
+    let mut store = RootCertStore::empty();
+    let certificates = load_certs(certificate_authorities).map_err(|e| {
+        ConfigurationError::CertificateAuthorities {
+            error: format!("could not parse the certificate list: {e}"),
+        }
+    })?;
+    for certificate in certificates {
+        store
+            .add(&certificate)
+            .map_err(|e| ConfigurationError::CertificateAuthorities {
+                error: format!("could not add certificate to root store: {e}"),
+            })?;
+    }
+    if store.is_empty() {
+        Err(ConfigurationError::CertificateAuthorities {
+            error: "the certificate list is empty".to_string(),
+        })
+    } else {
+        Ok(store)
+    }
+}
+
+fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
+    tracing::debug!("loading root certificates");
+
+    // Load and return certificate.
+    let certs = rustls_pemfile::certs(&mut certificates.as_bytes()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            "failed to load certificate".to_string(),
+        )
+    })?;
+    Ok(certs.into_iter().map(rustls::Certificate).collect())
 }
 
 /// test only helper method to create a router factory in integration tests
 ///
 /// not meant to be used directly
-pub async fn __create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
+pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
     let config: Configuration = serde_yaml::from_str(configuration).unwrap();
 
-    let schema: Schema = schema.parse().unwrap();
-
-    let service = YamlRouterServiceFactory::default()
-        .create(Arc::new(config), Arc::new(schema), None)
+    let service = YamlRouterFactory
+        .create(Arc::new(config), schema.to_string(), None, None)
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
@@ -124,115 +431,141 @@ caused by
     );
 }
 
-async fn create_plugins(
+pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
+    extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Vec<(String, Box<dyn DynPlugin>)>, BoxError> {
-    // List of mandatory plugins. Ordering is important!!
-    let mut mandatory_plugins = vec!["experimental.include_subgraph_errors", "apollo.csrf"];
-
-    // Telemetry is *only* mandatory if the global subscriber is set
-    if crate::subscriber::is_global_subscriber_set() {
-        mandatory_plugins.insert(0, "apollo.telemetry");
-    }
-
+    let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
+    let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
+    let extra = extra_plugins.unwrap_or_default();
+    let plugin_registry = &*crate::plugin::PLUGINS;
+    let mut apollo_plugin_factories: HashMap<&str, &PluginFactory> = plugin_registry
+        .iter()
+        .filter(|factory| factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
+        .map(|factory| (factory.name.as_str(), &**factory))
+        .collect();
     let mut errors = Vec::new();
-    let plugin_registry = crate::plugin::plugins();
     let mut plugin_instances = Vec::new();
 
-    for (name, mut configuration) in configuration.plugins().into_iter() {
-        let name = name.clone();
-
-        match plugin_registry.get(name.as_str()) {
-            Some(factory) => {
-                tracing::debug!(
-                    "creating plugin: '{}' with configuration:\n{:#}",
-                    name,
-                    configuration
-                );
-                if name == "apollo.telemetry" {
-                    inject_schema_id(schema, &mut configuration);
-                }
-                // expand any env variables in the config before processing.
-                match factory.create_instance(&configuration).await {
-                    Ok(plugin) => {
-                        plugin_instances.push((name, plugin));
-                    }
-                    Err(err) => errors.push(ConfigurationError::PluginConfiguration {
-                        plugin: name,
-                        error: err.to_string(),
-                    }),
-                }
+    // Use fonction-like macros to avoid borrow conflicts of captures
+    macro_rules! add_plugin {
+        ($name: expr, $factory: expr, $plugin_config: expr) => {{
+            match $factory
+                .create_instance(
+                    &$plugin_config,
+                    schema.as_string().clone(),
+                    configuration.notify.clone(),
+                )
+                .await
+            {
+                Ok(plugin) => plugin_instances.push(($name, plugin)),
+                Err(err) => errors.push(ConfigurationError::PluginConfiguration {
+                    plugin: $name,
+                    error: err.to_string(),
+                }),
             }
-            None => errors.push(ConfigurationError::PluginUnknown(name)),
-        }
+        }};
     }
 
-    // At this point we've processed all of the plugins that were provided in configuration.
-    // We now need to do process our list of mandatory plugins:
-    //  - If a mandatory plugin is already in the list, then it must be re-located
-    //    to its mandatory location
-    //  - If it is missing, it must be added at its mandatory location
+    macro_rules! add_apollo_plugin {
+        ($name: literal, $opt_plugin_config: expr) => {{
+            let name = format!("{}{}", APOLLO_PLUGIN_PREFIX, $name);
+            let factory = apollo_plugin_factories
+                .remove(name.as_str())
+                .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
+            if let Some(mut plugin_config) = $opt_plugin_config {
+                if name == "apollo.telemetry" {
+                    // The apollo.telemetry" plugin isn't happy with empty config, so we
+                    // give it some. If any of the other mandatory plugins need special
+                    // treatment, then we'll have to perform it here.
+                    // This is *required* by the telemetry module or it will fail...
+                    inject_schema_id(schema, &mut plugin_config);
+                }
+                add_plugin!(name, factory, plugin_config);
+            }
+        }};
+    }
 
-    for (desired_position, name) in mandatory_plugins.iter().enumerate() {
-        let position_maybe = plugin_instances.iter().position(|(x, _)| x == name);
-        match position_maybe {
-            Some(actual_position) => {
-                // Found it, re-locate if required.
-                if actual_position != desired_position {
-                    let temp = plugin_instances.remove(actual_position);
-                    plugin_instances.insert(desired_position, temp);
+    macro_rules! add_mandatory_apollo_plugin {
+        ($name: literal) => {
+            add_apollo_plugin!(
+                $name,
+                Some(
+                    apollo_plugins_config
+                        .remove($name)
+                        .unwrap_or(Value::Object(Map::new()))
+                )
+            );
+        };
+    }
+
+    macro_rules! add_optional_apollo_plugin {
+        ($name: literal) => {
+            add_apollo_plugin!($name, apollo_plugins_config.remove($name));
+        };
+    }
+
+    macro_rules! add_user_plugins {
+        () => {
+            for (name, plugin_config) in user_plugins_config {
+                if let Some(factory) = plugin_registry.iter().find(|factory| factory.name == name) {
+                    add_plugin!(name, factory, plugin_config);
+                } else {
+                    errors.push(ConfigurationError::PluginUnknown(name))
                 }
             }
-            None => {
-                // Didn't find it, insert
-                match plugin_registry.get(*name) {
-                    // Create an instance
-                    Some(factory) => {
-                        // Create default (empty) config
-                        let mut config = Value::Object(Map::new());
-                        // The apollo.telemetry" plugin isn't happy with empty config, so we
-                        // give it some. If any of the other mandatory plugins need special
-                        // treatment, then we'll have to perform it here.
-                        // This is *required* by the telemetry module or it will fail...
-                        if *name == "apollo.telemetry" {
-                            inject_schema_id(schema, &mut config);
-                        }
-                        match factory.create_instance(&config).await {
-                            Ok(plugin) => {
-                                plugin_instances
-                                    .insert(desired_position, (name.to_string(), plugin));
-                            }
-                            Err(err) => errors.push(ConfigurationError::PluginConfiguration {
-                                plugin: name.to_string(),
-                                error: err.to_string(),
-                            }),
-                        }
-                    }
-                    None => errors.push(ConfigurationError::PluginUnknown(name.to_string())),
-                }
-            }
-        }
+            plugin_instances.extend(extra);
+        };
+    }
+
+    add_mandatory_apollo_plugin!("include_subgraph_errors");
+    add_mandatory_apollo_plugin!("csrf");
+    add_mandatory_apollo_plugin!("headers");
+    add_mandatory_apollo_plugin!("telemetry");
+    add_mandatory_apollo_plugin!("traffic_shaping");
+    add_optional_apollo_plugin!("forbid_mutations");
+    add_optional_apollo_plugin!("subscription");
+    add_optional_apollo_plugin!("override_subgraph_url");
+    add_optional_apollo_plugin!("authorization");
+    add_optional_apollo_plugin!("authentication");
+
+    // This relative ordering is documented in `docs/source/customizations/native.mdx`:
+    add_optional_apollo_plugin!("rhai");
+    add_optional_apollo_plugin!("coprocessor");
+    add_user_plugins!();
+
+    // Macros above remove from `apollo_plugin_factories`, so anything left at the end
+    // indicates a missing macro call.
+    let unused_apollo_plugin_names = apollo_plugin_factories.keys().copied().collect::<Vec<_>>();
+    if !unused_apollo_plugin_names.is_empty() {
+        panic!(
+            "Apollo plugins without their ordering specified in `fn create_plugins`: {}",
+            unused_apollo_plugin_names.join(", ")
+        )
     }
 
     let plugin_details = plugin_instances
         .iter()
         .map(|(name, plugin)| (name, plugin.name()))
         .collect::<Vec<(&String, &str)>>();
-    tracing::info!(?plugin_details, "list of plugins");
+    tracing::debug!(
+        "plugins list: {:?}",
+        plugin_details
+            .iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<&&String>>()
+    );
 
     if !errors.is_empty() {
         for error in &errors {
             tracing::error!("{:#}", error);
         }
 
-        Err(BoxError::from(
-            errors
-                .into_iter()
-                .map(|e| e.to_string())
-                .collect::<Vec<String>>()
-                .join("\n"),
-        ))
+        Err(BoxError::from(format!(
+            "there were {} configuration errors",
+            errors.len()
+        )))
     } else {
         Ok(plugin_instances)
     }
@@ -244,7 +577,6 @@ fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
             telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
         }
     }
-
     if let (Some(schema_id), Some(apollo)) = (
         &schema.api_schema().schema_id,
         configuration.get_mut("apollo"),
@@ -271,11 +603,12 @@ mod test {
 
     use crate::configuration::Configuration;
     use crate::plugin::Plugin;
+    use crate::plugin::PluginInit;
     use crate::register_plugin;
     use crate::router_factory::inject_schema_id;
-    use crate::router_factory::RouterServiceConfigurator;
-    use crate::router_factory::YamlRouterServiceFactory;
-    use crate::Schema;
+    use crate::router_factory::RouterSuperServiceFactory;
+    use crate::router_factory::YamlRouterFactory;
+    use crate::spec::Schema;
 
     #[derive(Debug)]
     struct PluginError;
@@ -293,8 +626,10 @@ mod test {
     #[derive(Debug)]
     struct AlwaysStartsAndStopsPlugin {}
 
+    /// Configuration for the test plugin
     #[derive(Debug, Default, Deserialize, JsonSchema)]
     struct Conf {
+        /// The name of the test
         name: String,
     }
 
@@ -302,14 +637,14 @@ mod test {
     impl Plugin for AlwaysStartsAndStopsPlugin {
         type Config = Conf;
 
-        async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::debug!("{}", configuration.name);
+        async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+            tracing::debug!("{}", init.config.name);
             Ok(AlwaysStartsAndStopsPlugin {})
         }
     }
 
     register_plugin!(
-        "apollo.test",
+        "test",
         "always_starts_and_stops",
         AlwaysStartsAndStopsPlugin
     );
@@ -323,21 +658,17 @@ mod test {
     impl Plugin for AlwaysFailsToStartPlugin {
         type Config = Conf;
 
-        async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
-            tracing::debug!("{}", configuration.name);
+        async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+            tracing::debug!("{}", init.config.name);
             Err(BoxError::from("Error"))
         }
     }
 
-    register_plugin!(
-        "apollo.test",
-        "always_fails_to_start",
-        AlwaysFailsToStartPlugin
-    );
+    register_plugin!("test", "always_fails_to_start", AlwaysFailsToStartPlugin);
 
     #[tokio::test]
     async fn test_yaml_no_extras() {
-        let config = Configuration::builder().build();
+        let config = Configuration::builder().build().unwrap();
         let service = create_service(config).await;
         assert!(service.is_ok())
     }
@@ -347,7 +678,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                apollo.test.always_starts_and_stops:
+                test.always_starts_and_stops:
                     name: albert
         "#,
         )
@@ -361,7 +692,7 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                apollo.test.always_fails_to_start:
+                test.always_fails_to_start:
                     name: albert
         "#,
         )
@@ -375,9 +706,9 @@ mod test {
         let config: Configuration = serde_yaml::from_str(
             r#"
             plugins:
-                apollo.test.always_starts_and_stops:
+                test.always_starts_and_stops:
                     name: albert
-                apollo.test.always_fails_to_start:
+                test.always_fails_to_start:
                     name: albert
         "#,
         )
@@ -387,19 +718,18 @@ mod test {
     }
 
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
-        let schema: Schema = include_str!("testdata/supergraph.graphql").parse().unwrap();
+        let schema = include_str!("testdata/supergraph.graphql");
 
-        let service = YamlRouterServiceFactory::default()
-            .create(Arc::new(config), Arc::new(schema), None)
+        let service = YamlRouterFactory
+            .create(Arc::new(config), schema.to_string(), None, None)
             .await;
         service.map(|_| ())
     }
 
     #[test]
     fn test_inject_schema_id() {
-        let schema = include_str!("testdata/starstuff@current.graphql")
-            .parse()
-            .unwrap();
+        let schema = include_str!("testdata/starstuff@current.graphql");
+        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
         let mut config = json!({});
         inject_schema_id(&schema, &mut config);
         let config =

@@ -21,10 +21,6 @@ pub(crate) fn accounts_subgraph() -> MockSubgraph {
                                 "__typename": "User",
                                 "id": "2"
                             },
-                            {
-                                "__typename": "User",
-                                "id": "1"
-                            }
                         ]
                     }
                 }},
@@ -37,12 +33,15 @@ pub(crate) fn accounts_subgraph() -> MockSubgraph {
                             {
                                 "name": "Alan Turing"
                             },
-                            {
-                                "name": "Ada Lovelace"
-                            }
                         ]
                     }
                 }}
+        ),
+        (
+            json! {{
+                    "query": "subscription{userWasCreated{name}}",
+                }},
+            json! {{}}
         )
     ].into_iter().map(|(query, response)| (serde_json::from_value(query).unwrap(), serde_json::from_value(response).unwrap())).collect();
     MockSubgraph::new(account_mocks)
@@ -115,6 +114,16 @@ pub(crate) fn reviews_subgraph() -> MockSubgraph {
                         ]
                     }
                 }}
+        ),
+        (
+            json! {{
+                    "query": "subscription{reviewAdded{body}}",
+                }},
+            json! {{
+                "errors": [{
+                    "message": "subscription is not enabled"
+                }]
+            }}
         )
     ].into_iter().map(|(query, response)| (serde_json::from_value(query).unwrap(), serde_json::from_value(response).unwrap())).collect();
     MockSubgraph::new(review_mocks)
@@ -160,10 +169,6 @@ pub(crate) fn products_subgraph() -> MockSubgraph {
                             },
                             {
                                 "__typename": "Product",
-                                "upc": "1"
-                            },
-                            {
-                                "__typename": "Product",
                                 "upc": "2"
                             }
                         ]
@@ -172,9 +177,6 @@ pub(crate) fn products_subgraph() -> MockSubgraph {
             json!{{
                     "data": {
                         "_entities": [
-                            {
-                                "name": "Table"
-                            },
                             {
                                 "name": "Table"
                             },

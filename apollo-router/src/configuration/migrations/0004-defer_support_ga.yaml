@@ -1,0 +1,6 @@
+description: supergraph.preview_defer_support moved to supergraph.defer_support
+actions:
+  - type: move
+    from: supergraph.preview_defer_support
+    to: supergraph.defer_support
+

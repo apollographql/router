@@ -4,20 +4,15 @@ metadata:
   name: {{ include "router.fullname" . }}
   labels:
     {{- include "router.labels" . | nindent 4 }}
+    {{- if .Values.extraLabels }}
+    {{- include "common.templatizeExtraLabels" . | nindent 4 }}
+    {{- end }}
   {{/* There may not be much configuration so check that there is something */}}
-  {{- if .Values.router.configuration }}
-  {{- if .Values.router.configuration.telemetry }}
-  {{- if .Values.router.configuration.telemetry.metrics }}
-  {{- if .Values.router.configuration.telemetry.metrics.prometheus }}
-  {{- if .Values.router.configuration.telemetry.metrics.prometheus.enabled }}
+  {{- if (((((.Values.router).configuration).telemetry).metrics).prometheus).enabled }}
   annotations:
-    prometheus.io/path: /plugins/apollo.telemetry/prometheus
-    prometheus.io/port: "{{ .Values.containerPorts.http }}"
+    prometheus.io/path: {{ .Values.router.configuration.telemetry.metrics.prometheus.path | default "/metrics" }}
+    prometheus.io/port: {{ (splitList ":" .Values.router.configuration.telemetry.metrics.prometheus.listen | last) | default "9090" | quote }}
     prometheus.io/scrape: "true"
-  {{- end }}
-  {{- end }}
-  {{- end }}
-  {{- end }}
   {{- end }}
 spec:
   {{- if not .Values.autoscaling.enabled }}
@@ -28,12 +23,20 @@ spec:
       {{- include "router.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
+      {{- if or .Values.podAnnotations .Values.supergraphFile }}
       annotations:
-        {{- toYaml . | nindent 8 }}
+        {{- if .Values.supergraphFile }}
+        checksum/supergraph-config-map: {{ .Values.supergraphFile | sha256sum }}
+        {{- end }}
+        {{- if .Values.podAnnotations }}
+        {{- toYaml .Values.podAnnotations | nindent 8 }}
+        {{- end }}
       {{- end }}
       labels:
         {{- include "router.selectorLabels" . | nindent 8 }}
+        {{- if .Values.extraLabels }}
+        {{- include "common.templatizeExtraLabels" . | nindent 8 }}
+        {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -58,9 +61,9 @@ spec:
             - /app/configuration.yaml
             {{- end }}
           {{- end }}
-          {{- if or .Values.managedFederation.apiKey .Values.managedFederation.graphRef .Values.extraEnvVars }}
+          {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret .Values.managedFederation.graphRef .Values.extraEnvVars }}
           env:
-            {{- if .Values.managedFederation.apiKey }}
+            {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret }}
             - name: APOLLO_KEY
               valueFrom:
                 secretKeyRef:
@@ -91,28 +94,46 @@ spec:
             - name: http
               containerPort: {{ .Values.containerPorts.http }}
               protocol: TCP
+            - name: health
+              containerPort: {{ .Values.containerPorts.health }}
+              protocol: TCP
+            {{- if .Values.serviceMonitor.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.containerPorts.metrics }}
+              protocol: TCP
+            {{- end }}
+          lifecycle:
+            {{- toYaml .Values.lifecycle | nindent 12 }}
           livenessProbe:
             httpGet:
-              path: /.well-known/apollo/server-health
-              port: http
+              path: "/health?live"
+              port: {{ splitList ":" ((index .Values.router.configuration "health_check").listen | default ":8088") | last }}
+            initialDelaySeconds: {{  ((.Values.probes).liveness).initialDelaySeconds | default 0 }}
           readinessProbe:
             httpGet:
-              path: /.well-known/apollo/server-health
-              port: http
+              path: "/health?ready"
+              port: {{ (splitList ":"  ((index .Values.router.configuration "health_check").listen | default ":8088")) | last }}
+            initialDelaySeconds: {{ ((.Values.probes).readiness).initialDelaySeconds | default 0 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- if or .Values.router.configuration  .Values.extraVolumeMounts }}
           volumeMounts:
             {{- if .Values.router.configuration }}
             - name: router-configuration
-              mountPath: /app/configuration.yaml
-              subPath: configuration.yaml
+              mountPath: /app/
               readOnly: true
             {{- end }}
           {{- if .Values.extraVolumeMounts }}
             {{- include "common.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
           {{- end }}
           {{- end }}
+        {{- if .Values.extraContainers }}
+          {{- include "common.tplvalues.render" (dict "value" .Values.extraContainers "context" $) | nindent 8 }}
+        {{- end }}
+      {{- if .Values.initContainers }}
+      initContainers:
+        {{- include "common.tplvalues.render" (dict "value" .Values.initContainers "context" $) | nindent 8 }}
+      {{- end }}
       {{- if or .Values.router.configuration .Values.extraVolumes }}
       volumes:
         {{- if .Values.router.configuration }}
@@ -135,4 +156,10 @@ spec:
       {{- with .Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      {{- end }}
+      {{- if .Values.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       {{- end }}

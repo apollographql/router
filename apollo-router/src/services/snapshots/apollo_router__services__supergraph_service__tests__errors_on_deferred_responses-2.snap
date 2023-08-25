@@ -1,0 +1,25 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+expression: stream.next_response().await.unwrap()
+---
+{
+  "hasNext": false,
+  "incremental": [
+    {
+      "data": {
+        "name": null
+      },
+      "path": [
+        "currentUser"
+      ],
+      "errors": [
+        {
+          "message": "error user 0",
+          "path": [
+            "currentUser"
+          ]
+        }
+      ]
+    }
+  ]
+}

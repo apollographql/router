@@ -1,0 +1,18 @@
+---
+source: apollo-router/tests/integration_tests.rs
+expression: stream.next().await.unwrap().unwrap()
+---
+{
+  "hasNext": false,
+  "incremental": [
+    {
+      "label": "name",
+      "data": {
+        "name": "Ada Lovelace"
+      },
+      "path": [
+        "me"
+      ]
+    }
+  ]
+}

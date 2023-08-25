@@ -1,0 +1,71 @@
+{
+  "kind": "Condition",
+  "condition": "shouldDefer",
+  "ifClause": {
+    "kind": "Defer",
+    "primary": {
+      "path": null,
+      "subselection": "{ me { id } }",
+      "node": {
+        "kind": "Fetch",
+        "serviceName": "accounts",
+        "variableUsages": [],
+        "operation": "query Me__accounts__0{me{__typename id}}",
+        "operationName": "Me__accounts__0",
+        "operationKind": "query",
+        "id": "0"
+      }
+    },
+    "deferred": [
+      {
+        "depends": [
+          {
+            "id": "0",
+            "deferLabel": null
+          }
+        ],
+        "label": null,
+        "queryPath": ["me"],
+        "subselection": "{ ... on User { name username } }",
+        "node": {
+          "kind": "Flatten",
+          "path": ["me"],
+          "node": {
+            "kind": "Fetch",
+            "serviceName": "accounts",
+            "requires": [
+              {
+                "kind": "InlineFragment",
+                "typeCondition": "User",
+                "selections": [
+                  {
+                    "kind": "Field",
+                    "name": "__typename"
+                  },
+                  {
+                    "kind": "Field",
+                    "name": "id"
+                  }
+                ]
+              }
+            ],
+            "variableUsages": [],
+            "operation": "query Me__accounts__1($representations:[_Any!]!){_entities(representations:$representations){...on User{name username}}}",
+            "operationName": "Me__accounts__1",
+            "operationKind": "query",
+            "id": null
+          }
+        }
+      }
+    ]
+  },
+  "elseClause": {
+    "kind": "Fetch",
+    "serviceName": "accounts",
+    "variableUsages": [],
+    "operation": "query Me__accounts__2{me{id name username}}",
+    "operationName": "Me__accounts__2",
+    "operationKind": "query",
+    "id": null
+  }
+}

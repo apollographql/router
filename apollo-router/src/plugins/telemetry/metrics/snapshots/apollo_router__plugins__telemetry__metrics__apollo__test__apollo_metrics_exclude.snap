@@ -1,11 +1,15 @@
 ---
 source: apollo-router/src/plugins/telemetry/metrics/apollo.rs
-assertion_line: 332
 expression: results
 ---
 [
   {
-    "traces_and_stats": {},
-    "operation_count": 1
+    "request_id": "[REDACTED]",
+    "stats": {},
+    "licensed_operation_count_by_type": {
+      "type": "query",
+      "subtype": null,
+      "licensed_operation_count": 1
+    }
   }
 ]

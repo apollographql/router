@@ -1,7 +1,7 @@
-server:
+supergraph:
   listen: 1.2.3.4:5
 telemetry:
   tracing:
     datadog:
-      endpoint: ${ENDPOINT}
+      endpoint: ${env.TEST_CONFIG_ENDPOINT}
 

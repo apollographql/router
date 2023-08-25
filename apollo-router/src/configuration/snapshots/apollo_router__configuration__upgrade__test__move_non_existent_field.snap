@@ -1,0 +1,7 @@
+---
+source: apollo-router/src/configuration/upgrade.rs
+expression: "apply_migration(&json!({ \"should\" : \"stay\" }),\n        &Migration::builder().action(Action::Move {\n                            from: \"obj.field1\".to_string(),\n                            to: \"new.obj.field1\".to_string(),\n                        }).description(\"move field1\").build()).expect(\"expected successful migration\")"
+---
+{
+  "should": "stay"
+}

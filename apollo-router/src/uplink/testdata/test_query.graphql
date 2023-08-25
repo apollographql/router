@@ -1,0 +1,21 @@
+query TestQuery($apiKey: String!, $graph_ref: String!, $ifAfterId: ID) {
+    uplinkQuery(ref: $graph_ref, apiKey: $apiKey, ifAfterId: $ifAfterId) {
+        __typename
+        ... on New {
+            id
+            data {
+                name
+                ordering
+            }
+            minDelaySeconds
+        }
+        ... on Unchanged {
+            id
+            minDelaySeconds
+        }
+        ... on FetchError {
+            code
+            message
+        }
+    }
+}

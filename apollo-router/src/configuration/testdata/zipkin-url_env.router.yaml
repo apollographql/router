@@ -3,4 +3,4 @@ telemetry:
     trace_config:
       service_name: router
     zipkin:
-      endpoint: ${ENDPOINT}
+      endpoint: ${env.TEST_CONFIG_ENDPOINT}

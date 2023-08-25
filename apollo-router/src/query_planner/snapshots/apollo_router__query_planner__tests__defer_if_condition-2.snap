@@ -1,0 +1,17 @@
+---
+source: apollo-router/src/query_planner/mod.rs
+expression: deferred_response
+---
+{
+  "data": {
+    "me": {
+      "name": "Ada Lovelace",
+      "username": "@ada",
+      "__typename": "User",
+      "id": "1"
+    }
+  },
+  "path": [
+    "me"
+  ]
+}

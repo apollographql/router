@@ -1,0 +1,9 @@
+supergraph:
+  apq:
+    router:
+      cache:
+        in_memory:
+          limit: 2000
+        redis:
+          urls:
+            - http://example.com

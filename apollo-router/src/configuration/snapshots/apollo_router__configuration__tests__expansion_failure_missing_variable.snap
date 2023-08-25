@@ -1,0 +1,5 @@
+---
+source: apollo-router/src/configuration/mod.rs
+expression: error.to_string()
+---
+could not expand variable: TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT, environment variable not found

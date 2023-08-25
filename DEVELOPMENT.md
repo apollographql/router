@@ -18,20 +18,16 @@ The **Apollo Router** is a configurable, high-performance **graph router** for a
 
 ## Development
 
-We recommend using [asdf](https://github.com/asdf-vm/asdf) to make sure your
-nodejs and rust versions are correct.  The versions currently used to compile
-are specified in [.tool-versions](.tool-versions). To set up your toolchain
-run:
+You will need a recent version of rust (`1.65` works well as of writing). 
+Installing rust [using rustup](https://www.rust-lang.org/tools/install) is
+the recommended way to do it as it will install rustup, rustfmt and other 
+goodies that are not always included by default in other rust distribution channels:
 
-```shell
-asdf plugin add rust
-asdf plugin add nodejs
-asdf install
-asdf reshim
+```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-The `router-bridge` dependency requires building a nodejs project. This should
-happen automatically, but may take some time.
+In addition, you will need to [install protoc](https://grpc.io/docs/protoc-installation/).
 
 Set up your git hooks:
 
@@ -43,8 +39,9 @@ git config --local core.hooksPath .githooks/
 
 Use `cargo build --all-targets` to build the project.
 
-Some tests run against the existing Node.js implementation of the Apollo Router. This
-requires that the `federation-demo` project is running:
+Some tests use external services such as Jaeger and Redis. 
+
+To start these services: 
 
 ```
 docker-compose up -d
@@ -53,7 +50,6 @@ docker-compose up -d
 **Note:** `-d` is for running into background. You can remove `-d` if you
 have issues and you want to see the logs or if you want to run the service
 in foreground.
-
 
 ### Run Apollo Router against the docker-compose or Node.js setup
 
@@ -82,6 +78,35 @@ The CI checks require `cargo-deny` and `cargo-about` which can both be installed
 
 They also need you to have the federation-demo project up and running,
 as explained in the Getting started section above.
+
+### Yaml configuration design
+
+If you are adding a new feature or modifying an existing feature then consult the [yaml design guidance](dev-docs/yaml-design-guidance.md) page.
+
+
+### Investigating memory usage
+
+There are two features: `dhat-heap` and `dhat-ad-hoc` which may be enabled for investigating memory issues
+with the router. You may enable either or both, depending on the kind of problem you are investigating.
+
+You have to build the router with your choice of feature flags and you must use the `release-dhat` profile.
+
+e.g.: heap and ad-hoc allocation tracing
+```shell
+# e.g. heap and ad-hoc allocation tracing: cargo build --profile release-dhat --features dhat-heap,dhat-ad-hoc
+```
+
+e.g.: heap allocation tracing
+```shell
+cargo build --profile release-dhat --features dhat-heap 
+```
+
+This will create a router in `./target/release-dhat`.
+
+When you run your binary, on termination you will get `dhat-heap.json` and/or `dhat-ad-hoc.json` files which can
+be examined using standard DHAT tooling.
+
+For more details on interpreting these files and running tests, see the [dhat-rs](https://docs.rs/dhat/latest/dhat/#running) crate documentation.
 
 ### Troubleshoot
 

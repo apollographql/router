@@ -1,0 +1,44 @@
+---
+source: apollo-router/tests/integration_tests.rs
+expression: "serde_json::from_slice::<graphql::Response>(&response.bytes().await.unwrap()).unwrap()"
+---
+{
+  "data": {
+    "me": {
+      "reviews": [
+        {
+          "author": {
+            "reviews": [
+              {
+                "author": {
+                  "name": "Ada Lovelace"
+                }
+              },
+              {
+                "author": {
+                  "name": "Ada Lovelace"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "author": {
+            "reviews": [
+              {
+                "author": {
+                  "name": "Ada Lovelace"
+                }
+              },
+              {
+                "author": {
+                  "name": "Ada Lovelace"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

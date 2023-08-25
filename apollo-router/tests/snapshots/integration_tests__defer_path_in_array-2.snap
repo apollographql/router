@@ -1,0 +1,33 @@
+---
+source: apollo-router/tests/integration_tests.rs
+expression: stream.next().await.unwrap().unwrap()
+---
+{
+  "hasNext": false,
+  "incremental": [
+    {
+      "label": "author name",
+      "data": {
+        "name": "Ada Lovelace"
+      },
+      "path": [
+        "me",
+        "reviews",
+        0,
+        "author"
+      ]
+    },
+    {
+      "label": "author name",
+      "data": {
+        "name": "Ada Lovelace"
+      },
+      "path": [
+        "me",
+        "reviews",
+        1,
+        "author"
+      ]
+    }
+  ]
+}

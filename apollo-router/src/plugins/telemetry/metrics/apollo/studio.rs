@@ -1,50 +1,31 @@
 use std::collections::HashMap;
 use std::ops::AddAssign;
 use std::time::Duration;
-use std::time::SystemTime;
 
-use apollo_spaceport::ReferencedFieldsForType;
-use apollo_spaceport::ReportHeader;
-use apollo_spaceport::StatsContext;
-use itertools::Itertools;
 use serde::Serialize;
+use uuid::Uuid;
 
 use super::duration_histogram::DurationHistogram;
+use crate::plugins::telemetry::apollo::LicensedOperationCountByType;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 
-impl Report {
-    #[cfg(test)]
-    fn new(reports: Vec<SingleReport>) -> Report {
-        let mut aggregated_report = Report::default();
-        for report in reports {
-            aggregated_report += report;
-        }
-        aggregated_report
-    }
-
-    pub(crate) fn into_report(self, header: ReportHeader) -> apollo_spaceport::Report {
-        let mut report = apollo_spaceport::Report {
-            header: Some(header),
-            end_time: Some(SystemTime::now().into()),
-            operation_count: self.operation_count,
-            ..Default::default()
-        };
-
-        for (key, traces_and_stats) in self.traces_per_query {
-            report.traces_per_query.insert(key, traces_and_stats.into());
-        }
-        report
-    }
+#[derive(Default, Debug, Serialize)]
+pub(crate) struct SingleStatsReport {
+    pub(crate) request_id: Uuid,
+    pub(crate) stats: HashMap<String, SingleStats>,
+    pub(crate) licensed_operation_count_by_type: Option<LicensedOperationCountByType>,
 }
 
 #[derive(Default, Debug, Serialize)]
-pub(crate) struct SingleReport {
-    pub(crate) traces_and_stats: HashMap<String, SingleTracesAndStats>,
-    pub(crate) operation_count: u64,
-}
-
-#[derive(Default, Debug, Serialize)]
-pub(crate) struct SingleTracesAndStats {
+pub(crate) struct SingleStats {
     pub(crate) stats_with_context: SingleContextualizedStats,
+    pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
+}
+
+#[derive(Default, Debug, Serialize)]
+pub(crate) struct Stats {
+    pub(crate) stats_with_context: ContextualizedStats,
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
@@ -54,7 +35,6 @@ pub(crate) struct SingleContextualizedStats {
     pub(crate) query_latency_stats: SingleQueryLatencyStats,
     pub(crate) per_type_stat: HashMap<String, SingleTypeStat>,
 }
-
 // TODO Make some of these fields bool
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct SingleQueryLatencyStats {
@@ -87,47 +67,16 @@ pub(crate) struct SingleTypeStat {
 pub(crate) struct SingleFieldStat {
     pub(crate) return_type: String,
     pub(crate) errors_count: u64,
-    pub(crate) estimated_execution_count: f64,
     pub(crate) requests_with_errors_count: u64,
-    pub(crate) latency: Duration,
+
+    // Floating-point estimates that compensate for the sampling rate,
+    // rounded to integers when converting to Protobuf after aggregating
+    // a number of requests.
+    pub(crate) observed_execution_count: u64,
+    pub(crate) latency: DurationHistogram<f64>,
 }
 
-#[derive(Default, Serialize)]
-pub(crate) struct Report {
-    traces_per_query: HashMap<String, TracesAndStats>,
-    pub(crate) operation_count: u64,
-}
-
-impl AddAssign<SingleReport> for Report {
-    fn add_assign(&mut self, report: SingleReport) {
-        for (k, v) in report.traces_and_stats {
-            *self.traces_per_query.entry(k).or_default() += v;
-        }
-
-        self.operation_count += report.operation_count;
-    }
-}
-
-#[derive(Default, Debug, Serialize)]
-pub(crate) struct TracesAndStats {
-    #[serde(with = "vectorize")]
-    pub(crate) stats_with_context: HashMap<StatsContext, ContextualizedStats>,
-    pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
-}
-
-impl AddAssign<SingleTracesAndStats> for TracesAndStats {
-    fn add_assign(&mut self, stats: SingleTracesAndStats) {
-        *self
-            .stats_with_context
-            .entry(stats.stats_with_context.context.clone())
-            .or_default() += stats.stats_with_context;
-
-        // No merging required here because references fields by type will always be the same for each stats report key.
-        self.referenced_fields_by_type = stats.referenced_fields_by_type;
-    }
-}
-
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct ContextualizedStats {
     context: StatsContext,
     query_latency_stats: QueryLatencyStats,
@@ -144,7 +93,7 @@ impl AddAssign<SingleContextualizedStats> for ContextualizedStats {
     }
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct QueryLatencyStats {
     request_latencies: DurationHistogram,
     persisted_query_hits: u64,
@@ -181,7 +130,7 @@ impl AddAssign<SingleQueryLatencyStats> for QueryLatencyStats {
     }
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct PathErrorStats {
     children: HashMap<String, PathErrorStats>,
     errors_count: u64,
@@ -198,7 +147,7 @@ impl AddAssign<SinglePathErrorStats> for PathErrorStats {
     }
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct TypeStat {
     per_field_stat: HashMap<String, FieldStat>,
 }
@@ -211,26 +160,31 @@ impl AddAssign<SingleTypeStat> for TypeStat {
     }
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct FieldStat {
     return_type: String,
     errors_count: u64,
-    estimated_execution_count: f64,
     requests_with_errors_count: u64,
-    latency: DurationHistogram,
+    observed_execution_count: u64,
+    // Floating-point estimates that compensate for the sampling rate,
+    // rounded to integers when converting to Protobuf after aggregating
+    // a number of requests.
+    latency: DurationHistogram<f64>,
 }
 
 impl AddAssign<SingleFieldStat> for FieldStat {
     fn add_assign(&mut self, stat: SingleFieldStat) {
-        self.latency.increment_duration(Some(stat.latency), 1);
+        self.latency += stat.latency;
         self.requests_with_errors_count += stat.requests_with_errors_count;
-        self.estimated_execution_count += stat.estimated_execution_count;
+        self.observed_execution_count += stat.observed_execution_count;
         self.errors_count += stat.errors_count;
         self.return_type = stat.return_type;
     }
 }
 
-impl From<ContextualizedStats> for apollo_spaceport::ContextualizedStats {
+impl From<ContextualizedStats>
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::ContextualizedStats
+{
     fn from(stats: ContextualizedStats) -> Self {
         Self {
             per_type_stat: stats
@@ -244,29 +198,21 @@ impl From<ContextualizedStats> for apollo_spaceport::ContextualizedStats {
     }
 }
 
-impl From<TracesAndStats> for apollo_spaceport::TracesAndStats {
-    fn from(stats: TracesAndStats) -> Self {
-        Self {
-            stats_with_context: stats.stats_with_context.into_values().map_into().collect(),
-            referenced_fields_by_type: stats.referenced_fields_by_type,
-            ..Default::default()
-        }
-    }
-}
-
-impl From<QueryLatencyStats> for apollo_spaceport::QueryLatencyStats {
+impl From<QueryLatencyStats>
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::QueryLatencyStats
+{
     fn from(stats: QueryLatencyStats) -> Self {
         Self {
-            latency_count: stats.request_latencies.buckets,
-            request_count: stats.request_latencies.entries,
-            cache_hits: stats.cache_hits.entries,
-            cache_latency_count: stats.cache_hits.buckets,
+            request_count: stats.request_latencies.total,
+            latency_count: stats.request_latencies.buckets_to_i64(),
+            cache_hits: stats.cache_hits.total,
+            cache_latency_count: stats.cache_hits.buckets_to_i64(),
             persisted_query_hits: stats.persisted_query_hits,
             persisted_query_misses: stats.persisted_query_misses,
             root_error_stats: Some(stats.root_error_stats.into()),
             requests_with_errors_count: stats.requests_with_errors_count,
-            public_cache_ttl_count: stats.public_cache_ttl_count.buckets,
-            private_cache_ttl_count: stats.private_cache_ttl_count.buckets,
+            public_cache_ttl_count: stats.public_cache_ttl_count.buckets_to_i64(),
+            private_cache_ttl_count: stats.private_cache_ttl_count.buckets_to_i64(),
             registered_operation_count: stats.registered_operation_count,
             forbidden_operation_count: stats.forbidden_operation_count,
             requests_without_field_instrumentation: stats.requests_without_field_instrumentation,
@@ -274,7 +220,9 @@ impl From<QueryLatencyStats> for apollo_spaceport::QueryLatencyStats {
     }
 }
 
-impl From<PathErrorStats> for apollo_spaceport::PathErrorStats {
+impl From<PathErrorStats>
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::PathErrorStats
+{
     fn from(stats: PathErrorStats) -> Self {
         Self {
             children: stats
@@ -288,7 +236,7 @@ impl From<PathErrorStats> for apollo_spaceport::PathErrorStats {
     }
 }
 
-impl From<TypeStat> for apollo_spaceport::TypeStat {
+impl From<TypeStat> for crate::plugins::telemetry::apollo_exporter::proto::reports::TypeStat {
     fn from(stat: TypeStat) -> Self {
         Self {
             per_field_stat: stat
@@ -300,32 +248,18 @@ impl From<TypeStat> for apollo_spaceport::TypeStat {
     }
 }
 
-impl From<FieldStat> for apollo_spaceport::FieldStat {
+impl From<FieldStat> for crate::plugins::telemetry::apollo_exporter::proto::reports::FieldStat {
     fn from(stat: FieldStat) -> Self {
         Self {
             return_type: stat.return_type,
             errors_count: stat.errors_count,
-            observed_execution_count: stat.latency.entries,
-            estimated_execution_count: stat.estimated_execution_count as u64,
             requests_with_errors_count: stat.requests_with_errors_count,
-            latency_count: stat.latency.buckets,
+
+            observed_execution_count: stat.observed_execution_count,
+            // Round sampling-rate-compensated floating-point estimates to nearest integers:
+            estimated_execution_count: stat.latency.total as u64,
+            latency_count: stat.latency.buckets_to_i64(),
         }
-    }
-}
-
-pub(crate) mod vectorize {
-    use serde::Serialize;
-    use serde::Serializer;
-
-    pub(crate) fn serialize<'a, T, K, V, S>(target: T, ser: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-        T: IntoIterator<Item = (&'a K, &'a V)>,
-        K: Serialize + 'a,
-        V: Serialize + 'a,
-    {
-        let container: Vec<_> = target.into_iter().collect();
-        serde::Serialize::serialize(&container, ser)
     }
 }
 
@@ -334,16 +268,15 @@ mod test {
     use std::collections::HashMap;
     use std::time::Duration;
 
-    use apollo_spaceport::ReferencedFieldsForType;
-
     use super::*;
+    use crate::plugins::telemetry::apollo::Report;
+    use crate::query_planner::OperationKind;
 
     #[test]
     fn test_aggregation() {
         let metric_1 = create_test_metric("client_1", "version_1", "report_key_1");
         let metric_2 = create_test_metric("client_1", "version_1", "report_key_1");
         let aggregated_metrics = Report::new(vec![metric_1, metric_2]);
-
         insta::with_settings!({sort_maps => true}, {
             insta::assert_json_snapshot!(aggregated_metrics);
         });
@@ -377,21 +310,29 @@ mod test {
         client_name: &str,
         client_version: &str,
         stats_report_key: &str,
-    ) -> SingleReport {
+    ) -> SingleStatsReport {
         // This makes me sad. Really this should have just been a case of generate a couple of metrics using
         // a prop testing library and then assert that things got merged OK. But in practise everything was too hard to use
 
         let mut count = Count::default();
 
-        SingleReport {
-            operation_count: count.inc_u64(),
-            traces_and_stats: HashMap::from([(
+        SingleStatsReport {
+            request_id: Uuid::default(),
+            licensed_operation_count_by_type: LicensedOperationCountByType {
+                r#type: OperationKind::Query,
+                subtype: None,
+                licensed_operation_count: count.inc_u64(),
+            }
+            .into(),
+            stats: HashMap::from([(
                 stats_report_key.to_string(),
-                SingleTracesAndStats {
+                SingleStats {
                     stats_with_context: SingleContextualizedStats {
                         context: StatsContext {
                             client_name: client_name.to_string(),
                             client_version: client_version.to_string(),
+                            operation_type: String::new(),
+                            operation_subtype: String::new(),
                         },
                         query_latency_stats: SingleQueryLatencyStats {
                             latency: Duration::from_secs(1),
@@ -458,12 +399,14 @@ mod test {
     }
 
     fn field_stat(count: &mut Count) -> SingleFieldStat {
+        let mut latency = DurationHistogram::default();
+        latency.increment_duration(Some(Duration::from_secs(1)), 1.0);
         SingleFieldStat {
             return_type: "String".into(),
             errors_count: count.inc_u64(),
-            estimated_execution_count: count.inc_f64(),
+            observed_execution_count: count.inc_u64(),
             requests_with_errors_count: count.inc_u64(),
-            latency: Duration::from_secs(1),
+            latency,
         }
     }
 
@@ -475,10 +418,6 @@ mod test {
         fn inc_u64(&mut self) -> u64 {
             self.count += 1;
             self.count
-        }
-        fn inc_f64(&mut self) -> f64 {
-            self.count += 1;
-            self.count as f64
         }
     }
 }

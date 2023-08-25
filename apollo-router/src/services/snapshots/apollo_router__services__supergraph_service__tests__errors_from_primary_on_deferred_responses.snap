@@ -1,0 +1,12 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+expression: stream.next_response().await.unwrap()
+---
+{
+  "data": {
+    "computer": {
+      "id": "Computer1"
+    }
+  },
+  "hasNext": true
+}

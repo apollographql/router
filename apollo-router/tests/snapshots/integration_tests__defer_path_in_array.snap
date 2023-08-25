@@ -1,0 +1,25 @@
+---
+source: apollo-router/tests/integration_tests.rs
+expression: stream.next().await.unwrap().unwrap()
+---
+{
+  "data": {
+    "me": {
+      "reviews": [
+        {
+          "id": "1",
+          "author": {
+            "id": "1"
+          }
+        },
+        {
+          "id": "2",
+          "author": {
+            "id": "1"
+          }
+        }
+      ]
+    }
+  },
+  "hasNext": true
+}

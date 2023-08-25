@@ -1,7 +1,9 @@
+//! Create a new tower Service instance.
 use tower::Service;
 
-pub trait NewService<Request> {
+/// Trait
+pub(crate) trait ServiceFactory<Request> {
     type Service: Service<Request>;
 
-    fn new_service(&self) -> Self::Service;
+    fn create(&self) -> Self::Service;
 }

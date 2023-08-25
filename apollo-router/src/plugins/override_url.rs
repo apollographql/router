@@ -4,27 +4,40 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use http::Uri;
-use tower::util::BoxService;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceExt;
 
 use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::SubgraphRequest;
-use crate::SubgraphResponse;
+use crate::services::subgraph;
+use crate::services::SubgraphRequest;
 
 #[derive(Debug, Clone)]
 struct OverrideSubgraphUrl {
     urls: HashMap<String, Uri>,
 }
 
+/// Subgraph URL mappings
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(untagged)]
+enum Conf {
+    /// Subgraph URL mappings
+    Mapping(HashMap<String, url::Url>),
+}
+
 #[async_trait::async_trait]
 impl Plugin for OverrideSubgraphUrl {
-    type Config = HashMap<String, url::Url>;
+    type Config = Conf;
 
-    async fn new(configuration: Self::Config) -> Result<Self, BoxError> {
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let Conf::Mapping(urls) = init.config;
         Ok(OverrideSubgraphUrl {
-            urls: configuration
+            urls: urls
                 .into_iter()
                 .map(|(k, v)| (k, Uri::from_str(v.as_str()).unwrap()))
                 .collect(),
@@ -34,8 +47,8 @@ impl Plugin for OverrideSubgraphUrl {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: BoxService<SubgraphRequest, SubgraphResponse, BoxError>,
-    ) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        service: subgraph::BoxService,
+    ) -> subgraph::BoxService {
         let new_url = self.urls.get(subgraph_name).cloned();
         service
             .map_request(move |mut req: SubgraphRequest| {
@@ -61,11 +74,11 @@ mod tests {
     use tower::Service;
     use tower::ServiceExt;
 
-    use super::*;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::DynPlugin;
+    use crate::services::SubgraphRequest;
+    use crate::services::SubgraphResponse;
     use crate::Context;
-    use crate::SubgraphRequest;
 
     #[tokio::test]
     async fn plugin_registered() {
@@ -83,7 +96,7 @@ mod tests {
             });
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.override_subgraph_url")
+            .find(|factory| factory.name == "apollo.override_subgraph_url")
             .expect("Plugin not found")
             .create_instance(
                 &Value::from_str(
@@ -93,11 +106,13 @@ mod tests {
             }"#,
                 )
                 .unwrap(),
+                Default::default(),
+                Default::default(),
             )
             .await
             .unwrap();
         let mut subgraph_service =
-            dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service.build()));
+            dyn_plugin.subgraph_service("test_one", BoxService::new(mock_service));
         let context = Context::new();
         context.insert("test".to_string(), 5i64).unwrap();
         let subgraph_req = SubgraphRequest::fake_builder().context(context);

@@ -1,11 +1,13 @@
-//! Asynchronous Checkpoint [`Layer`].
+//! Asynchronous Checkpoint
 //!
 //! Provides a general mechanism for controlling the flow of a request. Useful in any situation
 //! where the caller wishes to provide control flow for a request.
 //!
 //! If the evaluated closure succeeds then the request is passed onto the next service in the
-//! chain of responsibilities. If it fails, then the control flow is broken a response is passed
+//! chain of responsibilities. If it fails, then the control flow is broken and a response is passed
 //! back to the invoking service.
+//!
+//! See [`Layer`] and [`Service`] for more details.
 
 use std::marker::PhantomData;
 use std::ops::ControlFlow;
@@ -19,7 +21,7 @@ use tower::Layer;
 use tower::Service;
 use tower::ServiceExt;
 
-/// [`Layer`] for Asynchronous Checkpoints.
+/// [`Layer`] for Asynchronous Checkpoints. See [`ServiceBuilderExt::checkpoint_async()`](crate::layers::ServiceBuilderExt::checkpoint_async()).
 #[allow(clippy::type_complexity)]
 pub struct AsyncCheckpointLayer<S, Fut, Request>
 where
@@ -65,7 +67,7 @@ where
     }
 }
 
-/// [`Service`] for Asynchronous Checkpoints.
+/// [`Service`] for Asynchronous Checkpoints. See [`ServiceBuilderExt::checkpoint_async()`](crate::layers::ServiceBuilderExt::checkpoint_async()).
 #[allow(clippy::type_complexity)]
 pub struct AsyncCheckpointService<S, Fut, Request>
 where
@@ -145,31 +147,33 @@ mod async_checkpoint_tests {
     use super::*;
     use crate::layers::ServiceBuilderExt;
     use crate::plugin::test::MockExecutionService;
-    use crate::ExecutionRequest;
-    use crate::ExecutionResponse;
+    use crate::services::ExecutionRequest;
+    use crate::services::ExecutionResponse;
 
     #[tokio::test]
     async fn test_service_builder() {
         let expected_label = "from_mock_service";
 
         let mut execution_service = MockExecutionService::new();
+        execution_service.expect_clone().return_once(move || {
+            let mut execution_service = MockExecutionService::new();
+            execution_service
+                .expect_call()
+                .times(1)
+                .returning(move |req: ExecutionRequest| {
+                    Ok(ExecutionResponse::fake_builder()
+                        .label(expected_label.to_string())
+                        .context(req.context)
+                        .build()
+                        .unwrap())
+                });
 
-        execution_service
-            .expect_call()
-            .times(1)
-            .returning(move |_req: crate::ExecutionRequest| {
-                Ok(ExecutionResponse::fake_builder()
-                    .label(expected_label.to_string())
-                    .build())
-            });
-
-        let service = execution_service.build();
+            execution_service
+        });
 
         let service_stack = ServiceBuilder::new()
-            .checkpoint_async(|req: crate::ExecutionRequest| async {
-                Ok(ControlFlow::Continue(req))
-            })
-            .service(service);
+            .checkpoint_async(|req: ExecutionRequest| async { Ok(ControlFlow::Continue(req)) })
+            .service(execution_service);
 
         let request = ExecutionRequest::fake_builder().build();
 
@@ -191,20 +195,23 @@ mod async_checkpoint_tests {
         let expected_label = "from_mock_service";
         let mut router_service = MockExecutionService::new();
 
-        router_service
-            .expect_call()
-            .times(1)
-            .returning(move |_req| {
-                Ok(ExecutionResponse::fake_builder()
-                    .label(expected_label.to_string())
-                    .build())
-            });
-
-        let service = router_service.build();
+        router_service.expect_clone().return_once(move || {
+            let mut router_service = MockExecutionService::new();
+            router_service
+                .expect_call()
+                .times(1)
+                .returning(move |_req| {
+                    Ok(ExecutionResponse::fake_builder()
+                        .label(expected_label.to_string())
+                        .build()
+                        .unwrap())
+                });
+            router_service
+        });
 
         let service_stack =
             AsyncCheckpointLayer::new(|req| async { Ok(ControlFlow::Continue(req)) })
-                .layer(service);
+                .layer(router_service);
 
         let request = ExecutionRequest::fake_builder().build();
 
@@ -224,18 +231,20 @@ mod async_checkpoint_tests {
     #[tokio::test]
     async fn test_return() {
         let expected_label = "returned_before_mock_service";
-        let router_service = MockExecutionService::new();
-
-        let service = router_service.build();
+        let mut router_service = MockExecutionService::new();
+        router_service
+            .expect_clone()
+            .return_once(MockExecutionService::new);
 
         let service_stack = AsyncCheckpointLayer::new(|_req| async {
             Ok(ControlFlow::Break(
                 ExecutionResponse::fake_builder()
                     .label("returned_before_mock_service".to_string())
-                    .build(),
+                    .build()
+                    .unwrap(),
             ))
         })
-        .layer(service);
+        .layer(router_service);
 
         let request = ExecutionRequest::fake_builder().build();
 
@@ -255,15 +264,16 @@ mod async_checkpoint_tests {
     #[tokio::test]
     async fn test_error() {
         let expected_error = "checkpoint_error";
-        let router_service = MockExecutionService::new();
-
-        let service = router_service.build();
+        let mut router_service = MockExecutionService::new();
+        router_service
+            .expect_clone()
+            .return_once(MockExecutionService::new);
 
         let service_stack =
             AsyncCheckpointLayer::new(
                 move |_req| async move { Err(BoxError::from(expected_error)) },
             )
-            .layer(service);
+            .layer(router_service);
 
         let request = ExecutionRequest::fake_builder().build();
 

@@ -1,7 +1,24 @@
-//! Starts a server that will handle http graphql requests.
+//! Components of a federated GraphQL Server.
+//!
+//! Most of these modules are of varying interest to different audiences.
+//!
+//! If your interests are confined to developing plugins, then the following modules
+//! are likely to be of most interest to you:
+//!
+//! * [`self`] - this module (apollo_router) contains high level building blocks for a federated GraphQL router
+//!
+//! * [`graphql`] - graphql specific functionality for requests, responses, errors
+//!
+//! * [`layers`] - examples of tower layers used to implement plugins
+//!
+//! * [`plugin`] - various APIs for implementing a plugin
+//!
+//! * [`services`] - the various services handling a GraphQL requests,
+//!   and APIs for plugins to intercept them
 
 #![cfg_attr(feature = "failfast", allow(unreachable_code))]
 #![warn(unreachable_pub)]
+#![warn(missing_docs)]
 
 macro_rules! failfast_debug {
     ($($tokens:tt)+) => {{
@@ -26,60 +43,66 @@ macro_rules! failfast_error {
 }
 
 #[macro_use]
-pub mod json_ext;
+mod json_ext;
+#[macro_use]
+pub mod plugin;
 
-mod axum_http_server_factory;
+pub(crate) mod axum_factory;
 mod cache;
 mod configuration;
 mod context;
-pub mod error;
+mod error;
 mod executable;
 mod files;
 pub mod graphql;
+mod http_ext;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
-pub mod plugin;
-pub mod plugins;
-pub mod query_planner;
-mod reload;
+pub(crate) mod notification;
+mod orbiter;
+mod plugins;
+pub(crate) mod protocols;
+mod query_planner;
 mod request;
 mod response;
 mod router;
 mod router_factory;
 pub mod services;
-mod spec;
+pub(crate) mod spec;
 mod state_machine;
-pub mod subscriber;
-mod traits;
+pub mod test_harness;
+pub mod tracer;
+mod uplink;
 
-pub use configuration::Configuration;
-pub use context::Context;
-pub use executable::main;
-pub use executable::Executable;
-pub use router::ApolloRouter;
-pub use router::ConfigurationKind;
-pub use router::SchemaKind;
-pub use router::ShutdownKind;
-pub use router_factory::__create_test_service_factory_from_yaml;
-pub use services::http_ext;
-pub use spec::Schema;
+pub use crate::configuration::Configuration;
+pub use crate::configuration::ListenAddr;
+pub use crate::context::Context;
+pub use crate::executable::main;
+pub use crate::executable::Executable;
+pub use crate::notification::Notify;
+pub use crate::router::ApolloRouterError;
+pub use crate::router::ConfigurationSource;
+pub use crate::router::LicenseSource;
+pub use crate::router::RouterHttpServer;
+pub use crate::router::SchemaSource;
+pub use crate::router::ShutdownSource;
+pub use crate::router_factory::Endpoint;
+pub use crate::test_harness::MockedSubgraphs;
+pub use crate::test_harness::TestHarness;
+pub use crate::uplink::UplinkConfig;
 
-#[deprecated(note = "use apollo_router::graphql::Request instead")]
-pub type Request = graphql::Request;
-#[deprecated(note = "use apollo_router::graphql::Response instead")]
-pub type Response = graphql::Response;
-#[deprecated(note = "use apollo_router::graphql::Error instead")]
-pub type Error = graphql::Error;
-
-// TODO: clean these up and import from relevant modules instead
-pub(crate) use services::*;
-pub(crate) use spec::*;
-
-/// Reexports for macros
+/// Not part of the public API
 #[doc(hidden)]
 pub mod _private {
+    // Reexports for macros
+    pub use linkme;
+    pub use once_cell;
     pub use router_bridge;
     pub use serde_json;
-    pub use startup;
+
+    pub use crate::plugin::PluginFactory;
+    pub use crate::plugin::PLUGINS;
+    // For tests
+    pub use crate::router_factory::create_test_service_factory_from_yaml;
 }

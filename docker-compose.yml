@@ -1,20 +1,9 @@
 version: "3.9"
 services:
-
-  services:
-    build: dockerfiles/federation-demo
+  redis:
+    image: redis:latest
     ports:
-      - 4100:4100
-      - 4001:4001
-      - 4002:4002
-      - 4003:4003
-      - 4004:4004
-    command: npm run start
-    environment:
-      - JAEGER_HOST=jaeger
-    depends_on:
-      - jaeger
-
+      - 6379:6379
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:

@@ -1,0 +1,13 @@
+---
+source: apollo-router/src/query_planner/mod.rs
+expression: defer_disabled
+---
+{
+  "data": {
+    "me": {
+      "id": "1",
+      "name": "Ada Lovelace",
+      "username": "@ada"
+    }
+  }
+}

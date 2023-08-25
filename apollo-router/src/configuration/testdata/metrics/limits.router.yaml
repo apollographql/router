@@ -1,0 +1,9 @@
+limits:
+  max_depth: 1
+  experimental_http_max_request_bytes: 2000000
+  warn_only: true
+  max_root_fields: 1
+  parser_max_tokens: 15000
+  parser_max_recursion: 4096
+  max_height: 2
+  max_aliases: 2

@@ -1,15 +1,16 @@
 use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::Entry;
 
 use crate::error::FetchError;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
-use crate::*;
+use crate::spec::Schema;
 
 /// A selection that is part of a fetch.
 /// Selections are used to propagate data to subgraph fetches.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase", tag = "kind")]
 pub(crate) enum Selection {
     /// A field selection.
@@ -20,31 +21,31 @@ pub(crate) enum Selection {
 }
 
 /// The field that is used
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Field {
     /// An optional alias for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    alias: Option<String>,
+    pub(crate) alias: Option<String>,
 
     /// The name of the field.
-    name: String,
+    pub(crate) name: String,
 
     /// The selections for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
-    selections: Option<Vec<Selection>>,
+    pub(crate) selections: Option<Vec<Selection>>,
 }
 
 /// An inline fragment.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InlineFragment {
     /// The required fragment type.
     #[serde(skip_serializing_if = "Option::is_none")]
-    type_condition: Option<String>,
+    pub(crate) type_condition: Option<String>,
 
     /// The selections from the fragment.
-    selections: Vec<Selection>,
+    pub(crate) selections: Vec<Selection>,
 }
 
 pub(crate) fn select_object(
@@ -141,9 +142,9 @@ mod tests {
     use crate::graphql::Response;
     use crate::json_ext::Path;
 
-    fn select<'a>(
+    fn select(
         response: &Response,
-        path: &'a Path,
+        path: &Path,
         selections: &[Selection],
         schema: &Schema,
     ) -> Result<Value, FetchError> {
@@ -152,7 +153,7 @@ mod tests {
             .data
             .as_ref()
             .unwrap()
-            .select_values_and_paths(path, |_path, value| {
+            .select_values_and_paths(schema, path, |_path, value| {
                 values.push(value);
             });
 
@@ -173,7 +174,7 @@ mod tests {
 
     macro_rules! select {
         ($schema:expr, $content:expr $(,)?) => {{
-            let schema: Schema = $schema.parse().unwrap();
+            let schema = Schema::parse_test(&$schema, &Default::default()).unwrap();
             let response = Response::builder()
                 .data($content)
                 .build();
@@ -266,13 +267,12 @@ mod tests {
 
     #[test]
     fn test_array() {
-        let schema: Schema = with_supergraph_boilerplate(
+        let schema = with_supergraph_boilerplate(
             "type Query { me: String }
             type MainObject { mainObjectList: [SubObject] }
             type SubObject { key: String name: String }",
-        )
-        .parse()
-        .unwrap();
+        );
+        let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
 
         let response = bjson!({
             "__typename": "MainObject",

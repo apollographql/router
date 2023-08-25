@@ -10,5 +10,5 @@ apollo-router = { path = "../../apollo-router" }
 futures = "0.3"
 http = "0.2"
 serde_json = "1"
-tokio = { version = "1.17", features = ["full"] }
+tokio = { version = "1.29", features = ["full"] }
 tower = { version = "0.4", features = ["full"] }

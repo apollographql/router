@@ -1,3 +1,6 @@
+#![allow(missing_docs)] // FIXME
+use std::time::Instant;
+
 use bytes::Bytes;
 use serde::Deserialize;
 use serde::Serialize;
@@ -14,6 +17,7 @@ use crate::json_ext::Value;
 /// Used for federated and subgraph queries.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct Response {
     /// The label that was passed to the defer or stream directive for this patch.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -34,18 +38,37 @@ pub struct Response {
     /// The optional graphql extensions.
     #[serde(skip_serializing_if = "Object::is_empty", default)]
     pub extensions: Object,
+
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub has_next: Option<bool>,
+
+    #[serde(skip, default)]
+    pub subscribed: Option<bool>,
+
+    /// Used for subscription event to compute the duration of a subscription event
+    #[serde(skip, default)]
+    pub created_at: Option<Instant>,
+
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub incremental: Vec<IncrementalResponse>,
 }
 
 #[buildstructor::buildstructor]
 impl Response {
     /// Constructor
-    #[builder]
-    pub fn new(
+    #[builder(visibility = "pub")]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
         label: Option<String>,
         data: Option<Value>,
         path: Option<Path>,
         errors: Vec<Error>,
         extensions: Map<ByteString, Value>,
+        _subselection: Option<String>,
+        has_next: Option<bool>,
+        subscribed: Option<bool>,
+        incremental: Vec<IncrementalResponse>,
+        created_at: Option<Instant>,
     ) -> Self {
         Self {
             label,
@@ -53,10 +76,14 @@ impl Response {
             path,
             errors,
             extensions,
+            has_next,
+            subscribed,
+            incremental,
+            created_at,
         }
     }
 
-    /// If path is None, this is a primary query.
+    /// If path is None, this is a primary response.
     pub fn is_primary(&self) -> bool {
         self.path.is_none()
     }
@@ -69,7 +96,7 @@ impl Response {
     /// Create a [`Response`] from the supplied [`Bytes`].
     ///
     /// This will return an error (identifying the faulty service) if the input is invalid.
-    pub fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, FetchError> {
+    pub(crate) fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, FetchError> {
         let value =
             Value::from_bytes(b).map_err(|error| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
@@ -111,6 +138,38 @@ impl Response {
                 service: service_name.to_string(),
                 reason: err.to_string(),
             })?;
+        let has_next = extract_key_value_from_object!(object, "hasNext", Value::Bool(b) => b)
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?;
+        let incremental =
+            extract_key_value_from_object!(object, "incremental", Value::Array(a) => a).map_err(
+                |err| FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: err.to_string(),
+                },
+            )?;
+        let incremental: Vec<IncrementalResponse> = match incremental {
+            Some(v) => v
+                .into_iter()
+                .map(serde_json_bytes::from_value)
+                .collect::<Result<Vec<IncrementalResponse>, _>>()
+                .map_err(|err| FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: err.to_string(),
+                })?,
+            None => vec![],
+        };
+        // Graphql spec says:
+        // If the data entry in the response is not present, the errors entry in the response must not be empty.
+        // It must contain at least one error. The errors it contains should indicate why no data was able to be returned.
+        if data.is_none() && errors.is_empty() {
+            return Err(FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: "graphql response without data must contain at least one error".to_string(),
+            });
+        }
 
         Ok(Response {
             label,
@@ -118,17 +177,74 @@ impl Response {
             path,
             errors,
             extensions,
+            has_next,
+            subscribed: None,
+            incremental,
+            created_at: None,
         })
+    }
+}
+
+/// A graphql incremental response.
+/// Used with `@defer`
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct IncrementalResponse {
+    /// The label that was passed to the defer or stream directive for this patch.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub label: Option<String>,
+
+    /// The response data.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub data: Option<Value>,
+
+    /// The path that the data should be merged at.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub path: Option<Path>,
+
+    /// The optional graphql errors encountered.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub errors: Vec<Error>,
+
+    /// The optional graphql extensions.
+    #[serde(skip_serializing_if = "Object::is_empty", default)]
+    pub extensions: Object,
+}
+
+#[buildstructor::buildstructor]
+impl IncrementalResponse {
+    /// Constructor
+    #[builder(visibility = "pub")]
+    fn new(
+        label: Option<String>,
+        data: Option<Value>,
+        path: Option<Path>,
+        errors: Vec<Error>,
+        extensions: Map<ByteString, Value>,
+    ) -> Self {
+        Self {
+            label,
+            data,
+            path,
+            errors,
+            extensions,
+        }
+    }
+
+    /// append_errors default the errors `path` with the one provided.
+    pub fn append_errors(&mut self, errors: &mut Vec<Error>) {
+        self.errors.append(errors)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use router_bridge::planner::Location;
     use serde_json::json;
     use serde_json_bytes::json as bjson;
 
     use super::*;
-    use crate::error::Location;
 
     #[test]
     fn test_append_errors_path_fallback_and_override() {
@@ -334,7 +450,20 @@ mod tests {
                     .cloned()
                     .unwrap()
                 )
+                .has_next(true)
                 .build()
+        );
+    }
+
+    #[test]
+    fn test_no_data_and_no_errors() {
+        let response = Response::from_bytes("test", "{\"errors\":null}".into());
+        assert_eq!(
+            response.expect_err("no data and no errors"),
+            FetchError::SubrequestMalformedResponse {
+                service: "test".to_string(),
+                reason: "graphql response without data must contain at least one error".to_string(),
+            }
         );
     }
 }

@@ -1,7 +1,7 @@
 [workspace]
 default-members = ["apollo-router"]
 members = [
-    "apollo-spaceport",
+    # "apollo-spaceport",
     "apollo-router",
     "apollo-router-benchmarks",
     "apollo-router-scaffold",
@@ -21,9 +21,10 @@ members = [
     "examples/rhai-surrogate-cache-key",
     "examples/jwt-auth",
     "fuzz",
-    "uplink",
-    "xtask",
+    # "uplink",
+    # Note that xtask is not in the workspace member because it relies on dependencies that are incompatible with the router. Notably hyperx but there are others.
 ]
+resolver = "2"
 
 # this makes build scripts and proc macros faster to compile
 [profile.dev.build-override]
@@ -31,3 +32,10 @@ members = [
 # debug = false
 strip = "debuginfo"
 incremental = false
+
+# If building a dhat feature, you must use this profile
+# e.g. heap allocation tracing: cargo build --profile release-dhat --features dhat-heap
+# e.g. heap and ad-hoc allocation tracing: cargo build --profile release-dhat --features dhat-heap,dhat-ad-hoc
+[profile.release-dhat]
+inherits = "release"
+debug = 1

@@ -1,11 +1,13 @@
-//! Synchronous Checkpoint [`Layer`].
+//! Synchronous Checkpoint.
 //!
 //! Provides a general mechanism for controlling the flow of a request. Useful in any situation
 //! where the caller wishes to provide control flow for a request.
 //!
 //! If the evaluated closure succeeds then the request is passed onto the next service in the
-//! chain of responsibilities. If it fails, then the control flow is broken a response is passed
+//! chain of responsibilities. If it fails, then the control flow is broken and a response is passed
 //! back to the invoking service.
+//!
+//! See [`Layer`] and [`Service`] for more details.
 
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -15,7 +17,7 @@ use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 
-/// [`Layer`] for Synchronous Checkpoints.
+/// [`Layer`] for Synchronous Checkpoints. See [`ServiceBuilderExt::checkpoint()`](crate::layers::ServiceBuilderExt::checkpoint()).
 #[allow(clippy::type_complexity)]
 pub struct CheckpointLayer<S, Request>
 where
@@ -81,6 +83,7 @@ where
     }
 }
 
+/// [`Service`] for Synchronous Checkpoints. See [`ServiceBuilderExt::checkpoint()`](crate::layers::ServiceBuilderExt::checkpoint()).
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub struct CheckpointService<S, Request>
@@ -173,8 +176,8 @@ mod checkpoint_tests {
     use super::*;
     use crate::layers::ServiceBuilderExt;
     use crate::plugin::test::MockExecutionService;
-    use crate::ExecutionRequest;
-    use crate::ExecutionResponse;
+    use crate::services::ExecutionRequest;
+    use crate::services::ExecutionResponse;
 
     #[tokio::test]
     async fn test_service_builder() {
@@ -185,17 +188,17 @@ mod checkpoint_tests {
         execution_service
             .expect_call()
             .times(1)
-            .returning(move |_req: crate::ExecutionRequest| {
+            .returning(move |req: ExecutionRequest| {
                 Ok(ExecutionResponse::fake_builder()
                     .label(expected_label.to_string())
-                    .build())
+                    .context(req.context)
+                    .build()
+                    .unwrap())
             });
 
-        let service = execution_service.build();
-
         let service_stack = ServiceBuilder::new()
-            .checkpoint(|req: crate::ExecutionRequest| Ok(ControlFlow::Continue(req)))
-            .service(service);
+            .checkpoint(|req: ExecutionRequest| Ok(ControlFlow::Continue(req)))
+            .service(execution_service);
 
         let request = ExecutionRequest::fake_builder().build();
 
@@ -223,13 +226,12 @@ mod checkpoint_tests {
             .returning(move |_req| {
                 Ok(ExecutionResponse::fake_builder()
                     .label(expected_label.to_string())
-                    .build())
+                    .build()
+                    .unwrap())
             });
 
-        let service = router_service.build();
-
         let service_stack =
-            CheckpointLayer::new(|req| Ok(ControlFlow::Continue(req))).layer(service);
+            CheckpointLayer::new(|req| Ok(ControlFlow::Continue(req))).layer(router_service);
 
         let request = ExecutionRequest::fake_builder().build();
 
@@ -251,16 +253,15 @@ mod checkpoint_tests {
         let expected_label = "returned_before_mock_service";
         let router_service = MockExecutionService::new();
 
-        let service = router_service.build();
-
         let service_stack = CheckpointLayer::new(|_req| {
             Ok(ControlFlow::Break(
                 ExecutionResponse::fake_builder()
                     .label("returned_before_mock_service".to_string())
-                    .build(),
+                    .build()
+                    .unwrap(),
             ))
         })
-        .layer(service);
+        .layer(router_service);
 
         let request = ExecutionRequest::fake_builder().build();
 
@@ -282,10 +283,8 @@ mod checkpoint_tests {
         let expected_error = "checkpoint_error";
         let router_service = MockExecutionService::new();
 
-        let service = router_service.build();
-
-        let service_stack =
-            CheckpointLayer::new(move |_req| Err(BoxError::from(expected_error))).layer(service);
+        let service_stack = CheckpointLayer::new(move |_req| Err(BoxError::from(expected_error)))
+            .layer(router_service);
 
         let request = ExecutionRequest::fake_builder().build();
 

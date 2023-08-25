@@ -1,66 +1,100 @@
 //! Logic for loading configuration in to an object model
-// This entire file is license key functionality
+pub(crate) mod cors;
+pub(crate) mod expansion;
+mod experimental;
+pub(crate) mod metrics;
+mod persisted_queries;
+mod schema;
+pub(crate) mod subgraph;
+#[cfg(test)]
+mod tests;
+mod upgrade;
 mod yaml;
 
-use std::borrow::Cow;
-use std::cmp::Ordering;
 use std::fmt;
+use std::io;
+use std::io::BufReader;
+use std::iter;
+use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use std::str::FromStr;
+use std::sync::Arc;
+#[cfg(not(test))]
+use std::time::Duration;
 
 use derivative::Derivative;
 use displaydoc::Display;
-use envmnt::ExpandOptions;
-use envmnt::ExpansionType;
 use itertools::Itertools;
-use jsonschema::Draft;
-use jsonschema::JSONSchema;
+use once_cell::sync::Lazy;
+pub(crate) use persisted_queries::PersistedQueries;
+#[cfg(test)]
+pub(crate) use persisted_queries::PersistedQueriesSafelist;
+use regex::Regex;
+use rustls::Certificate;
+use rustls::PrivateKey;
+use rustls::ServerConfig;
+use rustls_pemfile::certs;
+use rustls_pemfile::read_one;
+use rustls_pemfile::Item;
 use schemars::gen::SchemaGenerator;
-use schemars::gen::SchemaSettings;
 use schemars::schema::ObjectValidation;
-use schemars::schema::RootSchema;
 use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
 use serde_json::Map;
 use serde_json::Value;
 use thiserror::Error;
-use tower_http::cors::CorsLayer;
-use tower_http::cors::{self};
 
+use self::cors::Cors;
+use self::expansion::Expansion;
+pub(crate) use self::experimental::Discussed;
+pub(crate) use self::schema::generate_config_schema;
+pub(crate) use self::schema::generate_upgrade;
+use self::subgraph::SubgraphConfiguration;
+use crate::cache::DEFAULT_CACHE_CAPACITY;
+use crate::configuration::schema::Mode;
+use crate::graphql;
+use crate::notification::Notify;
+#[cfg(not(test))]
+use crate::notification::RouterBroadcasts;
 use crate::plugin::plugins;
+#[cfg(not(test))]
+use crate::plugins::subscription::SubscriptionConfig;
+#[cfg(not(test))]
+use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
+#[cfg(not(test))]
+use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
+use crate::uplink::UplinkConfig;
+use crate::ApolloRouterError;
+
+// TODO: Talk it through with the teams
+#[cfg(not(test))]
+static HEARTBEAT_TIMEOUT_DURATION_SECONDS: u64 = 15;
+
+static SUPERGRAPH_ENDPOINT_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?P<first_path>.*/)(?P<sub_path>.+)\*$")
+        .expect("this regex to check the path is valid")
+});
 
 /// Configuration error.
 #[derive(Debug, Error, Display)]
+#[non_exhaustive]
 pub enum ConfigurationError {
-    /// could not read secret from file: {0}
-    CannotReadSecretFromFile(std::io::Error),
-    /// could not read secret from environment variable: {0}
-    CannotReadSecretFromEnv(std::env::VarError),
-    /// missing environment variable: {0}
-    MissingEnvironmentVariable(String),
-    /// invalid environment variable: {0}
-    InvalidEnvironmentVariable(String),
-    /// could not setup OTLP tracing: {0}
-    OtlpTracing(opentelemetry::trace::TraceError),
-    /// could not setup OTLP metrics: {0}
-    Metrics(#[from] opentelemetry::metrics::MetricsError),
-    /// the configuration could not be loaded because it requires the feature {0:?}
-    MissingFeature(&'static str),
+    /// could not expand variable: {key}, {cause}
+    CannotExpandVariable { key: String, cause: String },
+    /// could not expand variable: {key}. Variables must be prefixed with one of '{supported_modes}' followed by '.' e.g. 'env.'
+    UnknownExpansionMode {
+        key: String,
+        supported_modes: String,
+    },
     /// unknown plugin {0}
     PluginUnknown(String),
     /// plugin {plugin} could not be configured: {error}
     PluginConfiguration { plugin: String, error: String },
-    /// plugin {plugin} could not be started: {error}
-    PluginStartup { plugin: String, error: String },
-    /// plugin {plugin} could not be stopped: {error}
-    PluginShutdown { plugin: String, error: String },
-    /// unknown layer {0}
-    LayerUnknown(String),
-    /// layer {layer} could not be configured: {error}
-    LayerConfiguration { layer: String, error: String },
     /// {message}: {error}
     InvalidConfiguration {
         message: &'static str,
@@ -68,90 +102,383 @@ pub enum ConfigurationError {
     },
     /// could not deserialize configuration: {0}
     DeserializeConfigError(serde_json::Error),
+
+    /// APOLLO_ROUTER_CONFIG_SUPPORTED_MODES must be of the format env,file,... Possible modes are 'env' and 'file'.
+    InvalidExpansionModeConfig,
+
+    /// could not migrate configuration: {error}.
+    MigrationFailure { error: String },
+
+    /// could not load certificate authorities: {error}
+    CertificateAuthorities { error: String },
 }
 
 /// The configuration for the router.
-/// Currently maintains a mapping of subgraphs.
-#[derive(Clone, Derivative, Deserialize, Serialize, JsonSchema)]
+///
+/// Can be created through `serde::Deserialize` from various formats,
+/// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
+#[derive(Clone, Derivative, Serialize, JsonSchema)]
 #[derivative(Debug)]
+// We can't put a global #[serde(default)] here because of the Default implementation using `from_str` which use deserialize
 pub struct Configuration {
-    /// Configuration options pertaining to the http server component.
+    /// The raw configuration string.
+    #[serde(skip)]
+    pub(crate) validated_yaml: Option<Value>,
+
+    /// Health check configuration
     #[serde(default)]
-    pub(crate) server: Server,
+    pub(crate) health_check: HealthCheck,
+
+    /// Sandbox configuration
+    #[serde(default)]
+    pub(crate) sandbox: Sandbox,
+
+    /// Homepage configuration
+    #[serde(default)]
+    pub(crate) homepage: Homepage,
+
+    /// Configuration for the supergraph
+    #[serde(default)]
+    pub(crate) supergraph: Supergraph,
+
+    /// Cross origin request headers.
+    #[serde(default)]
+    pub(crate) cors: Cors,
+
+    #[serde(default)]
+    pub(crate) tls: Tls,
+
+    /// Configures automatic persisted queries
+    #[serde(default)]
+    pub(crate) apq: Apq,
+
+    // NOTE: when renaming this to move out of preview, also update paths
+    // in `uplink/license.rs`.
+    /// Configures managed persisted queries
+    #[serde(default)]
+    pub preview_persisted_queries: PersistedQueries,
+
+    /// Configuration for operation limits, parser limits, HTTP limits, etc.
+    #[serde(default)]
+    pub(crate) limits: Limits,
+
+    /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
+    /// You probably don’t want this in production!
+    #[serde(default)]
+    pub(crate) experimental_chaos: Chaos,
+
+    /// Set the GraphQL validation implementation to use.
+    #[serde(default)]
+    pub(crate) experimental_graphql_validation_mode: GraphQLValidationMode,
 
     /// Plugin configuration
     #[serde(default)]
-    plugins: UserPlugins,
+    pub(crate) plugins: UserPlugins,
 
     /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
     #[serde(default)]
     #[serde(flatten)]
-    apollo_plugins: ApolloPlugins,
+    pub(crate) apollo_plugins: ApolloPlugins,
+
+    /// Uplink configuration.
+    #[serde(skip)]
+    pub uplink: Option<UplinkConfig>,
+
+    #[serde(default, skip_serializing, skip_deserializing)]
+    pub(crate) notify: Notify<String, graphql::Response>,
 }
 
-const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
+impl PartialEq for Configuration {
+    fn eq(&self, other: &Self) -> bool {
+        self.validated_yaml == other.validated_yaml
+    }
+}
 
-fn default_listen() -> ListenAddr {
+/// GraphQL validation modes.
+#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derivative(Debug)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum GraphQLValidationMode {
+    /// Use the new Rust-based implementation.
+    New,
+    /// Use the old JavaScript-based implementation.
+    #[default]
+    Legacy,
+    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
+    /// implementations disagree.
+    Both,
+}
+
+impl<'de> serde::Deserialize<'de> for Configuration {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // This intermediate structure will allow us to deserialize a Configuration
+        // yet still exercise the Configuration validation function
+        #[derive(Deserialize, Default)]
+        #[serde(default)]
+        struct AdHocConfiguration {
+            health_check: HealthCheck,
+            sandbox: Sandbox,
+            homepage: Homepage,
+            supergraph: Supergraph,
+            cors: Cors,
+            plugins: UserPlugins,
+            #[serde(flatten)]
+            apollo_plugins: ApolloPlugins,
+            tls: Tls,
+            apq: Apq,
+            preview_persisted_queries: PersistedQueries,
+            #[serde(skip)]
+            uplink: UplinkConfig,
+            limits: Limits,
+            experimental_chaos: Chaos,
+            experimental_graphql_validation_mode: GraphQLValidationMode,
+        }
+        let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
+
+        Configuration::builder()
+            .health_check(ad_hoc.health_check)
+            .sandbox(ad_hoc.sandbox)
+            .homepage(ad_hoc.homepage)
+            .supergraph(ad_hoc.supergraph)
+            .cors(ad_hoc.cors)
+            .plugins(ad_hoc.plugins.plugins.unwrap_or_default())
+            .apollo_plugins(ad_hoc.apollo_plugins.plugins)
+            .tls(ad_hoc.tls)
+            .apq(ad_hoc.apq)
+            .persisted_query(ad_hoc.preview_persisted_queries)
+            .operation_limits(ad_hoc.limits)
+            .chaos(ad_hoc.experimental_chaos)
+            .uplink(ad_hoc.uplink)
+            .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
+            .build()
+            .map_err(|e| serde::de::Error::custom(e.to_string()))
+    }
+}
+
+pub(crate) const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
+
+fn default_graphql_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
+}
+
+// This isn't dead code! we use it in buildstructor's fake_new
+#[allow(dead_code)]
+fn test_listen() -> ListenAddr {
+    SocketAddr::from_str("127.0.0.1:0").unwrap().into()
 }
 
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
     pub(crate) fn new(
-        server: Option<Server>,
+        supergraph: Option<Supergraph>,
+        health_check: Option<HealthCheck>,
+        sandbox: Option<Sandbox>,
+        homepage: Option<Homepage>,
+        cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
-    ) -> Self {
-        Self {
-            server: server.unwrap_or_default(),
+        tls: Option<Tls>,
+        notify: Option<Notify<String, graphql::Response>>,
+        apq: Option<Apq>,
+        persisted_query: Option<PersistedQueries>,
+        operation_limits: Option<Limits>,
+        chaos: Option<Chaos>,
+        uplink: Option<UplinkConfig>,
+        graphql_validation_mode: Option<GraphQLValidationMode>,
+    ) -> Result<Self, ConfigurationError> {
+        #[cfg(not(test))]
+        let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
+            Some(plugin_conf) => {
+                let conf = serde_json::from_value::<SubscriptionConfig>(plugin_conf.clone())
+                    .map_err(|err| ConfigurationError::PluginConfiguration {
+                        plugin: APOLLO_SUBSCRIPTION_PLUGIN.to_string(),
+                        error: format!("{err:?}"),
+                    })?;
+                conf.queue_capacity
+            }
+            None => None,
+        };
+
+        let conf = Self {
+            validated_yaml: Default::default(),
+            supergraph: supergraph.unwrap_or_default(),
+            health_check: health_check.unwrap_or_default(),
+            sandbox: sandbox.unwrap_or_default(),
+            homepage: homepage.unwrap_or_default(),
+            cors: cors.unwrap_or_default(),
+            apq: apq.unwrap_or_default(),
+            preview_persisted_queries: persisted_query.unwrap_or_default(),
+            limits: operation_limits.unwrap_or_default(),
+            experimental_chaos: chaos.unwrap_or_default(),
+            experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
-        }
-    }
+            tls: tls.unwrap_or_default(),
+            uplink,
+            #[cfg(test)]
+            notify: notify.unwrap_or_default(),
+            #[cfg(not(test))]
+            notify: notify.map(|n| n.set_queue_size(notify_queue_cap))
+                .unwrap_or_else(|| Notify::builder().and_queue_size(notify_queue_cap).ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS)).router_broadcasts(Arc::new(RouterBroadcasts::new())).heartbeat_error_message(graphql::Response::builder().errors(vec![graphql::Error::builder().message("the connection has been closed because it hasn't heartbeat for a while").extension_code("SUBSCRIPTION_HEARTBEAT_ERROR").build()]).build()).build()),
+        };
 
-    pub fn boxed(self) -> Box<Self> {
-        Box::new(self)
-    }
-
-    pub(crate) fn plugins(&self) -> Vec<(String, Value)> {
-        let mut plugins = vec![];
-
-        // Add all the apollo plugins
-        for (plugin, config) in &self.apollo_plugins.plugins {
-            let plugin_full_name = format!("{}{}", APOLLO_PLUGIN_PREFIX, plugin);
-            tracing::debug!(
-                "adding plugin {} with user provided configuration",
-                plugin_full_name.as_str()
-            );
-            plugins.push((plugin_full_name, config.clone()));
-        }
-
-        // Add all the user plugins
-        if let Some(config_map) = self.plugins.plugins.as_ref() {
-            for (plugin, config) in config_map {
-                plugins.push((plugin.clone(), config.clone()));
-            }
-        }
-
-        plugins
+        conf.validate()
     }
 }
 
+impl Default for Configuration {
+    fn default() -> Self {
+        // We want to trigger all defaulting logic so don't use the raw builder.
+        Configuration::from_str("").expect("default configuration must be valid")
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Configuration {
+    #[builder]
+    pub(crate) fn fake_new(
+        supergraph: Option<Supergraph>,
+        health_check: Option<HealthCheck>,
+        sandbox: Option<Sandbox>,
+        homepage: Option<Homepage>,
+        cors: Option<Cors>,
+        plugins: Map<String, Value>,
+        apollo_plugins: Map<String, Value>,
+        tls: Option<Tls>,
+        notify: Option<Notify<String, graphql::Response>>,
+        apq: Option<Apq>,
+        persisted_query: Option<PersistedQueries>,
+        operation_limits: Option<Limits>,
+        chaos: Option<Chaos>,
+        uplink: Option<UplinkConfig>,
+        graphql_validation_mode: Option<GraphQLValidationMode>,
+    ) -> Result<Self, ConfigurationError> {
+        let configuration = Self {
+            validated_yaml: Default::default(),
+            supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
+            health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
+            sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
+            homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
+            cors: cors.unwrap_or_default(),
+            limits: operation_limits.unwrap_or_default(),
+            experimental_chaos: chaos.unwrap_or_default(),
+            experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
+            plugins: UserPlugins {
+                plugins: Some(plugins),
+            },
+            apollo_plugins: ApolloPlugins {
+                plugins: apollo_plugins,
+            },
+            tls: tls.unwrap_or_default(),
+            notify: notify.unwrap_or_default(),
+            apq: apq.unwrap_or_default(),
+            preview_persisted_queries: persisted_query.unwrap_or_default(),
+            uplink,
+        };
+
+        configuration.validate()
+    }
+}
+
+impl Configuration {
+    pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
+        // Sandbox and Homepage cannot be both enabled
+        if self.sandbox.enabled && self.homepage.enabled {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "sandbox and homepage cannot be enabled at the same time",
+                error: "disable the homepage if you want to enable sandbox".to_string(),
+            });
+        }
+        // Sandbox needs Introspection to be enabled
+        if self.sandbox.enabled && !self.supergraph.introspection {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "sandbox requires introspection",
+                error: "sandbox needs introspection to be enabled".to_string(),
+            });
+        }
+        if !self.supergraph.path.starts_with('/') {
+            return Err(ConfigurationError::InvalidConfiguration {
+            message: "invalid 'server.graphql_path' configuration",
+            error: format!(
+                "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
+                self.supergraph.path,
+                self.supergraph.path
+            ),
+        });
+        }
+        if self.supergraph.path.ends_with('*')
+            && !self.supergraph.path.ends_with("/*")
+            && !SUPERGRAPH_ENDPOINT_REGEX.is_match(&self.supergraph.path)
+        {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "invalid 'server.graphql_path' configuration",
+                error: format!(
+                    "'{}' is invalid, you can only set a wildcard after a '/'",
+                    self.supergraph.path
+                ),
+            });
+        }
+        if self.supergraph.path.contains("/*/") {
+            return Err(
+                ConfigurationError::InvalidConfiguration {
+                    message: "invalid 'server.graphql_path' configuration",
+                    error: format!(
+                        "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
+                        self.supergraph.path
+                    ),
+                },
+            );
+        }
+
+        // PQs.
+        if self.preview_persisted_queries.enabled {
+            if self.preview_persisted_queries.safelist.enabled && self.apq.enabled {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "apqs must be disabled to enable safelisting",
+                    error: "either set preview_persisted_queries.safelist.enabled: false or apq.enabled: false in your router yaml configuration".into()
+                });
+            } else if !self.preview_persisted_queries.safelist.enabled
+                && self.preview_persisted_queries.safelist.require_id
+            {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "safelist must be enabled to require IDs",
+                    error: "either set preview_persisted_queries.safelist.enabled: true or preview_persisted_queries.safelist.require_id: false in your router yaml configuration".into()
+                });
+            }
+        } else {
+            // If the feature isn't enabled, sub-features shouldn't be.
+            if self.preview_persisted_queries.safelist.enabled {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "persisted queries must be enabled to enable safelisting",
+                    error: "either set preview_persisted_queries.safelist.enabled: false or preview_persisted_queries.enabled: true in your router yaml configuration".into()
+                });
+            } else if self.preview_persisted_queries.log_unknown {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "persisted queries must be enabled to enable logging unknown operations",
+                    error: "either set preview_persisted_queries.log_unknown: false or preview_persisted_queries.enabled: true in your router yaml configuration".into()
+                });
+            }
+        }
+
+        Ok(self)
+    }
+}
+
+/// Parse configuration from a string in YAML syntax
 impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let config =
-            serde_yaml::from_str(s).map_err(|e| ConfigurationError::InvalidConfiguration {
-                message: "failed to parse configuration",
-                error: e.to_string(),
-            })?;
-        Ok(config)
+        schema::validate_yaml_configuration(s, Expansion::default()?, Mode::Upgrade)?.validate()
     }
 }
 
@@ -189,12 +516,11 @@ impl JsonSchema for ApolloPlugins {
         // compile time to be picked up.
 
         let plugins = crate::plugin::plugins()
-            .iter()
-            .sorted_by_key(|(name, _)| *name)
-            .filter(|(name, _)| name.starts_with(APOLLO_PLUGIN_PREFIX))
-            .map(|(name, factory)| {
+            .sorted_by_key(|factory| factory.name.clone())
+            .filter(|factory| factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
+            .map(|factory| {
                 (
-                    name[APOLLO_PLUGIN_PREFIX.len()..].to_string(),
+                    factory.name[APOLLO_PLUGIN_PREFIX.len()..].to_string(),
                     factory.create_schema(gen),
                 )
             })
@@ -223,73 +549,628 @@ impl JsonSchema for UserPlugins {
         // compile time to be picked up.
 
         let plugins = crate::plugin::plugins()
-            .iter()
-            .sorted_by_key(|(name, _)| *name)
-            .filter(|(name, _)| !name.starts_with(APOLLO_PLUGIN_PREFIX))
-            .map(|(name, factory)| (name.to_string(), factory.create_schema(gen)))
+            .sorted_by_key(|factory| factory.name.clone())
+            .filter(|factory| !factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
+            .map(|factory| (factory.name.to_string(), factory.create_schema(gen)))
             .collect::<schemars::Map<String, Schema>>();
         gen_schema(plugins)
+    }
+}
+
+/// Configuration options pertaining to the supergraph server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct Supergraph {
+    /// The socket address and port to listen on
+    /// Defaults to 127.0.0.1:4000
+    pub(crate) listen: ListenAddr,
+
+    /// The HTTP path on which GraphQL requests will be served.
+    /// default: "/"
+    pub(crate) path: String,
+
+    /// Enable introspection
+    /// Default: false
+    pub(crate) introspection: bool,
+
+    /// Enable reuse of query fragments
+    /// Default: depends on the federation version
+    #[serde(rename = "experimental_reuse_query_fragments")]
+    pub(crate) reuse_query_fragments: Option<bool>,
+
+    /// Set to false to disable defer support
+    pub(crate) defer_support: bool,
+
+    /// Query planning options
+    pub(crate) query_planning: QueryPlanning,
+}
+
+fn default_defer_support() -> bool {
+    true
+}
+
+#[buildstructor::buildstructor]
+impl Supergraph {
+    #[builder]
+    pub(crate) fn new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        introspection: Option<bool>,
+        defer_support: Option<bool>,
+        query_planning: Option<QueryPlanning>,
+        reuse_query_fragments: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(default_graphql_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            introspection: introspection.unwrap_or_else(default_graphql_introspection),
+            defer_support: defer_support.unwrap_or_else(default_defer_support),
+            query_planning: query_planning.unwrap_or_default(),
+            reuse_query_fragments,
+        }
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Supergraph {
+    #[builder]
+    pub(crate) fn fake_new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        introspection: Option<bool>,
+        defer_support: Option<bool>,
+        query_planning: Option<QueryPlanning>,
+        reuse_query_fragments: Option<bool>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(test_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            introspection: introspection.unwrap_or_else(default_graphql_introspection),
+            defer_support: defer_support.unwrap_or_else(default_defer_support),
+            query_planning: query_planning.unwrap_or_default(),
+            reuse_query_fragments,
+        }
+    }
+}
+
+impl Default for Supergraph {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+impl Supergraph {
+    /// To sanitize the path for axum router
+    pub(crate) fn sanitized_path(&self) -> String {
+        let mut path = self.path.clone();
+        if self.path.ends_with("/*") {
+            // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
+            path = format!("{}router_extra_path", self.path);
+        } else if SUPERGRAPH_ENDPOINT_REGEX.is_match(&self.path) {
+            let new_path = SUPERGRAPH_ENDPOINT_REGEX
+                .replace(&self.path, "${first_path}${sub_path}:supergraph_route");
+            path = new_path.to_string();
+        }
+
+        path
+    }
+}
+
+/// Configuration for operation limits, parser limits, HTTP limits, etc.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct Limits {
+    /// If set, requests with operations deeper than this maximum
+    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
+    /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
+    ///
+    /// Counts depth of an operation, looking at its selection sets,
+    /// including fields in fragments and inline fragments. The following
+    /// example has a depth of 3.
+    ///
+    /// ```graphql
+    /// query getProduct {
+    ///   book { # 1
+    ///     ...bookDetails
+    ///   }
+    /// }
+    ///
+    /// fragment bookDetails on Book {
+    ///   details { # 2
+    ///     ... on ProductDetailsBook {
+    ///       country # 3
+    ///     }
+    ///   }
+    /// }
+    /// ```
+    pub(crate) max_depth: Option<u32>,
+
+    /// If set, requests with operations higher than this maximum
+    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
+    /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
+    ///
+    /// Height is based on simple merging of fields using the same name or alias,
+    /// but only within the same selection set.
+    /// For example `name` here is only counted once and the query has height 3, not 4:
+    ///
+    /// ```graphql
+    /// query {
+    ///     name { first }
+    ///     name { last }
+    /// }
+    /// ```
+    ///
+    /// This may change in a future version of Apollo Router to do
+    /// [full field merging across fragments][merging] instead.
+    ///
+    /// [merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]
+    pub(crate) max_height: Option<u32>,
+
+    /// If set, requests with operations with more root fields than this maximum
+    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
+    /// `"extensions": {"code": "MAX_ROOT_FIELDS_LIMIT"}`
+    ///
+    /// This limit counts only the top level fields in a selection set,
+    /// including fragments and inline fragments.
+    pub(crate) max_root_fields: Option<u32>,
+
+    /// If set, requests with operations with more aliases than this maximum
+    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
+    /// `"extensions": {"code": "MAX_ALIASES_LIMIT"}`
+    pub(crate) max_aliases: Option<u32>,
+
+    /// If set to true (which is the default is dev mode),
+    /// requests that exceed a `max_*` limit are *not* rejected.
+    /// Instead they are executed normally, and a warning is logged.
+    pub(crate) warn_only: bool,
+
+    /// Limit recursion in the GraphQL parser to protect against stack overflow.
+    /// default: 4096
+    pub(crate) parser_max_recursion: usize,
+
+    /// Limit the number of tokens the GraphQL parser processes before aborting.
+    pub(crate) parser_max_tokens: usize,
+
+    /// Limit the size of incoming HTTP requests read from the network,
+    /// to protect against running out of memory. Default: 2000000 (2 MB)
+    pub(crate) experimental_http_max_request_bytes: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            // These limits are opt-in
+            max_depth: None,
+            max_height: None,
+            max_root_fields: None,
+            max_aliases: None,
+            warn_only: false,
+            experimental_http_max_request_bytes: 2_000_000,
+            parser_max_tokens: 15_000,
+
+            // This is `apollo-parser`’s default, which protects against stack overflow
+            // but is still very high for "reasonable" queries.
+            // https://docs.rs/apollo-parser/0.2.8/src/apollo_parser/parser/mod.rs.html#368
+            parser_max_recursion: 4096,
+        }
+    }
+}
+
+/// Router level (APQ) configuration
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Router {
+    #[serde(default)]
+    pub(crate) cache: Cache,
+}
+
+/// Automatic Persisted Queries (APQ) configuration
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Apq {
+    /// Activates Automatic Persisted Queries (enabled by default)
+    #[serde(default = "default_apq")]
+    pub(crate) enabled: bool,
+
+    #[serde(default)]
+    pub(crate) router: Router,
+
+    #[serde(default)]
+    pub(crate) subgraph: SubgraphConfiguration<SubgraphApq>,
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Apq {
+    #[builder]
+    pub(crate) fn fake_new(enabled: Option<bool>) -> Self {
+        Self {
+            enabled: enabled.unwrap_or_else(default_apq),
+            ..Default::default()
+        }
+    }
+}
+
+/// Subgraph level Automatic Persisted Queries (APQ) configuration
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SubgraphApq {
+    /// Enable
+    #[serde(default = "default_subgraph_apq")]
+    pub(crate) enabled: bool,
+}
+
+fn default_subgraph_apq() -> bool {
+    false
+}
+
+fn default_apq() -> bool {
+    true
+}
+
+impl Default for Apq {
+    fn default() -> Self {
+        Self {
+            enabled: default_apq(),
+            router: Default::default(),
+            subgraph: Default::default(),
+        }
+    }
+}
+
+/// Query planning cache configuration
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct QueryPlanning {
+    /// Cache configuration
+    pub(crate) experimental_cache: Cache,
+    /// Warm up the cache on reloads by running the query plan over
+    /// a list of the most used queries
+    /// Defaults to 0 (do not warm up the cache)
+    #[serde(default)]
+    pub(crate) warmed_up_queries: usize,
+}
+
+/// Cache configuration
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct Cache {
+    /// Configures the in memory cache (always active)
+    pub(crate) in_memory: InMemoryCache,
+    /// Configures and activates the Redis cache
+    pub(crate) redis: Option<RedisCache>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// In memory cache configuration
+pub(crate) struct InMemoryCache {
+    /// Number of entries in the Least Recently Used cache
+    pub(crate) limit: NonZeroUsize,
+}
+
+impl Default for InMemoryCache {
+    fn default() -> Self {
+        Self {
+            limit: DEFAULT_CACHE_CAPACITY,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// Redis cache configuration
+pub(crate) struct RedisCache {
+    /// List of URLs to the Redis cluster
+    pub(crate) urls: Vec<url::Url>,
+}
+
+/// TLS related configuration options.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct Tls {
+    /// TLS server configuration
+    ///
+    /// this will affect the GraphQL endpoint and any other endpoint targeting the same listen address
+    pub(crate) supergraph: Option<TlsSupergraph>,
+    pub(crate) subgraph: SubgraphConfiguration<TlsSubgraph>,
+}
+
+/// Configuration options pertaining to the supergraph server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TlsSupergraph {
+    /// server certificate in PEM format
+    #[serde(deserialize_with = "deserialize_certificate", skip_serializing)]
+    #[schemars(with = "String")]
+    pub(crate) certificate: Certificate,
+    /// server key in PEM format
+    #[serde(deserialize_with = "deserialize_key", skip_serializing)]
+    #[schemars(with = "String")]
+    pub(crate) key: PrivateKey,
+    /// list of certificate authorities in PEM format
+    #[serde(deserialize_with = "deserialize_certificate_chain", skip_serializing)]
+    #[schemars(with = "String")]
+    pub(crate) certificate_chain: Vec<Certificate>,
+}
+
+impl TlsSupergraph {
+    pub(crate) fn tls_config(&self) -> Result<Arc<rustls::ServerConfig>, ApolloRouterError> {
+        let mut certificates = vec![self.certificate.clone()];
+        certificates.extend(self.certificate_chain.iter().cloned());
+
+        let mut config = ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_single_cert(certificates, self.key.clone())
+            .map_err(ApolloRouterError::Rustls)?;
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+
+        Ok(Arc::new(config))
+    }
+}
+
+fn deserialize_certificate<'de, D>(deserializer: D) -> Result<Certificate, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let data = String::deserialize(deserializer)?;
+
+    load_certs(&data)
+        .map_err(serde::de::Error::custom)
+        .and_then(|mut certs| {
+            if certs.len() > 1 {
+                Err(serde::de::Error::custom(
+                    "expected exactly one server certificate",
+                ))
+            } else {
+                certs.pop().ok_or(serde::de::Error::custom(
+                    "expected exactly one server certificate",
+                ))
+            }
+        })
+}
+
+fn deserialize_certificate_chain<'de, D>(deserializer: D) -> Result<Vec<Certificate>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let data = String::deserialize(deserializer)?;
+
+    load_certs(&data).map_err(serde::de::Error::custom)
+}
+
+fn deserialize_key<'de, D>(deserializer: D) -> Result<PrivateKey, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let data = String::deserialize(deserializer)?;
+
+    load_keys(&data).map_err(serde::de::Error::custom)
+}
+
+fn load_certs(data: &str) -> io::Result<Vec<Certificate>> {
+    certs(&mut BufReader::new(data.as_bytes()))
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cert"))
+        .map(|mut certs| certs.drain(..).map(Certificate).collect())
+}
+
+fn load_keys(data: &str) -> io::Result<PrivateKey> {
+    let mut reader = BufReader::new(data.as_bytes());
+    let mut key_iterator = iter::from_fn(|| read_one(&mut reader).transpose());
+
+    let private_key = match key_iterator.next() {
+        Some(Ok(Item::RSAKey(key))) => PrivateKey(key),
+        Some(Ok(Item::PKCS8Key(key))) => PrivateKey(key),
+        Some(Ok(Item::ECKey(key))) => PrivateKey(key),
+        Some(Err(e)) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("could not parse the key: {e}"),
+            ))
+        }
+        Some(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected a private key",
+            ))
+        }
+        None => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "could not find a private key",
+            ))
+        }
+    };
+
+    if key_iterator.next().is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "expected exactly one private key",
+        ));
+    }
+    Ok(private_key)
+}
+
+/// Configuration options pertaining to the subgraph server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct TlsSubgraph {
+    /// list of certificate authorities in PEM format
+    pub(crate) certificate_authorities: Option<String>,
+}
+
+#[buildstructor::buildstructor]
+impl TlsSubgraph {
+    #[builder]
+    pub(crate) fn new(certificate_authorities: Option<String>) -> Self {
+        Self {
+            certificate_authorities,
+        }
+    }
+}
+
+impl Default for TlsSubgraph {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Configuration options pertaining to the sandbox page.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct Sandbox {
+    /// Set to true to enable sandbox
+    pub(crate) enabled: bool,
+}
+
+fn default_sandbox() -> bool {
+    false
+}
+
+#[buildstructor::buildstructor]
+impl Sandbox {
+    #[builder]
+    pub(crate) fn new(enabled: Option<bool>) -> Self {
+        Self {
+            enabled: enabled.unwrap_or_else(default_sandbox),
+        }
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Sandbox {
+    #[builder]
+    pub(crate) fn fake_new(enabled: Option<bool>) -> Self {
+        Self {
+            enabled: enabled.unwrap_or_else(default_sandbox),
+        }
+    }
+}
+
+impl Default for Sandbox {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Configuration options pertaining to the home page.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct Homepage {
+    /// Set to false to disable the homepage
+    pub(crate) enabled: bool,
+    /// Graph reference
+    /// This will allow you to redirect from the Apollo Router landing page back to Apollo Studio Explorer
+    pub(crate) graph_ref: Option<String>,
+}
+
+fn default_homepage() -> bool {
+    true
+}
+
+#[buildstructor::buildstructor]
+impl Homepage {
+    #[builder]
+    pub(crate) fn new(enabled: Option<bool>) -> Self {
+        Self {
+            enabled: enabled.unwrap_or_else(default_homepage),
+            graph_ref: None,
+        }
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Homepage {
+    #[builder]
+    pub(crate) fn fake_new(enabled: Option<bool>) -> Self {
+        Self {
+            enabled: enabled.unwrap_or_else(default_homepage),
+            graph_ref: None,
+        }
+    }
+}
+
+impl Default for Homepage {
+    fn default() -> Self {
+        Self::builder().enabled(default_homepage()).build()
     }
 }
 
 /// Configuration options pertaining to the http server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Server {
+#[serde(default)]
+pub(crate) struct HealthCheck {
     /// The socket address and port to listen on
-    /// Defaults to 127.0.0.1:4000
-    #[serde(default = "default_listen")]
+    /// Defaults to 127.0.0.1:8088
     pub(crate) listen: ListenAddr,
 
-    /// Cross origin request headers.
-    #[serde(default)]
-    pub(crate) cors: Option<Cors>,
+    /// Set to false to disable the health check endpoint
+    pub(crate) enabled: bool,
+}
 
-    /// introspection queries
-    /// enabled by default
-    #[serde(default = "default_introspection")]
-    pub(crate) introspection: bool,
+fn default_health_check_listen() -> ListenAddr {
+    SocketAddr::from_str("127.0.0.1:8088").unwrap().into()
+}
 
-    /// display landing page
-    /// enabled by default
-    #[serde(default = "default_landing_page")]
-    pub(crate) landing_page: bool,
-
-    /// GraphQL endpoint
-    /// default: "/"
-    #[serde(default = "default_endpoint")]
-    pub(crate) endpoint: String,
-
-    /// healthCheck path
-    /// default: "/.well-known/apollo/server-health"
-    #[serde(default = "default_health_check_path")]
-    pub(crate) health_check_path: String,
+fn default_health_check() -> bool {
+    true
 }
 
 #[buildstructor::buildstructor]
-impl Server {
+impl HealthCheck {
     #[builder]
-    pub(crate) fn new(
-        listen: Option<ListenAddr>,
-        cors: Option<Cors>,
-        introspection: Option<bool>,
-        landing_page: Option<bool>,
-        endpoint: Option<String>,
-        health_check_path: Option<String>,
-    ) -> Self {
+    pub(crate) fn new(listen: Option<ListenAddr>, enabled: Option<bool>) -> Self {
         Self {
-            listen: listen.unwrap_or_else(default_listen),
-            cors,
-            introspection: introspection.unwrap_or_else(default_introspection),
-            landing_page: landing_page.unwrap_or_else(default_landing_page),
-            endpoint: endpoint.unwrap_or_else(default_endpoint),
-            health_check_path: health_check_path.unwrap_or_else(default_health_check_path),
+            listen: listen.unwrap_or_else(default_health_check_listen),
+            enabled: enabled.unwrap_or_else(default_health_check),
         }
     }
 }
 
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl HealthCheck {
+    #[builder]
+    pub(crate) fn fake_new(listen: Option<ListenAddr>, enabled: Option<bool>) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(test_listen),
+            enabled: enabled.unwrap_or_else(default_health_check),
+        }
+    }
+}
+
+impl Default for HealthCheck {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
+/// You probably don’t want this in production!
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct Chaos {
+    /// Force a hot reload of the Router (as if the schema or configuration had changed)
+    /// at a regular time interval.
+    #[serde(with = "humantime_serde")]
+    #[schemars(with = "Option<String>")]
+    pub(crate) force_reload: Option<std::time::Duration>,
+}
+
 /// Listening address.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ListenAddr {
     /// Socket address.
@@ -299,9 +1180,38 @@ pub enum ListenAddr {
     UnixSocket(std::path::PathBuf),
 }
 
+impl ListenAddr {
+    pub(crate) fn ip_and_port(&self) -> Option<(IpAddr, u16)> {
+        #[cfg_attr(not(unix), allow(irrefutable_let_patterns))]
+        if let Self::SocketAddr(addr) = self {
+            Some((addr.ip(), addr.port()))
+        } else {
+            None
+        }
+    }
+}
+
 impl From<SocketAddr> for ListenAddr {
     fn from(addr: SocketAddr) -> Self {
         Self::SocketAddr(addr)
+    }
+}
+
+#[allow(clippy::from_over_into)]
+impl Into<serde_json::Value> for ListenAddr {
+    fn into(self) -> serde_json::Value {
+        match self {
+            // It avoids to prefix with `http://` when serializing and relying on the Display impl.
+            // Otherwise, it's converted to a `UnixSocket` in any case.
+            Self::SocketAddr(addr) => serde_json::Value::String(addr.to_string()),
+            #[cfg(unix)]
+            Self::UnixSocket(path) => serde_json::Value::String(
+                path.as_os_str()
+                    .to_str()
+                    .expect("unsupported non-UTF-8 path")
+                    .to_string(),
+            ),
+        }
     }
 }
 
@@ -326,935 +1236,17 @@ impl From<tokio_util::either::Either<std::net::SocketAddr, tokio::net::unix::Soc
 impl fmt::Display for ListenAddr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::SocketAddr(addr) => write!(f, "http://{}", addr),
+            Self::SocketAddr(addr) => write!(f, "http://{addr}"),
             #[cfg(unix)]
             Self::UnixSocket(path) => write!(f, "{}", path.display()),
         }
     }
 }
 
-/// Cross origin request configuration.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct Cors {
-    /// Set to true to allow any origin.
-    ///
-    /// Defaults to false
-    /// Having this set to true is the only way to allow Origin: null.
-    #[serde(default)]
-    pub(crate) allow_any_origin: Option<bool>,
-
-    /// Set to true to add the `Access-Control-Allow-Credentials` header.
-    #[serde(default)]
-    pub(crate) allow_credentials: Option<bool>,
-
-    /// The headers to allow.
-    /// If this is not set, we will default to
-    /// the `mirror_request` mode, which mirrors the received
-    /// `access-control-request-headers` preflight has sent.
-    ///
-    /// Note that if you set headers here,
-    /// you also want to have a look at your `CSRF` plugins configuration,
-    /// and make sure you either:
-    /// - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight`
-    /// - defined `csrf` required headers in your yml configuration, as shown in the
-    /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
-    #[serde(default)]
-    pub(crate) allow_headers: Option<Vec<String>>,
-
-    /// Which response headers should be made available to scripts running in the browser,
-    /// in response to a cross-origin request.
-    #[serde(default)]
-    pub(crate) expose_headers: Option<Vec<String>>,
-
-    /// The origin(s) to allow requests from.
-    /// Defaults to `https://studio.apollographql.com/` for Apollo Studio.
-    #[serde(default = "default_origins")]
-    pub(crate) origins: Vec<String>,
-
-    /// Allowed request methods. Defaults to GET, POST, OPTIONS.
-    #[serde(default = "default_cors_methods")]
-    pub(crate) methods: Vec<String>,
-}
-
-impl Default for Cors {
-    fn default() -> Self {
-        Self {
-            allow_any_origin: None,
-            allow_credentials: None,
-            allow_headers: Default::default(),
-            expose_headers: Default::default(),
-            origins: default_origins(),
-            methods: default_cors_methods(),
-        }
-    }
-}
-
-fn default_origins() -> Vec<String> {
-    vec!["https://studio.apollographql.com".into()]
-}
-
-fn default_cors_methods() -> Vec<String> {
-    vec!["GET".into(), "POST".into(), "OPTIONS".into()]
-}
-
-fn default_introspection() -> bool {
-    true
-}
-
-fn default_landing_page() -> bool {
-    true
-}
-
-fn default_endpoint() -> String {
+fn default_graphql_path() -> String {
     String::from("/")
 }
 
-fn default_health_check_path() -> String {
-    String::from("/.well-known/apollo/server-health")
-}
-
-impl Default for Server {
-    fn default() -> Self {
-        Server::builder().build()
-    }
-}
-
-#[cfg(test)]
-#[buildstructor::buildstructor]
-impl Cors {
-    #[builder]
-    pub(crate) fn new(
-        allow_any_origin: Option<bool>,
-        allow_credentials: Option<bool>,
-        allow_headers: Option<Vec<String>>,
-        expose_headers: Option<Vec<String>>,
-        origins: Option<Vec<String>>,
-        methods: Option<Vec<String>>,
-    ) -> Self {
-        Self {
-            allow_any_origin,
-            allow_credentials,
-            allow_headers,
-            expose_headers,
-            origins: origins.unwrap_or_else(default_origins),
-            methods: methods.unwrap_or_else(default_cors_methods),
-        }
-    }
-}
-
-impl Cors {
-    pub(crate) fn into_layer(self) -> Result<CorsLayer, String> {
-        // Ensure configuration is valid before creating CorsLayer
-
-        self.ensure_usable_cors_rules()?;
-
-        let allow_headers = if let Some(headers_to_allow) = self.allow_headers {
-            cors::AllowHeaders::list(headers_to_allow.iter().filter_map(|header| {
-                header
-                    .parse()
-                    .map_err(|_| tracing::error!("header name '{header}' is not valid"))
-                    .ok()
-            }))
-        } else {
-            cors::AllowHeaders::mirror_request()
-        };
-        let cors = CorsLayer::new()
-            .allow_credentials(self.allow_credentials.unwrap_or_default())
-            .allow_headers(allow_headers)
-            .expose_headers(cors::ExposeHeaders::list(
-                self.expose_headers
-                    .unwrap_or_default()
-                    .iter()
-                    .filter_map(|header| {
-                        header
-                            .parse()
-                            .map_err(|_| tracing::error!("header name '{header}' is not valid"))
-                            .ok()
-                    }),
-            ))
-            .allow_methods(cors::AllowMethods::list(self.methods.iter().filter_map(
-                |method| {
-                    method
-                        .parse()
-                        .map_err(|_| tracing::error!("method '{method}' is not valid"))
-                        .ok()
-                },
-            )));
-
-        if self.allow_any_origin.unwrap_or_default() {
-            Ok(cors.allow_origin(cors::Any))
-        } else {
-            Ok(cors.allow_origin(cors::AllowOrigin::list(
-                self.origins.into_iter().filter_map(|origin| {
-                    origin
-                        .parse()
-                        .map_err(|_| tracing::error!("origin '{origin}' is not valid"))
-                        .ok()
-                }),
-            )))
-        }
-    }
-
-    // This is cribbed from the similarly named function in tower-http. The version there
-    // asserts that CORS rules are useable, which results in a panic if they aren't. We
-    // don't want the router to panic in such cases, so this function returns an error
-    // with a message describing what the problem is.
-    fn ensure_usable_cors_rules(&self) -> Result<(), &'static str> {
-        if self.allow_credentials.unwrap_or_default() {
-            if let Some(headers) = &self.allow_headers {
-                if headers.iter().any(|x| x == "*") {
-                    return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                        with `Access-Control-Allow-Headers: *`");
-                }
-            }
-
-            if self.methods.iter().any(|x| x == "*") {
-                return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                    with `Access-Control-Allow-Methods: *`");
-            }
-
-            if self.origins.iter().any(|x| x == "*") {
-                return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                    with `Access-Control-Allow-Origin: *`");
-            }
-
-            if self.allow_any_origin.unwrap_or_default() {
-                return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                    with `Access-Control-Allow-Origin: *`");
-            }
-
-            if let Some(headers) = &self.expose_headers {
-                if headers.iter().any(|x| x == "*") {
-                    return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                        with `Access-Control-Expose-Headers: *`");
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Generate a JSON schema for the configuration.
-pub(crate) fn generate_config_schema() -> RootSchema {
-    let settings = SchemaSettings::draft07().with(|s| {
-        s.option_nullable = true;
-        s.option_add_null_type = false;
-        s.inline_subschemas = true;
-    });
-    let gen = settings.into_generator();
-    gen.into_root_schema_for::<Configuration>()
-}
-
-/// Validate config yaml against the generated json schema.
-/// This is a tricky problem, and the solution here is by no means complete.
-/// In the case that validation cannot be performed then it will let serde validate as normal. The
-/// goal is to give a good enough experience until more time can be spent making this better,
-///
-/// THe validation sequence is:
-/// 1. Parse the config into yaml
-/// 2. Create the json schema
-/// 3. Validate the yaml against the json schema.
-/// 4. If there were errors then try and parse using a custom parser that retains line and column number info.
-/// 5. Convert the json paths from the error messages into nice error snippets.
-///
-/// If at any point something doesn't work out it lets the config pass and it'll get re-validated by serde later.
-///
-pub(crate) fn validate_configuration(raw_yaml: &str) -> Result<Configuration, ConfigurationError> {
-    let yaml =
-        &serde_yaml::from_str(raw_yaml).map_err(|e| ConfigurationError::InvalidConfiguration {
-            message: "failed to parse yaml",
-            error: e.to_string(),
-        })?;
-    let expanded_yaml = expand_env_variables(yaml);
-    let schema = serde_json::to_value(generate_config_schema()).map_err(|e| {
-        ConfigurationError::InvalidConfiguration {
-            message: "failed to parse schema",
-            error: e.to_string(),
-        }
-    })?;
-    let schema = JSONSchema::options()
-        .with_draft(Draft::Draft7)
-        .compile(&schema)
-        .map_err(|e| ConfigurationError::InvalidConfiguration {
-            message: "failed to compile schema",
-            error: e.to_string(),
-        })?;
-    if let Err(errors) = schema.validate(&expanded_yaml) {
-        // Validation failed, translate the errors into something nice for the user
-        // We have to reparse the yaml to get the line number information for each error.
-        match yaml::parse(raw_yaml) {
-            Ok(yaml) => {
-                let yaml_split_by_lines = raw_yaml.split('\n').collect::<Vec<_>>();
-
-                let errors = errors
-                    .enumerate()
-                    .filter_map(|(idx, mut e)| {
-                        if let Some(element) = yaml.get_element(&e.instance_path) {
-                            const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
-                            match element {
-                                yaml::Value::String(value, marker) => {
-                                    let lines = yaml_split_by_lines[0.max(
-                                        marker
-                                            .line()
-                                            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
-                                    )
-                                        ..marker.line()]
-                                        .iter()
-                                        .join("\n");
-
-                                    // Replace the value in the error message with the one from the raw config.
-                                    // This guarantees that if the env variable contained a secret it won't be leaked.
-                                    e.instance = Cow::Owned(coerce(value));
-
-                                    Some(format!(
-                                        "{}. {}\n\n{}\n{}^----- {}",
-                                        idx + 1,
-                                        e.instance_path,
-                                        lines,
-                                        " ".repeat(0.max(marker.col())),
-                                        e
-                                    ))
-                                }
-                                seq_element @ yaml::Value::Sequence(_, m) => {
-                                    let (start_marker, end_marker) = (m, seq_element.end_marker());
-
-                                    let offset = 0.max(
-                                        start_marker
-                                            .line()
-                                            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
-                                    );
-                                    let lines = yaml_split_by_lines[offset..end_marker.line()]
-                                        .iter()
-                                        .enumerate()
-                                        .map(|(idx, line)| {
-                                            let real_line = idx + offset;
-                                            match real_line.cmp(&start_marker.line()) {
-                                                Ordering::Equal => format!("┌ {line}"),
-                                                Ordering::Greater => format!("| {line}"),
-                                                Ordering::Less => line.to_string(),
-                                            }
-                                        })
-                                        .join("\n");
-
-                                    Some(format!(
-                                        "{}. {}\n\n{}\n└-----> {}",
-                                        idx + 1,
-                                        e.instance_path,
-                                        lines,
-                                        e
-                                    ))
-                                }
-                                map_value
-                                @ yaml::Value::Mapping(current_label, _value, _marker) => {
-                                    let (start_marker, end_marker) = (
-                                        current_label.as_ref()?.marker.as_ref()?,
-                                        map_value.end_marker(),
-                                    );
-                                    let offset = 0.max(
-                                        start_marker
-                                            .line()
-                                            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
-                                    );
-                                    let lines = yaml_split_by_lines[offset..end_marker.line()]
-                                        .iter()
-                                        .enumerate()
-                                        .map(|(idx, line)| {
-                                            let real_line = idx + offset;
-                                            match real_line.cmp(&start_marker.line()) {
-                                                Ordering::Equal => format!("┌ {line}"),
-                                                Ordering::Greater => format!("| {line}"),
-                                                Ordering::Less => line.to_string(),
-                                            }
-                                        })
-                                        .join("\n");
-
-                                    Some(format!(
-                                        "{}. {}\n\n{}\n└-----> {}",
-                                        idx + 1,
-                                        e.instance_path,
-                                        lines,
-                                        e
-                                    ))
-                                }
-                            }
-                        } else {
-                            None
-                        }
-                    })
-                    .join("\n\n");
-
-                if !errors.is_empty() {
-                    return Err(ConfigurationError::InvalidConfiguration {
-                        message: "configuration had errors",
-                        error: format!("\n{}", errors),
-                    });
-                }
-            }
-            Err(e) => {
-                // the yaml failed to parse. Just let serde do it's thing.
-                tracing::warn!(
-                    "failed to parse yaml using marked parser: {}. Falling back to serde validation",
-                    e
-                );
-            }
-        }
-    }
-
-    let config: Configuration = serde_json::from_value(expanded_yaml)
-        .map_err(ConfigurationError::DeserializeConfigError)?;
-
-    // ------------- Check for unknown fields at runtime ----------------
-    // We can't do it with the `deny_unknown_fields` property on serde because we are using `flatten`
-    let registered_plugins = plugins();
-    let apollo_plugin_names: Vec<&str> = registered_plugins
-        .keys()
-        .filter_map(|n| n.strip_prefix(APOLLO_PLUGIN_PREFIX))
-        .collect();
-    let unknown_fields: Vec<&String> = config
-        .apollo_plugins
-        .plugins
-        .keys()
-        .filter(|ap_name| {
-            let ap_name = ap_name.as_str();
-            ap_name != "server" && ap_name != "plugins" && !apollo_plugin_names.contains(&ap_name)
-        })
-        .collect();
-
-    if !unknown_fields.is_empty() {
-        return Err(ConfigurationError::InvalidConfiguration {
-            message: "unknown fields",
-            error: format!(
-                "additional properties are not allowed ('{}' was/were unexpected)",
-                unknown_fields.iter().join(", ")
-            ),
-        });
-    }
-
-    // Custom validations
-    if !config.server.endpoint.starts_with('/') {
-        return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.endpoint' configuration",
-            error: format!(
-                "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
-                config.server.endpoint,
-                config.server.endpoint
-            ),
-        });
-    }
-    if config.server.endpoint.ends_with('*') && !config.server.endpoint.ends_with("/*") {
-        return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.endpoint' configuration",
-            error: format!(
-                "'{}' is invalid, you can only set a wildcard after a '/'",
-                config.server.endpoint
-            ),
-        });
-    }
-    if config.server.endpoint.contains("/*/") {
-        return Err(
-                ConfigurationError::InvalidConfiguration {
-                    message: "invalid 'server.endpoint' configuration",
-                    error: format!(
-                        "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
-                        config.server.endpoint
-                    ),
-                },
-            );
-    }
-
-    Ok(config)
-}
-
-fn expand_env_variables(configuration: &serde_json::Value) -> serde_json::Value {
-    let mut configuration = configuration.clone();
-    visit(&mut configuration);
-    configuration
-}
-
-fn visit(value: &mut Value) {
-    let mut expanded: Option<String> = None;
-    match value {
-        Value::String(value) => {
-            let new_value = envmnt::expand(
-                value,
-                Some(
-                    ExpandOptions::new()
-                        .clone_with_expansion_type(ExpansionType::UnixBracketsWithDefaults),
-                ),
-            );
-
-            if &new_value != value {
-                expanded = Some(new_value);
-            }
-        }
-        Value::Array(a) => a.iter_mut().for_each(visit),
-        Value::Object(o) => o.iter_mut().for_each(|(_, v)| visit(v)),
-        _ => {}
-    }
-    // The expansion may have resulted in a primitive, reparse and replace
-    if let Some(expanded) = expanded {
-        *value = coerce(&expanded)
-    }
-}
-
-fn coerce(expanded: &str) -> Value {
-    match serde_yaml::from_str(expanded) {
-        Ok(Value::Bool(b)) => Value::Bool(b),
-        Ok(Value::Number(n)) => Value::Number(n),
-        Ok(Value::Null) => Value::Null,
-        _ => Value::String(expanded.to_string()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-    use std::fs;
-
-    use http::Uri;
-    #[cfg(unix)]
-    use insta::assert_json_snapshot;
-    use regex::Regex;
-    #[cfg(unix)]
-    use schemars::gen::SchemaSettings;
-    use walkdir::DirEntry;
-    use walkdir::WalkDir;
-
-    use super::*;
-    use crate::error::SchemaError;
-
-    #[cfg(unix)]
-    #[test]
-    fn schema_generation() {
-        let settings = SchemaSettings::draft2019_09().with(|s| {
-            s.option_nullable = true;
-            s.option_add_null_type = false;
-            s.inline_subschemas = true;
-        });
-        let gen = settings.into_generator();
-        let schema = gen.into_root_schema_for::<Configuration>();
-        assert_json_snapshot!(&schema)
-    }
-
-    #[test]
-    fn routing_url_in_schema() {
-        let schema: crate::Schema = r#"
-        schema
-          @core(feature: "https://specs.apollo.dev/core/v0.1"),
-          @core(feature: "https://specs.apollo.dev/join/v0.1")
-        {
-          query: Query
-        }
-
-        type Query {
-          me: String
-        }
-
-        directive @core(feature: String!) repeatable on SCHEMA
-
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-        enum join__Graph {
-          ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-          INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
-          PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
-          REVIEWS @join__graph(name: "reviews" url: "http://localhost:4004/graphql")
-        }"#
-        .parse()
-        .unwrap();
-
-        let subgraphs: HashMap<&String, &Uri> = schema.subgraphs().collect();
-
-        // if no configuration override, use the URL from the supergraph
-        assert_eq!(
-            subgraphs.get(&"accounts".to_string()).unwrap().to_string(),
-            "http://localhost:4001/graphql"
-        );
-        // if both configuration and schema specify a non empty URL, the configuration wins
-        // this should show a warning in logs
-        assert_eq!(
-            subgraphs.get(&"inventory".to_string()).unwrap().to_string(),
-            "http://localhost:4002/graphql"
-        );
-        // if the configuration has a non empty routing URL, and the supergraph
-        // has an empty one, the configuration wins
-        assert_eq!(
-            subgraphs.get(&"products".to_string()).unwrap().to_string(),
-            "http://localhost:4003/graphql"
-        );
-
-        assert_eq!(
-            subgraphs.get(&"reviews".to_string()).unwrap().to_string(),
-            "http://localhost:4004/graphql"
-        );
-    }
-
-    #[test]
-    fn missing_subgraph_url() {
-        let schema_error = r#"
-        schema
-          @core(feature: "https://specs.apollo.dev/core/v0.1"),
-          @core(feature: "https://specs.apollo.dev/join/v0.1")
-        {
-          query: Query
-        }
-
-        type Query {
-          me: String
-        }
-
-        directive @core(feature: String!) repeatable on SCHEMA
-
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
-        enum join__Graph {
-          ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
-          INVENTORY @join__graph(name: "inventory" url: "http://localhost:4002/graphql")
-          PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
-          REVIEWS @join__graph(name: "reviews" url: "")
-        }"#
-        .parse::<crate::Schema>()
-        .expect_err("Must have an error because we have one missing subgraph routing url");
-
-        if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
-            assert_eq!(subgraph, "reviews");
-        } else {
-            panic!(
-                "expected missing subgraph URL for 'reviews', got: {:?}",
-                schema_error
-            );
-        }
-    }
-
-    #[test]
-    fn cors_defaults() {
-        let cors = Cors::builder().build();
-
-        assert_eq!(
-            ["https://studio.apollographql.com"],
-            cors.origins.as_slice()
-        );
-        assert!(
-            !cors.allow_any_origin.unwrap_or_default(),
-            "Allow any origin should be disabled by default"
-        );
-
-        assert!(
-            cors.allow_headers.is_none(),
-            "No allow_headers list should be present by default"
-        );
-    }
-
-    #[test]
-    fn bad_endpoint_configuration_without_slash() {
-        let error = validate_configuration(
-            r#"
-server:
-  endpoint: test
-  "#,
-        )
-        .expect_err("should have resulted in an error");
-        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"));
-    }
-
-    #[test]
-    fn bad_endpoint_configuration_with_wildcard_as_prefix() {
-        let error = validate_configuration(
-            r#"
-server:
-  endpoint: /*/test
-  "#,
-        )
-        .expect_err("should have resulted in an error");
-        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
-    }
-
-    #[test]
-    fn unknown_fields() {
-        let error = validate_configuration(
-            r#"
-server:
-  endpoint: /
-subgraphs:
-  account: true
-  "#,
-        )
-        .expect_err("should have resulted in an error");
-        assert_eq!(error.to_string(), String::from("unknown fields: additional properties are not allowed ('subgraphs' was/were unexpected)"));
-    }
-
-    #[test]
-    fn bad_endpoint_configuration_with_bad_ending_wildcard() {
-        let error = validate_configuration(
-            r#"
-server:
-  endpoint: /test*
-  "#,
-        )
-        .expect_err("should have resulted in an error");
-        assert_eq!(error.to_string(), String::from("invalid 'server.endpoint' configuration: '/test*' is invalid, you can only set a wildcard after a '/'"));
-    }
-
-    #[test]
-    fn line_precise_config_errors() {
-        let error = validate_configuration(
-            r#"
-plugins:
-  non_existant:
-    foo: "bar"
-
-telemetry:
-  another_non_existant: 3
-  "#,
-        )
-        .expect_err("should have resulted in an error");
-        insta::assert_snapshot!(error.to_string());
-    }
-
-    #[test]
-    fn line_precise_config_errors_with_errors_after_first_field() {
-        let error = validate_configuration(
-            r#"
-server:
-  # The socket address and port to listen on
-  # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
-  bad: "donotwork"
-  another_one: true
-        "#,
-        )
-        .expect_err("should have resulted in an error");
-        insta::assert_snapshot!(error.to_string());
-    }
-
-    #[test]
-    fn line_precise_config_errors_bad_type() {
-        let error = validate_configuration(
-            r#"
-server:
-  # The socket address and port to listen on
-  # Defaults to 127.0.0.1:4000
-  listen: true
-        "#,
-        )
-        .expect_err("should have resulted in an error");
-        insta::assert_snapshot!(error.to_string());
-    }
-
-    #[test]
-    fn line_precise_config_errors_with_inline_sequence() {
-        let error = validate_configuration(
-            r#"
-server:
-  # The socket address and port to listen on
-  # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
-  cors:
-    allow_headers: [ Content-Type, 5 ]
-        "#,
-        )
-        .expect_err("should have resulted in an error");
-        insta::assert_snapshot!(error.to_string());
-    }
-
-    #[test]
-    fn line_precise_config_errors_with_sequence() {
-        let error = validate_configuration(
-            r#"
-server:
-  # The socket address and port to listen on
-  # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
-  cors:
-    allow_headers:
-      - Content-Type
-      - 5
-        "#,
-        )
-        .expect_err("should have resulted in an error");
-        insta::assert_snapshot!(error.to_string());
-    }
-
-    #[test]
-    fn it_does_not_allow_invalid_cors_headers() {
-        let cfg = validate_configuration(
-            r#"
-server:
-  cors:
-    allow_credentials: true
-    allow_headers: [ "*" ]
-        "#,
-        )
-        .expect("should not have resulted in an error");
-        let error = cfg
-            .server
-            .cors
-            .expect("should not have resulted in an error")
-            .into_layer()
-            .expect_err("should have resulted in an error");
-        assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`");
-    }
-
-    #[test]
-    fn it_does_not_allow_invalid_cors_methods() {
-        let cfg = validate_configuration(
-            r#"
-server:
-  cors:
-    allow_credentials: true
-    methods: [ GET, "*" ]
-        "#,
-        )
-        .expect("should not have resulted in an error");
-        let error = cfg
-            .server
-            .cors
-            .expect("should not have resulted in an error")
-            .into_layer()
-            .expect_err("should have resulted in an error");
-        assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`");
-    }
-
-    #[test]
-    fn it_does_not_allow_invalid_cors_origins() {
-        let cfg = validate_configuration(
-            r#"
-server:
-  cors:
-    allow_credentials: true
-    allow_any_origin: true
-        "#,
-        )
-        .expect("should not have resulted in an error");
-        let error = cfg
-            .server
-            .cors
-            .expect("should not have resulted in an error")
-            .into_layer()
-            .expect_err("should have resulted in an error");
-        assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Origin: *`");
-    }
-
-    #[test]
-    fn validate_project_config_files() {
-        #[cfg(not(unix))]
-        let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
-        #[cfg(unix)]
-        let filename_matcher =
-            Regex::from_str("((.+[.])?router(_unix)?\\.yaml)|(.+\\.mdx)").unwrap();
-        #[cfg(not(unix))]
-        let embedded_yaml_matcher =
-            Regex::from_str(r#"(?ms)```yaml title="router.yaml"(.+?)```"#).unwrap();
-        #[cfg(unix)]
-        let embedded_yaml_matcher =
-            Regex::from_str(r#"(?ms)```yaml title="router(_unix)?.yaml"(.+?)```"#).unwrap();
-
-        fn it(path: &str) -> impl Iterator<Item = DirEntry> {
-            WalkDir::new(path).into_iter().filter_map(|e| e.ok())
-        }
-
-        for entry in it(".").chain(it("../examples")).chain(it("../docs")) {
-            if entry
-                .path()
-                .with_file_name(".skipconfigvalidation")
-                .exists()
-            {
-                continue;
-            }
-
-            let name = entry.file_name().to_string_lossy();
-            if filename_matcher.is_match(&name) {
-                let config = fs::read_to_string(entry.path()).expect("failed to read file");
-                let yamls = if name.ends_with(".mdx") {
-                    #[cfg(unix)]
-                    let index = 2usize;
-                    #[cfg(not(unix))]
-                    let index = 1usize;
-                    // Extract yaml from docs
-                    embedded_yaml_matcher
-                        .captures_iter(&config)
-                        .map(|i| i.get(index).unwrap().as_str().into())
-                        .collect()
-                } else {
-                    vec![config]
-                };
-
-                for yaml in yamls {
-                    if let Err(e) = validate_configuration(&yaml) {
-                        panic!(
-                            "{} configuration error: \n{}",
-                            entry.path().to_string_lossy(),
-                            e
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn it_does_not_leak_env_variable_values() {
-        std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
-        let error = validate_configuration(
-            r#"
-server:
-  introspection: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
-        "#,
-        )
-        .expect_err("Must have an error because we expect a boolean");
-        insta::assert_snapshot!(error.to_string());
-    }
-
-    #[test]
-    fn line_precise_config_errors_with_inline_sequence_env_expansion() {
-        std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
-        let error = validate_configuration(
-            r#"
-server:
-  # The socket address and port to listen on
-  # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
-  cors:
-    allow_headers: [ Content-Type, "${TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
-        "#,
-        )
-        .expect_err("should have resulted in an error");
-        insta::assert_snapshot!(error.to_string());
-    }
-
-    #[test]
-    fn line_precise_config_errors_with_sequence_env_expansion() {
-        std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
-
-        let error = validate_configuration(
-            r#"
-server:
-  # The socket address and port to listen on
-  # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
-  cors:
-    allow_headers:
-      - Content-Type
-      - "${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}"
-        "#,
-        )
-        .expect_err("should have resulted in an error");
-        insta::assert_snapshot!(error.to_string());
-    }
-
-    #[test]
-    fn line_precise_config_errors_with_errors_after_first_field_env_expansion() {
-        let error = validate_configuration(
-            r#"
-server:
-  # The socket address and port to listen on
-  # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
-  ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}: 5
-  another_one: ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:true}
-        "#,
-        )
-        .expect_err("should have resulted in an error");
-        insta::assert_snapshot!(error.to_string());
-    }
+fn default_graphql_introspection() -> bool {
+    false
 }

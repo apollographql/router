@@ -18,6 +18,8 @@ crates/*/Cargo.lock
 .idea
 *.iml
 .vscode
+.DS_Store
+        
 
 # Docs
 /docs/node_modules/

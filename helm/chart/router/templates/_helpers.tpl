@@ -24,6 +24,13 @@ If release name contains chart name it will be used as a full name.
 {{- end }}
 
 {{/*
+Create a name for our rhai config map.
+*/}}
+{{- define "router.rhaiConfigMapName" -}}
+{{- printf "%s-rhai" (include "router.fullname" .) }}
+{{- end }}
+
+{{/*
 Create chart name and version as used by the chart label.
 */}}
 {{- define "router.chart" -}}
@@ -83,4 +90,29 @@ Usage:
     {{- else }}
         {{- tpl (.value | toYaml) .context }}
     {{- end }}
+{{- end -}}
+
+{{- define "router.prometheusMetricsPath" -}}
+{{- if ((((.Values.router).configuration).telemetry).metrics).prometheus }}
+{{- .Values.router.configuration.telemetry.metrics.prometheus.path | quote }}
+{{- else -}}
+"/metrics"
+{{- end }}
+{{- end -}}
+
+{{/*
+This function takes the `extraLabels` map and templatizes the values.
+This allows to pass references from the values and interprates them as template.
+A use case for this usage is to add a custom label to the deployment referencing the version of the chart.
+For example:
+
+```
+extraLabels:
+  custom-version: {{ .Chart.AppVersion }}
+```
+*/}}
+{{- define "common.templatizeExtraLabels" -}}
+{{- range $key, $value := .Values.extraLabels }}
+{{ printf "%s: %s" $key (include  "common.tplvalues.render" ( dict "value" $value "context" $))}}
+{{- end -}}
 {{- end -}}

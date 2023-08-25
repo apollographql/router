@@ -4,12 +4,15 @@ expression: results
 ---
 [
   {
-    "traces_and_stats": {
+    "request_id": "[REDACTED]",
+    "stats": {
       "## GraphQLValidationFailure\n": {
         "stats_with_context": {
           "context": {
             "client_name": "test_client",
-            "client_version": "1.0-test"
+            "client_version": "1.0-test",
+            "operation_type": "query",
+            "operation_subtype": ""
           },
           "query_latency_stats": {
             "latency": {
@@ -36,6 +39,6 @@ expression: results
         "referenced_fields_by_type": {}
       }
     },
-    "operation_count": 0
+    "licensed_operation_count_by_type": null
   }
 ]

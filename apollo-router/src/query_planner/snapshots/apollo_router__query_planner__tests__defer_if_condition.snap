@@ -1,0 +1,12 @@
+---
+source: apollo-router/src/query_planner/mod.rs
+expression: defer_primary_response
+---
+{
+  "data": {
+    "me": {
+      "__typename": "User",
+      "id": "1"
+    }
+  }
+}

@@ -26,7 +26,7 @@
     {
       "fileMatch": [
         "^\\.tool-versions$",
-        "^dockerfiles/diy/dockerfiles/Dockerfile\\.repo$",
+        "(^|/)Dockerfile[^/]*$",
         "^rust-toolchain\\.toml$",
         "^docs/.*?\\.mdx$"
       ],
@@ -38,6 +38,15 @@
     }
   ],
   "packageRules": [
+    // Don't do `rust` image updates on Dockerfiles since they'll we want them
+    // managed/grouped into the package rule directly after this one.  This
+    // prevents multiple PRs for the same bump, and puts all our Rust version
+    // bumps together.
+    {
+      "matchPackageNames": ["rust"],
+      "matchManagers": ["dockerfile"],
+      "enabled": false
+    },
     {
       // This "rust" name maps to the Docker Hub "rust" image above on account
       // of the `regexManagers[0]` defined above being `datasourceTemplate` = `docker`.
@@ -69,32 +78,54 @@
     {
       "matchCurrentVersion": ">= 1.0.0",
       "matchManagers": [ "cargo", "npm" ],
+      // TODO: https://github.com/apollographql/router/pull/3194/commits/4e522a245e715e67d44c8dfc0a458bca1d054078
+      // Remove this after `flate2` is resolved.
+      "excludePackageNames": ["flate2"],
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "groupName": "all non-major packages >= 1.0",
       "groupSlug": "all-non-major-gte-1.0",
       "automerge": true,
     },
+    // We're currently constrained in our ability to update the `tracing`
+    // packages to the latest versions because of our usage.  As an extension
+    // of the same concern, we cannot update our `opentelemetry` packages since
+    // those are tightly intertwined.  This exception puts those packages into
+    // their own group and away from other dep updates until the time that
+    // those problems are no longer.  For more details, see the explainations
+    // in the `/apollo-router/Cargo.toml` file around the declarations for
+    // `^opentelemetry` and `^tracing` packages.
     {
-      "matchPaths": [
-        "docs/package.json"
+      "matchManagers": [
+        "cargo"
       ],
-      "extends": [
-        "apollo-docs"
+      "matchPackagePatterns": [
+        "^tracing",
+        "^opentelemetry",
       ],
-      // "Past" major version branches, preserved as
-      // "version-[0-9]" branches, should be added here!
-      // See Apollo Server or Apollo Client repos for examples.
-      "baseBranches": [
-        "main"
-      ],
-      // The current Apollo Gatsby theme does not support a version of Gatsby
-      // that supports React 17.
-      "packageRules": [
-        {
-          "matchPackageNames": ["react", "react-dom"],
-          "allowedVersions": "16.x",
-        },
-      ],
+      "groupName": "cargo tracing packages",
+      "groupSlug": "cargo-tracing-packages",
+      "dependencyDashboardApproval": true
     },
+    // Our own `apollo-` packages deserve to get front-and-center treatment.
+    // We'll put them in their own PR to facilitate workflows that surface
+    // their changes earlier, and get us dog-fooding them quicker.
+    // They also have a small proclivity to require more hands-on changes
+    // since they're pre-0.x and we use them so extensively.
+    {
+      "matchPackagePatterns": ["^apollo-"],
+      "groupName": "apollo-rs crates",
+      "groupSlug": "rust-apollo-rs-updates",
+      "matchManagers": ["cargo"],
+      "automerge": false
+    },
+    // We'll review these in a PR of their own since it has the most direct runtime
+    // implications on users that we'd like to be very intentional about.
+    {
+      "matchPackageNames": ["router-bridge"],
+      "groupName": "router-bridge updates (including federation)",
+      "groupSlug": "rust-router-bridge-updates",
+      "matchManagers": ["cargo"],
+      "automerge": false
+    }
   ]
 }

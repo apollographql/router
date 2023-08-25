@@ -1,0 +1,12 @@
+---
+source: apollo-router/src/orbiter/mod.rs
+expression: report
+---
+session_id: "[session_id]"
+version: "[version]"
+platform:
+  os: "[os]"
+  continuous_integration: "[ci]"
+usage:
+  configuration.plugins.len: 0
+

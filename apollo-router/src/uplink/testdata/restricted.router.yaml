@@ -1,0 +1,62 @@
+health_check:
+  enabled: true
+homepage:
+  enabled: true
+
+authentication:
+  router:
+    jwt:
+      jwks:
+        - url: https://example.com
+
+coprocessor:
+  url: https://example.com
+
+supergraph:
+  query_planning:
+    experimental_cache:
+      redis:
+        urls:
+          - https://example.com
+      in_memory:
+        limit: 1000
+
+limits:
+  max_depth: 20
+  max_height: 100
+  max_aliases: 100
+  max_root_fields: 10
+
+apq:
+  router:
+    cache:
+      redis:
+        urls:
+          - https://example.com
+      in_memory:
+        limit: 1000
+
+traffic_shaping:
+  subgraphs:
+    products:
+      experimental_entity_caching:
+        ttl: 2s
+  experimental_cache:
+    urls:
+      - https://example.com
+
+subscription:
+  enabled: true
+  mode:
+    passthrough:
+      subgraphs:
+        reviews:
+          path: /graphql
+    preview_callback:
+      public_url: "http://localhost:4040/"
+      listen: 0.0.0.0:4040
+      subgraphs:
+        - atestsubgraph
+plugins:
+  experimental.restricted:
+    enabled: true

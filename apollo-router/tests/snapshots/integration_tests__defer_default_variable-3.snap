@@ -1,0 +1,12 @@
+---
+source: apollo-router/tests/integration_tests.rs
+expression: stream.next().await.unwrap().unwrap()
+---
+{
+  "data": {
+    "me": {
+      "id": "1",
+      "name": "Ada Lovelace"
+    }
+  }
+}

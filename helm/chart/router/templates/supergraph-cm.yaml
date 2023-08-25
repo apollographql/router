@@ -1,0 +1,12 @@
+{{- if .Values.supergraphFile }}
+{{- $routerFullName := include "router.fullname" .  -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $routerFullName }}-supergraph
+  labels:
+    {{- include "router.labels" . | nindent 4 }}
+data:
+  supergraph-schema.graphql: |-
+{{ .Values.supergraphFile | indent 4 }}
+{{- end }}
