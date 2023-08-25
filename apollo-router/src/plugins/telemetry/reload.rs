@@ -12,6 +12,7 @@ use rand::Rng;
 use tower::BoxError;
 use tracing_core::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::filter::Filtered;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::Filter;
 use tracing_subscriber::layer::Layer;
@@ -30,7 +31,10 @@ use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::metrics::layer::MetricsLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 
-type LayeredTracer = Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>;
+pub(super) type LayeredTracer = Layered<
+    Filtered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, SamplingFilter, Registry>,
+    Registry,
+>;
 
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
 // generic types in the layer definition.
@@ -62,7 +66,9 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = ReloadTracer::new(
         opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer("noop", None, None),
     );
-    let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(hot_tracer.clone());
+    let opentelemetry_layer = tracing_opentelemetry::layer()
+        .with_tracer(hot_tracer.clone())
+        .with_filter(SamplingFilter::new());
 
     // We choose json or plain based on tty
     let fmt = if atty::is(atty::Stream::Stdout) {
@@ -136,13 +142,7 @@ pub(super) fn reload_metrics(layer: MetricsLayer) {
 }
 
 #[allow(clippy::type_complexity)]
-pub(super) fn reload_fmt(
-    layer: Box<
-        dyn Layer<Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>>
-            + Send
-            + Sync,
-    >,
-) {
+pub(super) fn reload_fmt(layer: Box<dyn Layer<LayeredTracer> + Send + Sync>) {
     if let Some(handle) = FMT_LAYER_HANDLE.get() {
         handle.reload(layer).expect("fmt layer reload must succeed");
     }
