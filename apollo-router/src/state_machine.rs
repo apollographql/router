@@ -27,6 +27,8 @@ use super::router::ApolloRouterError::{self};
 use super::router::Event::UpdateConfiguration;
 use super::router::Event::UpdateSchema;
 use super::router::Event::{self};
+use crate::configuration::metrics::Metrics;
+use crate::configuration::metrics::MetricsHandle;
 use crate::configuration::Configuration;
 use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
@@ -58,6 +60,7 @@ enum State<FA: RouterSuperServiceFactory> {
     },
     Running {
         configuration: Arc<Configuration>,
+        _metrics_handle: MetricsHandle,
         schema: Arc<String>,
         license: LicenseState,
         server_handle: Option<HttpServerHandle>,
@@ -163,6 +166,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 server_handle,
                 router_service_factory,
                 all_connections_stopped_signals,
+                ..
             } => {
                 // When we get an unlicensed event, if we were licensed before then just carry on.
                 // This means that users can delete and then undelete their graphs in studio while having their routers continue to run.
@@ -412,8 +416,11 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             discussed.log_preview_used(yaml);
         }
 
+        let metrics_handle = Metrics::spawn(&configuration).await;
+
         Ok(Running {
             configuration,
+            _metrics_handle: metrics_handle,
             schema,
             license,
             server_handle: Some(server_handle),
@@ -513,7 +520,7 @@ where
         // Process all the events in turn until we get to error state or we run out of events.
         while let Some(event) = messages.next().await {
             let event_name = format!("{event:?}");
-            let last_state = format!("{state:?}");
+            let previous_state = format!("{state:?}");
 
             state = match event {
                 UpdateConfiguration(configuration) => {
@@ -543,7 +550,11 @@ where
             self.notify_updated.notify_one();
 
             tracing::debug!(
-                "state machine event: {event_name}, transitioned from: {last_state} to: {state:?}"
+                monotonic_counter.apollo_router_state_change_total = 1u64,
+                event = event_name,
+                state = ?state,
+                previous_state,
+                "state machine transitioned"
             );
 
             // If we've errored then exit even if there are potentially more messages

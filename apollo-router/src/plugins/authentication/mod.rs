@@ -469,6 +469,15 @@ fn authenticate(
             monotonic_counter.apollo_authentication_failure_count = 1u64,
             kind = %AUTHENTICATION_KIND
         );
+        tracing::info!(
+            monotonic_counter
+                .apollo
+                .router
+                .operations
+                .authentication
+                .jwt = 1,
+            authentication.jwt.failed = true
+        );
         tracing::info!(message = %error, "jwt authentication failure");
         let response = router::Response::error_builder()
             .error(
@@ -618,6 +627,7 @@ fn authenticate(
             monotonic_counter.apollo_authentication_success_count = 1u64,
             kind = %AUTHENTICATION_KIND
         );
+        tracing::info!(monotonic_counter.apollo.router.operations.jwt = 1);
         return Ok(ControlFlow::Continue(request));
     }
 

@@ -66,7 +66,7 @@ where
         {
             let mut result = Vec::new();
             while let Some(element) = seq.next_element::<String>()? {
-                let header_name = HeaderNameVisitor::default().visit_string(element)?;
+                let header_name = HeaderNameVisitor.visit_string(element)?;
                 result.push(header_name);
             }
             Ok(result)

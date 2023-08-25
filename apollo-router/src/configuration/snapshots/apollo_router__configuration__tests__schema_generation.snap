@@ -512,12 +512,21 @@ expression: "&schema"
     "authorization": {
       "description": "Authorization plugin",
       "type": "object",
-      "required": [
-        "require_authentication"
-      ],
       "properties": {
+        "preview_directives": {
+          "description": "`@authenticated` and `@requiresScopes` directives",
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "enables the `@authenticated` and `@requiresScopes` directives",
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        },
         "require_authentication": {
           "description": "Reject unauthenticated requests",
+          "default": false,
           "type": "boolean"
         }
       }
@@ -1582,7 +1591,7 @@ expression: "&schema"
           "type": "object",
           "properties": {
             "enabled": {
-              "description": "Enables using the peristed query list as a safelist (disabled by default)",
+              "description": "Enables using the persisted query list as a safelist (disabled by default)",
               "default": false,
               "type": "boolean"
             },
@@ -2051,6 +2060,11 @@ expression: "&schema"
                 }
               },
               "additionalProperties": false
+            },
+            "experimental_otlp_endpoint": {
+              "description": "The Apollo Studio endpoint for exporting traces and metrics.",
+              "default": "https://usage-reporting.api.apollographql.com/",
+              "type": "string"
             },
             "field_level_instrumentation_sampler": {
               "description": "Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.",

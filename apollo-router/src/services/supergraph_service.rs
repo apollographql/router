@@ -55,6 +55,7 @@ use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::query_planner::WarmUpCachingQueryKey;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
 use crate::services::query_planner;
@@ -366,12 +367,12 @@ async fn subscription_task(
 
     let limit_is_set = subscription_config.max_opened_subscriptions.is_some();
     let mut subscription_handle = subscription_handle.clone();
-    let operation_signature =
-        if let Some(usage_reporting) = context.private_entries.lock().get::<UsageReporting>() {
-            usage_reporting.stats_report_key.clone()
-        } else {
-            String::new()
-        };
+    let operation_signature = context
+        .private_entries
+        .lock()
+        .get::<UsageReporting>()
+        .map(|usage_reporting| usage_reporting.stats_report_key.clone())
+        .unwrap_or_default();
 
     let operation_name = context
         .get::<_, String>(OPERATION_NAME)
@@ -747,7 +748,7 @@ impl SupergraphCreator {
             )
     }
 
-    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<WarmUpCachingQueryKey> {
         self.query_planner_service.cache_keys(count).await
     }
 
@@ -758,7 +759,7 @@ impl SupergraphCreator {
     pub(crate) async fn warm_up_query_planner(
         &mut self,
         query_parser: &QueryAnalysisLayer,
-        cache_keys: Vec<(String, Option<String>)>,
+        cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
         self.query_planner_service
             .warm_up(query_parser, cache_keys)
@@ -999,7 +1000,7 @@ mod tests {
             )
             .with_json(
                 serde_json::json!{{
-                    "query":"{computer(id:\"Computer1\"){errorField id}}",
+                    "query":"{computer(id:\"Computer1\"){id errorField}}",
                 }},
                 serde_json::json!{{
                     "data": {
@@ -2792,6 +2793,7 @@ mod tests {
           }
 
           type Query
+          @join__type(graph: S1)
           {
             foo: Foo! @join__field(graph: S1)
           }

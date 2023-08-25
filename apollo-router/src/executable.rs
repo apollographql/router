@@ -159,7 +159,7 @@ pub struct Opt {
     )]
     log_level: String,
 
-    /// Reload configuration and schema files automatically.
+    /// Reload locally provided configuration and supergraph files automatically.  This only affects watching of local files and does not affect supergraphs and configuration provided by GraphOS through Uplink, which is always reloaded immediately.
     #[clap(
         alias = "hr",
         long = "hot-reload",

@@ -2,6 +2,7 @@
 pub(crate) mod cors;
 pub(crate) mod expansion;
 mod experimental;
+pub(crate) mod metrics;
 mod persisted_queries;
 mod schema;
 pub(crate) mod subgraph;
@@ -27,6 +28,7 @@ use displaydoc::Display;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 pub(crate) use persisted_queries::PersistedQueries;
+#[cfg(test)]
 pub(crate) use persisted_queries::PersistedQueriesSafelist;
 use regex::Regex;
 use rustls::Certificate;
@@ -435,6 +437,36 @@ impl Configuration {
                     ),
                 },
             );
+        }
+
+        // PQs.
+        if self.preview_persisted_queries.enabled {
+            if self.preview_persisted_queries.safelist.enabled && self.apq.enabled {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "apqs must be disabled to enable safelisting",
+                    error: "either set preview_persisted_queries.safelist.enabled: false or apq.enabled: false in your router yaml configuration".into()
+                });
+            } else if !self.preview_persisted_queries.safelist.enabled
+                && self.preview_persisted_queries.safelist.require_id
+            {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "safelist must be enabled to require IDs",
+                    error: "either set preview_persisted_queries.safelist.enabled: true or preview_persisted_queries.safelist.require_id: false in your router yaml configuration".into()
+                });
+            }
+        } else {
+            // If the feature isn't enabled, sub-features shouldn't be.
+            if self.preview_persisted_queries.safelist.enabled {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "persisted queries must be enabled to enable safelisting",
+                    error: "either set preview_persisted_queries.safelist.enabled: false or preview_persisted_queries.enabled: true in your router yaml configuration".into()
+                });
+            } else if self.preview_persisted_queries.log_unknown {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "persisted queries must be enabled to enable logging unknown operations",
+                    error: "either set preview_persisted_queries.log_unknown: false or preview_persisted_queries.enabled: true in your router yaml configuration".into()
+                });
+            }
         }
 
         Ok(self)
