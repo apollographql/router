@@ -78,6 +78,9 @@
     {
       "matchCurrentVersion": ">= 1.0.0",
       "matchManagers": [ "cargo", "npm" ],
+      // TODO: https://github.com/apollographql/router/pull/3194/commits/4e522a245e715e67d44c8dfc0a458bca1d054078
+      // Remove this after `flate2` is resolved.
+      "excludePackageNames": ["flate2"],
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "groupName": "all non-major packages >= 1.0",
       "groupSlug": "all-non-major-gte-1.0",
@@ -102,6 +105,18 @@
       "groupName": "cargo tracing packages",
       "groupSlug": "cargo-tracing-packages",
       "dependencyDashboardApproval": true
+    },
+    // Our own `apollo-` packages deserve to get front-and-center treatment.
+    // We'll put them in their own PR to facilitate workflows that surface
+    // their changes earlier, and get us dog-fooding them quicker.
+    // They also have a small proclivity to require more hands-on changes
+    // since they're pre-0.x and we use them so extensively.
+    {
+      "matchPackagePatterns": ["^apollo-"],
+      "groupName": "apollo-rs crates",
+      "groupSlug": "rust-apollo-rs-updates",
+      "matchManagers": ["cargo"],
+      "automerge": false
     },
     // We'll review these in a PR of their own since it has the most direct runtime
     // implications on users that we'd like to be very intentional about.

@@ -1,5 +1,4 @@
 //! Environment variable expansion in the configuration file
-// This entire file is license key functionality
 
 use std::env;
 use std::env::VarError;
@@ -13,31 +12,65 @@ use serde_json::Value;
 use super::ConfigurationError;
 use crate::executable::APOLLO_ROUTER_DEV_ENV;
 
-#[derive(buildstructor::Builder)]
+#[derive(buildstructor::Builder, Clone)]
 pub(crate) struct Expansion {
     prefix: Option<String>,
     supported_modes: Vec<String>,
-    defaults: Vec<ConfigDefault>,
+    override_configs: Vec<Override>,
 }
 
-#[derive(buildstructor::Builder)]
-pub(crate) struct ConfigDefault {
+#[derive(buildstructor::Builder, Clone)]
+pub(crate) struct Override {
+    /// The path to the config value to override.
     config_path: String,
+    /// Env variables take precedence over any override values.
     env_name: Option<String>,
-    /// Note that the default type is important. If you set it as bool or numeric then the env variable will be coerced into that type.
-    /// If it can't be coerced then it'll fall back to string.
-    default: Value,
+    /// Override value
+    value: Option<Value>,
+    /// The type of the value, used to coerce env variables.
+    value_type: ValueType,
+}
+
+#[derive(Clone)]
+pub(crate) enum ValueType {
+    String,
+    #[allow(dead_code)]
+    Number,
+    Bool,
+}
+
+impl Override {
+    fn value(&self) -> Option<Value> {
+        // Order of precedence is:
+        // 1. If the env variable is set, use that
+        // 2. If the override is set, use that
+        // 3. Don't change the config
+        match (
+            self.env_name
+                .as_ref()
+                .and_then(|name| std::env::var(name).ok()),
+            self.value.clone(),
+        ) {
+            (Some(value), _) => {
+                // Coerce the env variable into the correct format, otherwise let it through as a string
+                let parsed = Value::from_str(&value);
+                let string_var = Value::String(value);
+                Some(match (&self.value_type, parsed) {
+                    (ValueType::Bool, Ok(Value::Bool(bool))) => Value::Bool(bool),
+                    (ValueType::Number, Ok(Value::Number(number))) => Value::Number(number),
+                    _ => string_var,
+                })
+            }
+            (_, Some(value)) => Some(value),
+            _ => None,
+        }
+    }
 }
 
 impl Expansion {
     pub(crate) fn default() -> Result<Self, ConfigurationError> {
-        // APOLLO_ROUTER_CONFIG_ENV_PREFIX and APOLLO_ROUTER_CONFIG_SUPPORTED_MODES are unsupported and may change in future.
-        // If you need this functionality then raise an issue and we can look to promoting this to official support.
-        let prefix = match env::var("APOLLO_ROUTER_CONFIG_ENV_PREFIX") {
-            Ok(v) => Some(v),
-            Err(VarError::NotPresent) => None,
-            Err(VarError::NotUnicode(_)) => Err(ConfigurationError::InvalidExpansionModeConfig)?,
-        };
+        let prefix = Expansion::prefix_from_env()?;
+
         let supported_expansion_modes = match env::var("APOLLO_ROUTER_CONFIG_SUPPORTED_MODES") {
             Ok(v) => v,
             Err(VarError::NotPresent) => "env,file".to_string(),
@@ -60,43 +93,80 @@ impl Expansion {
         Ok(Expansion::builder()
             .and_prefix(prefix)
             .supported_modes(supported_modes)
-            .default(
-                ConfigDefault::builder()
+            .override_config(
+                Override::builder()
                     .config_path("telemetry.apollo.endpoint")
                     .env_name("APOLLO_USAGE_REPORTING_INGRESS_URL")
-                    .default("https://usage-reporting.api.apollographql.com/api/ingress/traces")
+                    .value_type(ValueType::String)
                     .build(),
             )
-            .defaults(dev_mode_defaults)
+            // Note that APOLLO_USAGE_REPORTING_OTLP_INGRESS_URL is experimental and subject to change without notice
+            .override_config(
+                Override::builder()
+                    .config_path("telemetry.apollo.experimental_otlp_endpoint")
+                    .env_name("APOLLO_USAGE_REPORTING_OTLP_INGRESS_URL")
+                    .value_type(ValueType::String)
+                    .build(),
+            )
+            .override_config(
+                Override::builder()
+                    .config_path("supergraph.listen")
+                    .env_name("APOLLO_ROUTER_LISTEN_ADDRESS")
+                    .value_type(ValueType::String)
+                    .build(),
+            )
+            .override_configs(dev_mode_defaults)
             .build())
+    }
+
+    pub(crate) fn default_rhai() -> Result<Self, ConfigurationError> {
+        Ok(Expansion::builder()
+            .and_prefix(Expansion::prefix_from_env()?)
+            .build())
+    }
+
+    fn prefix_from_env() -> Result<Option<String>, ConfigurationError> {
+        // APOLLO_ROUTER_CONFIG_ENV_PREFIX and APOLLO_ROUTER_CONFIG_SUPPORTED_MODES are unsupported and may change in future.
+        // If you need this functionality then raise an issue and we can look to promoting this to official support.
+        match env::var("APOLLO_ROUTER_CONFIG_ENV_PREFIX") {
+            Ok(v) => Ok(Some(v)),
+            Err(VarError::NotPresent) => Ok(None),
+            Err(VarError::NotUnicode(_)) => Err(ConfigurationError::InvalidExpansionModeConfig),
+        }
     }
 }
 
-fn dev_mode_defaults() -> Vec<ConfigDefault> {
+fn dev_mode_defaults() -> Vec<Override> {
     vec![
-        ConfigDefault::builder()
+        Override::builder()
             .config_path("plugins.[\"experimental.expose_query_plan\"]")
-            .default(true)
+            .value(true)
+            .value_type(ValueType::Bool)
             .build(),
-        ConfigDefault::builder()
+        Override::builder()
             .config_path("include_subgraph_errors.all")
-            .default(true)
+            .value(true)
+            .value_type(ValueType::Bool)
             .build(),
-        ConfigDefault::builder()
+        Override::builder()
             .config_path("telemetry.tracing.experimental_response_trace_id.enabled")
-            .default(true)
+            .value(true)
+            .value_type(ValueType::Bool)
             .build(),
-        ConfigDefault::builder()
+        Override::builder()
             .config_path("supergraph.introspection")
-            .default(true)
+            .value(true)
+            .value_type(ValueType::Bool)
             .build(),
-        ConfigDefault::builder()
+        Override::builder()
             .config_path("sandbox.enabled")
-            .default(true)
+            .value(true)
+            .value_type(ValueType::Bool)
             .build(),
-        ConfigDefault::builder()
+        Override::builder()
             .config_path("homepage.enabled")
-            .default(false)
+            .value(false)
+            .value_type(ValueType::Bool)
             .build(),
     ]
 }
@@ -116,15 +186,7 @@ impl Expansion {
             }
 
             if let Some(key) = key.strip_prefix("env.") {
-                return match self.prefix.as_ref() {
-                    None => env::var(key),
-                    Some(prefix) => env::var(format!("{prefix}_{key}")),
-                }
-                .map(Some)
-                .map_err(|cause| ConfigurationError::CannotExpandVariable {
-                    key: key.to_string(),
-                    cause: format!("{cause}"),
-                });
+                return self.expand_env(key);
             }
             if let Some(key) = key.strip_prefix("file.") {
                 if !std::path::Path::new(key).exists() {
@@ -140,6 +202,18 @@ impl Expansion {
             }
             Err(ConfigurationError::InvalidExpansionModeConfig)
         }
+    }
+
+    pub(crate) fn expand_env(&self, key: &str) -> Result<Option<String>, ConfigurationError> {
+        match self.prefix.as_ref() {
+            None => env::var(key),
+            Some(prefix) => env::var(format!("{prefix}_{key}")),
+        }
+        .map(Some)
+        .map_err(|cause| ConfigurationError::CannotExpandVariable {
+            key: key.to_string(),
+            cause: format!("{cause}"),
+        })
     }
 
     pub(crate) fn expand(
@@ -158,37 +232,13 @@ impl Expansion {
         let mut transformer_builder = TransformBuilder::default();
         transformer_builder =
             transformer_builder.add_action(Parser::parse("", "").expect("migration must be valid"));
-        for default in &self.defaults {
-            let value = if let Some(env_name) = &default.env_name {
-                if let Ok(var) = std::env::var(env_name) {
-                    // Coerce the env variable into the same format as the default, otherwise let it through as a string
-                    let parsed = Value::from_str(&var);
-                    let string_var = Value::String(var);
-                    match (&default.default, parsed) {
-                        (Value::Bool(_), Ok(Value::Bool(bool))) => Value::Bool(bool),
-                        (Value::Number(_), Ok(Value::Number(number))) => Value::Number(number),
-                        _ => string_var,
-                    }
-                } else {
-                    default.default.clone()
-                }
-            } else {
-                default.default.clone()
-            };
-
-            if default.env_name.is_some()
-                && !jsonpath_lib::select(config, &format!("$.{}", default.config_path))
-                    .unwrap_or_default()
-                    .is_empty()
-            {
-                // Env variables do NOT override config. If the user want to enable this then they must use config expansion.
-                continue;
+        for override_config in &self.override_configs {
+            if let Some(value) = override_config.value() {
+                transformer_builder = transformer_builder.add_action(
+                    Parser::parse(&format!("const({value})"), &override_config.config_path)
+                        .expect("migration must be valid"),
+                );
             }
-
-            transformer_builder = transformer_builder.add_action(
-                Parser::parse(&format!("const({value})"), &default.config_path)
-                    .expect("migration must be valid"),
-            );
         }
         *config = transformer_builder
             .build()
@@ -244,10 +294,63 @@ pub(crate) fn coerce(expanded: &str) -> Value {
 mod test {
     use insta::assert_yaml_snapshot;
     use serde_json::json;
+    use serde_json::Value;
 
     use crate::configuration::expansion::dev_mode_defaults;
-    use crate::configuration::expansion::ConfigDefault;
+    use crate::configuration::expansion::Override;
+    use crate::configuration::expansion::ValueType;
     use crate::configuration::Expansion;
+
+    #[test]
+    fn test_override_precedence() {
+        std::env::set_var("TEST_OVERRIDE", "env_override");
+        assert_eq!(
+            None,
+            Override::builder()
+                .config_path("")
+                .value_type(ValueType::String)
+                .build()
+                .value()
+        );
+        assert_eq!(
+            None,
+            Override::builder()
+                .config_path("")
+                .env_name("NON_EXISTENT")
+                .value_type(ValueType::String)
+                .build()
+                .value()
+        );
+        assert_eq!(
+            Some(Value::String("override".to_string())),
+            Override::builder()
+                .config_path("")
+                .env_name("NON_EXISTENT")
+                .value("override")
+                .value_type(ValueType::String)
+                .build()
+                .value()
+        );
+        assert_eq!(
+            Some(Value::String("override".to_string())),
+            Override::builder()
+                .config_path("")
+                .value("override")
+                .value_type(ValueType::String)
+                .build()
+                .value()
+        );
+        assert_eq!(
+            Some(Value::String("env_override".to_string())),
+            Override::builder()
+                .config_path("")
+                .env_name("TEST_OVERRIDE")
+                .value("override")
+                .value_type(ValueType::String)
+                .build()
+                .value()
+        );
+    }
 
     #[test]
     fn test_type_coercion() {
@@ -256,98 +359,78 @@ mod test {
         std::env::set_var("TEST_DEFAULTED_BOOL_VAR", "true");
         std::env::set_var("TEST_DEFAULTED_INCORRECT_TYPE", "true");
 
-        let expansion = Expansion::builder()
-            .supported_mode("env")
-            .default(
-                ConfigDefault::builder()
-                    .config_path("no_env_string")
-                    .env_name("NON_EXISTENT_STRING")
-                    .default("defaulted_string")
-                    .build(),
-            )
-            .default(
-                ConfigDefault::builder()
-                    .config_path("no_env_numeric")
-                    .env_name("NON_EXISTENT_NUMERIC")
-                    .default(2)
-                    .build(),
-            )
-            .default(
-                ConfigDefault::builder()
-                    .config_path("no_env_bool")
-                    .env_name("NON_EXISTENT_BOOL")
-                    .default(true)
-                    .build(),
-            )
-            .default(
-                ConfigDefault::builder()
-                    .config_path("overridden_string")
-                    .env_name("TEST_DEFAULTED_STRING_VAR")
-                    .default("defaulted_string")
-                    .build(),
-            )
-            .default(
-                ConfigDefault::builder()
-                    .config_path("overridden_numeric")
-                    .env_name("TEST_DEFAULTED_NUMERIC_VAR")
-                    .default(2)
-                    .build(),
-            )
-            .default(
-                ConfigDefault::builder()
-                    .config_path("overridden_bool")
-                    .env_name("TEST_DEFAULTED_BOOL_VAR")
-                    .default(false)
-                    .build(),
-            )
-            .default(
-                ConfigDefault::builder()
-                    .config_path("overridden_incorrect_type")
-                    .env_name("TEST_DEFAULTED_INCORRECT_TYPE")
-                    .default(23)
-                    .build(),
-            )
-            .build();
-
-        let mut value = json!({});
-        value = expansion.expand(&value).expect("expansion must succeed");
-        insta::with_settings!({sort_maps => true}, {
-            assert_yaml_snapshot!(value);
-        })
+        assert_eq!(
+            Some(Value::String("overridden_string".to_string())),
+            Override::builder()
+                .config_path("")
+                .env_name("TEST_DEFAULTED_STRING_VAR")
+                .value_type(ValueType::String)
+                .build()
+                .value()
+        );
+        assert_eq!(
+            Some(Value::Number(1.into())),
+            Override::builder()
+                .config_path("")
+                .env_name("TEST_DEFAULTED_NUMERIC_VAR")
+                .value_type(ValueType::Number)
+                .build()
+                .value()
+        );
+        assert_eq!(
+            Some(Value::Bool(true)),
+            Override::builder()
+                .config_path("")
+                .env_name("TEST_DEFAULTED_BOOL_VAR")
+                .value_type(ValueType::Bool)
+                .build()
+                .value()
+        );
+        assert_eq!(
+            Some(Value::String("true".to_string())),
+            Override::builder()
+                .config_path("")
+                .env_name("TEST_DEFAULTED_INCORRECT_TYPE")
+                .value_type(ValueType::Number)
+                .build()
+                .value()
+        );
     }
 
     #[test]
     fn test_unprefixed() {
         std::env::set_var("TEST_EXPANSION_VAR", "expanded");
-        std::env::set_var("TEST_DEFAULTED_VAR", "defaulted");
+        std::env::set_var("TEST_OVERRIDDEN_VAR", "overridden");
 
         let expansion = Expansion::builder()
             .supported_mode("env")
-            .default(
-                ConfigDefault::builder()
+            .override_config(
+                Override::builder()
                     .config_path("defaulted")
                     .env_name("TEST_DEFAULTED_VAR")
-                    .default("defaulted")
+                    .value("defaulted")
+                    .value_type(ValueType::String)
                     .build(),
             )
-            .default(
-                ConfigDefault::builder()
+            .override_config(
+                Override::builder()
                     .config_path("no_env")
                     .env_name("NON_EXISTENT")
-                    .default("defaulted")
+                    .value("defaulted")
+                    .value_type(ValueType::String)
                     .build(),
             )
-            .default(
-                ConfigDefault::builder()
+            .override_config(
+                Override::builder()
                     .config_path("overridden")
-                    .env_name("TEST_DEFAULTED_VAR")
-                    .default("defaulted")
+                    .env_name("TEST_OVERRIDDEN_VAR")
+                    .value("defaulted")
+                    .value_type(ValueType::String)
                     .build(),
             )
             .build();
 
-        let mut value =
-            json!({"expanded": "${env.TEST_EXPANSION_VAR}", "overridden": "overridden"});
+        let mut value = json!({"expanded": "${env.TEST_EXPANSION_VAR}", "overridden": "default"});
         value = expansion.expand(&value).expect("expansion must succeed");
         insta::with_settings!({sort_maps => true}, {
             assert_yaml_snapshot!(value);
@@ -357,35 +440,37 @@ mod test {
     #[test]
     fn test_prefixed() {
         std::env::set_var("TEST_PREFIX_TEST_EXPANSION_VAR", "expanded");
-        std::env::set_var("TEST_DEFAULTED_VAR", "defaulted");
+        std::env::set_var("TEST_OVERRIDDEN_VAR", "overridden");
 
         let expansion = Expansion::builder()
             .prefix("TEST_PREFIX")
             .supported_mode("env")
-            .default(
-                ConfigDefault::builder()
+            .override_config(
+                Override::builder()
                     .config_path("defaulted")
                     .env_name("TEST_DEFAULTED_VAR")
-                    .default("defaulted")
+                    .value("defaulted")
+                    .value_type(ValueType::String)
                     .build(),
             )
-            .default(
-                ConfigDefault::builder()
+            .override_config(
+                Override::builder()
                     .config_path("no_env")
                     .env_name("NON_EXISTENT")
-                    .default("defaulted")
+                    .value("defaulted")
+                    .value_type(ValueType::String)
                     .build(),
             )
-            .default(
-                ConfigDefault::builder()
+            .override_config(
+                Override::builder()
                     .config_path("overridden")
-                    .env_name("TEST_DEFAULTED_VAR")
-                    .default("defaulted")
+                    .env_name("TEST_OVERRIDDEN_VAR")
+                    .value("defaulted")
+                    .value_type(ValueType::String)
                     .build(),
             )
             .build();
-        let mut value =
-            json!({"expanded": "${env.TEST_EXPANSION_VAR}", "overridden": "overridden"});
+        let mut value = json!({"expanded": "${env.TEST_EXPANSION_VAR}", "overridden": "default"});
         value = expansion.expand(&value).expect("expansion must succeed");
         insta::with_settings!({sort_maps => true}, {
             assert_yaml_snapshot!(value);
@@ -394,7 +479,9 @@ mod test {
 
     #[test]
     fn test_dev_mode() {
-        let expansion = Expansion::builder().defaults(dev_mode_defaults()).build();
+        let expansion = Expansion::builder()
+            .override_configs(dev_mode_defaults())
+            .build();
         let mut value =
             json!({"homepage": {"enabled": false, "some_other_config": "should remain"}});
         value = expansion.expand(&value).expect("expansion must succeed");

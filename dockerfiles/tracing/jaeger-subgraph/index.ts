@@ -1,10 +1,12 @@
-import { ApolloServer, gql } from 'apollo-server-express';
-import { ApolloServerPluginDrainHttpServer } from 'apollo-server-core';
-import { buildFederatedSchema } from '@apollo/federation';
-
-
+import { ApolloServer } from '@apollo/server';
+import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
+import { expressMiddleware } from "@apollo/server/express4";
 import express from 'express';
 import http from 'http';
+import cors from "cors";
+import { json } from "body-parser";
+import { gql } from 'graphql-tag';
+import { buildFederatedSchema } from '@apollo/federation';
 const { Tags, FORMAT_HTTP_HEADERS } = require('opentracing');
 
 var initTracerFromEnv = require('jaeger-client').initTracerFromEnv;
@@ -97,18 +99,19 @@ async function startApolloServer(typeDefs, resolvers) {
 
   // More required logic for integrating with Express
   await server.start();
-  server.applyMiddleware({
-    app,
 
-    // By default, apollo-server hosts its GraphQL endpoint at the
-    // server root. However, *other* Apollo Server packages host it at
-    // /graphql. Optionally provide this to match apollo-server.
-    path: '/'
-  });
+  app.use(
+    "/",
+    cors<cors.CorsRequest>(),
+    json(),
+    expressMiddleware(server, {
+      context: async ({ req }) => ({ token: req.headers.token }),
+    })
+  );
 
   // Modified server startup
   await new Promise<void>(resolve => httpServer.listen({ port: 4001 }, resolve));
-  console.log(`🚀 Server ready at http://localhost:4001${server.graphqlPath}`);
+  console.log(`🚀 Server ready at http://localhost:4001/`);
 }
 
 console.log("starting")

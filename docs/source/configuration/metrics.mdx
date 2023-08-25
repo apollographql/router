@@ -89,6 +89,16 @@ All cache metrics listed above have the following attributes:
 - `kind`: the cache being queried (`apq`, `query planner`, `introspection`)
 - `storage`: The backend storage of the cache (`memory`, `redis`)
 
+#### Coprocessor
+
+- `apollo_router_operations_coprocessor_total` - Total operations with co-processors enabled.
+- `apollo_router_operations_coprocessor.duration` - Time spent waiting for the coprocessor to answer, in seconds
+
+The coprocessor operations metric has the following attributes:
+
+- `coprocessor.stage`: string (`RouterRequest`, `RouterResponse`, `SubgraphRequest`, `SubgraphResponse`)
+- `coprocessor.succeeded`: bool
+
 #### Performance
 
 - `apollo_router_processing_time` - Time spent processing a request (outside of waiting for external or subgraph requests) in seconds.
@@ -99,16 +109,21 @@ All cache metrics listed above have the following attributes:
 - `apollo_router_uplink_fetch_duration_seconds_bucket` - Uplink request duration, attributes:
 
   - `url`: The Uplink URL that was polled
-  - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `Entitlement`)
+  - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `License`)
   - `kind`: (`new`, `unchanged`, `http_error`, `uplink_error`)
   - `code`: The error code depending on type (if an error occurred)
   - `error`: The error message (if an error occurred)
 
 - `apollo_router_uplink_fetch_count_total`
   - `status`: (`success`, `failure`)
-  - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `Entitlement`)
+  - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `License`)
 
 Note that the initial call to uplink during router startup will not be reflected in metrics.
+
+#### Subscription
+- `apollo_router_opened_subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated)
+- `apollo_router_deduplicated_subscriptions_total` - Number of subscriptions that has been deduplicated
+- `apollo_router_skipped_event_count` - Number of subscription events that has been skipped because too many events have been received from the subgraph but not yet sent to the client.
 
 ## Using OpenTelemetry Collector
 
@@ -232,6 +247,26 @@ To fetch the value of the field `isImportant`, the corresponding path is `.items
 To fetch the value of the field `x`, the corresponding path is `.items[0].wanted.x`.
 
 JSON path queries always begin with a period `.`
+
+## Changing default buckets for histograms
+
+You can customize the buckets for all generated histograms:
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    common:
+      buckets:
+        - 0.05
+        - 0.10
+        - 0.25
+        - 0.50
+        - 1.00
+        - 2.50
+        - 5.00
+        - 10.00
+        - 20.00
+```
 
 ## Adding custom resources
 

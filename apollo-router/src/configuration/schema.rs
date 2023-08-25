@@ -1,5 +1,4 @@
 //! Configuration schema generation and validation
-// This entire file is license key functionality
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -38,7 +37,7 @@ pub(crate) fn generate_config_schema() -> RootSchema {
     // It's fine to just add it here.
     let gen = settings.into_generator();
     let mut schema = gen.into_root_schema_for::<Configuration>();
-    let mut root = schema.schema.object.as_mut().expect("schema not generated");
+    let root = schema.schema.object.as_mut().expect("schema not generated");
     root.additional_properties = Some(Box::new(schemars::schema::Schema::Bool(false)));
     schema
 }

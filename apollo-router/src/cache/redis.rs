@@ -1,5 +1,3 @@
-// This entire file is license key functionality
-
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,6 +9,7 @@ use fred::prelude::RedisError;
 use fred::prelude::RedisErrorKind;
 use fred::types::Expiration;
 use fred::types::FromRedis;
+use fred::types::PerformanceConfig;
 use fred::types::ReconnectPolicy;
 use fred::types::RedisConfig;
 use url::Url;
@@ -102,8 +101,13 @@ where
     type Error = RedisError;
 
     fn try_into(self) -> Result<fred::types::RedisValue, Self::Error> {
-        let v = serde_json::to_vec(&self.0)
-            .expect("JSON serialization should not fail for redis values");
+        let v = serde_json::to_vec(&self.0).map_err(|e| {
+            tracing::error!("couldn't serialize value to redis {}. This is a bug in the router, please file an issue: https://github.com/apollographql/router/issues/new", e);
+            RedisError::new(
+                RedisErrorKind::Parse,
+                format!("couldn't serialize value to redis {}", e),
+            )
+        })?;
 
         Ok(fred::types::RedisValue::Bytes(v.into()))
     }
@@ -116,8 +120,11 @@ impl RedisCacheStorage {
 
         let client = RedisClient::new(
             config,
-            None, //perf policy
-            Some(ReconnectPolicy::new_exponential(10, 1, 2000, 10)),
+            Some(PerformanceConfig {
+                default_command_timeout_ms: 1,
+                ..Default::default()
+            }),
+            Some(ReconnectPolicy::new_exponential(0, 1, 2000, 5)),
         );
         let _handle = client.connect();
 
@@ -328,5 +335,27 @@ impl RedisCacheStorage {
             }
         };
         tracing::trace!("insert result {:?}", r);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::time::SystemTime;
+
+    #[test]
+    fn ensure_invalid_payload_serialization_doesnt_fail() {
+        #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+        struct Stuff {
+            time: SystemTime,
+        }
+
+        let invalid_json_payload = super::RedisValue(Stuff {
+            // this systemtime is invalid, serialization will fail
+            time: std::time::UNIX_EPOCH - std::time::Duration::new(1, 0),
+        });
+
+        let as_value: Result<fred::types::RedisValue, _> = invalid_json_payload.try_into();
+
+        assert!(as_value.is_err());
     }
 }

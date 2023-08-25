@@ -1,6 +1,6 @@
 //! Authentication plugin
-// With regards to ELv2 licensing, this entire file is license key functionality
 
+use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::time::Duration;
@@ -17,6 +17,7 @@ use jsonwebtoken::jwk::KeyOperations;
 use jsonwebtoken::jwk::PublicKeyUse;
 use jsonwebtoken::Algorithm;
 use jsonwebtoken::DecodingKey;
+use jsonwebtoken::TokenData;
 use jsonwebtoken::Validation;
 use once_cell::sync::Lazy;
 use reqwest::Client;
@@ -29,6 +30,9 @@ use tower::ServiceExt;
 use url::Url;
 
 use self::jwks::JwksManager;
+use self::subgraph::SigningParams;
+use self::subgraph::SigningParamsConfig;
+use self::subgraph::SubgraphAuth;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -40,6 +44,8 @@ use crate::services::router;
 use crate::Context;
 
 mod jwks;
+mod subgraph;
+
 #[cfg(test)]
 mod tests;
 
@@ -60,9 +66,6 @@ enum AuthenticationError<'a> {
 
     /// '{0}' is not a valid JWT header: {1}
     InvalidHeader(&'a str, JWTError),
-
-    /// Cannot retrieve JWKS: {0}
-    CannotRetrieveJWKS(BoxError),
 
     /// Cannot create decoding key: {0}
     CannotCreateDecodingKey(JWTError),
@@ -97,12 +100,18 @@ pub(crate) enum Error {
     BadHeaderValuePrefix,
 }
 
-struct AuthenticationPlugin {
+struct Router {
     configuration: JWTConf,
     jwks_manager: JwksManager,
 }
 
+struct AuthenticationPlugin {
+    router: Option<Router>,
+    subgraph: Option<SubgraphAuth>,
+}
+
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct JWTConf {
     /// List of JWKS used to verify tokens
     jwks: Vec<JwksConf>,
@@ -115,6 +124,7 @@ struct JWTConf {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct JwksConf {
     /// Retrieve the JWK Set
     url: String,
@@ -136,12 +146,22 @@ impl Default for JWTConf {
     }
 }
 
+/// Authentication
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct Conf {
+    /// Router configuration
+    router: Option<RouterConf>,
+    /// Subgraph configuration
+    subgraph: Option<subgraph::Config>,
+}
+
 // We may support additional authentication mechanisms in future, so all
 // configuration (which is currently JWT specific) is isolated to the
 // JWTConf structure.
-/// Authentication
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
-struct Conf {
+#[serde(deny_unknown_fields)]
+struct RouterConf {
     /// The JWT configuration
     jwt: JWTConf,
 }
@@ -168,9 +188,10 @@ struct JWTCriteria {
 fn search_jwks(
     jwks_manager: &JwksManager,
     criteria: &JWTCriteria,
-) -> Result<Option<(Option<String>, Jwk)>, BoxError> {
+) -> Option<Vec<(Option<String>, Jwk)>> {
     const HIGHEST_SCORE: usize = 2;
     let mut candidates = vec![];
+    let mut found_highest_score = false;
     for JwkSetInfo {
         jwks,
         issuer,
@@ -270,9 +291,10 @@ fn search_jwks(
             // point for having an explicitly matching algorithm and 1 point for an explicitly
             // matching kid. We will sort our candidates and pick the key with the highest score.
 
-            // If we find a key with a HIGHEST_SCORE, let's stop looking.
+            // If we find a key with a HIGHEST_SCORE, we will filter the list to only keep those
+            // with that score
             if key_score == HIGHEST_SCORE {
-                return Ok(Some((issuer, key)));
+                found_highest_score = true;
             }
 
             candidates.push((key_score, (issuer.clone(), key)));
@@ -292,13 +314,34 @@ fn search_jwks(
     );
 
     if candidates.is_empty() {
-        Ok(None)
+        None
     } else {
         // Only sort if we need to
         if candidates.len() > 1 {
             candidates.sort_by(|a, b| a.0.cmp(&b.0));
         }
-        Ok(Some(candidates.pop().expect("list isn't empty").1))
+
+        if found_highest_score {
+            Some(
+                candidates
+                    .into_iter()
+                    .filter_map(|(score, candidate)| {
+                        if score == HIGHEST_SCORE {
+                            Some(candidate)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+            )
+        } else {
+            Some(
+                candidates
+                    .into_iter()
+                    .map(|(_score, candidate)| candidate)
+                    .collect(),
+            )
+        }
     }
 }
 
@@ -307,60 +350,103 @@ impl Plugin for AuthenticationPlugin {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        if init
-            .config
-            .jwt
-            .header_value_prefix
-            .as_bytes()
-            .iter()
-            .any(u8::is_ascii_whitespace)
-        {
-            return Err(Error::BadHeaderValuePrefix.into());
-        }
-        let mut list = vec![];
-        for jwks_conf in &init.config.jwt.jwks {
-            let url: Url = Url::from_str(jwks_conf.url.as_str())?;
-            list.push(JwksConfig {
-                url,
-                issuer: jwks_conf.issuer.clone(),
-                algorithms: jwks_conf
-                    .algorithms
-                    .as_ref()
-                    .map(|algs| algs.iter().cloned().collect()),
-            });
-        }
+        let subgraph = if let Some(config) = init.config.subgraph {
+            let all = if let Some(config) = &config.all {
+                Some(subgraph::make_signing_params(config, "all").await?)
+            } else {
+                None
+            };
 
-        tracing::info!(jwks=?init.config.jwt.jwks, "JWT authentication using JWKSets from");
+            let mut subgraphs: HashMap<String, SigningParamsConfig> = Default::default();
+            for (subgraph_name, config) in &config.subgraphs {
+                subgraphs.insert(
+                    subgraph_name.clone(),
+                    subgraph::make_signing_params(config, subgraph_name.as_str()).await?,
+                );
+            }
 
-        let jwks_manager = JwksManager::new(list).await?;
+            Some(SubgraphAuth {
+                signing_params: { SigningParams { all, subgraphs } },
+            })
+        } else {
+            None
+        };
 
-        Ok(AuthenticationPlugin {
-            configuration: init.config.jwt,
-            jwks_manager,
-        })
+        let router = if let Some(router_conf) = init.config.router {
+            if router_conf
+                .jwt
+                .header_value_prefix
+                .as_bytes()
+                .iter()
+                .any(u8::is_ascii_whitespace)
+            {
+                return Err(Error::BadHeaderValuePrefix.into());
+            }
+            let mut list = vec![];
+            for jwks_conf in &router_conf.jwt.jwks {
+                let url: Url = Url::from_str(jwks_conf.url.as_str())?;
+                list.push(JwksConfig {
+                    url,
+                    issuer: jwks_conf.issuer.clone(),
+                    algorithms: jwks_conf
+                        .algorithms
+                        .as_ref()
+                        .map(|algs| algs.iter().cloned().collect()),
+                });
+            }
+
+            tracing::info!(jwks=?router_conf.jwt.jwks, "JWT authentication using JWKSets from");
+
+            let jwks_manager = JwksManager::new(list).await?;
+
+            Some(Router {
+                configuration: router_conf.jwt,
+                jwks_manager,
+            })
+        } else {
+            None
+        };
+
+        Ok(Self { router, subgraph })
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        let request_full_config = self.configuration.clone();
-        let jwks_manager = self.jwks_manager.clone();
+        if let Some(config) = &self.router {
+            let jwks_manager = config.jwks_manager.clone();
+            let configuration = config.configuration.clone();
 
-        fn authentication_service_span() -> impl Fn(&router::Request) -> tracing::Span + Clone {
-            move |_request: &router::Request| {
-                tracing::info_span!(
-                    AUTHENTICATION_SPAN_NAME,
-                    "authentication service" = stringify!(router::Request),
-                    "otel.kind" = "INTERNAL"
-                )
+            fn authentication_service_span() -> impl Fn(&router::Request) -> tracing::Span + Clone {
+                move |_request: &router::Request| {
+                    tracing::info_span!(
+                        AUTHENTICATION_SPAN_NAME,
+                        "authentication service" = stringify!(router::Request),
+                        "otel.kind" = "INTERNAL"
+                    )
+                }
             }
-        }
 
-        ServiceBuilder::new()
-            .instrument(authentication_service_span())
-            .checkpoint(move |request: router::Request| {
-                authenticate(&request_full_config, &jwks_manager, request)
-            })
-            .service(service)
-            .boxed()
+            ServiceBuilder::new()
+                .instrument(authentication_service_span())
+                .checkpoint(move |request: router::Request| {
+                    authenticate(&configuration, &jwks_manager, request)
+                })
+                .service(service)
+                .boxed()
+        } else {
+            service
+        }
+    }
+
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: crate::services::subgraph::BoxService,
+    ) -> crate::services::subgraph::BoxService {
+        if let Some(auth) = &self.subgraph {
+            auth.subgraph_service(name, service)
+        } else {
+            service
+        }
     }
 }
 
@@ -382,6 +468,15 @@ fn authenticate(
         tracing::info!(
             monotonic_counter.apollo_authentication_failure_count = 1u64,
             kind = %AUTHENTICATION_KIND
+        );
+        tracing::info!(
+            monotonic_counter
+                .apollo
+                .router
+                .operations
+                .authentication
+                .jwt = 1,
+            authentication.jwt.failed = true
         );
         tracing::info!(message = %error, "jwt authentication failure");
         let response = router::Response::error_builder()
@@ -436,18 +531,35 @@ fn authenticate(
         );
     }
 
-    // Split our string in (at most 2) sections.
-    let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
-    if jwt_parts.len() != 2 {
-        return failure_message(
-            request.context,
-            AuthenticationError::MissingJWT(jwt_value),
-            StatusCode::BAD_REQUEST,
-        );
-    }
+    // If there's no header prefix, we need to avoid splitting the header
+    let jwt = if config.header_value_prefix.is_empty() {
+        // check for whitespace- we've already trimmed, so this means the request has a prefix that shouldn't exist
+        if jwt_value.contains(' ') {
+            return failure_message(
+                request.context,
+                AuthenticationError::InvalidPrefix(
+                    jwt_value_untrimmed,
+                    &config.header_value_prefix,
+                ),
+                StatusCode::BAD_REQUEST,
+            );
+        }
+        // we can simply assign the jwt to the jwt_value; we'll validate down below
+        jwt_value
+    } else {
+        // Otherwise, we need to split our string in (at most 2) sections.
+        let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
+        if jwt_parts.len() != 2 {
+            return failure_message(
+                request.context,
+                AuthenticationError::MissingJWT(jwt_value),
+                StatusCode::BAD_REQUEST,
+            );
+        }
 
-    // We have our jwt
-    let jwt = jwt_parts[1];
+        // We have our jwt
+        jwt_parts[1]
+    };
 
     // Try to create a valid header to work with
     let jwt_header = match decode_header(jwt) {
@@ -472,52 +584,11 @@ fn authenticate(
     // Search our list of JWKS to find the kid and process it
     // Note: This will search through JWKS in the order in which they are defined
     // in configuration.
-
-    let jwk_opt = match search_jwks(jwks_manager, &criteria) {
-        Ok(j) => j,
-        Err(e) => {
-            return failure_message(
-                request.context,
-                AuthenticationError::CannotRetrieveJWKS(e),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            );
-        }
-    };
-
-    if let Some((issuer, jwk)) = jwk_opt {
-        let decoding_key = match DecodingKey::from_jwk(&jwk) {
-            Ok(k) => k,
-            Err(e) => {
-                return failure_message(
-                    request.context,
-                    AuthenticationError::CannotCreateDecodingKey(e),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                );
-            }
-        };
-
-        let algorithm = match jwk.common.algorithm {
-            Some(a) => a,
-            None => {
-                return failure_message(
-                    request.context,
-                    AuthenticationError::JWKHasNoAlgorithm,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                );
-            }
-        };
-
-        let mut validation = Validation::new(algorithm);
-        validation.validate_nbf = true;
-
-        let token_data = match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
-            Ok(v) => v,
-            Err(e) => {
-                return failure_message(
-                    request.context,
-                    AuthenticationError::CannotDecodeJWT(e),
-                    StatusCode::UNAUTHORIZED,
-                );
+    if let Some(keys) = search_jwks(jwks_manager, &criteria) {
+        let (issuer, token_data) = match decode_jwt(jwt, keys, criteria) {
+            Ok(data) => data,
+            Err((auth_error, status_code)) => {
+                return failure_message(request.context, auth_error, status_code);
             }
         };
 
@@ -556,6 +627,7 @@ fn authenticate(
             monotonic_counter.apollo_authentication_success_count = 1u64,
             kind = %AUTHENTICATION_KIND
         );
+        tracing::info!(monotonic_counter.apollo.router.operations.jwt = 1);
         return Ok(ControlFlow::Continue(request));
     }
 
@@ -572,6 +644,68 @@ fn authenticate(
             AuthenticationError::CannotFindSuitableKey(criteria.alg, criteria.kid),
             StatusCode::UNAUTHORIZED,
         )
+    }
+}
+
+fn decode_jwt(
+    jwt: &str,
+    keys: Vec<(Option<String>, Jwk)>,
+    criteria: JWTCriteria,
+) -> Result<(Option<String>, TokenData<serde_json::Value>), (AuthenticationError, StatusCode)> {
+    let mut error = None;
+    for (issuer, jwk) in keys.into_iter() {
+        let decoding_key = match DecodingKey::from_jwk(&jwk) {
+            Ok(k) => k,
+            Err(e) => {
+                error = Some((
+                    AuthenticationError::CannotCreateDecodingKey(e),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ));
+                continue;
+            }
+        };
+
+        let algorithm = match jwk.common.algorithm {
+            Some(a) => a,
+            None => {
+                error = Some((
+                    AuthenticationError::JWKHasNoAlgorithm,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ));
+                continue;
+            }
+        };
+
+        let mut validation = Validation::new(algorithm);
+        validation.validate_nbf = true;
+
+        match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
+            Ok(v) => return Ok((issuer, v)),
+            Err(e) => {
+                error = Some((
+                    AuthenticationError::CannotDecodeJWT(e),
+                    StatusCode::UNAUTHORIZED,
+                ));
+            }
+        };
+    }
+
+    match error {
+        Some(e) => Err(e),
+        None => {
+            // We can't find a key to process this JWT.
+            if criteria.kid.is_some() {
+                Err((
+                    AuthenticationError::CannotFindKID(criteria.kid),
+                    StatusCode::UNAUTHORIZED,
+                ))
+            } else {
+                Err((
+                    AuthenticationError::CannotFindSuitableKey(criteria.alg, criteria.kid),
+                    StatusCode::UNAUTHORIZED,
+                ))
+            }
+        }
     }
 }
 

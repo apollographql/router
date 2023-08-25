@@ -1,0 +1,13 @@
+# this example demonstrates enabling persisted queries and logging all operations
+# that have not been published to a Persisted Query List (PQL) that is linked to your GraphOS variant
+
+# usage:
+# 1) start the router with:
+#    APOLLO_KEY="my-api-key" APOLLO_GRAPH_REF="my-graph@my-variant" cargo run -- -c ./pq_log_unkown.yaml
+# 2) make requests against the router:
+#    curl --get http://localhost:4000 --header 'content-type: application/json' --data-urlencode 'extensions={"persistedQuery":{"sha256Hash":"hash-of-operation", "version": 1}}'
+
+preview_persisted_queries:
+  enabled: true
+  log_unknown: true
+

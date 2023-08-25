@@ -32,6 +32,7 @@ use crate::ListenAddr;
 
 pub(crate) mod aggregation;
 pub(crate) mod apollo;
+pub(crate) mod filter;
 pub(crate) mod layer;
 pub(crate) mod otlp;
 pub(crate) mod prometheus;
@@ -559,7 +560,7 @@ impl BasicMetrics {
                 .init(),
             http_requests_duration: meter
                 .f64_histogram("apollo_router_http_request_duration_seconds")
-                .with_description("Total number of HTTP requests made.")
+                .with_description("Duration of HTTP requests.")
                 .init(),
         }
     }

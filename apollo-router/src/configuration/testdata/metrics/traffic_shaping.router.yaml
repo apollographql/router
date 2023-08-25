@@ -1,0 +1,20 @@
+traffic_shaping:
+  router:
+    timeout: 10s
+    global_rate_limit:
+      capacity: 100
+      interval: 1s
+  all:
+    deduplicate_query: true
+    compression: br
+    timeout: 10s
+    global_rate_limit:
+      capacity: 100
+      interval: 1s
+    experimental_enable_http2: true
+    experimental_retry:
+      ttl: 1s
+      min_per_sec: 2
+      retry_mutations: true
+      retry_percent: 2
+

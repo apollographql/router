@@ -30,6 +30,18 @@ supergraph:
         limit: 512 # This is the default value.
 ```
 
+On schema reloads, the cache will be reset, and queries will need to go through query planning again. To avoid latencies right after the reload, you can configure the router to pregenerate query plans for the most used queries before switching to the new schema:
+
+```yaml title="router.yaml"
+supergraph:
+  query_planning:
+    # Pre-plan the 100 most used operations when the supergraph changes.  (Default is "0", disabled.)
+    warmed_up_queries: 100
+    experimental_cache:
+      in_memory:
+        limit: 512
+```
+
 ## Caching automatic persisted queries (APQ)
 
 **Automatic Persisted Queries** (**APQ**) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ sending the query string itself. When query strings are very large, this can significantly reduce network usage.

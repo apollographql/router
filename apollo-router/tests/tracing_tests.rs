@@ -38,6 +38,7 @@ async fn make_request(request: supergraph::Request) {
 }
 
 #[test_span(tokio::test)]
+#[level(tracing::Level::ERROR)]
 #[target(apollo_router=tracing::Level::DEBUG)]
 async fn traced_basic_request() {
     make_request(
@@ -51,6 +52,7 @@ async fn traced_basic_request() {
 }
 
 #[test_span(tokio::test)]
+#[level(tracing::Level::ERROR)]
 #[target(apollo_router=tracing::Level::DEBUG)]
 async fn traced_basic_composition() {
     make_request(
@@ -66,6 +68,8 @@ async fn traced_basic_composition() {
 }
 
 #[test_span(tokio::test(flavor = "multi_thread"))]
+#[level(tracing::Level::ERROR)]
+#[target(apollo_router=tracing::Level::INFO)]
 async fn variables() {
     make_request(
         supergraph::Request::fake_builder()

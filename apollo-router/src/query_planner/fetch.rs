@@ -27,10 +27,11 @@ use crate::services::SubgraphRequest;
 use crate::spec::Schema;
 
 /// GraphQL operation type.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub enum OperationKind {
+    #[default]
     Query,
     Mutation,
     Subscription,
@@ -58,12 +59,6 @@ impl OperationKind {
             OperationKind::Mutation => "mutation",
             OperationKind::Subscription => "subscription",
         }
-    }
-}
-
-impl Default for OperationKind {
-    fn default() -> Self {
-        OperationKind::Query
     }
 }
 
@@ -101,15 +96,15 @@ pub(crate) struct FetchNode {
     pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
 }
 
-struct Variables {
-    variables: Object,
-    paths: HashMap<Path, usize>,
+pub(crate) struct Variables {
+    pub(crate) variables: Object,
+    pub(crate) paths: HashMap<Path, usize>,
 }
 
 impl Variables {
     #[instrument(skip_all, level = "debug", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
-    async fn new(
+    pub(super) async fn new(
         requires: &[Selection],
         variable_usages: &[String],
         data: &Value,
@@ -229,8 +224,7 @@ impl FetchNode {
                     .uri(
                         parameters
                             .schema
-                            .subgraphs()
-                            .find_map(|(name, url)| (name == service_name).then_some(url))
+                            .subgraph_url(service_name)
                             .unwrap_or_else(|| {
                                 panic!(
                                     "schema uri for subgraph '{service_name}' should already have been checked"
@@ -296,6 +290,7 @@ impl FetchNode {
             self.response_at_path(parameters.schema, current_dir, paths, response);
         if let Some(id) = &self.id {
             if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
+                tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1);
                 if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
                     tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, self.id, e);
                 }
@@ -384,16 +379,16 @@ impl FetchNode {
                 }
             }
 
-            errors.push(
-                Error::builder()
-                    .path(current_dir.clone())
-                    .message(format!(
-                        "Subgraph response from '{}' was missing key `_entities`",
-                        self.service_name
-                    ))
-                    .extension_code("PARSE_ERROR")
-                    .build(),
-            );
+            // if we get here, it means that the response was missing the `_entities` key
+            // This can happen if the subgraph failed during query execution e.g. for permissions checks.
+            // In this case we should add an additional error because the subgraph should have returned an error that will be bubbled up to the client.
+            // However, if they have not then print a warning to the logs.
+            if errors.is_empty() {
+                tracing::warn!(
+                    "Subgraph response from '{}' was missing key `_entities` and had no errors. This is likely a bug in the subgraph.",
+                    self.service_name
+                );
+            }
 
             (Value::Null, errors)
         } else {

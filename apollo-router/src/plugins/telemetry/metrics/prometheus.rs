@@ -22,6 +22,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::router_factory::Endpoint;
@@ -83,15 +84,10 @@ impl MetricsConfigurator for Config {
         metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         if self.enabled {
-            let mut controller = controllers::basic(
-                processors::factory(
-                    selectors::simple::histogram([
-                        0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
-                    ]),
-                    aggregation::stateless_temporality_selector(),
-                )
-                .with_memory(true),
-            )
+            let mut controller = controllers::basic(processors::factory(
+                selectors::simple::histogram(metrics_config.buckets.clone()),
+                aggregation::stateless_temporality_selector(),
+            ))
             .with_resource(Resource::new(
                 metrics_config
                     .resources
@@ -128,7 +124,9 @@ impl MetricsConfigurator for Config {
                     .boxed(),
                 ),
             );
-            builder = builder.with_meter_provider(exporter.meter_provider()?);
+            builder = builder.with_meter_provider(FilterMeterProvider::public_metrics(
+                exporter.meter_provider()?,
+            ));
             builder = builder.with_exporter(exporter);
             tracing::info!(
                 "Prometheus endpoint exposed at {}{}",
@@ -160,11 +158,15 @@ impl Service<router::Request> for PrometheusService {
             let encoder = TextEncoder::new();
             let mut result = Vec::new();
             encoder.encode(&metric_families, &mut result)?;
+            // otel 0.19.0 started adding "_total" onto various statistics.
+            // Let's remove any problems they may have created for us.
+            let stats = String::from_utf8_lossy(&result);
+            let modified_stats = stats.replace("_total_total", "_total");
             Ok(router::Response {
                 response: http::Response::builder()
                     .status(StatusCode::OK)
                     .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
-                    .body::<hyper::Body>(result.into())
+                    .body::<hyper::Body>(modified_stats.into())
                     .map_err(BoxError::from)?,
                 context: req.context,
             })

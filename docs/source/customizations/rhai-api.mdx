@@ -123,21 +123,23 @@ If the supplied status code is not a valid HTTP status code, then a `500` respon
 Your Rhai customization can use the global `Router.APOLLO_START` constant to calculate durations. This is similar to `Epoch` in Unix environments.
 
 ```rhai
-fn supergraph_service(service) {
-    // Define a closure to process our response
-    let f = |response| {
-        // highlight-start
-        let start = Router.APOLLO_START.elapsed;
-        // Do some processing here...
-        let duration = Router.APOLLO_START.elapsed - start;
-        print(`response processing took: ${duration}`);
-        // highlight-end
+// Define a closure to process our response
+// Note: We can't use a closure in this example because we are referencing our global Router during function execution
+fn process_response(response) {
+    // highlight-start
+    let start = Router.APOLLO_START.elapsed;
+    // Do some processing here...
+    let duration = Router.APOLLO_START.elapsed - start;
+    print(`response processing took: ${duration}`);
+    // highlight-end
 
-        // Log out any errors we may have
-        print(response.body.errors);
-    };
-    // Map our response using our closure
-    service.map_response(f);
+    // Log out any errors we may have
+    print(response.body.errors);
+}
+
+fn supergraph_service(service) {
+    const response_callback = Fn("process_request");
+    service.map_response(response_callback);
 }
 ```
 
@@ -241,13 +243,32 @@ fn supergraph_service(service) {
 }
 ```
 
+## Environment Variables
+
+Your Rhai customization can access environment variables using the `env` module. Use the `env::get()` function.
+
+```rhai
+fn router_service(service) {
+    try {
+        print(`HOME: ${env::get("HOME")}`);
+        print(`LANG: ${env::get("LANG")}`);
+    } catch(err) {
+        print(`exception: ${err}`);
+    }
+}
+```
+
+Note: You don't need to import the "env" module. It is imported in the router.
+Note: get() may fail, so it's best to handle exceptions when using it.
+
 ## `Request` interface
 
-All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, any of which a callback can modify in-place (read-write):
+All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, most of which a callback can modify in-place (read-write):
 
 ```
 request.context
 request.headers
+request.method
 request.body.query
 request.body.operation_name
 request.body.variables
@@ -255,6 +276,7 @@ request.body.extensions
 request.uri.host
 request.uri.path
 ```
+Note: `method` is read-only.
 
 **For `subgraph_service` callbacks only,** the `request` object provides _additional_ fields for interacting with the request that will be sent to the corresponding subgraph:
 
@@ -333,6 +355,14 @@ request.headers["set-cookie"] = [
 // You can also get multiple header values for a header using the values() fn
 // Note: It's probably more useful to do this on response headers. Simply illustrating the syntax here.
 print(`${request.headers.values("set-cookie")}`);
+```
+
+### `request.method`
+
+This is the HTTP method of the client request.
+
+```rhai
+print(`${request.method}`); // Log the HTTP method
 ```
 
 ### `request.body.query`

@@ -7,7 +7,7 @@ expression: deferred
   "incremental": [
     {
       "data": {
-        "activeOrganization": null
+        "org": null
       },
       "path": [
         "currentUser"
@@ -18,7 +18,7 @@ expression: deferred
             "message": "Cannot return null for non-nullable field Organization.nonNullId",
             "path": [
               "currentUser",
-              "activeOrganization",
+              "org",
               "nonNullId"
             ]
           }

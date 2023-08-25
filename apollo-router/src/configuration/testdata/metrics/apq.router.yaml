@@ -1,0 +1,12 @@
+apq:
+  enabled: true
+  router:
+    cache:
+      in_memory:
+        limit: 10000
+      redis:
+        urls:
+          - "http://example.com"
+  subgraph:
+    all:
+      enabled: true

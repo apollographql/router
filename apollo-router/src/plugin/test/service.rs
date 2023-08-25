@@ -1,6 +1,9 @@
 #![allow(dead_code, unreachable_pub)]
 #![allow(missing_docs)] // FIXME
 
+#[cfg(test)]
+use std::sync::Arc;
+
 use futures::Future;
 use hyper::Body;
 use hyper::Request as HyperRequest;
@@ -8,12 +11,16 @@ use hyper::Response as HyperResponse;
 
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
+#[cfg(test)]
+use crate::services::HasSchema;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+#[cfg(test)]
+use crate::spec::Schema;
 
 /// Build a mock service handler for the router pipeline.
 macro_rules! mock_service {
@@ -77,13 +84,26 @@ macro_rules! mock_async_service {
                     std::task::Poll::Ready(Ok(()))
                 }
                 fn call(&mut self, req: $request_type<$req_generic>) -> Self::Future {
-                    let r  = self.call(req);
-                    Box::pin(async move { r.await })
+                    Box::pin(self.call(req))
                 }
             }
         }
     };
 }
+
+#[cfg(test)]
+impl HasSchema for MockSupergraphService {
+    fn schema(&self) -> Arc<crate::spec::Schema> {
+        Arc::new(
+            Schema::parse_test(
+                include_str!("../../testdata/supergraph.graphql"),
+                &Default::default(),
+            )
+            .unwrap(),
+        )
+    }
+}
+
 mock_service!(Router, RouterRequest, RouterResponse);
 mock_service!(Supergraph, SupergraphRequest, SupergraphResponse);
 mock_service!(Execution, ExecutionRequest, ExecutionResponse);

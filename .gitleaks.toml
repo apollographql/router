@@ -14,5 +14,23 @@
     [ rules.allowlist ]
         commits = [
             "7fdb0a5a0831d309524e98503760c16bd3de160c",
+            # Example private key for test cases
+            "9d6464b96eed3a20c48d5ec653bf9986757c89e5",
             
+        ]
+
+[[ rules ]]
+    id = "jwt"
+    [ rules.allowlist ]
+        commits = [
+            # Example jwt
+            "f12bcddc663aa4c4d90218a1bb718fe74e0e7be3",
+        ]
+
+[[ rules ]]
+    id = "high-entropy-base64"
+    [ rules.allowlist ]
+        commits = [
+            # Non-Sensitive Test data
+            "728552f0ca934e0bc6803b803859d5c956a832d9",
         ]
