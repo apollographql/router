@@ -1691,7 +1691,8 @@ fn extract_cache_attributes(
 }
 
 struct CacheCounter {
-    potential_cache_entries: CountMinSketch<CacheKey, usize>,
+    primary: CountMinSketch<CacheKey, usize>,
+    secondary: CountMinSketch<CacheKey, usize>,
     created_at: Instant,
     ttl: Duration,
 }
@@ -1699,7 +1700,12 @@ struct CacheCounter {
 impl CacheCounter {
     fn new(ttl: Duration) -> Self {
         Self {
-            potential_cache_entries: CountMinSketch::new(
+            primary: CountMinSketch::new(
+                0.01, // probability calculate k_num
+                0.01, // error tolerance to calculate width
+                (),
+            ),
+            secondary: CountMinSketch::new(
                 0.01, // probability calculate k_num
                 0.01, // error tolerance to calculate width
                 (),
@@ -1748,15 +1754,20 @@ impl CacheCounter {
     }
 
     fn count(&mut self, key: &CacheKey) -> bool {
-        self.potential_cache_entries.push(key, &1) > 1
+        self.primary.push(key, &1) > 1 || self.secondary.get(key) > 1
     }
 
     fn clear(&mut self) {
-        self.potential_cache_entries = CountMinSketch::new(
-            0.01, // probability calculate k_num
-            0.01, // error tolerance to calculate width
-            (),
+        let secondary = std::mem::replace(
+            &mut self.primary,
+            CountMinSketch::new(
+                0.01, // probability calculate k_num
+                0.01, // error tolerance to calculate width
+                (),
+            ),
         );
+        self.secondary = secondary;
+
         self.created_at = Instant::now();
     }
 }
