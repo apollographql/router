@@ -1,22 +1,40 @@
 //! Apollo metrics
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
+use opentelemetry::sdk::export::metrics::aggregation;
+use opentelemetry::sdk::metrics::selectors;
+use opentelemetry::sdk::Resource;
+use opentelemetry::KeyValue;
+use opentelemetry_otlp::WithExportConfig;
+use sys_info::hostname;
+use tonic::metadata::MetadataMap;
 use tower::BoxError;
+use url::Url;
 
 use crate::plugins::telemetry::apollo::Config;
+use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::filter::FilterMeterProvider;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
+use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 mod duration_histogram;
 pub(crate) mod studio;
 
+fn default_buckets() -> Vec<f64> {
+    vec![
+        0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
+    ]
+}
+
 impl MetricsConfigurator for Config {
     fn apply(
         &self,
-        builder: MetricsBuilder,
+        mut builder: MetricsBuilder,
         _metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         tracing::debug!("configuring Apollo metrics");
@@ -24,6 +42,7 @@ impl MetricsConfigurator for Config {
         Ok(match self {
             Config {
                 endpoint,
+                experimental_otlp_endpoint: otlp_endpoint,
                 apollo_key: Some(key),
                 apollo_graph_ref: Some(reference),
                 schema_id,
@@ -33,23 +52,101 @@ impl MetricsConfigurator for Config {
                 if !ENABLED.swap(true, Ordering::Relaxed) {
                     tracing::info!("Apollo Studio usage reporting is enabled. See https://go.apollo.dev/o/data for details");
                 }
-                let batch_processor_config = batch_processor;
-                tracing::debug!("creating metrics exporter");
-                let exporter = ApolloExporter::new(
+
+                builder = Self::configure_apollo_metrics(
+                    builder,
                     endpoint,
-                    batch_processor_config,
                     key,
                     reference,
                     schema_id,
+                    batch_processor,
                 )?;
-
-                builder.with_apollo_metrics_collector(exporter.start())
+                // env variable EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED will disappear without warning in future
+                if std::env::var("EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED")
+                    .unwrap_or_else(|_| "true".to_string())
+                    == "true"
+                {
+                    builder = Self::configure_apollo_otlp_metrics(
+                        builder,
+                        otlp_endpoint,
+                        key,
+                        reference,
+                        schema_id,
+                        batch_processor,
+                    )?;
+                }
+                builder
             }
             _ => {
                 ENABLED.swap(false, Ordering::Relaxed);
                 builder
             }
         })
+    }
+}
+
+impl Config {
+    fn configure_apollo_otlp_metrics(
+        mut builder: MetricsBuilder,
+        endpoint: &Url,
+        key: &str,
+        reference: &str,
+        schema_id: &str,
+        batch_processor: &BatchProcessorConfig,
+    ) -> Result<MetricsBuilder, BoxError> {
+        tracing::debug!(endpoint = %endpoint, "creating Apollo OTLP metrics exporter");
+        let mut metadata = MetadataMap::new();
+        metadata.insert("apollo.api.key", key.parse()?);
+
+        let exporter = opentelemetry_otlp::new_pipeline()
+            .metrics(
+                selectors::simple::histogram(default_buckets()),
+                aggregation::delta_temporality_selector(),
+                opentelemetry::runtime::Tokio,
+            )
+            .with_resource(Resource::new([
+                KeyValue::new("apollo.graph.ref", reference.to_string()),
+                KeyValue::new("apollo.schema.id", schema_id.to_string()),
+                KeyValue::new(
+                    "apollo.user.agent",
+                    format!(
+                        "{}@{}",
+                        std::env!("CARGO_PKG_NAME"),
+                        std::env!("CARGO_PKG_VERSION")
+                    ),
+                ),
+                KeyValue::new("apollo.client.host", hostname()?),
+                KeyValue::new("apollo.client.uname", get_uname()?),
+            ]))
+            .with_period(Duration::from_secs(60))
+            .with_exporter(
+                opentelemetry_otlp::new_exporter()
+                    .tonic()
+                    .with_endpoint(endpoint.as_str())
+                    .with_timeout(batch_processor.max_export_timeout)
+                    .with_metadata(metadata),
+            )
+            .build()?;
+        builder =
+            builder.with_meter_provider(FilterMeterProvider::apollo_metrics(exporter.clone()));
+        builder = builder.with_exporter(exporter);
+        Ok(builder)
+    }
+
+    fn configure_apollo_metrics(
+        builder: MetricsBuilder,
+        endpoint: &Url,
+        key: &str,
+        reference: &str,
+        schema_id: &str,
+        batch_processor: &BatchProcessorConfig,
+    ) -> Result<MetricsBuilder, BoxError> {
+        let batch_processor_config = batch_processor;
+        tracing::debug!(endpoint = %endpoint, "creating Apollo metrics exporter");
+        let exporter =
+            ApolloExporter::new(endpoint, batch_processor_config, key, reference, schema_id)?;
+
+        Ok(builder.with_apollo_metrics_collector(exporter.start()))
     }
 }
 

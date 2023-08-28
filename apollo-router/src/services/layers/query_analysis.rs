@@ -8,6 +8,7 @@ use lru::LruCache;
 use tokio::sync::Mutex;
 
 use crate::context::OPERATION_NAME;
+use crate::plugins::authorization::AuthorizationPlugin;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
@@ -22,6 +23,7 @@ pub(crate) struct QueryAnalysisLayer {
     schema: Arc<Schema>,
     configuration: Arc<Configuration>,
     cache: Arc<Mutex<LruCache<QueryAnalysisKey, (Context, Arc<Mutex<ApolloCompiler>>)>>>,
+    enable_authorization_directives: bool,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -32,6 +34,8 @@ struct QueryAnalysisKey {
 
 impl QueryAnalysisLayer {
     pub(crate) async fn new(schema: Arc<Schema>, configuration: Arc<Configuration>) -> Self {
+        let enable_authorization_directives =
+            AuthorizationPlugin::enable_directives(&configuration, &schema).unwrap_or(false);
         Self {
             schema,
             cache: Arc::new(Mutex::new(LruCache::new(
@@ -42,6 +46,7 @@ impl QueryAnalysisLayer {
                     .in_memory
                     .limit,
             ))),
+            enable_authorization_directives,
             configuration,
         }
     }
@@ -109,6 +114,16 @@ impl QueryAnalysisLayer {
                     .and_then(|operation| operation.name().map(|s| s.to_owned()));
 
                 context.insert(OPERATION_NAME, operation_name).unwrap();
+
+                if self.enable_authorization_directives {
+                    AuthorizationPlugin::query_analysis(
+                        &query,
+                        &self.schema,
+                        &self.configuration,
+                        &context,
+                    )
+                    .await;
+                }
 
                 (*self.cache.lock().await).put(
                     QueryAnalysisKey {
