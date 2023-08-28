@@ -4,12 +4,12 @@ expression: "&metrics.metrics"
 ---
 value.apollo.router.config.limits:
   - 1
-  - opt__operation__max_aliases__: "true"
-    opt__operation__max_depth__: "true"
-    opt__operation__max_height__: "true"
-    opt__operation__max_root_fields__: "true"
-    opt__operation__warn_only__: "true"
-    opt__parser__max_recursion__: "true"
-    opt__parser__max_tokens__: "true"
-    opt__request__max_size__: "true"
+  - opt__operation__max_aliases__: true
+    opt__operation__max_depth__: true
+    opt__operation__max_height__: true
+    opt__operation__max_root_fields__: true
+    opt__operation__warn_only__: true
+    opt__parser__max_recursion__: true
+    opt__parser__max_tokens__: true
+    opt__request__max_size__: true
 

@@ -4,7 +4,7 @@ expression: "&metrics.metrics"
 ---
 value.apollo.router.config.persisted_queries:
   - 1
-  - opt__log_unknown__: "true"
-    opt__safelist__enabled__: "true"
-    opt__safelist__require_id__: "true"
+  - opt__log_unknown__: true
+    opt__safelist__enabled__: true
+    opt__safelist__require_id__: true
 
