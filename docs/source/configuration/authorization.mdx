@@ -6,7 +6,7 @@ minVersion: 1.28.1
 
 <GraphOSEnterpriseRequired />
 
-<FeatureInPreview />
+<PreviewFeature discordLink="https://discord.gg/graphos"/>
 
 APIs provide access to business-critical data. Unrestricted access can result in data breaches, monetary losses, or potential denial of service. Even for internal services, checks can be essential to limit data to authorized parties.
 
@@ -93,13 +93,36 @@ The router then enforces these directives on all incoming requests.
 
 ## Prerequisites
 
-The authorization directives use a request's **claims** to evaluate which fields and types are authorized. Claims are the individual details of a request's authentication and scope. They might include details like the ID of the user making the request and any authorization scopes assigned to that user.
+You must complete two prerequisites before using authorization directives in your subgraph schemas:
+- Include **claims** in requests to the router
+  - Claims are the individual details of a request's authentication and scope. They might include details like the ID of the user making the request and any authorization scopes assigned to that user.
+- Configure your router
+  - You need to add a few lines to your [router's configuration](./overview/) for it to recognize the authorization directives.
+
+### Including claims in requests
 
 To provide the router with the claims it needs to evaluate authorization directives, you must either configure JSON Web Token (JWT) authentication or add an external coprocessor that adds claims to a request's context. In some cases (explained below), you may require both.
 
 - **JWT authentication configuration**: If you configure [JWT authentication](./authn-jwt), the Apollo Router [automatically adds a JWT token's claims](./authn-jwt#working-with-jwt-claims) to the request's context at the `apollo_authentication::JWT::claims` key.
 - **Adding claims via coprocessor**:  If you can't use JWT authentication, you can [add claims with a coprocessor](/customizations/coprocessor#adding-authorization-claims-via-coprocessor). Coprocessors let you hook into the Apollo Router's request-handling lifecycle with custom code.
 - **Augmenting JWT claims via coprocessor**: Your authorization policies may require information beyond what your JSON web tokens provide. For example, a token's claims may include user IDs, which you then use to look up user roles. For situations like this, you can [augment the claims](./authn-jwt#claim-augmentation-via-coprocessors) from your JSON web tokens with coprocessors.
+
+### Router configuration
+
+To configure your router to validate authorization directives, follow these steps:
+
+1. Ensure your router instances are ready to work with PQLs:
+    - Make sure you're using version `1.28.1` or later of the Apollo Router.
+    - Make sure your router instances are [connected to your GraphOS Enterprise organization](/graphos/enterprise-features/#enabling-enterprise-features).
+
+2. Update your router's [YAML config file](./overview/) to include the following:
+
+```yaml title="router.yaml"
+authorization:
+  preview_directives:
+    enabled: true
+```
+> During [preview](/resources/product-launch-stages#preview), authorization directives are not active by default. This will change once the feature is generally available.
 
 ## Authorization directives
 
