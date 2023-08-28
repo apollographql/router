@@ -24,8 +24,6 @@ use super::METRIC_PREFIX_HISTOGRAM;
 use super::METRIC_PREFIX_MONOTONIC_COUNTER;
 use super::METRIC_PREFIX_VALUE;
 
-const I64_MAX: u64 = i64::MAX as u64;
-
 #[derive(Default)]
 pub(crate) struct Instruments {
     u64_counter: MetricsMap<Counter<u64>>,
@@ -162,14 +160,59 @@ pub(crate) struct MetricVisitor<'a> {
 }
 
 impl<'a> Visit for MetricVisitor<'a> {
-    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        // Do not display the log content
-        if field.name() != "message" {
+    fn record_f64(&mut self, field: &Field, value: f64) {
+        if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_MONOTONIC_COUNTER) {
+            self.metric = Some((metric_name, InstrumentType::CounterF64(value)));
+        } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_COUNTER) {
+            self.metric = Some((metric_name, InstrumentType::UpDownCounterF64(value)));
+        } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_HISTOGRAM) {
+            self.metric = Some((metric_name, InstrumentType::HistogramF64(value)));
+        } else {
             self.custom_attributes.push(KeyValue::new(
                 Key::from_static_str(field.name()),
-                Value::from(format!("{value:?}")),
+                Value::from(value),
             ));
         }
+    }
+
+    fn record_i64(&mut self, field: &Field, value: i64) {
+        if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_MONOTONIC_COUNTER) {
+            tracing::error!(metric_name, "monotonic counter must be u64");
+        } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_COUNTER) {
+            self.metric = Some((metric_name, InstrumentType::UpDownCounterI64(value)));
+        } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_HISTOGRAM) {
+            self.metric = Some((metric_name, InstrumentType::HistogramI64(value)));
+        } else {
+            self.custom_attributes.push(KeyValue::new(
+                Key::from_static_str(field.name()),
+                Value::from(value),
+            ));
+        }
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_MONOTONIC_COUNTER) {
+            self.metric = Some((metric_name, InstrumentType::CounterU64(value)));
+        } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_HISTOGRAM) {
+            self.metric = Some((metric_name, InstrumentType::HistogramU64(value)));
+        } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_VALUE) {
+            self.metric = Some((metric_name, InstrumentType::GaugeU64(value)));
+        }
+    }
+
+    fn record_i128(&mut self, field: &Field, _value: i128) {
+        tracing::error!(name = field.name(), "metric attribute cannot be i128");
+    }
+
+    fn record_u128(&mut self, field: &Field, _value: u128) {
+        tracing::error!(name = field.name(), "metric attribute cannot be u128");
+    }
+
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        self.custom_attributes.push(KeyValue::new(
+            Key::from_static_str(field.name()),
+            Value::from(value),
+        ));
     }
 
     fn record_str(&mut self, field: &Field, value: &str) {
@@ -179,49 +222,13 @@ impl<'a> Visit for MetricVisitor<'a> {
         ));
     }
 
-    fn record_u64(&mut self, field: &Field, value: u64) {
-        if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_MONOTONIC_COUNTER) {
-            self.metric = Some((metric_name, InstrumentType::CounterU64(value)));
-        } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_COUNTER) {
-            if value <= I64_MAX {
-                self.metric = Some((metric_name, InstrumentType::UpDownCounterI64(value as i64)));
-            } else {
-                eprintln!(
-                    "[tracing-opentelemetry]: Received Counter metric, but \
-                    provided u64: {value} is greater than i64::MAX. Ignoring \
-                    this metric."
-                );
-            }
-        } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_HISTOGRAM) {
-            self.metric = Some((metric_name, InstrumentType::HistogramU64(value)));
-        } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_VALUE) {
-            self.metric = Some((metric_name, InstrumentType::GaugeU64(value)));
-        } else {
-            self.record_debug(field, &value);
-        }
-    }
-
-    fn record_f64(&mut self, field: &Field, value: f64) {
-        if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_MONOTONIC_COUNTER) {
-            self.metric = Some((metric_name, InstrumentType::CounterF64(value)));
-        } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_COUNTER) {
-            self.metric = Some((metric_name, InstrumentType::UpDownCounterF64(value)));
-        } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_HISTOGRAM) {
-            self.metric = Some((metric_name, InstrumentType::HistogramF64(value)));
-        } else {
-            self.record_debug(field, &value);
-        }
-    }
-
-    fn record_i64(&mut self, field: &Field, value: i64) {
-        if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_MONOTONIC_COUNTER) {
-            self.metric = Some((metric_name, InstrumentType::CounterU64(value as u64)));
-        } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_COUNTER) {
-            self.metric = Some((metric_name, InstrumentType::UpDownCounterI64(value)));
-        } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_HISTOGRAM) {
-            self.metric = Some((metric_name, InstrumentType::HistogramI64(value)));
-        } else {
-            self.record_debug(field, &value);
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        // Do not display the log content
+        if field.name() != "message" {
+            self.custom_attributes.push(KeyValue::new(
+                Key::from_static_str(field.name()),
+                Value::from(format!("{value:?}")),
+            ));
         }
     }
 }
