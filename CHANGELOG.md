@@ -4,6 +4,53 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.28.1] - 2023-08-28
+
+## 🚀 Features
+
+### Expose the number of subgraph fetches in `QueryPlan` ([#3658](https://github.com/apollographql/router/issues/3658))
+
+Add a new `subgraph_fetches` method for the `QueryPlan` type that exposes the number of expected subgraph fetches for a given query plan.
+
+By [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollographql/router/pull/3659
+
+## 🐛 Fixes
+
+### Helm: Declare `extraContainers` prior to the router container ([Issue #3632](https://github.com/apollographql/router/issues/3632))
+
+Currently, in our Helm chart, `extraContainers` are declared _after_ the router container. Moving the `extraContainers` _ahead_ of the router container will make it simpler to co-ordinate container startup sequencing and take full advantage of Kubernetes' lifecycle hooks.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3633
+
+### Fix memory leak caused by `Arc` circular reference in `Notify` ([Issue #3686](https://github.com/apollographql/router/issues/3686))
+
+A [memory leak](https://github.com/apollographql/router/issues/3686) caused by a [change](https://github.com/apollographql/router/pull/3341) to subscription handling was fixed.
+
+By [@xuorig](https://github.com/xuorig) in https://github.com/apollographql/router/pull/3692
+
+### Fix GraphQL block-comment parser regression ([Issue #3680](https://github.com/apollographql/router/issues/3680))
+
+In 1.28.0, the GraphQL parser falsely errored out on backslashes in block comments, such as:
+
+```graphql
+"""
+A regex: '/\W/'
+A path: PHP\Namespace\Class
+"""
+```
+
+This now parses again.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in [PR #3675](https://github.com/apollographql/router/pull/3675) and [`apollo-rs#638`](https://github.com/apollographql/apollo-rs/pull/638).
+
+### Error no longer reported on Redis cache misses ([Issue #2876](https://github.com/apollographql/router/issues/2876))
+
+The Router will no longer log an error in when fetching from Redis and the record doesn't exist. This affected APQ, QueryPlanning and experimental entity caching.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3661
+
+
+
 # [1.28.0] - 2023-08-24 (Yanked)
 
 > **Warning**
