@@ -177,7 +177,10 @@ impl<'a> Visit for MetricVisitor<'a> {
 
     fn record_i64(&mut self, field: &Field, value: i64) {
         if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_MONOTONIC_COUNTER) {
-            tracing::error!(metric_name, "monotonic counter must be u64");
+            tracing::error!(
+                metric_name,
+                "monotonic counter must be u64, this metric will be ignored"
+            );
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_COUNTER) {
             self.metric = Some((metric_name, InstrumentType::UpDownCounterI64(value)));
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_HISTOGRAM) {
@@ -201,11 +204,17 @@ impl<'a> Visit for MetricVisitor<'a> {
     }
 
     fn record_i128(&mut self, field: &Field, _value: i128) {
-        tracing::error!(name = field.name(), "metric attribute cannot be i128");
+        tracing::error!(
+            name = field.name(),
+            "metric attribute cannot be i128, this attribute will be ignored"
+        );
     }
 
     fn record_u128(&mut self, field: &Field, _value: u128) {
-        tracing::error!(name = field.name(), "metric attribute cannot be u128");
+        tracing::error!(
+            name = field.name(),
+            "metric attribute cannot be u128, this attribute will be ignored"
+        );
     }
 
     fn record_bool(&mut self, field: &Field, value: bool) {
