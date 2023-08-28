@@ -4,7 +4,11 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
-# [1.28.0] - 2023-08-24
+# [1.28.0] - 2023-08-24 (Yanked)
+
+> **Warning**
+> We have discovered an issue with comment parsing in graphql schema in this release (#3680). We will be releasing a follow up to fix this shortly. For now users should use 1.27.0.
+
 
 ## 🚀 Features
 
