@@ -427,22 +427,26 @@ async fn subscription_task(
                 }
             }
             Some(new_configuration) = configuration_updated_rx.next() => {
-                let plugins = match create_plugins(&new_configuration, &execution_service_factory.schema, None).await {
-                    Ok(plugins) => plugins,
-                    Err(err) => {
-                        tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
-                        break;
-                    },
-                };
-                let subgraph_services = match create_subgraph_services(&plugins, &execution_service_factory.schema, &new_configuration).await {
-                    Ok(subgraph_services) => subgraph_services,
-                    Err(err) => {
-                        tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
-                        break;
-                    },
-                };
-                let plugins = Arc::new(IndexMap::from_iter(plugins));
-                execution_service_factory = ExecutionServiceFactory { schema: execution_service_factory.schema.clone(), plugins: plugins.clone(), subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone())) };
+                // If the configuration was dropped in the meantime, we ignore this update and will
+                // pick up the next one.
+                if let Some(conf) = new_configuration.upgrade() {
+                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, None).await {
+                        Ok(plugins) => plugins,
+                        Err(err) => {
+                            tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
+                            break;
+                        },
+                    };
+                    let subgraph_services = match create_subgraph_services(&plugins, &execution_service_factory.schema, &conf).await {
+                        Ok(subgraph_services) => subgraph_services,
+                        Err(err) => {
+                            tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
+                            break;
+                        },
+                    };
+                    let plugins = Arc::new(IndexMap::from_iter(plugins));
+                    execution_service_factory = ExecutionServiceFactory { schema: execution_service_factory.schema.clone(), plugins: plugins.clone(), subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone())) };
+                }
             }
             Some(new_schema) = schema_updated_rx.next() => {
                 if new_schema.raw_sdl != execution_service_factory.schema.raw_sdl {
