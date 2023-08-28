@@ -4,6 +4,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Weak;
 use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
@@ -146,11 +147,11 @@ where
 
 impl<K, V> Notify<K, V> {
     /// Broadcast a new configuration
-    pub(crate) fn broadcast_configuration(&self, configuration: Arc<Configuration>) {
+    pub(crate) fn broadcast_configuration(&self, configuration: Weak<Configuration>) {
         self.router_broadcasts.configuration.0.send(configuration).expect("cannot send the configuration update to the static channel. Should not happen because the receiver will always live in this struct; qed");
     }
     /// Receive the new configuration everytime we have a new router configuration
-    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Arc<Configuration>> {
+    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Weak<Configuration>> {
         self.router_broadcasts.subscribe_configuration()
     }
     /// Receive the new schema everytime we have a new schema
@@ -875,8 +876,8 @@ where
 
 pub(crate) struct RouterBroadcasts {
     configuration: (
-        broadcast::Sender<Arc<Configuration>>,
-        broadcast::Receiver<Arc<Configuration>>,
+        broadcast::Sender<Weak<Configuration>>,
+        broadcast::Receiver<Weak<Configuration>>,
     ),
     schema: (
         broadcast::Sender<Arc<Schema>>,
@@ -892,7 +893,7 @@ impl RouterBroadcasts {
         }
     }
 
-    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Arc<Configuration>> {
+    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Weak<Configuration>> {
         BroadcastStream::new(self.configuration.0.subscribe())
             .filter_map(|cfg| futures::future::ready(cfg.ok()))
     }
