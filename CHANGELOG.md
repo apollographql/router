@@ -8,6 +8,37 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
+### Expose the `stats_reports_key` hash to plugins. ([Issue #2728](https://github.com/apollographql/router/issues/2728))
+
+This exposes a new key in the `Context`, `apollo_operation_id`, which identifies operation you can find in studio:
+
+```
+https://studio.apollographql.com/graph/<your_graph_variant>/variant/<your_graph_variant>/operations?query=<apollo_operation_id>
+```
+
+The `apollo_operation_id` context key is exposed during:
+
+- Execution service request
+- Subgraph service request
+- Subgraph service response
+- Execution service response
+- Supergraph service response
+- Router service response
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3586
+
+### Add new (unstable) metrics ([PR #3609](https://github.com/apollographql/router/pull/3609))
+
+Many of our existing metrics are poorly and inconsistently named. In addition, they follow Prometheus style rather than Otel style.
+
+This changeset adds some new metrics that will give us a good foundation to build upon.
+New metrics are namespaced `apollo.router.operations.*`.
+
+These metrics should be treated as unstable and may change in the future.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3609
+
+
 ### Expose the number of subgraph fetches in `QueryPlan` ([#3658](https://github.com/apollographql/router/issues/3658))
 
 Add a new `subgraph_fetches` method for the `QueryPlan` type that exposes the number of expected subgraph fetches for a given query plan.
@@ -15,6 +46,13 @@ Add a new `subgraph_fetches` method for the `QueryPlan` type that exposes the nu
 By [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollographql/router/pull/3659
 
 ## 🐛 Fixes
+
+### Flush metrics when Router reloads or shuts down ([Issue #3140](https://github.com/apollographql/router/issues/3140))
+
+When the Router either reloads or shuts down it now flushes metrics.
+Push metrics exporters, such as OTLP, would have previously missed some metrics — in particular those related to _reload_ events.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3143
 
 ### Helm: Declare `extraContainers` prior to the router container ([Issue #3632](https://github.com/apollographql/router/issues/3632))
 
@@ -48,55 +86,6 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in [PR #3675](https://gith
 The Router will no longer log an error in when fetching from Redis and the record doesn't exist. This affected APQ, QueryPlanning and experimental entity caching.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3661
-
-
-
-# [1.28.0] - 2023-08-24 (Yanked)
-
-> **Warning**
-> We have discovered an issue with comment parsing in graphql schema in this release (#3680). We will be releasing a follow up to fix this shortly. For now users should use 1.27.0.
-
-
-## 🚀 Features
-
-### Expose the `stats_reports_key` hash to plugins. ([Issue #2728](https://github.com/apollographql/router/issues/2728))
-
-This exposes a new key in the `Context`, `apollo_operation_id`, which identifies operation you can find in studio:
-
-```
-https://studio.apollographql.com/graph/<your_graph_variant>/variant/<your_graph_variant>/operations?query=<apollo_operation_id>
-```
-
-The `apollo_operation_id` context key is exposed during:
-
-- Execution service request
-- Subgraph service request
-- Subgraph service response
-- Execution service response
-- Supergraph service response
-- Router service response
-
-By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3586
-
-### Add new (unstable) metrics ([PR #3609](https://github.com/apollographql/router/pull/3609))
-
-Many of our existing metrics are poorly and inconsistently named. In addition, they follow Prometheus style rather than Otel style.
-
-This changeset adds some new metrics that will give us a good foundation to build upon.
-New metrics are namespaced `apollo.router.operations.*`.
-
-These metrics should be treated as unstable and may change in the future.
-
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3609
-
-## 🐛 Fixes
-
-### Flush metrics when Router reloads or shuts down ([Issue #3140](https://github.com/apollographql/router/issues/3140))
-
-When the Router either reloads or shuts down it now flushes metrics.
-Push metrics exporters, such as OTLP, would have previously missed some metrics — in particular those related to _reload_ events.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3143
 
 ## 🛠 Maintenance
 
@@ -151,7 +140,13 @@ As a side effect of this change, Router now re-downloads the PQ manifest when re
 
 By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/3566
 
+# [1.28.0] - 2023-08-24 (Yanked)
 
+> **Warning**
+>
+> **See v1.28.1 for the version that replaces this release.**
+>
+> We yanked v1.28.0 shortly after it was released since we discovered an issue with block-comment parsing in GraphQL *schemas* that resulted in #3680.  We have re-released a **fixed** v1.28.1 which takes the place of this release.  The entire contents of this change log have been moved to v1.28.0.
 
 # [1.27.0] - 2023-08-18
 
