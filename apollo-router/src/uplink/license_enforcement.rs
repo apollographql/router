@@ -135,6 +135,10 @@ impl LicenseEnforcementReport {
                 .name("Authentication plugin")
                 .build(),
             ConfigurationRestriction::builder()
+                .path("$.authorization.preview_directives")
+                .name("Authorization directives")
+                .build(),
+            ConfigurationRestriction::builder()
                 .path("$.coprocessor")
                 .name("Coprocessor plugin")
                 .build(),

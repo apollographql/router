@@ -78,9 +78,7 @@
     {
       "matchCurrentVersion": ">= 1.0.0",
       "matchManagers": [ "cargo", "npm" ],
-      // TODO: https://github.com/apollographql/router/pull/3194/commits/4e522a245e715e67d44c8dfc0a458bca1d054078
-      // Remove this after `flate2` is resolved.
-      "excludePackageNames": ["flate2"],
+      "excludePackageNames": [],
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "groupName": "all non-major packages >= 1.0",
       "groupSlug": "all-non-major-gte-1.0",
