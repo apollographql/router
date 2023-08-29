@@ -63,7 +63,6 @@ impl Metrics {
 
         // The reason we use jsonpath_rust is that jsonpath_lib has correctness issues and looks abandoned.
         // We should consider converting the rest of the codebase to use jsonpath_rust.
-        // The only issue is that jsonpath_rust's API takes ownership of the json Value. It has lower level APIs that don't but for some reason they don't get exposed.
 
         // Example usage:
         // log_usage_metrics!(
@@ -182,7 +181,7 @@ impl Metrics {
             opt.mode.passthrough,
             "$.mode.passthrough",
             opt.mode.callback,
-            "$.mode.callback",
+            "$.mode.preview_callback",
             opt.deduplication,
             "$[?(@.enable_deduplication == true)]",
             opt.max_opened,

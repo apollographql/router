@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.27.0"
+version = "1.28.1"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -53,9 +53,9 @@ features = ["docs_rs"]
 askama = "0.12.0"
 access-json = "0.1.0"
 anyhow = "1.0.75"
-apollo-compiler = "0.11.0"
+apollo-compiler = "0.11.1"
 apollo-encoder = "0.7.0"
-apollo-parser = "0.6.0"
+apollo-parser = "0.6.1"
 arc-swap = "1.6.0"
 async-compression = { version = "0.4.1", features = [
     "tokio",

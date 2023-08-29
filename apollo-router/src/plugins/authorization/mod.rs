@@ -17,6 +17,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use self::authenticated::AuthenticatedCheckVisitor;
 use self::authenticated::AuthenticatedVisitor;
 use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
 use self::policy::PolicyExtractionVisitor;
@@ -37,6 +38,7 @@ use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::query_planner::FilteredQuery;
 use crate::query_planner::QueryKey;
 use crate::register_plugin;
+use crate::services::execution;
 use crate::services::supergraph;
 use crate::spec::query::transform;
 use crate::spec::query::traverse;
@@ -51,6 +53,7 @@ pub(crate) mod authenticated;
 pub(crate) mod policy;
 pub(crate) mod scopes;
 
+const AUTHENTICATED_KEY: &str = "apollo_authorization::authenticated::required";
 const REQUIRED_SCOPES_KEY: &str = "apollo_authorization::scopes::required";
 const REQUIRED_POLICIES_KEY: &str = "apollo_authorization::policies::required";
 
@@ -133,6 +136,15 @@ impl AuthorizationPlugin {
     ) {
         let (compiler, file_id) = Query::make_compiler(query, schema, configuration);
 
+        let mut visitor = AuthenticatedCheckVisitor::new(&compiler, file_id);
+
+        // if this fails, the query is invalid and will fail at the query planning phase.
+        // We do not return validation errors here for now because that would imply a huge
+        // refactoring of telemetry and tests
+        if traverse::document(&mut visitor, file_id).is_ok() && !visitor.found {
+            context.insert(AUTHENTICATED_KEY, true).unwrap();
+        }
+
         let mut visitor = ScopeExtractionVisitor::new(&compiler, file_id);
 
         // if this fails, the query is invalid and will fail at the query planning phase.
@@ -141,7 +153,9 @@ impl AuthorizationPlugin {
         if traverse::document(&mut visitor, file_id).is_ok() {
             let scopes: Vec<String> = visitor.extracted_scopes.into_iter().collect();
 
-            context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
+            if !scopes.is_empty() {
+                context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
+            }
         }
 
         // TODO: @policy is out of scope for preview, this will be reactivated later
@@ -158,7 +172,9 @@ impl AuthorizationPlugin {
                     .map(|policy| (policy, None))
                     .collect();
 
-                context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
+                if !policies.is_empty() {
+                    context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
+                }
             }
         }
     }
@@ -454,6 +470,28 @@ impl Plugin for AuthorizationPlugin {
         } else {
             service
         }
+    }
+
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        ServiceBuilder::new()
+            .map_request(|request: execution::Request| {
+                let filtered = !request.query_plan.query.unauthorized_paths.is_empty();
+                let needs_authenticated = request.context.contains_key(AUTHENTICATED_KEY);
+                let needs_requires_scopes = request.context.contains_key(REQUIRED_SCOPES_KEY);
+
+                if needs_authenticated || needs_requires_scopes {
+                    tracing::info!(
+                        monotonic_counter.apollo.router.operations.authorization = 1u64,
+                        filtered = filtered,
+                        authenticated = needs_authenticated,
+                        requires_scopes = needs_requires_scopes,
+                    );
+                }
+
+                request
+            })
+            .service(service)
+            .boxed()
     }
 }
 
