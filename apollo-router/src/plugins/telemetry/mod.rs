@@ -1743,7 +1743,7 @@ impl CacheCounter {
 
         for (typename, (cache_hit, total_entities)) in seen.into_iter() {
             ::tracing::info!(
-                value.apollo.router.operations.entity = (cache_hit as f64 / total_entities as f64) * 100f64,
+                histogram.apollo.router.operations.entity = (cache_hit as f64 / total_entities as f64) * 100f64,
                 entity_type = %typename,
                 subgraph = %subgraph_name,
             );
