@@ -6,6 +6,8 @@ use std::process::Stdio;
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
+use base64::engine::general_purpose::STANDARD as Base64;
+use base64::Engine;
 use xtask::*;
 
 const ENTITLEMENTS: &str = "macos-entitlements.plist";
@@ -76,7 +78,8 @@ impl PackageMacos {
         let certificate_path = temp.path().join("certificate.p12");
         std::fs::write(
             &certificate_path,
-            base64::decode(&self.cert_bundle_base64)
+            Base64
+                .decode(&self.cert_bundle_base64)
                 .context("could not decode base64 encoded certificate bundle")?,
         )
         .context("could not write decoded certificate to file")?;

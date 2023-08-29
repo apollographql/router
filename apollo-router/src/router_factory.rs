@@ -173,7 +173,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         if config_changed {
             configuration
                 .notify
-                .broadcast_configuration(configuration.clone());
+                .broadcast_configuration(Arc::downgrade(&configuration));
         }
 
         let schema = bridge_query_planner.schema();
