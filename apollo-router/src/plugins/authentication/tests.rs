@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
 
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use jsonwebtoken::encode;
 use jsonwebtoken::get_current_timestamp;
 use jsonwebtoken::jwk::CommonParameters;
@@ -723,10 +725,6 @@ async fn issuer_check() {
 
     let encoding_key = EncodingKey::from_ec_der(&signing_key.to_pkcs8_der().unwrap().to_bytes());
 
-    let url_safe_engine = base64::engine::fast_portable::FastPortable::from(
-        &base64::alphabet::URL_SAFE,
-        base64::engine::fast_portable::NO_PAD,
-    );
     let jwk = Jwk {
         common: CommonParameters {
             public_key_use: Some(PublicKeyUse::Signature),
@@ -738,8 +736,8 @@ async fn issuer_check() {
         algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
             key_type: EllipticCurveKeyType::EC,
             curve: EllipticCurve::P256,
-            x: base64::encode_engine(point.x().unwrap(), &url_safe_engine),
-            y: base64::encode_engine(point.y().unwrap(), &url_safe_engine),
+            x: BASE64_URL_SAFE_NO_PAD.encode(point.x().unwrap()),
+            y: BASE64_URL_SAFE_NO_PAD.encode(point.y().unwrap()),
         }),
     };
 

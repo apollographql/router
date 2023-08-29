@@ -35,7 +35,6 @@ use crate::configuration::ListenAddr;
 use crate::router::Event::UpdateLicense;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
-use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
@@ -317,13 +316,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         S: HttpServerFactory,
         FA: RouterSuperServiceFactory,
     {
-        let parsed_schema = Arc::new(
-            Schema::parse(&schema, &configuration)
-                .map_err(|e| ServiceCreationError(e.to_string().into()))?,
-        );
-
         // Check the license
-        let report = LicenseEnforcementReport::build(&configuration, &parsed_schema);
+        let report = LicenseEnforcementReport::build(&configuration);
 
         match license {
             LicenseState::Licensed => {
@@ -520,7 +514,7 @@ where
         // Process all the events in turn until we get to error state or we run out of events.
         while let Some(event) = messages.next().await {
             let event_name = format!("{event:?}");
-            let last_state = format!("{state:?}");
+            let previous_state = format!("{state:?}");
 
             state = match event {
                 UpdateConfiguration(configuration) => {
@@ -550,7 +544,11 @@ where
             self.notify_updated.notify_one();
 
             tracing::debug!(
-                "state machine event: {event_name}, transitioned from: {last_state} to: {state:?}"
+                monotonic_counter.apollo_router_state_change_total = 1u64,
+                event = event_name,
+                state = ?state,
+                previous_state,
+                "state machine transitioned"
             );
 
             // If we've errored then exit even if there are potentially more messages
