@@ -70,7 +70,11 @@ preview_persisted_queries:
   enabled: true
   safelist:
     enabled: true
+apq:
+  enabled: false
 ```
+
+> **Note:** To enable safelisting, you _must_ turn off [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly preregistered.
 
 By default, the [`require_id`](#required_id) suboption is `false`, meaning the router accepts both operation IDs and operation strings as long as the operation is preregistered.
 
@@ -86,4 +90,8 @@ preview_persisted_queries:
   safelist:
     enabled: true
     require_id: true
+apq:
+  enabled: false
 ```
+
+> **Note:** To enable safelisting, you _must_ turn off [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly preregistered.
