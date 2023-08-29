@@ -351,6 +351,7 @@ dependencies = [
  "opentelemetry-prometheus",
  "opentelemetry-semantic-conventions",
  "opentelemetry-zipkin",
+ "opentelemetry_api",
  "p256 0.12.0",
  "parking_lot 0.12.1",
  "paste",

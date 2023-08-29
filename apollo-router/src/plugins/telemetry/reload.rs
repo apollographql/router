@@ -6,6 +6,7 @@ use anyhow::Result;
 use once_cell::sync::OnceCell;
 use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry::sdk::trace::Tracer;
+use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TracerProvider;
 use rand::thread_rng;
 use rand::Rng;
@@ -30,6 +31,8 @@ use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::metrics::layer::MetricsLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
+
+use super::config::SamplerOption;
 
 pub(super) type LayeredTracer = Layered<
     Filtered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, SamplingFilter, Registry>,
@@ -156,6 +159,25 @@ impl SamplingFilter {
         Self {}
     }
 
+    pub(super) fn configure(sampler: &SamplerOption) {
+        let ratio = match sampler {
+            SamplerOption::TraceIdRatioBased(ratio) => {
+                // can't use std::cmp::max because f64 is not Ord
+                if *ratio > 1.0 {
+                    1.0
+                } else {
+                    *ratio
+                }
+            }
+            SamplerOption::Always(s) => match s {
+                super::config::Sampler::AlwaysOn => 1f64,
+                super::config::Sampler::AlwaysOff => 0f64,
+            },
+        };
+
+        SPAN_SAMPLING_RATE.store(f64::to_bits(ratio), Ordering::Relaxed);
+    }
+
     fn sample(&self) -> bool {
         let s: f64 = thread_rng().gen_range(0.0..=1.0);
         s <= f64::from_bits(SPAN_SAMPLING_RATE.load(Ordering::Relaxed))
@@ -171,6 +193,12 @@ where
         _meta: &tracing::Metadata<'_>,
         cx: &tracing_subscriber::layer::Context<'_, S>,
     ) -> bool {
+        let current_otel_context = opentelemetry_api::Context::current();
+
+        if current_otel_context.span().span_context().is_valid() {
+            return true;
+        }
+
         let current_span = cx.current_span();
 
         // this span is enabled if:

@@ -67,6 +67,7 @@ use self::reload::reload_fmt;
 use self::reload::reload_metrics;
 use self::reload::LayeredTracer;
 use self::reload::NullFieldFormatter;
+use self::reload::SamplingFilter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
@@ -623,6 +624,9 @@ impl Telemetry {
         builder = setup_tracing(builder, &config.apollo, trace_config)?;
         // For metrics
         builder = builder.with_simple_exporter(metrics::span_metrics_exporter::Exporter::default());
+
+        // FIXME: add a test to set to 0 if none are configured
+        SamplingFilter::configure(&trace_config.sampler);
 
         let tracer_provider = builder.build();
         Ok(tracer_provider)
