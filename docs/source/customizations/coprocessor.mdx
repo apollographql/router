@@ -37,7 +37,7 @@ flowchart TB;
   client --"<b>1.</b> Sends request"--> routerService;
   routerService <-."<b>2.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;
   routerService --"<b>3</b>"--> supergraphService;
-  supergraphService <-"<b>4.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;
+  supergraphService <-."<b>4.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;
   supergraphService --"<b>5</b>"--> executionService;
   executionService --"<b>6</b>"--> subgraphService;
   subgraphService <-."<b>7.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;

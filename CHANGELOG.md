@@ -4,11 +4,7 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
-# [1.28.0] - 2023-08-24 (Yanked)
-
-> **Warning**
-> We have discovered an issue with comment parsing in graphql schema in this release (#3680). We will be releasing a follow up to fix this shortly. For now users should use 1.27.0.
-
+# [1.28.1] - 2023-08-28
 
 ## 🚀 Features
 
@@ -42,6 +38,13 @@ These metrics should be treated as unstable and may change in the future.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3609
 
+
+### Expose the number of subgraph fetches in `QueryPlan` ([#3658](https://github.com/apollographql/router/issues/3658))
+
+Add a new `subgraph_fetches` method for the `QueryPlan` type that exposes the number of expected subgraph fetches for a given query plan.
+
+By [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollographql/router/pull/3659
+
 ## 🐛 Fixes
 
 ### Flush metrics when Router reloads or shuts down ([Issue #3140](https://github.com/apollographql/router/issues/3140))
@@ -50,6 +53,39 @@ When the Router either reloads or shuts down it now flushes metrics.
 Push metrics exporters, such as OTLP, would have previously missed some metrics — in particular those related to _reload_ events.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3143
+
+### Helm: Declare `extraContainers` prior to the router container ([Issue #3632](https://github.com/apollographql/router/issues/3632))
+
+Currently, in our Helm chart, `extraContainers` are declared _after_ the router container. Moving the `extraContainers` _ahead_ of the router container will make it simpler to co-ordinate container startup sequencing and take full advantage of Kubernetes' lifecycle hooks.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3633
+
+### Fix memory leak caused by `Arc` circular reference in `Notify` ([Issue #3686](https://github.com/apollographql/router/issues/3686))
+
+A [memory leak](https://github.com/apollographql/router/issues/3686) caused by a [change](https://github.com/apollographql/router/pull/3341) to subscription handling was fixed.
+
+By [@xuorig](https://github.com/xuorig) in https://github.com/apollographql/router/pull/3692
+
+### Fix GraphQL block-comment parser regression ([Issue #3680](https://github.com/apollographql/router/issues/3680))
+
+In 1.28.0, the GraphQL parser falsely errored out on backslashes in block comments, such as:
+
+```graphql
+"""
+A regex: '/\W/'
+A path: PHP\Namespace\Class
+"""
+```
+
+This now parses again.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in [PR #3675](https://github.com/apollographql/router/pull/3675) and [`apollo-rs#638`](https://github.com/apollographql/apollo-rs/pull/638).
+
+### Error no longer reported on Redis cache misses ([Issue #2876](https://github.com/apollographql/router/issues/2876))
+
+The Router will no longer log an error in when fetching from Redis and the record doesn't exist. This affected APQ, QueryPlanning and experimental entity caching.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3661
 
 ## 🛠 Maintenance
 
@@ -104,7 +140,13 @@ As a side effect of this change, Router now re-downloads the PQ manifest when re
 
 By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/3566
 
+# [1.28.0] - 2023-08-24 (Yanked)
 
+> **Warning**
+>
+> **See v1.28.1 for the version that replaces this release.**
+>
+> We yanked v1.28.0 shortly after it was released since we discovered an issue with block-comment parsing in GraphQL *schemas* that resulted in #3680.  We have re-released a **fixed** v1.28.1 which takes the place of this release.  The entire contents of this change log have been moved to v1.28.0.
 
 # [1.27.0] - 2023-08-18
 
