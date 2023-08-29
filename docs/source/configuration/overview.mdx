@@ -467,7 +467,7 @@ By default, the Apollo Router obtains the routing URL for each of your subgraphs
 
 However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so with the `override_subgraph_url` option:
 
-```yaml title="router.yaml"
+```yaml
 override_subgraph_url:
   organizations: http://localhost:8080
   accounts: "${env.ACCOUNTS_SUBGRAPH_HOST_URL}"
