@@ -103,12 +103,16 @@ To provide the router with the claims it needs to evaluate authorization directi
 
 ## Authorization directives
 
-To use authorization directives in your subgraph schemas, you first need to enable them in your router. To do so, include the following in your router's [YAML config file](./overview/):
+Before using the authorization directives in your subgraph schemas, ensure your router instances are ready to work with them:
+  - Make sure you're using version `1.28.1` or later of the Apollo Router.
+  - Make sure your router instances are [connected to your GraphOS Enterprise organization](/graphos/enterprise-features/#enabling-enterprise-features).
+
+**Authorization directives are enabled in your router by default**. If you want to _disable_ them, include the following in your router's [YAML config file](./overview/):
 
 ```yaml title="router.yaml"
 authorization:
   preview_directives:
-    enabled: true
+    enabled: false
 ```
 
 ### `@requiresScopes`
