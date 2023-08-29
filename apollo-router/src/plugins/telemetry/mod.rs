@@ -840,7 +840,7 @@ impl Telemetry {
                 }
                 ::tracing::info!(
                     monotonic_counter.apollo.router.operations = 1u64,
-                    http.response.status_code = parts.status.as_u16(),
+                    http.response.status_code = parts.status.as_u16() as i64,
                 );
                 let response = http::Response::from_parts(
                     parts,
