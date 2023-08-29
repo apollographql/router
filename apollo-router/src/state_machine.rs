@@ -35,7 +35,6 @@ use crate::configuration::ListenAddr;
 use crate::router::Event::UpdateLicense;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
-use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
@@ -317,13 +316,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         S: HttpServerFactory,
         FA: RouterSuperServiceFactory,
     {
-        let parsed_schema = Arc::new(
-            Schema::parse(&schema, &configuration)
-                .map_err(|e| ServiceCreationError(e.to_string().into()))?,
-        );
-
         // Check the license
-        let report = LicenseEnforcementReport::build(&configuration, &parsed_schema);
+        let report = LicenseEnforcementReport::build(&configuration);
 
         match license {
             LicenseState::Licensed => {
