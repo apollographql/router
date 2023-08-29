@@ -263,6 +263,24 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         self.compiler
     }
 
+    fn operation(
+        &mut self,
+        node: &hir::OperationDefinition,
+    ) -> Result<Option<apollo_encoder::OperationDefinition>, BoxError> {
+        let operation_requires_authentication = node
+            .object_type(&self.compiler.db)
+            .map(|ty| ty.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some())
+            .unwrap_or(false);
+
+        if operation_requires_authentication {
+            self.unauthorized_paths.push(self.current_path.clone());
+            self.query_requires_authentication = true;
+            Ok(None)
+        } else {
+            transform::operation(self, node)
+        }
+    }
+
     fn field(
         &mut self,
         parent_type: &str,
@@ -436,6 +454,7 @@ mod tests {
 
     type Mutation @authenticated {
         ping: User
+        other: String
     }
 
     interface I {
@@ -509,9 +528,7 @@ mod tests {
     fn mutation() {
         static QUERY: &str = r#"
         mutation {
-            ping {
-                name
-            }
+            other
         }
         "#;
 

@@ -5,11 +5,9 @@ expression: "TestResult { query: QUERY, result: doc, paths }"
 query:
 
         mutation {
-            ping {
-                name
-            }
+            other
         }
         
 filtered:
 
-paths: ["/ping"]
+paths: [""]
