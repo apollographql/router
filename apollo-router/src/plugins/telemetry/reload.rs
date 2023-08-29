@@ -162,7 +162,7 @@ impl SamplingFilter {
     pub(super) fn configure(sampler: &SamplerOption) {
         let ratio = match sampler {
             SamplerOption::TraceIdRatioBased(ratio) => {
-                // can't use std::cmp::max because f64 is not Ord
+                // can't use std::cmp::min because f64 is not Ord
                 if *ratio > 1.0 {
                     1.0
                 } else {
