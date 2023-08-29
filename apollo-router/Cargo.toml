@@ -67,6 +67,7 @@ async-trait = "0.1.73"
 atty = "0.2.14"
 axum = { version = "0.6.20", features = ["headers", "json", "original-uri"] }
 base64 = "0.21.2"
+bloomfilter = "1.0.12"
 buildstructor = "0.5.3"
 bytes = "1.4.0"
 clap = { version = "4.3.23", default-features = false, features = [
@@ -242,7 +243,6 @@ aws-credential-types = "0.56.0"
 aws-config = "0.56.0"
 aws-types = "0.56.0"
 sha1 = "0.10.5"
-streaming_algorithms = "0.3.0"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
