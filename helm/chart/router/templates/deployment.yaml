@@ -23,15 +23,14 @@ spec:
       {{- include "router.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- if or .Values.podAnnotations .Values.supergraphFile }}
       annotations:
+        kubectl.kubernetes.io/default-container: {{ .Chart.Name }}
         {{- if .Values.supergraphFile }}
         checksum/supergraph-config-map: {{ .Values.supergraphFile | sha256sum }}
         {{- end }}
         {{- if .Values.podAnnotations }}
         {{- toYaml .Values.podAnnotations | nindent 8 }}
         {{- end }}
-      {{- end }}
       labels:
         {{- include "router.selectorLabels" . | nindent 8 }}
         {{- if .Values.extraLabels }}
@@ -46,6 +45,9 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
+        {{- if .Values.extraContainers }}
+          {{- include "common.tplvalues.render" (dict "value" .Values.extraContainers "context" $) | nindent 8 }}
+        {{- end }}
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
@@ -127,9 +129,6 @@ spec:
               {{- include "common.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
             {{- end }}
           {{- end }}
-        {{- if .Values.extraContainers }}
-          {{- include "common.tplvalues.render" (dict "value" .Values.extraContainers "context" $) | nindent 8 }}
-        {{- end }}
       {{- if .Values.initContainers }}
       initContainers:
         {{- include "common.tplvalues.render" (dict "value" .Values.initContainers "context" $) | nindent 8 }}
