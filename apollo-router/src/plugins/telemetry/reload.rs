@@ -211,7 +211,11 @@ where
         current_span
             .id()
             // - there's a parent span and it was enabled
-            .map(|id| cx.span(id).is_some())
+            .map(|id| {
+                let r = cx.span(id).and_then(|spanref| spanref.parent()).is_some();
+
+                r
+            })
             // - there's no parent span (it's the root), so we make the sampling decision
             .unwrap_or_else(|| self.sample())
     }
