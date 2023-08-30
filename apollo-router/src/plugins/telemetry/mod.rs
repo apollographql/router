@@ -48,7 +48,6 @@ use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::fmt::format::JsonFields;
 use tracing_subscriber::Layer;
@@ -60,17 +59,19 @@ use self::apollo::SingleReport;
 use self::apollo_exporter::proto;
 use self::apollo_exporter::Sender;
 use self::config::Conf;
+use self::config::Sampler;
+use self::config::SamplerOption;
 use self::formatters::text::TextFormatter;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use self::reload::reload_fmt;
 use self::reload::reload_metrics;
-use self::reload::LayeredRegistry;
+use self::reload::LayeredTracer;
 use self::reload::NullFieldFormatter;
+use self::reload::SamplingFilter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
-use self::tracing::reload::ReloadTracer;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::OPERATION_NAME;
 use crate::layers::ServiceBuilderExt;
@@ -614,15 +615,31 @@ impl Telemetry {
         config: &config::Conf,
     ) -> Result<opentelemetry::sdk::trace::TracerProvider, BoxError> {
         let tracing_config = config.tracing.clone().unwrap_or_default();
-        let trace_config = &tracing_config.trace_config.unwrap_or_default();
-        let mut builder =
-            opentelemetry::sdk::trace::TracerProvider::builder().with_config(trace_config.into());
+        let mut trace_config = tracing_config.trace_config.unwrap_or_default();
+        let mut sampler = trace_config.sampler;
+        // set it to AlwaysOn: it is now done in the SamplingFilter, so whatever is sent to an exporter
+        // should be accepted
+        trace_config.sampler = SamplerOption::Always(Sampler::AlwaysOn);
 
-        builder = setup_tracing(builder, &tracing_config.jaeger, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.zipkin, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.datadog, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.otlp, trace_config)?;
-        builder = setup_tracing(builder, &config.apollo, trace_config)?;
+        let mut builder = opentelemetry::sdk::trace::TracerProvider::builder()
+            .with_config((&trace_config).into());
+
+        builder = setup_tracing(builder, &tracing_config.jaeger, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.zipkin, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.datadog, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.otlp, &trace_config)?;
+        builder = setup_tracing(builder, &config.apollo, &trace_config)?;
+
+        if tracing_config.jaeger.is_none()
+            && tracing_config.zipkin.is_none()
+            && tracing_config.datadog.is_none()
+            && tracing_config.otlp.is_none()
+            && config.apollo.is_none()
+        {
+            sampler = SamplerOption::Always(Sampler::AlwaysOff);
+        }
+        // FIXME: add a test to set to 0 if none are configured
+        SamplingFilter::configure(&sampler);
 
         let tracer_provider = builder.build();
         Ok(tracer_provider)
@@ -664,21 +681,7 @@ impl Telemetry {
         Ok(builder)
     }
 
-    #[allow(clippy::type_complexity)]
-    fn create_fmt_layer(
-        config: &config::Conf,
-    ) -> Box<
-        dyn Layer<
-                ::tracing_subscriber::layer::Layered<
-                    OpenTelemetryLayer<
-                        LayeredRegistry,
-                        ReloadTracer<::opentelemetry::sdk::trace::Tracer>,
-                    >,
-                    LayeredRegistry,
-                >,
-            > + Send
-            + Sync,
-    > {
+    fn create_fmt_layer(config: &config::Conf) -> Box<dyn Layer<LayeredTracer> + Send + Sync> {
         let logging = &config.logging;
         let fmt = match logging.format {
             config::LoggingFormat::Pretty => tracing_subscriber::fmt::layer()
@@ -839,7 +842,7 @@ impl Telemetry {
                 }
                 ::tracing::info!(
                     monotonic_counter.apollo.router.operations = 1u64,
-                    http.response.status_code = parts.status.as_u16(),
+                    http.response.status_code = parts.status.as_u16() as i64,
                 );
                 let response = http::Response::from_parts(
                     parts,
