@@ -4,10 +4,10 @@ expression: "&metrics.metrics"
 ---
 value.apollo.router.config.telemetry:
   - 1
-  - opt__metrics__otlp__: "true"
-    opt__metrics__prometheus__: "true"
-    opt__tracing__datadog__: "true"
-    opt__tracing__jaeger__: "true"
-    opt__tracing__otlp__: "true"
-    opt__tracing__zipkin__: "true"
+  - opt__metrics__otlp__: true
+    opt__metrics__prometheus__: true
+    opt__tracing__datadog__: true
+    opt__tracing__jaeger__: true
+    opt__tracing__otlp__: true
+    opt__tracing__zipkin__: true
 
