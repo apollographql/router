@@ -732,7 +732,7 @@ mod test {
     fn test_inject_schema_id() {
         let schema = include_str!("testdata/starstuff@current.graphql");
         let schema = Schema::parse_test(schema, &Default::default()).unwrap();
-        let mut config = json!({});
+        let mut config = json!({ "apollo": {} });
         inject_schema_id(&schema, &mut config);
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
