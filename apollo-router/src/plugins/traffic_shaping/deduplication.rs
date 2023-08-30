@@ -17,6 +17,7 @@ use tower::ServiceExt;
 
 use crate::graphql::Request;
 use crate::http_ext;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::OperationKind;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -35,14 +36,10 @@ where
     }
 }
 
-type WaitMap = Arc<
-    Mutex<
-        HashMap<
-            http_ext::Request<Request>,
-            Arc<RwLock<Option<Result<CloneSubgraphResponse, String>>>>,
-        >,
-    >,
->;
+type CacheKey = (http_ext::Request<Request>, CacheKeyMetadata);
+
+type WaitMap =
+    Arc<Mutex<HashMap<CacheKey, Arc<RwLock<Option<Result<CloneSubgraphResponse, String>>>>>>>;
 
 struct CloneSubgraphResponse(SubgraphResponse);
 
@@ -98,7 +95,16 @@ where
                 }
                 Ok(mut tx) => {
                     let context = request.context.clone();
-                    let http_request = (&request.subgraph_request).into();
+                    let cache_key = (
+                        (&request.subgraph_request).into(),
+                        request
+                            .context
+                            .private_entries
+                            .lock()
+                            .get::<CacheKeyMetadata>()
+                            .cloned()
+                            .unwrap_or_default(),
+                    );
                     let res = {
                         // when _drop_signal is dropped, either by getting out of the block, returning
                         // the error from ready_oneshot or by cancellation, the drop_sentinel future will
@@ -106,7 +112,9 @@ where
                         let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
                         tokio::task::spawn(async move {
                             let _ = drop_sentinel.await;
-                            wait_map.lock().await.remove(&http_request);
+
+                            let mut locked_wait_map = wait_map.lock().await;
+                            locked_wait_map.remove(&cache_key);
                         });
 
                         service
@@ -145,8 +153,18 @@ async fn get_or_insert_wait_map(
     OwnedRwLockWriteGuard<Option<Result<CloneSubgraphResponse, String>>>,
     Arc<RwLock<Option<Result<CloneSubgraphResponse, String>>>>,
 > {
+    let cache_key = (
+        (&request.subgraph_request).into(),
+        request
+            .context
+            .private_entries
+            .lock()
+            .get::<CacheKeyMetadata>()
+            .cloned()
+            .unwrap_or_default(),
+    );
     let mut locked_wait_map = wait_map.lock().await;
-    match locked_wait_map.get(&(&request.subgraph_request).into()) {
+    match locked_wait_map.get(&cache_key) {
         Some(waiter) => {
             // Register interest in key
             let receiver = waiter.clone();
@@ -161,7 +179,7 @@ async fn get_or_insert_wait_map(
                 .try_write_owned()
                 .expect("the lock was just created");
 
-            locked_wait_map.insert((&request.subgraph_request).into(), value);
+            locked_wait_map.insert(cache_key, value);
             drop(locked_wait_map);
 
             Ok(w)

@@ -27,13 +27,14 @@ use super::router::ApolloRouterError::{self};
 use super::router::Event::UpdateConfiguration;
 use super::router::Event::UpdateSchema;
 use super::router::Event::{self};
+use crate::configuration::metrics::Metrics;
+use crate::configuration::metrics::MetricsHandle;
 use crate::configuration::Configuration;
 use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
 use crate::router::Event::UpdateLicense;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
-use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
@@ -58,6 +59,7 @@ enum State<FA: RouterSuperServiceFactory> {
     },
     Running {
         configuration: Arc<Configuration>,
+        _metrics_handle: MetricsHandle,
         schema: Arc<String>,
         license: LicenseState,
         server_handle: Option<HttpServerHandle>,
@@ -163,6 +165,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 server_handle,
                 router_service_factory,
                 all_connections_stopped_signals,
+                ..
             } => {
                 // When we get an unlicensed event, if we were licensed before then just carry on.
                 // This means that users can delete and then undelete their graphs in studio while having their routers continue to run.
@@ -313,13 +316,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         S: HttpServerFactory,
         FA: RouterSuperServiceFactory,
     {
-        let parsed_schema = Arc::new(
-            Schema::parse(&schema, &configuration)
-                .map_err(|e| ServiceCreationError(e.to_string().into()))?,
-        );
-
         // Check the license
-        let report = LicenseEnforcementReport::build(&configuration, &parsed_schema);
+        let report = LicenseEnforcementReport::build(&configuration);
 
         match license {
             LicenseState::Licensed => {
@@ -412,8 +410,11 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             discussed.log_preview_used(yaml);
         }
 
+        let metrics_handle = Metrics::spawn(&configuration).await;
+
         Ok(Running {
             configuration,
+            _metrics_handle: metrics_handle,
             schema,
             license,
             server_handle: Some(server_handle),
@@ -513,7 +514,7 @@ where
         // Process all the events in turn until we get to error state or we run out of events.
         while let Some(event) = messages.next().await {
             let event_name = format!("{event:?}");
-            let last_state = format!("{state:?}");
+            let previous_state = format!("{state:?}");
 
             state = match event {
                 UpdateConfiguration(configuration) => {
@@ -543,7 +544,11 @@ where
             self.notify_updated.notify_one();
 
             tracing::debug!(
-                "state machine event: {event_name}, transitioned from: {last_state} to: {state:?}"
+                monotonic_counter.apollo_router_state_change_total = 1u64,
+                event = event_name,
+                state = ?state,
+                previous_state,
+                "state machine transitioned"
             );
 
             // If we've errored then exit even if there are potentially more messages
@@ -593,6 +598,8 @@ mod tests {
     use crate::services::new_service::ServiceFactory;
     use crate::services::router;
     use crate::services::RouterRequest;
+
+    type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
 
     fn example_schema() -> String {
         include_str!("testdata/supergraph.graphql").to_owned()
@@ -678,7 +685,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -700,7 +707,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -722,7 +729,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -747,7 +754,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -769,7 +776,7 @@ mod tests {
             .await,
             Err(ApolloRouterError::LicenseViolation)
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 0);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 0);
     }
 
     #[test(tokio::test)]
@@ -793,7 +800,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -833,7 +840,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -856,7 +863,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -879,7 +886,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -902,7 +909,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -934,7 +941,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]
@@ -956,7 +963,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -982,7 +989,7 @@ mod tests {
             .await,
             Err(ApolloRouterError::ServiceCreationError(_))
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 0);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 0);
     }
 
     #[test(tokio::test)]
@@ -1023,7 +1030,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
@@ -1081,7 +1088,7 @@ mod tests {
             .await,
             Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.0.lock().unwrap().len(), 2);
     }
 
     mock! {
@@ -1178,21 +1185,28 @@ mod tests {
         ready_false_times: usize,
     ) -> (
         MockMyHttpServerFactory,
-        Arc<Mutex<Vec<oneshot::Receiver<()>>>>,
+        (SharedOneShotReceiver, SharedOneShotReceiver),
     ) {
         let mut server_factory = MockMyHttpServerFactory::new();
         let shutdown_receivers = Arc::new(Mutex::new(vec![]));
+        let extra_shutdown_receivers = Arc::new(Mutex::new(vec![]));
         let shutdown_receivers_clone = shutdown_receivers.to_owned();
+        let extra_shutdown_receivers_clone = extra_shutdown_receivers.to_owned();
         server_factory
             .expect_create_server()
             .times(expect_times_called)
             .returning(
                 move |configuration: Arc<Configuration>, mut main_listener: Option<Listener>| {
                     let (shutdown_sender, shutdown_receiver) = oneshot::channel();
+                    let (extra_shutdown_sender, extra_shutdown_receiver) = oneshot::channel();
                     shutdown_receivers_clone
                         .lock()
                         .unwrap()
                         .push(shutdown_receiver);
+                    extra_shutdown_receivers_clone
+                        .lock()
+                        .unwrap()
+                        .push(extra_shutdown_receiver);
 
                     let server = async move {
                         let main_listener = match main_listener.take() {
@@ -1202,14 +1216,16 @@ mod tests {
                             ),
                         };
 
-                        Ok((main_listener, vec![]))
+                        Ok(main_listener)
                     };
 
                     let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
 
                     Ok(HttpServerHandle::new(
                         shutdown_sender,
+                        extra_shutdown_sender,
                         Box::pin(server),
+                        Box::pin(async { Ok(vec![]) }),
                         Some(configuration.supergraph.listen.clone()),
                         vec![],
                         all_connections_stopped_sender,
@@ -1236,7 +1252,10 @@ mod tests {
             .with(eq(false))
             .times(ready_false_times)
             .return_const(());
-        (server_factory, shutdown_receivers)
+        (
+            server_factory,
+            (shutdown_receivers, extra_shutdown_receivers),
+        )
     }
 
     fn create_mock_router_configurator(expect_times_called: usize) -> MockMyRouterConfigurator {

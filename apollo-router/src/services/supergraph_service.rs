@@ -27,7 +27,7 @@ use tracing_futures::Instrument;
 
 use super::execution::QueryPlan;
 use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
-use super::layers::content_negociation;
+use super::layers::content_negotiation;
 use super::layers::query_analysis::Compiler;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
@@ -55,6 +55,7 @@ use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::query_planner::WarmUpCachingQueryKey;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
 use crate::services::query_planner;
@@ -366,12 +367,12 @@ async fn subscription_task(
 
     let limit_is_set = subscription_config.max_opened_subscriptions.is_some();
     let mut subscription_handle = subscription_handle.clone();
-    let operation_signature =
-        if let Some(usage_reporting) = context.private_entries.lock().get::<UsageReporting>() {
-            usage_reporting.stats_report_key.clone()
-        } else {
-            String::new()
-        };
+    let operation_signature = context
+        .private_entries
+        .lock()
+        .get::<UsageReporting>()
+        .map(|usage_reporting| usage_reporting.stats_report_key.clone())
+        .unwrap_or_default();
 
     let operation_name = context
         .get::<_, String>(OPERATION_NAME)
@@ -426,22 +427,26 @@ async fn subscription_task(
                 }
             }
             Some(new_configuration) = configuration_updated_rx.next() => {
-                let plugins = match create_plugins(&new_configuration, &execution_service_factory.schema, None).await {
-                    Ok(plugins) => plugins,
-                    Err(err) => {
-                        tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
-                        break;
-                    },
-                };
-                let subgraph_services = match create_subgraph_services(&plugins, &execution_service_factory.schema, &new_configuration).await {
-                    Ok(subgraph_services) => subgraph_services,
-                    Err(err) => {
-                        tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
-                        break;
-                    },
-                };
-                let plugins = Arc::new(IndexMap::from_iter(plugins));
-                execution_service_factory = ExecutionServiceFactory { schema: execution_service_factory.schema.clone(), plugins: plugins.clone(), subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone())) };
+                // If the configuration was dropped in the meantime, we ignore this update and will
+                // pick up the next one.
+                if let Some(conf) = new_configuration.upgrade() {
+                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, None).await {
+                        Ok(plugins) => plugins,
+                        Err(err) => {
+                            tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
+                            break;
+                        },
+                    };
+                    let subgraph_services = match create_subgraph_services(&plugins, &execution_service_factory.schema, &conf).await {
+                        Ok(subgraph_services) => subgraph_services,
+                        Err(err) => {
+                            tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
+                            break;
+                        },
+                    };
+                    let plugins = Arc::new(IndexMap::from_iter(plugins));
+                    execution_service_factory = ExecutionServiceFactory { schema: execution_service_factory.schema.clone(), plugins: plugins.clone(), subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone())) };
+                }
             }
             Some(new_schema) = schema_updated_rx.next() => {
                 if new_schema.raw_sdl != execution_service_factory.schema.raw_sdl {
@@ -736,7 +741,7 @@ impl SupergraphCreator {
             .layer(shaping.supergraph_service_internal(supergraph_service));
 
         ServiceBuilder::new()
-            .layer(content_negociation::SupergraphLayer::default())
+            .layer(content_negotiation::SupergraphLayer::default())
             .service(
                 self.plugins
                     .iter()
@@ -747,7 +752,7 @@ impl SupergraphCreator {
             )
     }
 
-    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<WarmUpCachingQueryKey> {
         self.query_planner_service.cache_keys(count).await
     }
 
@@ -758,7 +763,7 @@ impl SupergraphCreator {
     pub(crate) async fn warm_up_query_planner(
         &mut self,
         query_parser: &QueryAnalysisLayer,
-        cache_keys: Vec<(String, Option<String>)>,
+        cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
         self.query_planner_service
             .warm_up(query_parser, cache_keys)
@@ -803,7 +808,7 @@ mod tests {
    type Subscription @join__type(graph: USER) {
         userWasCreated: User
    }
-   
+
    type User
    @join__owner(graph: USER)
    @join__type(graph: ORGA, key: "id")
@@ -999,7 +1004,7 @@ mod tests {
             )
             .with_json(
                 serde_json::json!{{
-                    "query":"{computer(id:\"Computer1\"){errorField id}}",
+                    "query":"{computer(id:\"Computer1\"){id errorField}}",
                 }},
                 serde_json::json!{{
                     "data": {
@@ -2763,7 +2768,7 @@ mod tests {
         let schema = r#"
           schema
             @link(url: "https://specs.apollo.dev/link/v1.0")
-            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+            @link(url: "https://specs.apollo.dev/join/v0.1", for: EXECUTION)
           {
             query: Query
           }
@@ -2792,6 +2797,7 @@ mod tests {
           }
 
           type Query
+          @join__type(graph: S1)
           {
             foo: Foo! @join__field(graph: S1)
           }

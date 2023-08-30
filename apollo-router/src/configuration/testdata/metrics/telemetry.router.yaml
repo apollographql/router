@@ -1,0 +1,17 @@
+telemetry:
+  metrics:
+    prometheus:
+      enabled: true
+    otlp:
+      endpoint: default
+  tracing:
+    otlp:
+      endpoint: default
+    zipkin:
+      endpoint: default
+    datadog:
+      endpoint: default
+    jaeger:
+      agent:
+        endpoint: default
+

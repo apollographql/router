@@ -21,8 +21,8 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
-      - image: cimg/redis:7.0.11
-      - image: jaegertracing/all-in-one:1.45.0
+      - image: cimg/redis:7.2.0
+      - image: jaegertracing/all-in-one:1.48.0
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -227,6 +227,28 @@ commands:
                     sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install libssl-dev libdw-dev cmake
                   fi
                   sudo dpkg -i $HOME/.deb/*.deb
+      - when:
+          condition:
+            or:
+              - equal: [ *windows_build_executor, << parameters.platform >> ]
+              - equal: [ *windows_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install CMake
+                command: |
+                  choco install cmake -y
+                  echo 'export PATH="/c/Program Files/CMake/bin:$PATH"' >> "$BASH_ENV"
+                  exit $LASTEXITCODE
+      - when:
+          condition:
+            or:
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install CMake
+                command: |
+                  brew install cmake
   install_protoc:
     parameters:
       platform:
@@ -348,10 +370,14 @@ commands:
           keys:
             - "<< pipeline.parameters.merge_version >>-lint"
       - run: xtask lint
-      - save_cache:
-          key: "<< pipeline.parameters.merge_version >>-lint"
-          paths:
-            - target
+      - when:
+          condition:
+            equal: [ "dev", "<< pipeline.git.branch >>" ]
+          steps:
+            - save_cache:
+                key: "<< pipeline.parameters.merge_version >>-lint"
+                paths:
+                  - target
 
   xtask_check_helm:
     steps:
@@ -393,11 +419,14 @@ commands:
       # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
       - run: git config --global --unset-all url.ssh://git@github.com.insteadof
       - run: xtask check-compliance
-      - save_cache:
-          key: "<< pipeline.parameters.merge_version >>-compliance"
-          paths:
-            - target
-
+      - when:
+          condition:
+            equal: [ "dev", "<< pipeline.git.branch >>" ]
+          steps:
+            - save_cache:
+                key: "<< pipeline.parameters.merge_version >>-compliance"
+                paths:
+                  - target
   xtask_test:
     parameters:
       variant:
@@ -415,11 +444,14 @@ commands:
           command: |
             find target/debug/deps -type f -size +50M -delete
             rm target/debug/router*
-      - save_cache:
-          key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
-          paths:
-            - target
-
+      - when:
+          condition:
+            equal: [ "dev", "<< pipeline.git.branch >>" ]
+          steps:
+          - save_cache:
+              key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
+              paths:
+                - target
 jobs:
   lint:
     environment:
@@ -690,6 +722,9 @@ jobs:
       VERSION: << pipeline.git.tag >>
     steps:
       - checkout
+      - setup_remote_docker:
+          version: 20.10.11
+          docker_layer_caching: true
       - attach_workspace:
           at: artifacts
       - gh/setup
@@ -715,10 +750,6 @@ jobs:
               *) gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/* ;;
 
             esac
-
-      - setup_remote_docker:
-          version: 20.10.11
-          docker_layer_caching: true
       - run:
           name: Docker build
           command: |
