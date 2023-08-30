@@ -439,7 +439,7 @@ impl DeferredNode {
                 let (primary_value, primary_errors) =
                     primary_receiver.recv().await.unwrap_or_default();
                 value.deep_merge(primary_value);
-                errors.extend(primary_errors.into_iter())
+                errors.extend(primary_errors)
             } else {
                 while let Some((v, _remaining)) = stream.next().await {
                     // a Err(RecvError) means either that the fetch was not performed and the
@@ -486,7 +486,7 @@ impl DeferredNode {
                     let (primary_value, primary_errors) =
                         primary_receiver.recv().await.unwrap_or_default();
                     v.deep_merge(primary_value);
-                    errors.extend(primary_errors.into_iter())
+                    errors.extend(primary_errors)
                 }
 
                 if let Err(e) = tx
@@ -511,7 +511,7 @@ impl DeferredNode {
                 let (primary_value, primary_errors) =
                     primary_receiver.recv().await.unwrap_or_default();
                 value.deep_merge(primary_value);
-                errors.extend(primary_errors.into_iter());
+                errors.extend(primary_errors);
 
                 if let Err(e) = tx
                     .send(

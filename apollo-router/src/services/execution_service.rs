@@ -262,9 +262,9 @@ impl ExecutionService {
                         schema.api_schema(),
                         variables_set,
                     )
-                    .into_iter(),
+                    ,
             );
-            nullified_paths.extend(paths.into_iter());
+            nullified_paths.extend(paths);
         });
 
         match (response.path.as_ref(), response.data.as_ref()) {

@@ -252,7 +252,7 @@ impl AuthorizationPlugin {
         let compiler = match filter_res {
             None => compiler,
             Some((query, paths)) => {
-                unauthorized_paths.extend(paths.into_iter());
+                unauthorized_paths.extend(paths);
 
                 if query.is_empty() {
                     return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
@@ -272,7 +272,7 @@ impl AuthorizationPlugin {
         let compiler = match filter_res {
             None => compiler,
             Some((query, paths)) => {
-                unauthorized_paths.extend(paths.into_iter());
+                unauthorized_paths.extend(paths);
 
                 if query.is_empty() {
                     return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
@@ -292,7 +292,7 @@ impl AuthorizationPlugin {
         let compiler = match filter_res {
             None => compiler,
             Some((query, paths)) => {
-                unauthorized_paths.extend(paths.into_iter());
+                unauthorized_paths.extend(paths);
 
                 if query.is_empty() {
                     return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
