@@ -34,7 +34,6 @@ pub(crate) struct Instruments {
     i64_histogram: MetricsMap<Histogram<i64>>,
     f64_histogram: MetricsMap<Histogram<f64>>,
     u64_gauge: MetricsMap<ObservableGauge<u64>>,
-    f64_gauge: MetricsMap<ObservableGauge<f64>>,
 }
 
 type MetricsMap<T> = RwLock<HashMap<&'static str, T>>;
@@ -49,7 +48,6 @@ pub(crate) enum InstrumentType {
     HistogramI64(i64),
     HistogramF64(f64),
     GaugeU64(u64),
-    GaugeF64(f64),
 }
 
 impl Instruments {
@@ -147,14 +145,6 @@ impl Instruments {
                     &self.u64_gauge,
                     metric_name,
                     || meter.u64_observable_gauge(metric_name).init(),
-                    |gauge| gauge.observe(cx, value, custom_attributes),
-                );
-            }
-            InstrumentType::GaugeF64(value) => {
-                update_or_insert(
-                    &self.f64_gauge,
-                    metric_name,
-                    || meter.f64_observable_gauge(metric_name).init(),
                     |gauge| gauge.observe(cx, value, custom_attributes),
                 );
             }
