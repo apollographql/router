@@ -4,6 +4,6 @@ expression: "&metrics.metrics"
 ---
 value.apollo.router.config.authorization:
   - 1
-  - opt__directives__: "false"
-    opt__require_authentication__: "true"
+  - opt__directives__: false
+    opt__require_authentication__: true
 
