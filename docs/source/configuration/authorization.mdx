@@ -1,7 +1,7 @@
 ---
 title: Authorization in the Apollo Router
 description: Strengthen service security with a centralized governance layer
-minVersion: 1.28.1
+minVersion: 1.29.0
 ---
 
 <GraphOSEnterpriseRequired />
@@ -93,8 +93,10 @@ The router then enforces these directives on all incoming requests.
 
 ## Prerequisites
 
+> ⚠️ Only the Apollo Router support authorization directives&mdash;[`@apollo/gateway`](/federation/v1/gateway/) does _not_. Checkout out the [migration guide](../migrating-from-gateway/) if you'd like to use them.
+
 Before using the authorization directives in your subgraph schemas, you must:
-- Validate that your Apollo Router uses version `1.28.1` or later and is [connected to your GraphOS Enterprise organization](../enterprise-features/#enabling-enterprise-features)
+- Validate that your Apollo Router uses version `1.29.0` or later and is [connected to your GraphOS Enterprise organization](../enterprise-features/#enabling-enterprise-features)
 - Include **[claims](#configure-request-claims)** in requests made to the router
 
 ### Configure request claims
