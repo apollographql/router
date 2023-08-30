@@ -66,10 +66,10 @@ Services may have their own access controls, but enforcing authorization _in the
 
 ## How access control works
 
-The Apollo Router provides access controls via **authorization directives**. Using the `@requiresScopes` and `@authenticated` directives, you can define access to specific fields and types across your supergraph:
+The Apollo Router provides access controls via **authorization directives** that define access to specific fields and types across your supergraph:
 
 - The [`@requiresScopes`](#requiresscopes) directive allows granular access control through the scopes you define.
-- The [`@authenticated`](#authenticated) directive works in a binary way: authenticated requests can access the specified field or type, and unauthenticated requests can't.
+- The [`@authenticated`](#authenticated) directive allows access to the annotated field or type for _authenticated requests only_.
 
 For example, imagine you're building a social media platform that includes a `Users` subgraph. You can use the [`@requiresScopes`](#requiresscopes) directive to declare that viewing other users' information requires the `read:user` scope:
 
