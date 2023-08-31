@@ -140,13 +140,13 @@ impl AuthorizationPlugin {
     ) {
         let (compiler, file_id) = Query::make_compiler(query, schema, configuration);
 
-        let mut visitor = AuthenticatedCheckVisitor::new(&compiler, file_id);
-
-        // if this fails, the query is invalid and will fail at the query planning phase.
-        // We do not return validation errors here for now because that would imply a huge
-        // refactoring of telemetry and tests
-        if traverse::document(&mut visitor, file_id).is_ok() && !visitor.found {
-            context.insert(AUTHENTICATED_KEY, true).unwrap();
+        if let Some(mut visitor) = AuthenticatedCheckVisitor::new(&compiler, file_id) {
+            // if this fails, the query is invalid and will fail at the query planning phase.
+            // We do not return validation errors here for now because that would imply a huge
+            // refactoring of telemetry and tests
+            if traverse::document(&mut visitor, file_id).is_ok() && !visitor.found {
+                context.insert(AUTHENTICATED_KEY, true).unwrap();
+            }
         }
 
         let mut visitor = ScopeExtractionVisitor::new(&compiler, file_id);
@@ -342,26 +342,30 @@ impl AuthorizationPlugin {
             .pop()
             .expect("the query was added to the compiler earlier");
 
-        let mut visitor = AuthenticatedVisitor::new(compiler, id);
-        let modified_query = transform::document(&mut visitor, id)
-            .map_err(|e| SpecError::ParsingError(e.to_string()))?
-            .to_string();
+        if let Some(mut visitor) = AuthenticatedVisitor::new(compiler, id) {
+            let modified_query = transform::document(&mut visitor, id)
+                .map_err(|e| SpecError::ParsingError(e.to_string()))?
+                .to_string();
 
-        if visitor.query_requires_authentication {
-            if is_authenticated {
-                tracing::debug!("the query contains @authenticated, the request is authenticated, keeping the query");
-                Ok(None)
-            } else {
-                tracing::debug!("the query contains @authenticated, modified query:\n{modified_query}\nunauthorized paths: {:?}", visitor
+            if visitor.query_requires_authentication {
+                if is_authenticated {
+                    tracing::debug!("the query contains @authenticated, the request is authenticated, keeping the query");
+                    Ok(None)
+                } else {
+                    tracing::debug!("the query contains @authenticated, modified query:\n{modified_query}\nunauthorized paths: {:?}", visitor
                 .unauthorized_paths
                 .iter()
                 .map(|path| path.to_string())
                 .collect::<Vec<_>>());
 
-                Ok(Some((modified_query, visitor.unauthorized_paths)))
+                    Ok(Some((modified_query, visitor.unauthorized_paths)))
+                }
+            } else {
+                tracing::debug!("the query does not contain @authenticated");
+                Ok(None)
             }
         } else {
-            tracing::debug!("the query does not contain @authenticated");
+            tracing::debug!("the schema does not contain @authenticated");
             Ok(None)
         }
     }
