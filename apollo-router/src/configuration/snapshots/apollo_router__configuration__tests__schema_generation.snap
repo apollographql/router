@@ -519,7 +519,7 @@ expression: "&schema"
           "properties": {
             "enabled": {
               "description": "enables the `@authenticated` and `@requiresScopes` directives",
-              "default": false,
+              "default": true,
               "type": "boolean"
             }
           }
