@@ -1086,10 +1086,28 @@ mod tests {
         query: Query
    }
    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-   directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-   directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+   scalar link__Import
+
+   enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
+
+  
    scalar join__FieldSet
    enum join__Graph {
        USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
@@ -1098,12 +1116,14 @@ mod tests {
 
    directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 
-   type Query {
+   type Query
+   @join__type(graph: ORGA)
+   @join__type(graph: USER)
+   {
        currentUser: User @join__field(graph: USER) @authenticated
        orga(id: ID): Organization @join__field(graph: ORGA)
    }
    type User
-   @join__owner(graph: USER)
    @join__type(graph: ORGA, key: "id")
    @join__type(graph: USER, key: "id"){
        id: ID!
@@ -1112,7 +1132,6 @@ mod tests {
        activeOrganization: Organization
    }
    type Organization
-   @join__owner(graph: ORGA)
    @join__type(graph: ORGA, key: "id")
    @join__type(graph: USER, key: "id") {
        id: ID
@@ -1148,6 +1167,9 @@ mod tests {
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{"query":"{orga(id:1){id creatorUser{__typename id}}}"}},
             serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": { "__typename": "User", "id": 0 } }}}}
+        ).with_json(
+            serde_json::json!{{"query":"{orga(id:1){id creatorUser{id name phone}}}"}},
+            serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": { "__typename": "User", "id": 0, "name":"Ada", "phone": "1234" } }}}}
         ).build())
     ].into_iter().collect());
 
@@ -1219,10 +1241,16 @@ mod tests {
                         ]
                     }
                 }},
+            ).with_json(
+                serde_json::json!{{"query":"{orga(id:1){id creatorUser{id name}}}"}},
+                serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": {"id": 0, "name":"Ada" } }}}}
             ).build()),
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{"query":"{orga(id:1){id creatorUser{__typename id}}}"}},
             serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": { "__typename": "User", "id": 0 } }}}}
+        ).with_json(
+            serde_json::json!{{"query":"{orga(id:1){id creatorUser{id name}}}"}},
+            serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": {"id": 0, "name":"Ada" } }}}}
         ).build())
     ].into_iter().collect());
 
