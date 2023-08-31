@@ -3717,9 +3717,9 @@ checksum = "8c408dc227d302f1496c84d9dc68c00fec6f56f9228a18f3023f976f3ca7c945"
 
 [[package]]
 name = "memchr"
-version = "2.6.1"
+version = "2.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f478948fd84d9f8e86967bf432640e46adfb5a4bd4f14ef7e864ab38220534ae"
+checksum = "5486aed0026218e61b8a01d5fbd5a0a134649abb71a0e53b7bc088529dced86e"
 
 [[package]]
 name = "memoffset"
@@ -5192,9 +5192,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.3+v2.5.3"
+version = "0.5.4+v2.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45db3eb6961669a47e611e25da5aabf767d81d0396ad0fb2efb7694587a84b01"
+checksum = "82d3e1bfc37d92eab53edcd17d4290b5aa8fb95ab43d0408f5d9b56157a6d61c"
 dependencies = [
  "anyhow",
  "async-channel",
