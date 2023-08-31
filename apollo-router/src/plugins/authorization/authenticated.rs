@@ -1078,6 +1078,78 @@ mod tests {
         });
     }
 
+    static ALTERNATIVE_DIRECTIVE_SCHEMA: &str = r#"
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/OtherAuthenticated/v0.1", import: ["@authenticated"])
+    {
+      query: Query
+      mutation: Mutation
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+
+    type Query {
+      topProducts: Product
+      customer: User
+      me: User @authenticated
+      itf: I!
+    }
+
+    type Mutation @authenticated {
+        ping: User
+        other: String
+    }
+
+    interface I {
+        id: ID
+    }
+
+    type Product {
+      type: String
+      price(setPrice: Int): Int
+      reviews: [Review] @authenticated
+      internal: Internal
+      publicReviews: [Review]
+      nonNullId: ID! @authenticated
+    }
+
+    scalar Internal @authenticated @specifiedBy(url: "http///example.com/test")
+
+    type Review {
+        body: String
+        author: User
+    }
+
+    type User
+        implements I
+        @authenticated {
+      id: ID
+      name: String
+    }
+    "#;
+
+    // a directive named `@authenticated` imported from a different spec should not be considered
+    #[test]
+    #[should_panic]
+    fn alternative_directive() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+            }
+
+            me {
+                name
+            }
+        }
+        "#;
+
+        let _ = filter(ALTERNATIVE_DIRECTIVE_SCHEMA, QUERY);
+    }
+
     const SCHEMA: &str = r#"schema
       @link(url: "https://specs.apollo.dev/link/v1.0")
       @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
