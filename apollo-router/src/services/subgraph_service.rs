@@ -62,7 +62,7 @@ use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
-use crate::plugins::subscription::SSEConfiguration;
+use crate::plugins::subscription::SseConfiguration;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::subscription::WebSocketConfiguration;
@@ -353,7 +353,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             })?,
                         );
                     }
-                    Some(SubscriptionMode::SSE(cfg)) => {
+                    Some(SubscriptionMode::Sse(cfg)) => {
                         // call_websocket for passthrough mode
                         return call_sse(
                             notify,
@@ -445,7 +445,7 @@ async fn call_sse(
     request: SubgraphRequest,
     context: Context,
     service_name: String,
-    subgraph_cfg: &SSEConfiguration,
+    subgraph_cfg: &SseConfiguration,
     subscription_hash: String,
 ) -> Result<SubgraphResponse, BoxError> {
     let SubgraphRequest {
@@ -1067,7 +1067,7 @@ fn get_websocket_request(
 fn get_sse_client(
     service_name: String,
     parts: http::request::Parts,
-    subgraph_sse_cfg: &SSEConfiguration,
+    subgraph_sse_cfg: &SseConfiguration,
 ) -> Result<crate::protocols::sse::client::ClientBuilder, FetchError> {
     let subgraph_url = url::Url::parse(&parts.uri.to_string()).map_err(|err| {
         tracing::error!("cannot parse subgraph url {}: {err:?}", parts.uri);
@@ -1985,7 +1985,7 @@ mod tests {
                     all: None,
                     subgraphs: [(
                         "testsse".to_string(),
-                        SSEConfiguration {
+                        SseConfiguration {
                             path: Some(String::from("/sse")),
                             ..Default::default()
                         },

@@ -1,10 +1,13 @@
 #![allow(unreachable_pub)]
 
-use std::{collections::VecDeque, convert::TryFrom, str::from_utf8};
+use std::collections::VecDeque;
+use std::convert::TryFrom;
+use std::str::from_utf8;
 
 use hyper::body::Bytes;
 
-use super::error::{Error, Result};
+use super::error::Error;
+use super::error::Result;
 
 #[derive(Default, PartialEq)]
 struct EventData {
@@ -31,12 +34,12 @@ impl EventData {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum SSE {
+pub enum Sse {
     Event(Event),
     Comment(String),
 }
 
-impl TryFrom<EventData> for Option<SSE> {
+impl TryFrom<EventData> for Option<Sse> {
     type Error = Error;
 
     fn try_from(event_data: EventData) -> std::result::Result<Self, Self::Error> {
@@ -61,7 +64,7 @@ impl TryFrom<EventData> for Option<SSE> {
 
         let retry = event_data.retry;
 
-        Ok(Some(SSE::Event(Event {
+        Ok(Some(Sse::Event(Event {
             event_type,
             data,
             id,
@@ -142,7 +145,7 @@ pub struct EventParser {
     event_data: Option<EventData>,
     /// the last-seen event ID; events without an ID will take on this value until it is updated.
     last_event_id: Option<String>,
-    sse: VecDeque<SSE>,
+    sse: VecDeque<Sse>,
 }
 
 impl EventParser {
@@ -165,7 +168,7 @@ impl EventParser {
         }
     }
 
-    pub fn get_event(&mut self) -> Option<SSE> {
+    pub fn get_event(&mut self) -> Option<Sse> {
         self.sse.pop_front()
     }
 
@@ -206,7 +209,7 @@ impl EventParser {
 
                 if let Some((key, value)) = parse_field(&line)? {
                     if key == "comment" {
-                        self.sse.push_back(SSE::Comment(value.to_string()));
+                        self.sse.push_back(Sse::Comment(value.to_string()));
                         continue;
                     }
 
@@ -254,7 +257,7 @@ impl EventParser {
                 );
 
                 if let Some(event_data) = event_data {
-                    match Option::<SSE>::try_from(event_data) {
+                    match Option::<Sse>::try_from(event_data) {
                         Err(e) => return Err(e),
                         Ok(None) => (),
                         Ok(Some(event)) => self.sse.push_back(event),
@@ -357,7 +360,8 @@ impl EventParser {
 
 #[cfg(test)]
 mod tests {
-    use super::{Error::*, *};
+    use super::Error::*;
+    use super::*;
 
     fn field<'a>(key: &'a str, value: &'a str) -> Result<Option<(&'a str, &'a str)>> {
         Ok(Some((key, value)))
@@ -412,8 +416,8 @@ mod tests {
         assert_eq!(parse_field(b"\xe2\x98\x83: foo"), field("☃", "foo"));
     }
 
-    fn event(typ: &str, data: &str) -> SSE {
-        SSE::Event(Event {
+    fn event(typ: &str, data: &str) -> Sse {
+        Sse::Event(Event {
             data: data.to_string(),
             id: None,
             event_type: typ.to_string(),
@@ -435,7 +439,7 @@ mod tests {
             .process_bytes(Bytes::from("id: a\x00bc\nevent: add\ndata: abc\n\n"))
             .is_ok());
 
-        if let Some(SSE::Event(event)) = parser.get_event() {
+        if let Some(Sse::Event(event)) = parser.get_event() {
             assert!(event.id.is_none());
         } else {
             panic!("Event should have been received");
@@ -449,10 +453,10 @@ mod tests {
         assert!(result.is_ok());
 
         let comment = parser.get_event();
-        assert!(matches!(comment, Some(SSE::Comment(_))));
+        assert!(matches!(comment, Some(Sse::Comment(_))));
 
         let event = parser.get_event();
-        assert!(matches!(event, Some(SSE::Event(_))));
+        assert!(matches!(event, Some(Sse::Event(_))));
 
         assert!(parser.get_event().is_none());
     }
@@ -464,7 +468,7 @@ mod tests {
         assert!(result.is_ok());
 
         let comment = parser.get_event();
-        assert!(matches!(comment, Some(SSE::Comment(_))));
+        assert!(matches!(comment, Some(Sse::Comment(_))));
 
         assert!(parser.get_event().is_none());
     }

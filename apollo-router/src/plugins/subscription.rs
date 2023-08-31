@@ -124,10 +124,10 @@ impl SubscriptionModeConfig {
 
         if let Some(sse_cfg) = &self.sse {
             if let Some(subgraph_cfg) = sse_cfg.subgraphs.get(service_name) {
-                return SubscriptionMode::SSE(subgraph_cfg.clone()).into();
+                return SubscriptionMode::Sse(subgraph_cfg.clone()).into();
             }
             if let Some(all_cfg) = &sse_cfg.all {
-                return SubscriptionMode::SSE(all_cfg.clone()).into();
+                return SubscriptionMode::Sse(all_cfg.clone()).into();
             }
         }
 
@@ -148,9 +148,9 @@ pub(crate) struct SubgraphPassthroughMode {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphSSEMode {
     /// Configuration for all subgraphs
-    pub(crate) all: Option<SSEConfiguration>,
+    pub(crate) all: Option<SseConfiguration>,
     /// Configuration for specific subgraphs
-    pub(crate) subgraphs: HashMap<String, SSEConfiguration>,
+    pub(crate) subgraphs: HashMap<String, SseConfiguration>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -160,7 +160,7 @@ pub(crate) enum SubscriptionMode {
     /// Using websocket to directly connect to subgraph
     Passthrough(WebSocketConfiguration),
     // Using SSE to connect to subgraph
-    SSE(SSEConfiguration),
+    Sse(SseConfiguration),
 }
 
 /// Using a callback url
@@ -213,7 +213,7 @@ pub(crate) struct WebSocketConfiguration {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
-pub(crate) struct SSEConfiguration {
+pub(crate) struct SseConfiguration {
     /// Path use to get the SSE stream
     pub(crate) path: Option<String>,
 

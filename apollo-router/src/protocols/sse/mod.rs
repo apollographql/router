@@ -2,11 +2,11 @@ use std::future;
 use std::pin::Pin;
 use std::task::Poll;
 
-use super::websocket::ServerMessage;
 use futures::Stream;
 use futures::StreamExt;
 use pin_project_lite::pin_project;
 
+use super::websocket::ServerMessage;
 use crate::graphql;
 use crate::protocols::websocket::ServerError;
 
@@ -47,7 +47,7 @@ pub(crate) fn convert_sse_stream(
 ) -> impl Stream<Item = serde_json::Result<ServerMessage>> {
     client.stream().filter_map(move |msg| match msg {
         Ok(sse) => match sse {
-            event_parser::SSE::Event(event) => match event.event_type.as_str() {
+            event_parser::Sse::Event(event) => match event.event_type.as_str() {
                 "next" => future::ready(Some(serde_json::from_str(&event.data).map(|s| {
                     ServerMessage::Next {
                         id: event.id.unwrap_or_else(|| id.clone()),
@@ -67,7 +67,7 @@ pub(crate) fn convert_sse_stream(
                     ),
                 }))),
             },
-            event_parser::SSE::Comment(_) => future::ready(None),
+            event_parser::Sse::Comment(_) => future::ready(None),
         },
         Err(err) => {
             tracing::trace!("cannot consume more message on sse stream: {err:?}");

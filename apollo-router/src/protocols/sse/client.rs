@@ -1,47 +1,50 @@
 #![allow(dead_code)]
 #![allow(unreachable_pub)]
 
-use futures::{ready, Stream};
-use hyper::{
-    body::HttpBody,
-    client::{
-        connect::{Connect, Connection},
-        ResponseFuture,
-    },
-    header::{HeaderMap, HeaderName, HeaderValue},
-    service::Service,
-    Body, Request, StatusCode, Uri,
-};
-use hyper_rustls::HttpsConnector as RustlsConnector;
-use pin_project_lite::pin_project;
-use std::{
-    boxed,
-    fmt::{self, Debug, Display, Formatter},
-    future::Future,
-    io::ErrorKind,
-    pin::Pin,
-    str::FromStr,
-    task::{Context, Poll},
-    time::{Duration, Instant},
-};
+use std::boxed;
+use std::error::Error as StdError;
+use std::fmt::Debug;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::{self};
+use std::future::Future;
+use std::io::ErrorKind;
+use std::pin::Pin;
+use std::str::FromStr;
+use std::task::Context;
+use std::task::Poll;
+use std::time::Duration;
+use std::time::Instant;
 
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    time::Sleep,
-};
+use futures::ready;
+use futures::Stream;
+use hyper::body::HttpBody;
+use hyper::client::connect::Connect;
+use hyper::client::connect::Connection;
+pub use hyper::client::HttpConnector;
+use hyper::client::ResponseFuture;
+use hyper::header::HeaderMap;
+use hyper::header::HeaderName;
+use hyper::header::HeaderValue;
+use hyper::service::Service;
+use hyper::Body;
+use hyper::Request;
+use hyper::StatusCode;
+use hyper::Uri;
+use hyper_rustls::HttpsConnector as RustlsConnector;
+use hyper_timeout::TimeoutConnector;
+use pin_project_lite::pin_project;
+use tokio::io::AsyncRead;
+use tokio::io::AsyncWrite;
+use tokio::time::Sleep;
 
 use super::config::ReconnectOptions;
-
-use super::error::{Error, Result};
-
-pub use hyper::client::HttpConnector;
-use hyper_timeout::TimeoutConnector;
-
+use super::error::Error;
+use super::error::Result;
 use super::event_parser::EventParser;
-use super::event_parser::SSE;
-
-use super::retry::{BackoffRetry, RetryStrategy};
-use std::error::Error as StdError;
+use super::event_parser::Sse;
+use super::retry::BackoffRetry;
+use super::retry::RetryStrategy;
 
 pub type HttpsConnector = RustlsConnector<HttpConnector>;
 
@@ -53,7 +56,7 @@ pub type BoxStream<T> = Pin<boxed::Box<dyn Stream<Item = T> + Send + Sync>>;
 /// Client is the Server-Sent-Events interface.
 /// This trait is sealed and cannot be implemented for types outside this crate.
 pub trait Client: Send + Sync + private::Sealed {
-    fn stream(&self) -> BoxStream<Result<SSE>>;
+    fn stream(&self) -> BoxStream<Result<Sse>>;
 }
 
 /*
@@ -261,7 +264,7 @@ where
     ///
     /// After the first successful connection, the stream will
     /// reconnect for retryable errors.
-    fn stream(&self) -> BoxStream<Result<SSE>> {
+    fn stream(&self) -> BoxStream<Result<Sse>> {
         Box::pin(ReconnectingRequest::new(
             self.http.clone(),
             self.request_props.clone(),
@@ -412,7 +415,7 @@ impl<C> Stream for ReconnectingRequest<C>
 where
     C: Connect + Clone + Send + Sync + 'static,
 {
-    type Item = Result<SSE>;
+    type Item = Result<Sse>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         tracing::trace!("ReconnectingRequest::poll({:?})", &self.state);
@@ -421,7 +424,7 @@ where
             let this = self.as_mut().project();
             if let Some(event) = this.event_parser.get_event() {
                 return match event {
-                    SSE::Event(ref evt) => {
+                    Sse::Event(ref evt) => {
                         *this.last_event_id = evt.id.clone();
 
                         if let Some(retry) = evt.retry {
@@ -430,7 +433,7 @@ where
                         }
                         Poll::Ready(Some(Ok(event)))
                     }
-                    SSE::Comment(_) => Poll::Ready(Some(Ok(event))),
+                    Sse::Comment(_) => Poll::Ready(Some(Ok(event))),
                 };
             }
 

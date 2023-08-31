@@ -1,6 +1,8 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
-use rand::{thread_rng, Rng};
+use rand::thread_rng;
+use rand::Rng;
 
 pub(crate) trait RetryStrategy {
     /// Return the next amount of time a failed request should delay before re-attempting.
@@ -82,9 +84,11 @@ impl RetryStrategy for BackoffRetry {
 #[cfg(test)]
 mod tests {
     use std::ops::Add;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
-    use super::{BackoffRetry, RetryStrategy};
+    use super::BackoffRetry;
+    use super::RetryStrategy;
 
     #[test]
     fn test_fixed_retry() {

@@ -1,25 +1,6 @@
 use std::time::Duration;
 
 /// Configuration for a [`Client`]'s reconnect behaviour.
-///
-/// ```
-/// # use std::time::Duration;
-/// # use eventsource_client::ReconnectOptions;
-/// #
-/// let reconnect_options = ReconnectOptions::reconnect(true)
-///                             .retry_initial(false)
-///                             .delay(Duration::from_secs(1))
-///                             .backoff_factor(2)
-///                             .delay_max(Duration::from_secs(60))
-///                             .build();
-/// ```
-///
-/// See [`default()`] for a description of the default behaviour. See
-/// [`ReconnectOptionsBuilder`] for descriptions of each configurable parameter.
-///
-/// [`Client`]: struct.Client.html
-/// [`default()`]: #method.default
-/// [`ReconnectOptionsBuilder`]: struct.ReconnectOptionsBuilder.html
 #[derive(Clone, Debug)]
 pub(crate) struct ReconnectOptions {
     pub(crate) retry_initial: bool,
@@ -38,7 +19,7 @@ impl ReconnectOptions {
     /// the client will stop receiving events after an error.
     ///
     /// [default]: #method.default
-    pub(crate)  fn reconnect(reconnect: bool) -> ReconnectOptionsBuilder {
+    pub(crate) fn reconnect(reconnect: bool) -> ReconnectOptionsBuilder {
         ReconnectOptionsBuilder::new(reconnect)
     }
 }
