@@ -19,15 +19,11 @@ use tower::ServiceExt;
 
 use self::authenticated::AuthenticatedCheckVisitor;
 use self::authenticated::AuthenticatedVisitor;
-use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
 use self::policy::PolicyExtractionVisitor;
 use self::policy::PolicyFilteringVisitor;
-use self::policy::POLICY_DIRECTIVE_NAME;
 use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
-use self::scopes::REQUIRES_SCOPES_DIRECTIVE_NAME;
 use crate::error::QueryPlannerError;
-use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::json_ext::Path;
@@ -95,7 +91,7 @@ pub(crate) struct AuthorizationPlugin {
 impl AuthorizationPlugin {
     pub(crate) fn enable_directives(
         configuration: &Configuration,
-        schema: &Schema,
+        _schema: &Schema,
     ) -> Result<bool, ServiceBuildError> {
         let has_config = configuration
             .apollo_plugins
@@ -104,32 +100,8 @@ impl AuthorizationPlugin {
             .find(|(s, _)| s.as_str() == "authorization")
             .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
             .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()));
-        let has_authorization_directives = schema
-            .type_system
-            .definitions
-            .directives
-            .contains_key(AUTHENTICATED_DIRECTIVE_NAME)
-            || schema
-                .type_system
-                .definitions
-                .directives
-                .contains_key(REQUIRES_SCOPES_DIRECTIVE_NAME)
-            || schema
-                .type_system
-                .definitions
-                .directives
-                .contains_key(POLICY_DIRECTIVE_NAME);
 
-        match has_config {
-            Some(b) => Ok(b),
-            None => {
-                if has_authorization_directives {
-                    Err(ServiceBuildError::Schema(SchemaError::Api("cannot start the router on a schema with authorization directives without configuring the authorization plugin".to_string())))
-                } else {
-                    Ok(false)
-                }
-            }
-        }
+        Ok(has_config.unwrap_or(true))
     }
 
     pub(crate) async fn query_analysis(
