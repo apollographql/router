@@ -189,31 +189,57 @@ where
 {
     fn enabled(
         &self,
-        _meta: &tracing::Metadata<'_>,
+        meta: &tracing::Metadata<'_>,
         cx: &tracing_subscriber::layer::Context<'_, S>,
     ) -> bool {
+        if !meta.is_span() {
+            return false;
+        }
+
         let current_otel_context = opentelemetry_api::Context::current();
 
-        if current_otel_context.span().span_context().is_valid() {
+        if current_otel_context.span().span_context().is_sampled() {
             return true;
         }
 
         let current_span = cx.current_span();
-
-        // this span is enabled if:
-        current_span
+        if let Some(spanref) = current_span
+            // the current span, which is the parent of the span that might get enabled here,
+            // exists, but it might have been enabled by another layer like metrics
             .id()
-            // - there's a parent span and it was enabled
-            .map(|id| {
-                let r = cx.span(id).and_then(|spanref| spanref.parent()).is_some();
+            .and_then(|id| cx.span(id))
+        {
+            // if this extension is set, that means the parent span was accepted, and so the
+            // entire trace is accepted
+            let extensions = spanref.extensions();
+            return extensions.get::<SampledSpan>().is_some();
+        }
 
-                r
-            })
-            // - there's no parent span (it's the root), so we make the sampling decision
-            .unwrap_or_else(|| self.sample())
+        // - there's no parent span (it's the root), so we make the sampling decision
+        self.sample()
+    }
+
+    fn on_new_span(
+        &self,
+        _attrs: &tracing_core::span::Attributes<'_>,
+        id: &tracing_core::span::Id,
+        ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let span = ctx.span(id).expect("Span not found, this is a bug");
+        let mut extensions = span.extensions_mut();
+        if extensions.get_mut::<SampledSpan>().is_none() {
+            extensions.insert(SampledSpan);
+        }
+    }
+
+    fn on_close(&self, id: tracing_core::span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
+        let span = ctx.span(&id).expect("Span not found, this is a bug");
+        let mut extensions = span.extensions_mut();
+        extensions.remove::<SampledSpan>();
     }
 }
 
+struct SampledSpan;
 /// prevents span fields from being formatted to a string when writing logs
 pub(crate) struct NullFieldFormatter;
 
