@@ -26,23 +26,43 @@ pub(crate) struct ScopeExtractionVisitor<'a> {
     compiler: &'a ApolloCompiler,
     file_id: FileId,
     pub(crate) extracted_scopes: HashSet<String>,
+    requires_scopes_directive_name: String,
 }
 
 pub(crate) const REQUIRES_SCOPES_DIRECTIVE_NAME: &str = "requiresScopes";
 
 impl<'a> ScopeExtractionVisitor<'a> {
     #[allow(dead_code)]
-    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Self {
-        Self {
+    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Option<Self> {
+        let requires_scopes_directive_name = if let Some(link) = compiler
+            .db
+            .schema()
+            .directives_by_name("link")
+            .filter(|link| {
+                link.argument_by_name("url")
+                    .and_then(|value| value.as_str())
+                    == Some("https://specs.apollo.dev/requiresScopes/v0.1")
+            })
+            .next()
+        {
+            link.argument_by_name("as")
+                .and_then(|value| value.as_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| REQUIRES_SCOPES_DIRECTIVE_NAME.to_string())
+        } else {
+            return None;
+        };
+
+        Some(Self {
             compiler,
             file_id,
             extracted_scopes: HashSet::new(),
-        }
+            requires_scopes_directive_name,
+        })
     }
 
     fn scopes_from_field(&mut self, field: &FieldDefinition) {
         self.extracted_scopes.extend(
-            scopes_argument(field.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)).cloned(),
+            scopes_argument(field.directive_by_name(&self.requires_scopes_directive_name)).cloned(),
         );
 
         if let Some(ty) = field.ty().type_def(&self.compiler.db) {
@@ -51,8 +71,9 @@ impl<'a> ScopeExtractionVisitor<'a> {
     }
 
     fn scopes_from_type(&mut self, ty: &TypeDefinition) {
-        self.extracted_scopes
-            .extend(scopes_argument(ty.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)).cloned());
+        self.extracted_scopes.extend(
+            scopes_argument(ty.directive_by_name(&self.requires_scopes_directive_name)).cloned(),
+        );
     }
 }
 
@@ -86,7 +107,8 @@ impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
     fn operation(&mut self, node: &hir::OperationDefinition) -> Result<(), BoxError> {
         if let Some(ty) = node.object_type(&self.compiler.db) {
             self.extracted_scopes.extend(
-                scopes_argument(ty.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)).cloned(),
+                scopes_argument(ty.directive_by_name(&self.requires_scopes_directive_name))
+                    .cloned(),
             );
         }
 
@@ -191,6 +213,7 @@ pub(crate) struct ScopeFilteringVisitor<'a> {
     pub(crate) query_requires_scopes: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
     current_path: Path,
+    requires_scopes_directive_name: String,
 }
 
 impl<'a> ScopeFilteringVisitor<'a> {
@@ -198,19 +221,38 @@ impl<'a> ScopeFilteringVisitor<'a> {
         compiler: &'a ApolloCompiler,
         file_id: FileId,
         scopes: HashSet<String>,
-    ) -> Self {
-        Self {
+    ) -> Option<Self> {
+        let requires_scopes_directive_name = if let Some(link) = compiler
+            .db
+            .schema()
+            .directives_by_name("link")
+            .filter(|link| {
+                link.argument_by_name("url")
+                    .and_then(|value| value.as_str())
+                    == Some("https://specs.apollo.dev/requiresScopes/v0.1")
+            })
+            .next()
+        {
+            link.argument_by_name("as")
+                .and_then(|value| value.as_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| REQUIRES_SCOPES_DIRECTIVE_NAME.to_string())
+        } else {
+            return None;
+        };
+
+        Some(Self {
             compiler,
             file_id,
             request_scopes: scopes,
             query_requires_scopes: false,
             unauthorized_paths: vec![],
             current_path: Path::default(),
-        }
+            requires_scopes_directive_name,
+        })
     }
 
     fn is_field_authorized(&mut self, field: &FieldDefinition) -> bool {
-        if let Some(directive) = field.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME) {
+        if let Some(directive) = field.directive_by_name(&self.requires_scopes_directive_name) {
             let mut field_scopes_sets = scopes_sets_argument(directive);
 
             // The outer array acts like a logical OR: if any of the inner arrays of scopes matches, the field
@@ -234,7 +276,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
     }
 
     fn is_type_authorized(&self, ty: &TypeDefinition) -> bool {
-        match ty.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME) {
+        match ty.directive_by_name(&self.requires_scopes_directive_name) {
             None => true,
             Some(directive) => {
                 let mut type_scopes_sets = scopes_sets_argument(directive);
@@ -292,7 +334,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
                 // we transform to a common representation of sorted vectors because the element order
                 // of hashsets is not stable
                 let ty_scope_sets = ty
-                    .directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)
+                    .directive_by_name(&self.requires_scopes_directive_name)
                     .map(|directive| {
                         let mut v = scopes_sets_argument(directive)
                             .map(|h| {
@@ -348,7 +390,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
                         // we transform to a common representation of sorted vectors because the element order
                         // of hashsets is not stable
                         let field_scope_sets = f
-                            .directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)
+                            .directive_by_name(&self.requires_scopes_directive_name)
                             .map(|directive| {
                                 let mut v = scopes_sets_argument(directive)
                                     .map(|h| {
@@ -389,7 +431,7 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
         node: &hir::OperationDefinition,
     ) -> Result<Option<apollo_encoder::OperationDefinition>, BoxError> {
         let is_authorized = if let Some(ty) = node.object_type(&self.compiler.db) {
-            match ty.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME) {
+            match ty.directive_by_name(&self.requires_scopes_directive_name) {
                 None => true,
                 Some(directive) => {
                     let mut type_scopes_sets = scopes_sets_argument(directive);
@@ -583,6 +625,15 @@ mod tests {
     use crate::spec::query::traverse;
 
     static BASIC_SCHEMA: &str = r#"
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
+    {
+        query: Query
+        mutation: Mutation
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     scalar federation__Scope
     directive @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 
@@ -639,7 +690,7 @@ mod tests {
         }
         assert!(diagnostics.is_empty());
 
-        let mut visitor = ScopeExtractionVisitor::new(&compiler, id);
+        let mut visitor = ScopeExtractionVisitor::new(&compiler, id).unwrap();
         traverse::document(&mut visitor, id).unwrap();
 
         visitor.extracted_scopes.into_iter().collect()
@@ -682,7 +733,7 @@ mod tests {
         }
         assert!(diagnostics.is_empty());
 
-        let mut visitor = ScopeFilteringVisitor::new(&compiler, file_id, scopes);
+        let mut visitor = ScopeFilteringVisitor::new(&compiler, file_id, scopes).unwrap();
         (
             transform::document(&mut visitor, file_id).unwrap(),
             visitor.unauthorized_paths,
@@ -1067,6 +1118,14 @@ mod tests {
     }
 
     static INTERFACE_SCHEMA: &str = r#"
+    schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+    @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
+  {
+      query: Query
+  }
+  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
     directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
     type Query {
@@ -1181,6 +1240,14 @@ mod tests {
     }
 
     static INTERFACE_FIELD_SCHEMA: &str = r#"
+    schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+    @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
+  {
+      query: Query
+  }
+  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
     directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
     type Query {
@@ -1259,6 +1326,14 @@ mod tests {
     #[test]
     fn union() {
         static UNION_MEMBERS_SCHEMA: &str = r#"
+        schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
+      {
+          query: Query
+      }
+      directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
         directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 
         directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
@@ -1301,6 +1376,83 @@ mod tests {
             query: QUERY,
             extracted_scopes: &extracted_scopes,
             scopes: ["a".to_string(), "b".to_string()].into_iter().collect(),
+            result: doc,
+            paths
+        });
+    }
+
+    static RENAMED_SCHEMA: &str = r#"
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", as: "scopes" for: SECURITY)
+    {
+        query: Query
+        mutation: Mutation
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    scalar federation__Scope
+    directive @scopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+
+    type Query {
+      topProducts: Product
+      customer: User
+      me: User @scopes(scopes: [["profile"]])
+      itf: I
+    }
+
+    type Mutation @scopes(scopes: [["mut"]]) {
+        ping: User @scopes(scopes: [["ping"]])
+        other: String
+    }
+
+    interface I {
+        id: ID
+    }
+
+    type Product {
+      type: String
+      price(setPrice: Int): Int
+      reviews: [Review]
+      internal: Internal
+      publicReviews: [Review]
+    }
+
+    scalar Internal @scopes(scopes: [["internal", "test"]]) @specifiedBy(url: "http///example.com/test")
+
+    type Review @scopes(scopes: [["review"]]) {
+        body: String
+        author: User
+    }
+
+    type User implements I @scopes(scopes: [["read:user"]]) {
+      id: ID
+      name: String @scopes(scopes: [["read:username"]])
+    }
+    "#;
+
+    #[test]
+    fn renamed_directive() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+            }
+
+            me {
+                name
+            }
+        }
+        "#;
+
+        let extracted_scopes = extract(RENAMED_SCHEMA, QUERY);
+
+        let (doc, paths) = filter(RENAMED_SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_scopes: &extracted_scopes,
+            scopes: Vec::new(),
             result: doc,
             paths
         });

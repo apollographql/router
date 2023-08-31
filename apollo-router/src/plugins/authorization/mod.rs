@@ -149,16 +149,16 @@ impl AuthorizationPlugin {
             }
         }
 
-        let mut visitor = ScopeExtractionVisitor::new(&compiler, file_id);
+        if let Some(mut visitor) = ScopeExtractionVisitor::new(&compiler, file_id) {
+            // if this fails, the query is invalid and will fail at the query planning phase.
+            // We do not return validation errors here for now because that would imply a huge
+            // refactoring of telemetry and tests
+            if traverse::document(&mut visitor, file_id).is_ok() {
+                let scopes: Vec<String> = visitor.extracted_scopes.into_iter().collect();
 
-        // if this fails, the query is invalid and will fail at the query planning phase.
-        // We do not return validation errors here for now because that would imply a huge
-        // refactoring of telemetry and tests
-        if traverse::document(&mut visitor, file_id).is_ok() {
-            let scopes: Vec<String> = visitor.extracted_scopes.into_iter().collect();
-
-            if !scopes.is_empty() {
-                context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
+                if !scopes.is_empty() {
+                    context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
+                }
             }
         }
 
@@ -380,24 +380,28 @@ impl AuthorizationPlugin {
             .pop()
             .expect("the query was added to the compiler earlier");
 
-        let mut visitor =
-            ScopeFilteringVisitor::new(compiler, id, scopes.iter().cloned().collect());
+        if let Some(mut visitor) =
+            ScopeFilteringVisitor::new(compiler, id, scopes.iter().cloned().collect())
+        {
+            let modified_query = transform::document(&mut visitor, id)
+                .map_err(|e| SpecError::ParsingError(e.to_string()))?
+                .to_string();
 
-        let modified_query = transform::document(&mut visitor, id)
-            .map_err(|e| SpecError::ParsingError(e.to_string()))?
-            .to_string();
-
-        if visitor.query_requires_scopes {
-            tracing::debug!("the query required scopes, the requests present scopes: {scopes:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
+            if visitor.query_requires_scopes {
+                tracing::debug!("the query required scopes, the requests present scopes: {scopes:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
                 visitor
                     .unauthorized_paths
                     .iter()
                     .map(|path| path.to_string())
                     .collect::<Vec<_>>()
             );
-            Ok(Some((modified_query, visitor.unauthorized_paths)))
+                Ok(Some((modified_query, visitor.unauthorized_paths)))
+            } else {
+                tracing::debug!("the query does not require scopes");
+                Ok(None)
+            }
         } else {
-            tracing::debug!("the query does not require scopes");
+            tracing::debug!("the schema does not contain @requiresScopes");
             Ok(None)
         }
     }
