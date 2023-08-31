@@ -59,6 +59,25 @@ impl Schema {
         Ok(schema)
     }
 
+    pub(crate) fn make_compiler(sdl: &str) -> Result<ApolloCompiler, SchemaError> {
+        let mut compiler = ApolloCompiler::new();
+        let id = compiler.add_type_system(sdl, "schema.graphql");
+
+        let ast = compiler.db.ast(id);
+
+        // Trace log recursion limit data
+        let recursion_limit = ast.recursion_limit();
+        tracing::trace!(?recursion_limit, "recursion limit data");
+
+        let mut parse_errors = ast.errors().peekable();
+        if parse_errors.peek().is_some() {
+            let errors = parse_errors.cloned().collect::<Vec<_>>();
+            return Err(SchemaError::Parse(ParseErrors { errors }));
+        }
+
+        Ok(compiler)
+    }
+
     pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
         let mut compiler = ApolloCompiler::new();
         let id = compiler.add_type_system(sdl, "schema.graphql");

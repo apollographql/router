@@ -80,8 +80,12 @@ pub(crate) struct Conf {
 #[allow(dead_code)]
 pub(crate) struct Directives {
     /// enables the `@authenticated` and `@requiresScopes` directives
-    #[serde(default)]
+    #[serde(default = "default_enable_directives")]
     enabled: bool,
+}
+
+fn default_enable_directives() -> bool {
+    true
 }
 
 pub(crate) struct AuthorizationPlugin {
