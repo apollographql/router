@@ -160,6 +160,13 @@ impl Schema {
             .unwrap_or(false)
     }
 
+    pub(crate) fn is_interface(&self, abstract_type: &str) -> bool {
+        self.type_system
+            .definitions
+            .interfaces
+            .contains_key(abstract_type)
+    }
+
     /// Return an iterator over subgraphs that yields the subgraph name and its URL.
     pub(crate) fn subgraphs(&self) -> impl Iterator<Item = (&String, &Uri)> {
         self.subgraphs.iter()

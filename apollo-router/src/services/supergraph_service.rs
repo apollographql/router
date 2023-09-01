@@ -2934,6 +2934,9 @@ mod tests {
             ).with_json(
                 serde_json::json!{{"query":"query dog__animal__0{dog{__typename id name}}", "operationName": "dog__animal__0"}},
                 serde_json::json!{{"data":{"dog":{"__typename":"Dog","id":"4321","name":"Spot"}}}}
+            ).with_json(
+                serde_json::json!{{"query":"query dog__animal__0{dog{name id}}", "operationName": "dog__animal__0"}},
+                serde_json::json!{{"data":{"dog":{"id":"4321","name":"Spot"}}}}
             ).build()),
         ].into_iter().collect());
 
@@ -3030,7 +3033,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let mut stream = service.oneshot(request).await.unwrap();
+        let mut stream = service.clone().oneshot(request).await.unwrap();
 
         let with_typename = stream.next_response().await.unwrap();
         assert_eq!(
@@ -3052,6 +3055,48 @@ mod tests {
                 .unwrap(),
             "{:?}\n{:?}",
             with_typename,
+            no_typename
+        );
+
+        let request = supergraph::Request::fake_builder()
+            .context(defer_context())
+            .query(
+                "query dog {
+                    dog {
+                        ...on Dog {
+                            name
+                            ...on Animal {
+                                id
+                            }
+                        }
+                    }
+                }",
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+
+        let with_reversed_fragments = stream.next_response().await.unwrap();
+        assert_eq!(
+            with_reversed_fragments
+                .data
+                .clone()
+                .unwrap()
+                .get("dog")
+                .unwrap()
+                .get("name")
+                .unwrap(),
+            no_typename
+                .data
+                .clone()
+                .unwrap()
+                .get("dog")
+                .unwrap()
+                .get("name")
+                .unwrap(),
+            "{:?}\n{:?}",
+            with_reversed_fragments,
             no_typename
         );
     }

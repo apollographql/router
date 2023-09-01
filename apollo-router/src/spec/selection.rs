@@ -152,17 +152,24 @@ impl Selection {
 
                 let fragment_type = FieldType::new_named(type_condition.clone());
 
+                let relevant_type = if schema.is_interface(type_condition.as_str()) {
+                    current_type
+                } else {
+                    &fragment_type
+                };
+
+                let known_type = relevant_type.inner_type_name().map(|s| s.to_string());
+
                 let selection_set = inline_fragment
                     .selection_set()
                     .selection()
                     .iter()
                     .filter_map(|selection| {
-                        Selection::from_hir(selection, &fragment_type, schema, count, defer_stats)
+                        Selection::from_hir(selection, relevant_type, schema, count, defer_stats)
                             .transpose()
                     })
                     .collect::<Result<_, _>>()?;
 
-                let known_type = current_type.inner_type_name().map(|s| s.to_string());
                 Some(Self::InlineFragment {
                     type_condition,
                     selection_set,
