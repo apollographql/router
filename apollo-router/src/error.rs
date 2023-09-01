@@ -439,6 +439,8 @@ impl From<SpecError> for QueryPlannerError {
 
 impl From<ValidationErrors> for QueryPlannerError {
     fn from(err: ValidationErrors) -> Self {
+        // This needs to be serializable, so eagerly stringify the non-serializable
+        // ApolloDiagnostics.
         QueryPlannerError::SpecError(SpecError::ValidationError(err.to_string()))
     }
 }
