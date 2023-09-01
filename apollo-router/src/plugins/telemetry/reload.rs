@@ -26,6 +26,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
 use super::config::SamplerOption;
+use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::text::TextFormatter;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
@@ -192,12 +193,14 @@ where
         meta: &tracing::Metadata<'_>,
         cx: &tracing_subscriber::layer::Context<'_, S>,
     ) -> bool {
+        // we ignore events
         if !meta.is_span() {
             return false;
         }
 
+        // if there's an exsting otel context set by the client request, and it is sampled,
+        // then that trace is sampled
         let current_otel_context = opentelemetry_api::Context::current();
-
         if current_otel_context.span().span_context().is_sampled() {
             return true;
         }
@@ -213,6 +216,12 @@ where
             // entire trace is accepted
             let extensions = spanref.extensions();
             return extensions.get::<SampledSpan>().is_some();
+        }
+
+        // we only make the sampling decision on the root span. If we reach here for any other span,
+        // it means that the parent span was not enabled, so we should not enable this span either
+        if meta.name() != REQUEST_SPAN_NAME {
+            return false;
         }
 
         // - there's no parent span (it's the root), so we make the sampling decision
