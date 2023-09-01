@@ -688,8 +688,9 @@ impl Query {
                         known_type
                             .as_ref()
                             // We have no typename, we apply the selection set if the known_type implements the type_condition
-                            .map(|k| is_subtype_or_same(parameters, type_condition, k))
+                            .map(|k| parameters.schema.is_subtype(type_condition, k))
                             .unwrap_or_default()
+                            || known_type.as_deref() == Some(type_condition.as_str())
                     };
 
                     if is_apply {
@@ -1065,14 +1066,6 @@ impl Query {
     pub(crate) fn is_deferred(&self, defer_conditions: BooleanValues) -> bool {
         self.defer_stats.has_unconditional_defer || defer_conditions.bits != 0
     }
-}
-
-fn is_subtype_or_same(
-    parameters: &FormatParameters<'_>,
-    parent: &String,
-    maybe_child: &String,
-) -> bool {
-    parent == maybe_child || parameters.schema.is_subtype(parent, maybe_child)
 }
 
 /// Intermediate structure for arguments passed through the entire formatting
