@@ -540,6 +540,85 @@ fn reformat_response_data_best_effort() {
 }
 
 #[test]
+// just like the test above, except the query is one the planner would generate.
+fn reformat_response_data_best_effort_relevant_query() {
+    FormatTest::builder()
+        .schema(
+            "type Query {
+        get: Thing
+    }
+    type Thing {
+        foo: String
+        stuff: Baz
+        array: [Element]
+        other: Bar
+    }
+
+    type Baz {
+        bar: String
+        baz: String
+    }
+
+    type Bar {
+        bar: String
+    }
+
+    union Element = Baz | Bar
+    ",
+        )
+        .query("{get{foo stuff{bar baz}array{...on Baz{bar baz}}other{bar}}}")
+        // the planner generates this:
+        // {get{foo stuff{bar baz}array{__typename ...on Baz{bar baz}}other{bar}}}
+        .response(json! {
+            {
+                "get": {
+                    "foo": "1",
+                    "stuff": {"baz": "2"},
+                    "array": [
+                        {
+                            "__typename": "Baz",
+                            "baz": "3"
+                        },
+                        "4",
+                        {
+                            "__typename": "Baz",
+                            "baz": "5"
+                        },
+                    ],
+                    "other": "6",
+                },
+                "should_be_removed": {
+                    "aaa": 2
+                },
+            }
+        })
+        .expected(json! {
+            {
+                "get": {
+                    "foo": "1",
+                    "stuff": {
+                        "bar": null,
+                        "baz": "2",
+                    },
+                    "array": [
+                        {
+                            "bar":null,
+                            "baz":"3"
+                        },
+                        null,
+                        {
+                            "bar": null,
+                            "baz":"5"
+                        }
+                    ],
+                    "other": null,
+                },
+            }
+        })
+        .test();
+}
+
+#[test]
 fn reformat_response_array_of_scalar_simple() {
     FormatTest::builder()
         .schema(
