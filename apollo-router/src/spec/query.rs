@@ -686,12 +686,10 @@ impl Query {
                             || parameters.schema.is_subtype(type_condition, input_type)
                     } else {
                         known_type
-                        .as_ref()
-                        // We have no typename, we apply the selection set if the known_type implements the type_condition
-                        .map(|k| is_subtype_or_same(parameters, type_condition, k))
+                            .as_ref()
+                            // We have no typename, we apply the selection set if the known_type implements the type_condition
+                            .map(|k| is_subtype_or_same(parameters, type_condition, k))
                             .unwrap_or_default()
-                            // Or if the known_type implements the parent's type_condition because we're in an inline fragment.
-                            || is_subtype_or_same(parameters, &parent_type.name(), type_condition)
                     };
 
                     if is_apply {
