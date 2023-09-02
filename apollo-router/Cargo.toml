@@ -189,7 +189,7 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum_macros = "0.25.2"
 sys-info = "0.9.1"
-thiserror = "1.0.47"
+thiserror = "1.0.48"
 tokio = { version = "1.32.0", features = ["full"] }
 tokio-stream = { version = "0.1.14", features = ["sync", "net"] }
 tokio-util = { version = "0.7.8", features = ["net", "codec", "time"] }
@@ -231,7 +231,7 @@ tokio-rustls = "0.24.1"
 http-serde = "1.1.3"
 hmac = "0.12.1"
 parking_lot = "0.12.1"
-memchr = "2.6.2"
+memchr = "2.6.3"
 brotli = "3.3.4"
 zstd = "0.12.4"
 zstd-safe = "6.0.6"
@@ -265,7 +265,7 @@ futures-test = "0.3.28"
 insta = { version = "1.31.0", features = ["json", "redactions", "yaml"] }
 introspector-gadget = "0.2.2"
 maplit = "1.0.2"
-memchr = { version = "2.6.2", default-features = false }
+memchr = { version = "2.6.3", default-features = false }
 mockall = "0.11.4"
 once_cell = "1.18.0"
 p256 = "0.12.0"
