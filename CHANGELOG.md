@@ -6,22 +6,6 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 # [1.29.1] - 2023-09-04
 
-## 🐛 Fixes
-
-### Subscriptions: Correct v1.28.x regression allowing panic via un-named subscription operation
-
-Correct a regression that was introduced in Router v1.28.0 which made a Router **panic** possible when the following _three_ conditions are _all_ met:
-
-1. When sending an un-named (i.e., "anonymous") `subscription` operation (e.g., `subscription { ... }`); **and**;
-2. The Router has a `subscription` type defined in the Supergraph schema; **and**
-3. Have subscriptions enabled (they are disabled by default) in the Router's YAML configuration, either by setting `enabled: true` _or_ by setting a `mode` within the `subscriptions` object (as seen in [the subscriptions documentation](https://www.apollographql.com/docs/router/executing-operations/subscription-support/#router-setup).
-
-By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3738
-
-
-
-# [1.29.0] - 2023-09-04
-
 ## 🚀 Features
 
 ### GraphOS Enterprise: Authorization ([PR #3397](https://github.com/apollographql/router/pull/3397), [PR #3662](https://github.com/apollographql/router/pull/3662))
@@ -48,6 +32,78 @@ This directive allows access to the annotated field or type for authenticated re
 For more information on how to use these directives, please read Apollo Router [docs](https://www.apollographql.com/docs/router/configuration/authorization)
 ```
 
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3397 https://github.com/apollographql/router/pull/3662
+
+## 🐛 Fixes
+
+### Subscriptions: Correct v1.28.x regression allowing panic via un-named subscription operation
+
+Correct a regression that was introduced in Router v1.28.0 which made a Router **panic** possible when the following _three_ conditions are _all_ met:
+
+1. When sending an un-named (i.e., "anonymous") `subscription` operation (e.g., `subscription { ... }`); **and**;
+2. The Router has a `subscription` type defined in the Supergraph schema; **and**
+3. Have subscriptions enabled (they are disabled by default) in the Router's YAML configuration, either by setting `enabled: true` _or_ by setting a `mode` within the `subscriptions` object (as seen in [the subscriptions documentation](https://www.apollographql.com/docs/router/executing-operations/subscription-support/#router-setup).
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3738
+
+
+### Update Deno to resolve Rust Docs generation failure ([Issue #3305](https://github.com/apollographql/router/issues/3305))
+
+We've updated to the latest version of Deno (0.200) to fix errors when generating [docs.rs/apollo-router](https://docs.rs/crate/apollo-router/latest).
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3626
+
+### GraphQL response processing is now captured under the execution span ([PR #3732](https://github.com/apollographql/router/pull/3732))
+
+Ensure processing is captured under the "execution" span.  Previously, events would be reported under the supergraph span or — even more arbitrarily — any plugin's span (e.g., Rhai).
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3732
+
+## 🛠 Maintenance
+
+### Apollo Uplink connections re-use the existing HTTP client ([Issue #3333](https://github.com/apollographql/router/issues/3333))
+
+A single HTTP client will now be shared between requests of the same type when making requests to [Apollo Uplink](https://www.apollographql.com/docs/federation/managed-federation/uplink/) to fetch supergraphs, licenses and configuration from Studio.  Previously, such requests created a new HTTP client on each periodic fetch which occasionally resulted in CPU spikes, especially on macOS.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3703
+
+### Remove unneeded schema parsing steps ([PR #3547](https://github.com/apollographql/router/pull/3547))
+
+Access to a parsed schema is required in various parts of the Router. Previously were were parsing the schema multiple times, but this is now fixed.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3547
+
+# [1.29.0] - 2023-09-04
+
+> **Warning**
+>
+> **This version has a critical bug impacting anyone using subscriptions.  See the _Fixes_ in [v1.29.1](https://github.com/apollographql/router/releases/tag/v1.29.1) for details.  We highly recommend using v1.29.1 over v1.29.0 when using subscriptions.**
+
+## 🚀 Features
+
+### GraphOS Enterprise: Authorization ([PR #3397](https://github.com/apollographql/router/pull/3397), [PR #3662](https://github.com/apollographql/router/pull/3662))
+
+> ⚠️ This is an [Enterprise feature](https://www.apollographql.com/blog/platform/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features/) of the Apollo Router. It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
+
+If your organization doesn't currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](https://www.apollographql.com/docs/graphos/org/plans/#enterprise-trials).
+We introduce two new directives, `@requiresScopes` and `@authenticated`, that define authorization policies for fields and types in the supergraph schema, composed with Federation version 2.5.3 or higher.
+
+They are defined as follows:
+
+```graphql
+scalar federation__Scope
+directive @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+```
+
+This directive allows granular access control through user-defined scopes.
+
+```graphql
+directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+```
+
+This directive allows access to the annotated field or type for authenticated requests only.
+For more information on how to use these directives, please read Apollo Router [docs](https://www.apollographql.com/docs/router/configuration/authorization)
+```
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3397 https://github.com/apollographql/router/pull/3662
 
@@ -79,9 +135,11 @@ Access to a parsed schema is required in various parts of the Router. Previously
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3547
 
-
-
 # [1.28.1] - 2023-08-28
+
+> **Warning**
+>
+> **This version has a critical bug impacting anyone using subscriptions.  See the _Fixes_ in [v1.29.1](https://github.com/apollographql/router/releases/tag/v1.29.1) for details.  We highly recommend using v1.29.1 over any v1.28.x version when using subscriptions.**
 
 ## 🚀 Features
 
