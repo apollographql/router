@@ -137,15 +137,14 @@ async fn test_local_root_50_percent_sample() -> Result<(), BoxError> {
     for _ in 0..100 {
         let (id, result) = router.execute_untraced_query(&query).await;
 
-        if result.headers().get("apollo-custom-trace-id").is_some() {
-            if validate_trace(id, &query, Some("ExampleQuery"), &["router", "products"])
+        if result.headers().get("apollo-custom-trace-id").is_some()
+            && validate_trace(id, &query, Some("ExampleQuery"), &["router", "products"])
                 .await
                 .is_ok()
-            {
-                router.graceful_shutdown().await;
+        {
+            router.graceful_shutdown().await;
 
-                return Ok(());
-            }
+            return Ok(());
         }
     }
     panic!("tried 100 requests with telemetry sampled at 50%, no traces were found")
