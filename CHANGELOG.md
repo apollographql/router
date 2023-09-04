@@ -39,7 +39,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 The documentation for our [`apollo-router` Crate on Crates.io](https://crates.io/crates/apollo-router), was failing to build because of a dependency's complication errors [in the docs.rs build environment](https://docs.rs/about/builds). 
 
-We've updated to the latest version of Deno which has resolved this constraint and allows us to generate our [docs.rs/apollo-router](https://docs.rs/crate/apollo-router/latest) docs once again.
+We've updated to the latest version of Deno (0.200) which has resolved this constraint and allows us to generate our [docs.rs/apollo-router](https://docs.rs/crate/apollo-router/latest) docs once again.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3626
 
