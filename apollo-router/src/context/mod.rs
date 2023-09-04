@@ -70,13 +70,6 @@ impl Context {
 }
 
 impl Context {
-    pub(crate) fn operation_name(&self) -> Option<String> {
-        // This method should be removed once we have a proper way to get the operation name.
-        self.entries
-            .get(OPERATION_NAME)
-            .and_then(|v| v.value().as_str().map(|s| s.to_string()))
-    }
-
     /// Returns true if the context contains a value for the specified key.
     pub fn contains_key<K>(&self, key: K) -> bool
     where
@@ -370,12 +363,5 @@ mod test {
         });
         assert_eq!(c.get("one").unwrap(), Some(2));
         assert_eq!(c.get("two").unwrap(), Some(3));
-    }
-
-    #[test]
-    fn operation_name_defaults_to_an_empty_string() {
-        let c = Context::new();
-        c.insert(OPERATION_NAME, Option::<String>::None).unwrap();
-        assert!(c.operation_name().is_none())
     }
 }
