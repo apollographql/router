@@ -21,6 +21,10 @@ directive @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DE
 This directive allows granular access control through user-defined scopes.
 
 directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+
+This directive allows access to the annotated field or type for authenticated requests only.
+
+For more information on how to use these directives, please read Apollo Router [docs](https://www.apollographql.com/docs/router/configuration/authorization)
 ```
 
 The implementation hooks into the request lifecycle at multiple steps:
@@ -39,13 +43,11 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Update Deno to resolve Rust Docs generation failure ([Issue #3305](https://github.com/apollographql/router/issues/3305))
 
-The documentation for our [`apollo-router` Crate on Crates.io](https://crates.io/crates/apollo-router), was failing to build because of a dependency's complication errors [in the docs.rs build environment](https://docs.rs/about/builds). 
-
-We've updated to the latest version of Deno (0.200) which has resolved this constraint and allows us to generate our [docs.rs/apollo-router](https://docs.rs/crate/apollo-router/latest) docs once again.
+We've updated to the latest version of Deno (0.200) to fix errors when generating [docs.rs/apollo-router](https://docs.rs/crate/apollo-router/latest).
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3626
 
-### Fix config metrics path and test for subscription callbacks ([Issue #3687](https://github.com/apollographql/router/issues/3687))
+### Fix config metrics for subscription callbacks ([Issue #3687](https://github.com/apollographql/router/issues/3687))
 
 Detection of subscription callbacks has been fixed for internal Apollo metrics. This has no user facing impact.
 
