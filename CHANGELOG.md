@@ -63,15 +63,6 @@ A single HTTP client will now be shared between requests of the same type when m
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3703
 
-### Add a metric tracking authorization usage ([PR #3660](https://github.com/apollographql/router/pull/3660))
-
-The new metric is a counter called `apollo.router.operations.authorization` and contains the following boolean attributes:
-- `filtered`: the query has one or more filtered fields 
-- `requires_scopes`: the query uses fields or types tagged with the `@requiresScopes` directive
-- `authenticated`: the query uses fields or types tagged with the `@authenticated` directive
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3660
-
 ### Remove unneeded schema parsing steps ([PR #3547](https://github.com/apollographql/router/pull/3547))
 
 We need access to a parsed schema in various parts of the router, sometimes before the point where it is actually parsed and integrated with the rest of the configuration, so it was parsed multiple times to mitigate that. Some architecture changes made these parsing steps obsolete so they were removed.
