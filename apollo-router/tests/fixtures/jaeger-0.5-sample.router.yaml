@@ -1,0 +1,29 @@
+telemetry:
+  tracing:
+    experimental_response_trace_id:
+      enabled: true
+      header_name: apollo-custom-trace-id
+    propagation:
+      jaeger: true
+    trace_config:
+      service_name: router
+      sampler: 0.5
+    jaeger:
+      batch_processor:
+        scheduled_delay: 100ms
+      agent:
+        endpoint: default
+  experimental_logging:
+    when_header:
+      - name: apollo-router-log-request
+        value: test
+        headers: true # default: false
+        body: true # default: false
+      # log request for all requests coming from Iphones
+      - name: custom-header
+        match: ^foo.*
+        headers: true
+override_subgraph_url:
+  products: http://localhost:4005
+include_subgraph_errors:
+  all: true
