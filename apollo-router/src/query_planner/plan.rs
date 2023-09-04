@@ -10,12 +10,19 @@ use super::subscription::SubscriptionNode;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::spec::Query;
 
 /// A planner key.
 ///
-/// This type consists of a query string and an optional operation string
-pub(crate) type QueryKey = (String, Option<String>);
+/// This type contains everything needed to separate query plan cache entries
+#[derive(Clone)]
+pub(crate) struct QueryKey {
+    pub(crate) filtered_query: String,
+    pub(crate) original_query: String,
+    pub(crate) operation_name: Option<String>,
+    pub(crate) metadata: CacheKeyMetadata,
+}
 
 /// A plan for a given GraphQL query
 #[derive(Debug, Serialize, Deserialize)]
@@ -176,6 +183,41 @@ impl PlanNode {
 
                 false
             }
+        }
+    }
+
+    pub(crate) fn subgraph_fetches(&self) -> usize {
+        match self {
+            PlanNode::Sequence { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
+            PlanNode::Parallel { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
+            PlanNode::Fetch(_) => 1,
+            PlanNode::Flatten(node) => node.node.subgraph_fetches(),
+            PlanNode::Defer { primary, deferred } => {
+                primary.node.as_ref().map_or(0, |n| n.subgraph_fetches())
+                    + deferred
+                        .iter()
+                        .map(|n| n.node.as_ref().map_or(0, |n| n.subgraph_fetches()))
+                        .sum::<usize>()
+            }
+            // A `SubscriptionNode` makes a request to a subgraph, so counting it as 1
+            PlanNode::Subscription { rest, .. } => {
+                rest.as_ref().map_or(0, |n| n.subgraph_fetches()) + 1
+            }
+            // Compute the highest possible value for condition nodes
+            PlanNode::Condition {
+                if_clause,
+                else_clause,
+                ..
+            } => std::cmp::max(
+                if_clause
+                    .as_ref()
+                    .map(|n| n.subgraph_fetches())
+                    .unwrap_or(0),
+                else_clause
+                    .as_ref()
+                    .map(|n| n.subgraph_fetches())
+                    .unwrap_or(0),
+            ),
         }
     }
 

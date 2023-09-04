@@ -43,12 +43,14 @@ pub(crate) enum SpecError {
     SubscriptionNotSupported,
 }
 
+pub(crate) const GRAPHQL_VALIDATION_FAILURE_ERROR_KEY: &str = "## GraphQLValidationFailure\n";
+
 impl SpecError {
     pub(crate) const fn get_error_key(&self) -> &'static str {
         match self {
             SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
             SpecError::UnknownOperation(_) => "## GraphQLUnknownOperationName\n",
-            _ => "## GraphQLValidationFailure\n",
+            _ => GRAPHQL_VALIDATION_FAILURE_ERROR_KEY,
         }
     }
 }

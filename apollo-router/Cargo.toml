@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.27.0"
+version = "1.28.1"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -53,9 +53,9 @@ features = ["docs_rs"]
 askama = "0.12.0"
 access-json = "0.1.0"
 anyhow = "1.0.75"
-apollo-compiler = "0.11.0"
+apollo-compiler = "0.11.1"
 apollo-encoder = "0.7.0"
-apollo-parser = "0.6.0"
+apollo-parser = "0.6.1"
 arc-swap = "1.6.0"
 async-compression = { version = "0.4.1", features = [
     "tokio",
@@ -69,15 +69,15 @@ axum = { version = "0.6.20", features = ["headers", "json", "original-uri"] }
 base64 = "0.21.2"
 buildstructor = "0.5.3"
 bytes = "1.4.0"
-clap = { version = "4.3.23", default-features = false, features = [
+clap = { version = "4.4.2", default-features = false, features = [
     "env",
     "derive",
     "std",
     "help",
 ] }
 console-subscriber = { version = "0.1.10", optional = true }
-ci_info = {version="0.14.11", features=["serde-1"] }
-dashmap = { version = "5.5.0", features = ["serde"] }
+ci_info = { version = "0.14.11", features = ["serde-1"] }
+dashmap = { version = "5.5.3", features = ["serde"] }
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", default-features = false, features = [
     "from",
@@ -87,8 +87,8 @@ dhat = { version = "0.3.2", optional = true }
 diff = "0.1.13"
 directories = "5.0.1"
 displaydoc = "0.2"
-flate2 = "1.0.24" # TODO: bump the flate2 dependency once deno updates it. Also, be sure to update Renovate configuration.
-fred = { version = "6.3.0", features = ["enable-rustls", "no-client-setname"] }
+flate2 = "1.0.27"
+fred = { version = "6.3.1", features = ["enable-rustls", "no-client-setname"] }
 futures = { version = "0.3.28", features = ["thread-pool"] }
 graphql_client = "0.13.0"
 hex = "0.4.3"
@@ -116,7 +116,9 @@ mime = "0.3.17"
 multer = "2.1.0"
 multimap = "0.9.0"
 # To avoid tokio issues
-notify = { version = "6.1.1", default-features = false, features=["macos_kqueue"] }
+notify = { version = "6.1.1", default-features = false, features = [
+    "macos_kqueue",
+] }
 nu-ansi-term = "0.49"
 once_cell = "1.18.0"
 
@@ -131,10 +133,7 @@ once_cell = "1.18.0"
 # groups `^tracing` and `^opentelemetry*` dependencies together as of
 # https://github.com/apollographql/router/pull/1509.  A comment which exists
 # there (and on `tracing` packages below) should be updated should this change.
-opentelemetry = { version = "0.19.0", features = [
-    "rt-tokio",
-    "metrics",
-] }
+opentelemetry = { version = "0.19.0", features = ["rt-tokio", "metrics"] }
 opentelemetry-datadog = { version = "0.7.0", features = ["reqwest-client"] }
 opentelemetry-http = "0.8.0"
 opentelemetry-jaeger = { version = "0.18.0", features = [
@@ -164,7 +163,7 @@ prost-types = "0.11.9"
 proteus = "0.5.0"
 rand = "0.8.5"
 rhai = { version = "1.15.1", features = ["sync", "serde", "internals"] }
-regex = "1.9.3"
+regex = "1.9.5"
 reqwest = { version = "0.11.19", default-features = false, features = [
     "rustls-tls",
     "rustls-native-certs",
@@ -172,26 +171,34 @@ reqwest = { version = "0.11.19", default-features = false, features = [
     "stream",
 ] }
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.4.0+v2.4.10"
-rust-embed="6.8.1"
+router-bridge = "=0.5.4+v2.5.3"
+rust-embed = "6.8.1"
 rustls = "0.21.6"
 rustls-pemfile = "1.0.3"
 schemars = { version = "0.8.12", features = ["url"] }
 shellexpand = "3.1.0"
 sha2 = "0.10.7"
-serde = { version = "1.0.183", features = ["derive", "rc"] }
+serde = { version = "1.0.188", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.1", features = ["preserve_order"] }
-serde_json = { version = "1.0.105", features = ["preserve_order", "float_roundtrip"] }
+serde_json = { version = "1.0.105", features = [
+    "preserve_order",
+    "float_roundtrip",
+] }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum_macros = "0.25.2"
 sys-info = "0.9.1"
-thiserror = "1.0.47"
+thiserror = "1.0.48"
 tokio = { version = "1.32.0", features = ["full"] }
 tokio-stream = { version = "0.1.14", features = ["sync", "net"] }
 tokio-util = { version = "0.7.8", features = ["net", "codec", "time"] }
-tonic = { version = "0.8.3", features = ["transport", "tls", "tls-roots", "gzip"] }
+tonic = { version = "0.8.3", features = [
+    "transport",
+    "tls",
+    "tls-roots",
+    "gzip",
+] }
 tower = { version = "0.4.13", features = ["full"] }
 tower-http = { version = "0.4.3", features = [
     "add-extension",
@@ -211,18 +218,20 @@ tracing-core = "0.1.31"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
 tracing-opentelemetry = "0.19.0"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter", "json"] }
-url = { version = "2.4.0", features = ["serde"] }
+url = { version = "2.4.1", features = ["serde"] }
 urlencoding = "2.1.3"
 uuid = { version = "1.4.1", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
 wiremock = "0.5.19"
 wsl = "0.1.0"
-tokio-tungstenite = { version = "0.18.0", features = ["rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.18.0", features = [
+    "rustls-tls-native-roots",
+] }
 tokio-rustls = "0.24.1"
 http-serde = "1.1.3"
 hmac = "0.12.1"
 parking_lot = "0.12.1"
-memchr = "2.5.0"
+memchr = "2.6.3"
 brotli = "3.3.4"
 zstd = "0.12.4"
 zstd-safe = "6.0.6"
@@ -244,14 +253,18 @@ uname = "0.1.1"
 tikv-jemallocator = "0.5"
 
 [dev-dependencies]
-axum = { version = "0.6.20", features = ["headers", "json", "original-uri", "ws"] }
+axum = { version = "0.6.20", features = [
+    "headers",
+    "json",
+    "original-uri",
+    "ws",
+] }
 ecdsa = { version = "0.15.1", features = ["signing", "pem", "pkcs8"] }
-fred = { version = "6.3.0", features = ["enable-rustls", "no-client-setname"] }
+fred = { version = "6.3.1", features = ["enable-rustls", "no-client-setname"] }
 futures-test = "0.3.28"
 insta = { version = "1.31.0", features = ["json", "redactions", "yaml"] }
-introspector-gadget = "0.2.2"
 maplit = "1.0.2"
-memchr = { version = "2.5.0", default-features = false }
+memchr = { version = "2.6.3", default-features = false }
 mockall = "0.11.4"
 once_cell = "1.18.0"
 p256 = "0.12.0"
@@ -261,7 +274,12 @@ reqwest = { version = "0.11.19", default-features = false, features = [
     "json",
     "stream",
 ] }
-rhai = { version = "1.15.1", features = ["sync", "serde", "internals", "testing-environ"] }
+rhai = { version = "1.15.1", features = [
+    "sync",
+    "serde",
+    "internals",
+    "testing-environ",
+] }
 similar-asserts = "1.5.0"
 tempfile = "3.8.0"
 test-log = { version = "0.2.12", default-features = false, features = [
