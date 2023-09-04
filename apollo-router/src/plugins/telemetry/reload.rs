@@ -26,6 +26,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
 use super::config::SamplerOption;
+use super::metrics::span_metrics_exporter::SpanMetricsLayer;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::text::TextFormatter;
@@ -34,9 +35,15 @@ use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::metrics::layer::MetricsLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 
+pub(crate) type LayeredRegistry = Layered<SpanMetricsLayer, Registry>;
+
 pub(super) type LayeredTracer = Layered<
-    Filtered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, SamplingFilter, Registry>,
-    Registry,
+    Filtered<
+        OpenTelemetryLayer<LayeredRegistry, ReloadTracer<Tracer>>,
+        SamplingFilter,
+        LayeredRegistry,
+    >,
+    LayeredRegistry,
 >;
 
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
@@ -115,6 +122,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
             // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
             // the tracing registry is only created once
             tracing_subscriber::registry()
+                .with(SpanMetricsLayer::default())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
                 .with(metrics_layer)
@@ -144,7 +152,6 @@ pub(super) fn reload_metrics(layer: MetricsLayer) {
     }
 }
 
-#[allow(clippy::type_complexity)]
 pub(super) fn reload_fmt(layer: Box<dyn Layer<LayeredTracer> + Send + Sync>) {
     if let Some(handle) = FMT_LAYER_HANDLE.get() {
         handle.reload(layer).expect("fmt layer reload must succeed");

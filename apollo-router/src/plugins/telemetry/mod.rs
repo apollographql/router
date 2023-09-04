@@ -637,8 +637,6 @@ impl Telemetry {
         builder = setup_tracing(builder, &tracing_config.datadog, &trace_config)?;
         builder = setup_tracing(builder, &tracing_config.otlp, &trace_config)?;
         builder = setup_tracing(builder, &apollo_config, &trace_config)?;
-        // For metrics
-        builder = builder.with_simple_exporter(metrics::span_metrics_exporter::Exporter::default());
 
         if tracing_config.jaeger.is_none()
             && tracing_config.zipkin.is_none()
@@ -691,7 +689,6 @@ impl Telemetry {
         Ok(builder)
     }
 
-    #[allow(clippy::type_complexity)]
     fn create_fmt_layer(config: &config::Conf) -> Box<dyn Layer<LayeredTracer> + Send + Sync> {
         let logging = &config.logging;
         let fmt = match logging.format {
@@ -853,7 +850,7 @@ impl Telemetry {
                 }
                 ::tracing::info!(
                     monotonic_counter.apollo.router.operations = 1u64,
-                    http.response.status_code = parts.status.as_u16() as i64,
+                    http.response.status_code = parts.status.as_u16(),
                 );
                 let response = http::Response::from_parts(
                     parts,
