@@ -3322,12 +3322,15 @@ fn it_parses_default_floats() {
     );
 
     let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
-    let value = schema.type_system.definitions.input_objects["WithAllKindsOfFloats"]
-        .field("a_float_that_doesnt_fit_an_int")
+    let value = schema
+        .definitions
+        .get_input_object("WithAllKindsOfFloats")
         .unwrap()
-        .default_value()
+        .fields["a_float_that_doesnt_fit_an_int"]
+        .default_value
+        .as_ref()
         .unwrap();
-    assert_eq!(f64::try_from(value).unwrap() as i64, 9876543210);
+    assert_eq!(value.to_f64().unwrap() as i64, 9876543210);
 }
 
 #[test]
@@ -5575,7 +5578,7 @@ fn test_query_not_named_query() {
         matches!(
             selection,
             Selection::Field {
-                field_type: FieldType(hir::Type::Named { name, .. }),
+                field_type: FieldType(apollo_compiler::executable::Type::Named(name)),
                 ..
             }
             if name == "Boolean"
@@ -5630,10 +5633,9 @@ fn filtered_defer_fragment() {
         }
       }";
 
-    let mut compiler = ApolloCompiler::new();
-    compiler.add_executable(query, "query.graphql");
+    let doc = ExecutableDocument::parse(&schema.definitions, query, "query.graphql");
     let (fragments, operations, defer_stats) =
-        Query::extract_query_information(&compiler, &schema).unwrap();
+        Query::extract_query_information(&schema, &doc).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5654,10 +5656,13 @@ fn filtered_defer_fragment() {
         validation_error: None,
     };
 
-    let mut compiler = ApolloCompiler::new();
-    compiler.add_executable(filtered_query, "filtered_query.graphql");
+    let doc = ExecutableDocument::parse(
+        &schema.definitions,
+        filtered_query,
+        "filtered_query.graphql",
+    );
     let (fragments, operations, defer_stats) =
-        Query::extract_query_information(&compiler, &schema).unwrap();
+        Query::extract_query_information(&schema, &doc).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,

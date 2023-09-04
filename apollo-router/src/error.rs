@@ -1,7 +1,6 @@
 //! Router errors.
 use std::sync::Arc;
 
-use apollo_compiler::ApolloDiagnostic;
 use displaydoc::Display;
 use lazy_static::__Deref;
 use router_bridge::introspect::IntrospectionError;
@@ -475,7 +474,7 @@ impl From<SpecError> for QueryPlannerError {
 impl From<ValidationErrors> for QueryPlannerError {
     fn from(err: ValidationErrors) -> Self {
         QueryPlannerError::OperationValidationErrors(
-            err.errors.iter().map(ApolloDiagnostic::to_json).collect(),
+            err.errors.iter().map(|e| e.to_json()).collect(),
         )
     }
 }
@@ -554,9 +553,9 @@ pub(crate) enum SchemaError {
 }
 
 /// Collection of schema validation errors.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct ParseErrors {
-    pub(crate) errors: Vec<apollo_parser::Error>,
+    pub(crate) errors: apollo_compiler::Diagnostics,
 }
 
 impl std::fmt::Display for ParseErrors {
@@ -567,7 +566,7 @@ impl std::fmt::Display for ParseErrors {
                 f.write_str("\n")?;
             }
             // TODO(@goto-bus-stop): display line/column once that is exposed from apollo-rs
-            write!(f, "at index {}: {}", error.index(), error.message())?;
+            write!(f, "{}", error)?;
         }
         let remaining = errors.count();
         if remaining > 0 {
@@ -578,19 +577,19 @@ impl std::fmt::Display for ParseErrors {
 }
 
 /// Collection of schema validation errors.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct ValidationErrors {
-    pub(crate) errors: Vec<apollo_compiler::ApolloDiagnostic>,
+    pub(crate) errors: apollo_compiler::Diagnostics,
 }
 
 impl IntoGraphQLErrors for ValidationErrors {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         Ok(self
             .errors
-            .into_iter()
+            .iter()
             .map(|diagnostic| {
                 Error::builder()
-                    .message(diagnostic.data.to_string())
+                    .message(diagnostic.message().to_string())
                     .locations(
                         diagnostic
                             .get_line_column()
@@ -616,9 +615,15 @@ impl std::fmt::Display for ValidationErrors {
                 f.write_str("\n")?;
             }
             if let Some(location) = error.get_line_column() {
-                write!(f, "[{}:{}] {}", location.line, location.column, error.data)?;
+                write!(
+                    f,
+                    "[{}:{}] {}",
+                    location.line,
+                    location.column,
+                    error.message()
+                )?;
             } else {
-                write!(f, "{}", error.data)?;
+                write!(f, "{}", error.message())?;
             }
         }
         Ok(())
