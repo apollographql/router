@@ -60,6 +60,7 @@ use super::Plugins;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
+use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -482,8 +483,22 @@ async fn call_websocket(
     };
 
     let request = get_websocket_request(service_name.clone(), parts, subgraph_cfg)?;
+
     let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
+
+    let signing_params = {
+        let ctx = context.private_entries.lock();
+        let sp = ctx.get::<SigningParamsConfig>();
+        sp.cloned()
+    };
+
+    let request = if let Some(signing_params) = signing_params {
+        signing_params.sign_empty(request).await?
+    } else {
+        request
+    };
+
     if display_headers {
         tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Websocket request headers to subgraph {service_name:?}");
     }
@@ -667,6 +682,18 @@ async fn call_http(
 
     let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
+
+    let signing_params = {
+        let ctx = context.private_entries.lock();
+        let sp = ctx.get::<SigningParamsConfig>();
+        sp.cloned()
+    };
+
+    let request = if let Some(signing_params) = signing_params {
+        signing_params.sign(request).await?
+    } else {
+        request
+    };
 
     // Print out the debug for the request
     if display_headers {

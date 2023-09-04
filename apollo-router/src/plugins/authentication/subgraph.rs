@@ -1,4 +1,3 @@
-use core::ops::ControlFlow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -12,13 +11,14 @@ use aws_sigv4::http_request::SignableBody;
 use aws_sigv4::http_request::SignableRequest;
 use aws_sigv4::http_request::SigningSettings;
 use aws_types::region::Region;
+use http::Request;
+use hyper::Body;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use crate::layers::ServiceBuilderExt;
 use crate::services::SubgraphRequest;
 
 /// Hardcoded Config using access_key and secret.
@@ -193,6 +193,110 @@ pub(crate) struct SigningParamsConfig {
     credentials_provider: Arc<dyn ProvideCredentials>,
     region: Region,
     service_name: String,
+    subgraph_name: String,
+}
+
+impl SigningParamsConfig {
+    pub(crate) async fn sign(self, mut req: Request<Body>) -> Result<Request<Body>, BoxError> {
+        let credentials = self
+            .credentials_provider
+            .provide_credentials()
+            .await
+            .map_err(|err| {
+                increment_failure_counter(self.subgraph_name.as_str());
+                let error = format!("failed to get credentials for AWS SigV4 signing: {}", err);
+                tracing::error!("{}", error);
+                error
+            })?;
+
+        let settings = get_signing_settings(&self);
+        let mut builder = http_request::SigningParams::builder()
+            .access_key(credentials.access_key_id())
+            .secret_key(credentials.secret_access_key())
+            .region(self.region.as_ref())
+            .service_name(&self.service_name)
+            .time(SystemTime::now())
+            .settings(settings);
+        builder.set_security_token(credentials.session_token());
+
+        // UnsignedPayload only applies to lattice
+        let (parts, body) = req.into_parts();
+        let body_bytes = hyper::body::to_bytes(body).await?.to_vec();
+        let signable_request = SignableRequest::new(
+            &parts.method,
+            &parts.uri,
+            &parts.headers,
+            match self.service_name.as_str() {
+                "vpc-lattice-svcs" => SignableBody::UnsignedPayload,
+                _ => SignableBody::Bytes(body_bytes.as_slice()),
+            },
+        );
+
+        let signing_params = builder.build().expect("all required fields set");
+
+        let (signing_instructions, _signature) = sign(signable_request, &signing_params)
+            .map_err(|err| {
+                increment_failure_counter(self.subgraph_name.as_str());
+                let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
+                tracing::error!("{}", error);
+                error
+            })?
+            .into_parts();
+        req = Request::<Body>::from_parts(parts, body_bytes.into());
+        signing_instructions.apply_to_request(&mut req);
+        increment_success_counter(self.subgraph_name.as_str());
+        Ok(req)
+    }
+    // This function is the same as above, except it's a new one because () doesn't implement `HttpBody` for some reason...
+    pub(crate) async fn sign_empty(self, mut req: Request<()>) -> Result<Request<()>, BoxError> {
+        let credentials = self
+            .credentials_provider
+            .provide_credentials()
+            .await
+            .map_err(|err| {
+                increment_failure_counter(self.subgraph_name.as_str());
+                let error = format!("failed to get credentials for AWS SigV4 signing: {}", err);
+                tracing::error!("{}", error);
+                error
+            })?;
+
+        let settings = get_signing_settings(&self);
+        let mut builder = http_request::SigningParams::builder()
+            .access_key(credentials.access_key_id())
+            .secret_key(credentials.secret_access_key())
+            .region(self.region.as_ref())
+            .service_name(&self.service_name)
+            .time(SystemTime::now())
+            .settings(settings);
+        builder.set_security_token(credentials.session_token());
+
+        // UnsignedPayload only applies to lattice
+        let (parts, _) = req.into_parts();
+        let signable_request = SignableRequest::new(
+            &parts.method,
+            &parts.uri,
+            &parts.headers,
+            match self.service_name.as_str() {
+                "vpc-lattice-svcs" => SignableBody::UnsignedPayload,
+                _ => SignableBody::Bytes(&[]),
+            },
+        );
+
+        let signing_params = builder.build().expect("all required fields set");
+
+        let (signing_instructions, _signature) = sign(signable_request, &signing_params)
+            .map_err(|err| {
+                increment_failure_counter(self.subgraph_name.as_str());
+                let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
+                tracing::error!("{}", error);
+                error
+            })?
+            .into_parts();
+        req = Request::<()>::from_parts(parts, ());
+        signing_instructions.apply_to_request(&mut req);
+        increment_success_counter(self.subgraph_name.as_str());
+        Ok(req)
+    }
 }
 
 fn increment_success_counter(subgraph_name: &str) {
@@ -234,6 +338,7 @@ pub(super) async fn make_signing_params(
                 region: config.region(),
                 service_name: config.service_name(),
                 credentials_provider,
+                subgraph_name: subgraph_name.to_string(),
             })
         }
     }
@@ -261,77 +366,12 @@ impl SubgraphAuth {
         service: crate::services::subgraph::BoxService,
     ) -> crate::services::subgraph::BoxService {
         if let Some(signing_params) = self.params_for_service(name) {
-            let name = name.to_string();
             ServiceBuilder::new()
-                .checkpoint_async(move |mut req: SubgraphRequest| {
+                .map_request(move |req: SubgraphRequest| {
                     let signing_params = signing_params.clone();
-                    let name = name.clone();
-                    async move {
-                        let credentials = signing_params
-                            .credentials_provider
-                            .provide_credentials()
-                            .await
-                            .map_err(|err| {
-                                increment_failure_counter(name.as_str());
-                                let error = format!(
-                                    "failed to get credentials for AWS SigV4 signing: {}",
-                                    err
-                                );
-                                tracing::error!("{}", error);
-                                error
-                            })?;
-
-                        let settings = get_signing_settings(&signing_params);
-                        let mut builder = http_request::SigningParams::builder()
-                            .access_key(credentials.access_key_id())
-                            .secret_key(credentials.secret_access_key())
-                            .region(signing_params.region.as_ref())
-                            .service_name(&signing_params.service_name)
-                            .time(SystemTime::now())
-                            .settings(settings);
-                        builder.set_security_token(credentials.session_token());
-                        let body_bytes =
-                            serde_json::to_vec(&req.subgraph_request.body()).map_err(|err| {
-                                increment_failure_counter(name.as_str());
-                                let error = format!(
-                                    "failed to serialize GraphQL body for AWS SigV4 signing: {}",
-                                    err
-                                );
-                                tracing::error!("{}", error);
-                                error
-                            })?;
-
-                        // UnsignedPayload only applies to lattice
-                        let signable_request = SignableRequest::new(
-                            req.subgraph_request.method(),
-                            req.subgraph_request.uri(),
-                            req.subgraph_request.headers(),
-                            match signing_params.service_name.as_str() {
-                                "vpc-lattice-svcs" => SignableBody::UnsignedPayload,
-                                _ => SignableBody::Bytes(&body_bytes),
-                            },
-                        );
-
-                        let signing_params = builder.build().expect("all required fields set");
-
-                        let (signing_instructions, _signature) =
-                            sign(signable_request, &signing_params)
-                                .map_err(|err| {
-                                    increment_failure_counter(name.as_str());
-                                    let error = format!(
-                                        "failed to sign GraphQL body for AWS SigV4: {}",
-                                        err
-                                    );
-                                    tracing::error!("{}", error);
-                                    error
-                                })?
-                                .into_parts();
-                        signing_instructions.apply_to_request(&mut req.subgraph_request);
-                        increment_success_counter(name.as_str());
-                        Ok(ControlFlow::Continue(req))
-                    }
+                    req.context.private_entries.lock().insert(signing_params);
+                    req
                 })
-                .buffered()
                 .service(service)
                 .boxed()
         } else {
