@@ -284,7 +284,6 @@ dependencies = [
  "askama",
  "async-compression",
  "async-trait",
- "atty",
  "aws-config",
  "aws-credential-types",
  "aws-sigv4",

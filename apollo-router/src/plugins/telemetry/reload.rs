@@ -1,3 +1,5 @@
+use std::io::IsTerminal;
+
 use anyhow::anyhow;
 use anyhow::Result;
 use once_cell::sync::OnceCell;
@@ -55,7 +57,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(hot_tracer.clone());
 
     // We choose json or plain based on tty
-    let fmt = if atty::is(atty::Stream::Stdout) {
+    let fmt = if std::io::stdout().is_terminal() {
         tracing_subscriber::fmt::Layer::new()
             .event_format(FilteringFormatter::new(
                 TextFormatter::new()
