@@ -47,7 +47,7 @@ impl TryFrom<EventData> for Option<Sse> {
             return Err(Error::InvalidEvent);
         }
 
-        if event_data.data.is_empty() {
+        if event_data.data.is_empty() && event_data.event_type.is_empty() {
             return Ok(None);
         }
 
@@ -58,7 +58,9 @@ impl TryFrom<EventData> for Option<Sse> {
         };
 
         let mut data = event_data.data.clone();
-        data.truncate(data.len() - 1);
+        if !data.is_empty() {
+            data.truncate(data.len() - 1);
+        }
 
         let id = event_data.id.clone();
 

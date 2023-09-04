@@ -544,6 +544,8 @@ async fn call_sse(
             .map(Ok::<_, graphql::Error>)
             .forward(handle_sink)
             .await;
+
+        tracing::trace!("SSE stream closed");
     });
 
     subscription_stream_tx.send(handle_stream).await?;
@@ -1241,6 +1243,8 @@ mod tests {
     use std::net::SocketAddr;
     use std::net::TcpListener;
     use std::str::FromStr;
+    use std::sync::atomic::AtomicI32;
+    use std::sync::atomic::Ordering;
 
     use axum::extract::ws::Message;
     use axum::extract::ConnectInfo;
@@ -1249,12 +1253,12 @@ mod tests {
     use axum::response::IntoResponse;
     use axum::response::Sse;
     use axum::routing::get;
+    use axum::Extension;
     use axum::Router;
     use axum::Server;
     use bytes::Buf;
     use futures::channel::mpsc;
     use futures::stream::Stream;
-    use futures::StreamExt;
     use http::header::HOST;
     use http::StatusCode;
     use http::Uri;
@@ -1262,6 +1266,7 @@ mod tests {
     use hyper::Body;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
+    use tokio_stream::StreamExt;
     use tower::service_fn;
     use tower::ServiceExt;
     use url::Url;
@@ -1888,12 +1893,24 @@ mod tests {
     }
 
     // starts a local server emulating a subgraph returning bad response format
-    async fn emulate_subgraph_sse_ok(listener: TcpListener) {
+    async fn emulate_subgraph_sse_ok(
+        listener: TcpListener,
+        num_events: i32,
+        total_handler_calls: Arc<AtomicI32>,
+        total_messages: Arc<AtomicI32>,
+    ) {
         async fn sse_handle(
+            Extension(num_events): Extension<i32>,
+            Extension((total_handler_calls, total_messages)): Extension<(
+                Arc<AtomicI32>,
+                Arc<AtomicI32>,
+            )>,
             request: http::Request<Body>,
         ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
             let (parts, body) = request.into_parts();
             let body_bytes = hyper::body::to_bytes(body).await.unwrap();
+
+            total_handler_calls.fetch_add(1, Ordering::SeqCst);
 
             let accept = parts.headers.get(ACCEPT).unwrap().to_str().unwrap();
 
@@ -1908,12 +1925,17 @@ mod tests {
                     .build()
             );
 
-            let stream = futures::stream::iter(1..2)
+            let stream = futures::stream::iter(0..num_events)
                 .map(|_| {
                     let response = graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build();
                     Event::default()
                         .event("next")
-                        .data(serde_json_bytes::serde_json::to_string(&response).unwrap())
+                    .data(serde_json_bytes::serde_json::to_string(&response).unwrap())
+                })
+                .throttle(Duration::from_millis(10))
+                .map(move |m| {
+                    total_messages.fetch_add(1, Ordering::SeqCst);
+                    m
                 })
                 .chain(futures::stream::once(futures::future::ready(
                     Event::default().event("complete"),
@@ -1924,6 +1946,8 @@ mod tests {
         }
         let router = axum::Router::new()
             .route("/sse", axum::routing::post(sse_handle))
+            .layer(Extension(num_events))
+            .layer(Extension((total_handler_calls, total_messages)))
             .layer(tower_http::trace::TraceLayer::new_for_http());
 
         let server = Server::from_tcp(listener)
@@ -2295,7 +2319,14 @@ mod tests {
     async fn test_subgraph_service_sse() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
-        let spawned_task = tokio::task::spawn(emulate_subgraph_sse_ok(listener));
+        let total_handler_calls = Arc::new(AtomicI32::new(0));
+        let total_messages = Arc::new(AtomicI32::new(0));
+        let spawned_task = tokio::task::spawn(emulate_subgraph_sse_ok(
+            listener,
+            1,
+            total_handler_calls.clone(),
+            total_messages.clone(),
+        ));
         let subgraph_service = SubgraphService::new(
             "testsse",
             true,
@@ -2349,6 +2380,8 @@ mod tests {
                 .build()
         );
         spawned_task.abort();
+        assert_eq!(total_handler_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(total_messages.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2425,6 +2458,178 @@ mod tests {
                     .build()])
                 .build()
         );
+        spawned_task.abort();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_sse_complete() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let total_handler_calls = Arc::new(AtomicI32::new(0));
+        let total_messages = Arc::new(AtomicI32::new(0));
+        let spawned_task = tokio::task::spawn(emulate_subgraph_sse_ok(
+            listener,
+            2,
+            total_handler_calls.clone(),
+            total_messages.clone(),
+        ));
+        let mut subscription_config = subscription_config();
+        let sse_config = subscription_config
+            .mode
+            .sse
+            .as_mut()
+            .unwrap()
+            .subgraphs
+            .get_mut("testsse")
+            .unwrap();
+        sse_config.reconnect = Some(false);
+        sse_config.retry_initial = Some(false);
+        let subgraph_service = SubgraphService::new(
+            "testsse",
+            true,
+            None,
+            false,
+            subscription_config.into(),
+            Notify::builder().build(),
+        );
+        let (tx, mut rx) = mpsc::channel(2);
+
+        let url = Uri::from_str(&format!("http://{socket_addr}/sse")).unwrap();
+        // The first initial response should be ok
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(
+                            Request::builder()
+                                .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                                .build(),
+                        )
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(
+                        Request::builder()
+                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Subscription,
+                context: Context::new(),
+                subscription_stream: Some(tx),
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+        assert!(response.response.body().errors.is_empty());
+
+        let mut gql_stream = rx.next().await.unwrap();
+        let mut messages = 0;
+        while let Some(response) = gql_stream.next().await {
+            assert_eq!(
+                response,
+                graphql::Response::builder()
+                    .subscribed(true)
+                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .build()
+            );
+            messages += 1;
+        }
+
+        assert_eq!(messages, 2);
+        spawned_task.abort();
+        assert_eq!(total_handler_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(total_messages.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_sse_close() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let total_handler_calls = Arc::new(AtomicI32::new(0));
+        let total_messages = Arc::new(AtomicI32::new(0));
+        let spawned_task = tokio::task::spawn(emulate_subgraph_sse_ok(
+            listener,
+            200,
+            total_handler_calls.clone(),
+            total_messages.clone(),
+        ));
+        let mut subscription_config = subscription_config();
+        let sse_config = subscription_config
+            .mode
+            .sse
+            .as_mut()
+            .unwrap()
+            .subgraphs
+            .get_mut("testsse")
+            .unwrap();
+        sse_config.reconnect = Some(false);
+        sse_config.retry_initial = Some(false);
+        let subgraph_service = SubgraphService::new(
+            "testsse",
+            true,
+            None,
+            false,
+            subscription_config.into(),
+            Notify::builder().build(),
+        );
+        let (tx, mut rx) = mpsc::channel(2);
+
+        let url = Uri::from_str(&format!("http://{socket_addr}/sse")).unwrap();
+        // The first initial response should be ok
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(
+                            Request::builder()
+                                .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                                .build(),
+                        )
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(
+                        Request::builder()
+                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Subscription,
+                context: Context::new(),
+                subscription_stream: Some(tx),
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+        assert!(response.response.body().errors.is_empty());
+
+        let mut gql_stream = rx.next().await.unwrap();
+        let message = gql_stream.next().await.unwrap();
+        assert_eq!(
+            message,
+            graphql::Response::builder()
+                .subscribed(true)
+                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                .build()
+        );
+        drop(gql_stream);
+        rx.close();
+        //Sleep to make sure no more events are processed
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        assert_eq!(total_handler_calls.load(Ordering::SeqCst), 1);
+        let total_messages = total_messages.load(Ordering::SeqCst);
+        assert!(total_messages < 10);
         spawned_task.abort();
     }
 
