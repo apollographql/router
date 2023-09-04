@@ -103,7 +103,6 @@ directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENU
 
 This directive allows access to the annotated field or type for authenticated requests only.
 For more information on how to use these directives, please read Apollo Router [docs](https://www.apollographql.com/docs/router/configuration/authorization)
-```
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3397 https://github.com/apollographql/router/pull/3662
 
@@ -267,7 +266,7 @@ Several improvements to safelisting behavior based on preview feedback:
 * If introspection is enabled on the server, any operation whose top-level fields are introspection fields (`__type`, `__schema`, or `__typename`) is considered to be in the safelist.
   This special case is not applied if `require_id` is enabled, so that Router never parses freeform GraphQL in this mode.
 * When `log_unknown` is enabled and `apq` has not been disabled, the Router now logs any operation not in the safelist as unknown, even those sent via IDs if the operation was found in the APQ cache rather than the manifest.
-* When `log_unknown` and `require_id` are both enabled, the Router now logs all operations that rejects (i.e., all operations sent as freeform GraphQL). 
+* When `log_unknown` and `require_id` are both enabled, the Router now logs all operations that rejects (i.e., all operations sent as freeform GraphQL).
 
   Previously, the Router only logged the operations that would have been rejected by the safelist feature with `require_id` disabled (i.e., operations sent as freeform GraphQL that do not match an operation in the manifest).
 
@@ -681,7 +680,7 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 # [1.24.0] - 2023-07-13
 
-***Note that this release contains a bug in query planning around query fragment reuse and should not be used. If upgrading, consider going straight to 1.25.0.*** 
+***Note that this release contains a bug in query planning around query fragment reuse and should not be used. If upgrading, consider going straight to 1.25.0.***
 
 ## 🚀 Features
 
@@ -705,7 +704,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 The GraphQL spec is rather light on what should happen when we process responses from subgraphs. The current behaviour within the Router was inconsistently short circuiting response processing and this producing confusing errors.
 > #### Processing the response
-> 
+>
 > If the response uses a non-200 status code and the media type of the response payload is application/json then the client MUST NOT rely on the body to be a well-formed GraphQL response since the source of the response may not be the server but instead some intermediary such as API gateways, proxies, firewalls, etc.
 
 The logic has been simplified and made consistent using the following rules:
@@ -919,7 +918,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 Root span name has changed from `request` to `<graphql.operation.kind> <graphql.operation.name>`
 
-[Open Telemetry graphql semantic conventions](https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/) specify that the root span name must match the operation kind and name. 
+[Open Telemetry graphql semantic conventions](https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/) specify that the root span name must match the operation kind and name.
 
 Many tracing providers don't have good support for filtering traces via attribute, so changing this significantly enhances the tracing experience.
 
@@ -1018,7 +1017,7 @@ By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https:/
 
 ### Add security-related warnings to JWT auth docs ([PR #3299](https://github.com/apollographql/router/pull/3299))
 
-There are a couple potential security pitfalls when leveraging the router for JWT authentication. These are now documented in [the relevant section of the docs](https://www.apollographql.com/docs/router/configuration/authn-jwt). If you are currently using JWT authentication in the router, be sure to [secure your subgraphs](https://www.apollographql.com/docs/federation/building-supergraphs/subgraphs-overview#securing-your-subgraphs) and [use care when propagating headers](https://www.apollographql.com/docs/router/configuration/authn-jwt#example-forwarding-claims-to-subgraphs). 
+There are a couple potential security pitfalls when leveraging the router for JWT authentication. These are now documented in [the relevant section of the docs](https://www.apollographql.com/docs/router/configuration/authn-jwt). If you are currently using JWT authentication in the router, be sure to [secure your subgraphs](https://www.apollographql.com/docs/federation/building-supergraphs/subgraphs-overview#securing-your-subgraphs) and [use care when propagating headers](https://www.apollographql.com/docs/router/configuration/authn-jwt#example-forwarding-claims-to-subgraphs).
 
 By [@dbanty](https://github.com/dbanty) in https://github.com/apollographql/router/pull/3299
 
@@ -1262,7 +1261,7 @@ This PR includes the following configurable performance optimizations.
 - Instead of sending subscription data between a Router and subgraph over an open WebSocket, the Router can be configured to send the subgraph a callback URL that will then be used to receive all source stream events
 - Subscription enabled subgraphs send source stream events (subscription updates) back to the callback URL by making HTTP POST requests
 - Refer to the [callback mode documentation](https://github.com/apollographql/router/blob/dev/dev-docs/callback_protocol.md) for more details, including an explanation of the callback URL request/response payload format
-- This feature is still experimental and needs to be enabled explicitly in the Router config file 
+- This feature is still experimental and needs to be enabled explicitly in the Router config file
 
 By [@bnjjj](https://github.com/bnjjj) and [@o0Ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/3285
 
@@ -1296,9 +1295,9 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 
 ### Add support for empty auth prefixes ([Issue #2909](https://github.com/apollographql/router/issues/2909))
 
-The `authentication.jwt` plugin now supports empty prefixes for the JWT header. Some companies use prefix-less headers; previously, the authentication plugin rejected requests even with an empty header explicitly set, such as: 
+The `authentication.jwt` plugin now supports empty prefixes for the JWT header. Some companies use prefix-less headers; previously, the authentication plugin rejected requests even with an empty header explicitly set, such as:
 
-```yml 
+```yml
 authentication:
   jwt:
     header_value_prefix: ""
