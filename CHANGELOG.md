@@ -57,10 +57,9 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
-### Uplink connections now reuse their reqwest client ([Issue #3333](https://github.com/apollographql/router/issues/3333))
+### Apollo Uplink connections re-use the existing HTTP client ([Issue #3333](https://github.com/apollographql/router/issues/3333))
 
-Previously uplink requests created a new reqwest client each time, this may cause CPU spikes especially on OSX.
-A single client will now be shared between requests of the same type. 
+A single HTTP client will now be shared between requests of the same type when making requests to [Apollo Uplink](https://www.apollographql.com/docs/federation/managed-federation/uplink/) to fetch supergraphs, licenses and configuration from Studio.  Previously, such requests created a new HTTP client on each periodic fetch which occasionally resulted in CPU spikes, especially on macOS.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3703
 
