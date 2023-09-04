@@ -24,6 +24,7 @@ use crate::plugin::DynPlugin;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::router_service::RouterCreator;
+use crate::services::HasSchema;
 use crate::spec::Schema;
 use crate::Configuration;
 
@@ -110,10 +111,9 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
             .await
             .map(|factory| {
                 if env::var("APOLLO_TELEMETRY_DISABLED").unwrap_or_default() != "true" {
+                    let schema = factory.supergraph_creator.schema();
+
                     tokio::task::spawn(async move {
-                        let schema = Arc::new(Schema::parse(&schema, &configuration).expect(
-                            "if we get here the schema was already parsed successfully elsewhere",
-                        ));
                         tracing::debug!("sending anonymous usage data to Apollo");
                         let report = create_report(configuration, schema);
                         if let Err(e) = send(report).await {

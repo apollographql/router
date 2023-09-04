@@ -25,7 +25,6 @@ use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::spec::Schema;
 use crate::Configuration;
 
 pub(crate) const LICENSE_EXPIRED_URL: &str = "https://go.apollo.dev/o/elp";
@@ -83,10 +82,7 @@ impl LicenseEnforcementReport {
         !self.restricted_config_in_use.is_empty()
     }
 
-    pub(crate) fn build(
-        configuration: &Configuration,
-        _schema: &Schema,
-    ) -> LicenseEnforcementReport {
+    pub(crate) fn build(configuration: &Configuration) -> LicenseEnforcementReport {
         LicenseEnforcementReport {
             restricted_config_in_use: Self::validate_configuration(
                 configuration,
@@ -301,7 +297,6 @@ mod test {
     use insta::assert_snapshot;
     use serde_json::json;
 
-    use crate::spec::Schema;
     use crate::uplink::license_enforcement::Audience;
     use crate::uplink::license_enforcement::Claims;
     use crate::uplink::license_enforcement::License;
@@ -309,20 +304,15 @@ mod test {
     use crate::uplink::license_enforcement::OneOrMany;
     use crate::Configuration;
 
-    fn check(router_yaml: &str, supergraph_schema: &str) -> LicenseEnforcementReport {
+    fn check(router_yaml: &str) -> LicenseEnforcementReport {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
-        let schema =
-            Schema::parse(supergraph_schema, &config).expect("supergraph schema must be valid");
 
-        LicenseEnforcementReport::build(&config, &schema)
+        LicenseEnforcementReport::build(&config)
     }
 
     #[test]
     fn test_oss() {
-        let report = check(
-            include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/oss.graphql"),
-        );
+        let report = check(include_str!("testdata/oss.router.yaml"));
 
         assert!(
             report.restricted_config_in_use.is_empty(),
@@ -332,10 +322,7 @@ mod test {
 
     #[test]
     fn test_restricted_features_via_config() {
-        let report = check(
-            include_str!("testdata/restricted.router.yaml"),
-            include_str!("testdata/oss.graphql"),
-        );
+        let report = check(include_str!("testdata/restricted.router.yaml"));
 
         assert!(
             !report.restricted_config_in_use.is_empty(),

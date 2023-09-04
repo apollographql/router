@@ -2768,7 +2768,7 @@ mod tests {
         let schema = r#"
           schema
             @link(url: "https://specs.apollo.dev/link/v1.0")
-            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+            @link(url: "https://specs.apollo.dev/join/v0.1", for: EXECUTION)
           {
             query: Query
           }
