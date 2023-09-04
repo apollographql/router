@@ -11,6 +11,8 @@ use aws_sigv4::http_request::SignableBody;
 use aws_sigv4::http_request::SignableRequest;
 use aws_sigv4::http_request::SigningSettings;
 use aws_types::region::Region;
+use http::HeaderMap;
+use http::HeaderName;
 use http::Request;
 use hyper::Body;
 use schemars::JsonSchema;
@@ -222,10 +224,14 @@ impl SigningParamsConfig {
         // UnsignedPayload only applies to lattice
         let (parts, body) = req.into_parts();
         let body_bytes = hyper::body::to_bytes(body).await?.to_vec();
+        let mut hm = HeaderMap::with_capacity(parts.headers.keys_len());
+        for (key, values) in &parts.headers {
+            hm.insert(key.clone(), values.clone());
+        }
         let signable_request = SignableRequest::new(
             &parts.method,
             &parts.uri,
-            &parts.headers,
+            &hm,
             match self.service_name.as_str() {
                 "vpc-lattice-svcs" => SignableBody::UnsignedPayload,
                 _ => SignableBody::Bytes(body_bytes.as_slice()),
@@ -247,7 +253,7 @@ impl SigningParamsConfig {
         increment_success_counter(self.subgraph_name.as_str());
         Ok(req)
     }
-    // This function is the same as above, except it's a new one because () doesn't implement `HttpBody` for some reason...
+    // This function is the same as above, except it's a new one because () doesn't implement HttpBody` for some reason...
     pub(crate) async fn sign_empty(self, mut req: Request<()>) -> Result<Request<()>, BoxError> {
         let credentials = self
             .credentials_provider
@@ -272,10 +278,14 @@ impl SigningParamsConfig {
 
         // UnsignedPayload only applies to lattice
         let (parts, _) = req.into_parts();
+        let mut hm = HeaderMap::with_capacity(parts.headers.keys_len());
+        for (key, values) in &parts.headers {
+            hm.insert(key.clone(), values.clone());
+        }
         let signable_request = SignableRequest::new(
             &parts.method,
             &parts.uri,
-            &parts.headers,
+            &hm,
             match self.service_name.as_str() {
                 "vpc-lattice-svcs" => SignableBody::UnsignedPayload,
                 _ => SignableBody::Bytes(&[]),
