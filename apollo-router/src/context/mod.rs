@@ -307,7 +307,8 @@ impl Default for BusyTimer {
 
 #[cfg(test)]
 mod test {
-    use crate::{context::OPERATION_NAME, Context};
+    use crate::context::OPERATION_NAME;
+    use crate::Context;
 
     #[test]
     fn test_context_insert() {
