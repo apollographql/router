@@ -10,9 +10,8 @@ use aws_sigv4::http_request::PayloadChecksumKind;
 use aws_sigv4::http_request::SignableBody;
 use aws_sigv4::http_request::SignableRequest;
 use aws_sigv4::http_request::SigningSettings;
+use aws_sigv4::signing_params;
 use aws_types::region::Region;
-use http::HeaderMap;
-use http::HeaderName;
 use http::Request;
 use hyper::Body;
 use schemars::JsonSchema;
@@ -210,28 +209,16 @@ impl SigningParamsConfig {
                 tracing::error!("{}", error);
                 error
             })?;
-
-        let settings = get_signing_settings(&self);
-        let mut builder = http_request::SigningParams::builder()
-            .access_key(credentials.access_key_id())
-            .secret_key(credentials.secret_access_key())
-            .region(self.region.as_ref())
-            .service_name(&self.service_name)
-            .time(SystemTime::now())
-            .settings(settings);
-        builder.set_security_token(credentials.session_token());
-
-        // UnsignedPayload only applies to lattice
+        let builder = self.signing_params_builder(&credentials).await?;
         let (parts, body) = req.into_parts();
+        let mut headers = parts.headers.clone();
+        headers.remove("connection");
+        // UnsignedPayload only applies to lattice
         let body_bytes = hyper::body::to_bytes(body).await?.to_vec();
-        let mut hm = HeaderMap::with_capacity(parts.headers.keys_len());
-        for (key, values) in &parts.headers {
-            hm.insert(key.clone(), values.clone());
-        }
         let signable_request = SignableRequest::new(
             &parts.method,
             &parts.uri,
-            &hm,
+            &headers,
             match self.service_name.as_str() {
                 "vpc-lattice-svcs" => SignableBody::UnsignedPayload,
                 _ => SignableBody::Bytes(body_bytes.as_slice()),
@@ -265,27 +252,15 @@ impl SigningParamsConfig {
                 tracing::error!("{}", error);
                 error
             })?;
-
-        let settings = get_signing_settings(&self);
-        let mut builder = http_request::SigningParams::builder()
-            .access_key(credentials.access_key_id())
-            .secret_key(credentials.secret_access_key())
-            .region(self.region.as_ref())
-            .service_name(&self.service_name)
-            .time(SystemTime::now())
-            .settings(settings);
-        builder.set_security_token(credentials.session_token());
-
-        // UnsignedPayload only applies to lattice
+        let builder = self.signing_params_builder(&credentials).await?;
         let (parts, _) = req.into_parts();
-        let mut hm = HeaderMap::with_capacity(parts.headers.keys_len());
-        for (key, values) in &parts.headers {
-            hm.insert(key.clone(), values.clone());
-        }
+        let mut headers = parts.headers.clone();
+        headers.remove("connection");
+        // UnsignedPayload only applies to lattice
         let signable_request = SignableRequest::new(
             &parts.method,
             &parts.uri,
-            &hm,
+            &headers,
             match self.service_name.as_str() {
                 "vpc-lattice-svcs" => SignableBody::UnsignedPayload,
                 _ => SignableBody::Bytes(&[]),
@@ -306,6 +281,22 @@ impl SigningParamsConfig {
         signing_instructions.apply_to_request(&mut req);
         increment_success_counter(self.subgraph_name.as_str());
         Ok(req)
+    }
+
+    async fn signing_params_builder<'s>(
+        &'s self,
+        credentials: &'s Credentials,
+    ) -> Result<signing_params::Builder<'s, SigningSettings>, BoxError> {
+        let settings = get_signing_settings(&self);
+        let mut builder = http_request::SigningParams::builder()
+            .access_key(credentials.access_key_id())
+            .secret_key(credentials.secret_access_key())
+            .region(self.region.as_ref())
+            .service_name(&self.service_name)
+            .time(SystemTime::now())
+            .settings(settings);
+        builder.set_security_token(credentials.session_token());
+        Ok(builder)
     }
 }
 
