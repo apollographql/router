@@ -43,12 +43,6 @@ We've updated to the latest version of Deno (0.200) to fix errors when generatin
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3626
 
-### Fix config metrics for subscription callbacks ([Issue #3687](https://github.com/apollographql/router/issues/3687))
-
-Detection of subscription callbacks has been fixed for internal Apollo metrics. This has no user facing impact.
-
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3688
-
 ### GraphQL response processing is now captured under the execution span ([PR #3732](https://github.com/apollographql/router/pull/3732))
 
 Ensure processing is captured under the "execution" span.  Previously, events would be reported under the supergraph span or — even more arbitrarily — any plugin's span (e.g., Rhai).
