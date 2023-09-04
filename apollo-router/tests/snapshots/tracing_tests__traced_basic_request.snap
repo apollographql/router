@@ -422,24 +422,24 @@ expression: get_spans()
                           "children": {}
                         }
                       }
+                    },
+                    "apollo_router::services::execution_service::format_response": {
+                      "name": "apollo_router::services::execution_service::format_response",
+                      "record": {
+                        "entries": [],
+                        "metadata": {
+                          "name": "format_response",
+                          "target": "apollo_router::services::execution_service",
+                          "level": "DEBUG",
+                          "module_path": "apollo_router::services::execution_service",
+                          "fields": {
+                            "names": []
+                          }
+                        }
+                      },
+                      "children": {}
                     }
                   }
-                },
-                "apollo_router::services::execution_service::format_response": {
-                  "name": "apollo_router::services::execution_service::format_response",
-                  "record": {
-                    "entries": [],
-                    "metadata": {
-                      "name": "format_response",
-                      "target": "apollo_router::services::execution_service",
-                      "level": "DEBUG",
-                      "module_path": "apollo_router::services::execution_service",
-                      "fields": {
-                        "names": []
-                      }
-                    }
-                  },
-                  "children": {}
                 }
               }
             }

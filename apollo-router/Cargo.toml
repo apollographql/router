@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.28.1"
+version = "1.29.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -264,7 +264,6 @@ ecdsa = { version = "0.15.1", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "6.3.1", features = ["enable-rustls", "no-client-setname"] }
 futures-test = "0.3.28"
 insta = { version = "1.31.0", features = ["json", "redactions", "yaml"] }
-introspector-gadget = "0.2.2"
 maplit = "1.0.2"
 memchr = { version = "2.6.3", default-features = false }
 mockall = "0.11.4"
