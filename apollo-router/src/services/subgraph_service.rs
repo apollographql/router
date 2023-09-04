@@ -537,13 +537,25 @@ async fn call_sse(
         reason: format!("cannot send the subgraph request to sse stream: {err:?}"),
     })?;
 
-    let (handle_sink, handle_stream) = handle.split();
+    let (mut handle_sink, handle_stream) = handle.split();
 
     tokio::task::spawn(async move {
-        _ = gql_stream
-            .map(Ok::<_, graphql::Error>)
-            .forward(handle_sink)
-            .await;
+        let mut stream = gql_stream.map(Ok::<_, graphql::Error>);
+
+        while let Some(val) = stream.next().await {
+            if let Ok(val) = val {
+                if let Err(err) = handle_sink.send(val).await {
+                    tracing::trace!(
+                        "cannot send the sse stream to the subscription stream: {err:?}"
+                    );
+                    break;
+                }
+            }
+        }
+
+        if let Err(err) = handle_sink.close().await {
+            tracing::trace!("cannot close the sse stream: {err:?}");
+        }
 
         tracing::trace!("SSE stream closed");
     });
@@ -2624,7 +2636,6 @@ mod tests {
                 .build()
         );
         drop(gql_stream);
-        rx.close();
         //Sleep to make sure no more events are processed
         tokio::time::sleep(Duration::from_millis(1000)).await;
         assert_eq!(total_handler_calls.load(Ordering::SeqCst), 1);
