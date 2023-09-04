@@ -53,7 +53,7 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ### GraphQL response processing is now captured under the execution span ([PR #3732](https://github.com/apollographql/router/pull/3732))
 
-This ensures that the response processing is captured under the "execution" span.  Previously, any event in processing would be reported under the supergraph span or — even more arbitrarily — any plugin's span (e.g., Rhai) which was happening in between.
+Ensure processing is captured under the "execution" span.  Previously, events would be reported under the supergraph span or — even more arbitrarily — any plugin's span (e.g., Rhai).
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3732
 
@@ -67,7 +67,7 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ### Remove unneeded schema parsing steps ([PR #3547](https://github.com/apollographql/router/pull/3547))
 
-We need access to a parsed schema in various parts of the router, sometimes before the point where it is actually parsed and integrated with the rest of the configuration, so it was parsed multiple times to mitigate that. Some architecture changes made these parsing steps obsolete so they were removed.
+Access to a parsed schema is required in various parts of the Router. Previously were were parsing the schema multiple times, but this is now fixed.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3547
 
