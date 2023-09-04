@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use apollo_compiler::diagnostics::ApolloDiagnostic;
 use apollo_compiler::ApolloCompiler;
-use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
 use apollo_compiler::InputDatabase;
+use apollo_compiler::ReprDatabase;
 use http::Uri;
 use sha2::Digest;
 use sha2::Sha256;
@@ -24,7 +24,9 @@ use crate::Configuration;
 #[derive(Debug)]
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
-    pub(crate) type_system: Arc<apollo_compiler::hir::TypeSystem>,
+    // TODO: replace with `definitions:
+    pub(crate) type_system: apollo_compiler::Arc<apollo_compiler::hir::TypeSystem>,
+    pub(crate) definitions: apollo_compiler::Arc<apollo_compiler::Schema>,
     /// Stored for comparison with the validation errors from query planning.
     diagnostics: Vec<ApolloDiagnostic>,
     subgraphs: HashMap<String, Uri>,
@@ -63,15 +65,12 @@ impl Schema {
         let mut compiler = ApolloCompiler::new();
         let id = compiler.add_type_system(sdl, "schema.graphql");
 
-        let ast = compiler.db.ast(id);
-
         // Trace log recursion limit data
-        let recursion_limit = ast.recursion_limit();
+        let recursion_limit = compiler.db.recursion_reached(id);
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let mut parse_errors = ast.errors().peekable();
-        if parse_errors.peek().is_some() {
-            let errors = parse_errors.cloned().collect::<Vec<_>>();
+        let errors = compiler.db.syntax_errors(id);
+        if !errors.is_empty() {
             return Err(SchemaError::Parse(ParseErrors { errors }));
         }
 
@@ -100,14 +99,12 @@ impl Schema {
             }
         }
 
+        let definitions = compiler.db.schema();
         let mut subgraphs = HashMap::new();
         // TODO: error if not found?
-        if let Some(join_enum) = compiler.db.find_enum_by_name("join__Graph".into()) {
-            for (name, url) in join_enum.values().filter_map(|value| {
-                let join_directive = value
-                    .directives()
-                    .iter()
-                    .find(|directive| directive.name() == "join__graph")?;
+        if let Some(join_enum) = definitions.get_enum("join__Graph") {
+            for (name, url) in join_enum.values.iter().filter_map(|(_name, value)| {
+                let join_directive = value.directive_by_name("join__graph")?;
                 let name = join_directive.argument_by_name("name")?.as_str()?;
                 let url = join_directive.argument_by_name("url")?.as_str()?;
                 Some((name, url))
@@ -131,8 +128,9 @@ impl Schema {
         let schema_id = Some(format!("{:x}", hasher.finalize()));
 
         Ok(Schema {
-            raw_sdl: Arc::new(sdl.to_string()),
+            raw_sdl: Arc::new(String::clone(&sdl)),
             type_system: compiler.db.type_system(),
+            definitions,
             diagnostics,
             subgraphs,
             api_schema: None,
@@ -178,13 +176,11 @@ impl Schema {
     }
 
     pub(crate) fn root_operation_name(&self, kind: OperationKind) -> &str {
-        let schema_def = &self.type_system.definitions.schema;
-        match kind {
-            OperationKind::Query => schema_def.query(),
-            OperationKind::Mutation => schema_def.mutation(),
-            OperationKind::Subscription => schema_def.subscription(),
+        if let Some(name) = self.definitions.root_operation(kind.into()) {
+            name.as_str()
+        } else {
+            kind.as_str()
         }
-        .unwrap_or_else(|| kind.as_str())
     }
 
     pub(crate) fn has_errors(&self) -> bool {

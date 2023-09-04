@@ -10,9 +10,9 @@ use std::sync::Arc;
 use apollo_compiler::hir;
 use apollo_compiler::validation::ValidationDatabase;
 use apollo_compiler::ApolloCompiler;
-use apollo_compiler::AstDatabase;
 use apollo_compiler::FileId;
 use apollo_compiler::HirDatabase;
+use apollo_compiler::ReprDatabase;
 use derivative::Derivative;
 use indexmap::IndexSet;
 use serde::Deserialize;
@@ -299,14 +299,14 @@ impl Query {
 
     /// Check for parse errors in a query in the compiler.
     pub(crate) fn check_errors(compiler: &ApolloCompiler, id: FileId) -> Result<(), SpecError> {
-        let ast = compiler.db.ast(id);
         // Trace log recursion limit data
-        let recursion_limit = ast.recursion_limit();
+        let recursion_limit = compiler.db.recursion_reached(id);
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let mut parse_errors = ast.errors().peekable();
-        if parse_errors.peek().is_some() {
+        let parse_errors = compiler.db.syntax_errors(id);
+        if !parse_errors.is_empty() {
             let text = parse_errors
+                .iter()
                 .map(|err| err.to_string())
                 .collect::<Vec<_>>()
                 .join("\n");

@@ -5,8 +5,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::RwLock;
 
-use apollo_parser::ast;
-use apollo_parser::ast::AstNode;
+use apollo_parser::cst;
+use apollo_parser::cst::CstNode;
 use apollo_parser::Parser;
 use apollo_parser::SyntaxTree;
 use futures::prelude::*;
@@ -165,10 +165,10 @@ impl FreeformGraphQLSafelist {
             let mut fragments = vec![];
 
             for definition in ast.document().syntax().children() {
-                if ast::OperationDefinition::can_cast(definition.kind()) {
-                    operations.push(ast::OperationDefinition::cast(definition).unwrap())
-                } else if ast::FragmentDefinition::can_cast(definition.kind()) {
-                    fragments.push(ast::FragmentDefinition::cast(definition).unwrap())
+                if cst::OperationDefinition::can_cast(definition.kind()) {
+                    operations.push(cst::OperationDefinition::cast(definition).unwrap())
+                } else if cst::FragmentDefinition::can_cast(definition.kind()) {
+                    fragments.push(cst::FragmentDefinition::cast(definition).unwrap())
                 }
             }
 

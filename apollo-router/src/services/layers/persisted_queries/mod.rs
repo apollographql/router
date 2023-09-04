@@ -4,7 +4,7 @@ mod manifest_poller;
 #[cfg(test)]
 use std::sync::Arc;
 
-use apollo_compiler::AstDatabase;
+use apollo_compiler::CstDatabase;
 use apollo_compiler::HirDatabase;
 use apollo_compiler::InputDatabase;
 use http::header::CACHE_CONTROL;
@@ -211,7 +211,7 @@ impl PersistedQueryLayer {
         // __type/__schema/__typename.) We do want to make sure the document
         // parsed properly before poking around at it, though.
         if self.introspection_enabled
-            && db.ast(file_id).errors().peekable().peek().is_none()
+            && db.cst(file_id).errors().peekable().peek().is_none()
             && db
                 .operations(file_id)
                 .iter()
@@ -220,7 +220,7 @@ impl PersistedQueryLayer {
             return Ok(request);
         }
 
-        match manifest_poller.action_for_freeform_graphql(operation_body, db.ast(file_id)) {
+        match manifest_poller.action_for_freeform_graphql(operation_body, db.cst(file_id)) {
             FreeformGraphQLAction::Allow => {
                 tracing::info!(monotonic_counter.apollo.router.operations.persisted_queries = 1u64,);
                 Ok(request)

@@ -62,6 +62,16 @@ impl OperationKind {
     }
 }
 
+impl From<OperationKind> for apollo_compiler::ast::OperationType {
+    fn from(value: OperationKind) -> Self {
+        match value {
+            OperationKind::Query => apollo_compiler::ast::OperationType::Query,
+            OperationKind::Mutation => apollo_compiler::ast::OperationType::Mutation,
+            OperationKind::Subscription => apollo_compiler::ast::OperationType::Subscription,
+        }
+    }
+}
+
 /// A fetch node.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

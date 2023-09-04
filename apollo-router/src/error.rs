@@ -513,17 +513,17 @@ pub(crate) enum SchemaError {
 /// Collection of schema validation errors.
 #[derive(Clone, Debug)]
 pub(crate) struct ParseErrors {
-    pub(crate) errors: Vec<apollo_parser::Error>,
+    pub(crate) errors: apollo_compiler::Arc<Vec<apollo_compiler::ApolloDiagnostic>>,
 }
 
 impl std::fmt::Display for ParseErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut errors = self.errors.iter();
         if let Some(error) = errors.next() {
-            write!(f, "{}", error.message())?;
+            write!(f, "{error}")?;
         }
         for error in errors {
-            write!(f, "\n{}", error.message())?;
+            write!(f, "\n{error}")?;
         }
         Ok(())
     }
