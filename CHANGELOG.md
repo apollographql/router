@@ -30,7 +30,6 @@ directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENU
 
 This directive allows access to the annotated field or type for authenticated requests only.
 For more information on how to use these directives, please read Apollo Router [docs](https://www.apollographql.com/docs/router/configuration/authorization)
-```
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3397 https://github.com/apollographql/router/pull/3662
 
