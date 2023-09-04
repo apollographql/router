@@ -199,16 +199,7 @@ pub(crate) struct SigningParamsConfig {
 
 impl SigningParamsConfig {
     pub(crate) async fn sign(self, mut req: Request<Body>) -> Result<Request<Body>, BoxError> {
-        let credentials = self
-            .credentials_provider
-            .provide_credentials()
-            .await
-            .map_err(|err| {
-                increment_failure_counter(self.subgraph_name.as_str());
-                let error = format!("failed to get credentials for AWS SigV4 signing: {}", err);
-                tracing::error!("{}", error);
-                error
-            })?;
+        let credentials = self.credentials().await?;
         let builder = self.signing_params_builder(&credentials).await?;
         let (parts, body) = req.into_parts();
         let mut headers = parts.headers.clone();
@@ -242,16 +233,7 @@ impl SigningParamsConfig {
     }
     // This function is the same as above, except it's a new one because () doesn't implement HttpBody` for some reason...
     pub(crate) async fn sign_empty(self, mut req: Request<()>) -> Result<Request<()>, BoxError> {
-        let credentials = self
-            .credentials_provider
-            .provide_credentials()
-            .await
-            .map_err(|err| {
-                increment_failure_counter(self.subgraph_name.as_str());
-                let error = format!("failed to get credentials for AWS SigV4 signing: {}", err);
-                tracing::error!("{}", error);
-                error
-            })?;
+        let credentials = self.credentials().await?;
         let builder = self.signing_params_builder(&credentials).await?;
         let (parts, _) = req.into_parts();
         let mut headers = parts.headers.clone();
@@ -297,6 +279,18 @@ impl SigningParamsConfig {
             .settings(settings);
         builder.set_security_token(credentials.session_token());
         Ok(builder)
+    }
+
+    async fn credentials(&self) -> Result<Credentials, BoxError> {
+        self.credentials_provider
+            .provide_credentials()
+            .await
+            .map_err(|err| {
+                increment_failure_counter(self.subgraph_name.as_str());
+                let error = format!("failed to get credentials for AWS SigV4 signing: {}", err);
+                tracing::error!("{}", error);
+                error.into()
+            })
     }
 }
 
