@@ -21,12 +21,6 @@ They are defined as follows:
 scalar federation__Scope
 directive @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 
-This directive allows granular access control through user-defined scopes.
-
-directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
-
-This directive allows access to the annotated field or type for authenticated requests only.
-
 For more information on how to use these directives, please read Apollo Router [docs](https://www.apollographql.com/docs/router/configuration/authorization)
 ```
 
