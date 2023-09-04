@@ -203,6 +203,7 @@ impl SigningParamsConfig {
         let builder = self.signing_params_builder(&credentials).await?;
         let (parts, body) = req.into_parts();
         let mut headers = parts.headers.clone();
+        // AWS refuses sigv4 payloads that sign the connection header...
         headers.remove("connection");
         // UnsignedPayload only applies to lattice
         let body_bytes = hyper::body::to_bytes(body).await?.to_vec();
@@ -231,12 +232,13 @@ impl SigningParamsConfig {
         increment_success_counter(self.subgraph_name.as_str());
         Ok(req)
     }
-    // This function is the same as above, except it's a new one because () doesn't implement HttpBody` for some reason...
+    // This function is the same as above, except it's a new one because () doesn't implement HttpBody`
     pub(crate) async fn sign_empty(self, mut req: Request<()>) -> Result<Request<()>, BoxError> {
         let credentials = self.credentials().await?;
         let builder = self.signing_params_builder(&credentials).await?;
         let (parts, _) = req.into_parts();
         let mut headers = parts.headers.clone();
+        // AWS refuses sigv4 payloads that sign the connection header...
         headers.remove("connection");
         // UnsignedPayload only applies to lattice
         let signable_request = SignableRequest::new(
