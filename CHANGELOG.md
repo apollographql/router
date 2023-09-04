@@ -10,7 +10,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ### GraphOS Enterprise: authorization directives ([PR #3397](https://github.com/apollographql/router/pull/3397), [PR #3662](https://github.com/apollographql/router/pull/3662))
 
-We introduce two new directives, `requiresScopes` and `@authenticated`, that define authorization policies for fields and types in the supergraph schema.
+We introduce two new directives, `@requiresScopes` and `@authenticated`, that define authorization policies for fields and types in the supergraph schema.
 
 They are defined as follows:
 
