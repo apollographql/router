@@ -35,10 +35,11 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
-### Update deno, so we can generate docs again ([Issue #3305](https://github.com/apollographql/router/issues/3305))
+### Update Deno to resolve Rust Docs generation failure ([Issue #3305](https://github.com/apollographql/router/issues/3305))
 
-Router docs failed to build on crates.io because of a documentation compile error in Deno.
-This updates Deno to the latest version, which allows us to generate crates.io documentation again.
+The documentation for our [`apollo-router` Crate on Crates.io](https://crates.io/crates/apollo-router), was failing to build because of a dependency's complication errors [in the docs.rs build environment](https://docs.rs/about/builds). 
+
+We've updated to the latest version of Deno which has resolved this constraint and allows us to generate our [docs.rs/apollo-router](https://docs.rs/crate/apollo-router/latest) docs once again.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3626
 
@@ -48,15 +49,15 @@ Detection of subscription callbacks has been fixed for internal Apollo metrics. 
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3688
 
-### GraphQL response processing must happen under the execution span ([PR #3732](https://github.com/apollographql/router/pull/3732))
+### GraphQL response processing is now captured under the execution span ([PR #3732](https://github.com/apollographql/router/pull/3732))
 
-Previously, any event in processing would be reported under the supergraph span, or any plugin span (like rhai) happening in between
+This ensures that the response processing is captured under the "execution" span.  Previously, any event in processing would be reported under the supergraph span or — even more arbitrarily — any plugin's span (e.g., Rhai) which was happening in between.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3732
 
 ## 🛠 Maintenance
 
-### Uplink connections now reuse reqwest client ([Issue #3333](https://github.com/apollographql/router/issues/3333))
+### Uplink connections now reuse their reqwest client ([Issue #3333](https://github.com/apollographql/router/issues/3333))
 
 Previously uplink requests created a new reqwest client each time, this may cause CPU spikes especially on OSX.
 A single client will now be shared between requests of the same type. 
