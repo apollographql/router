@@ -158,6 +158,7 @@ pub(crate) struct Telemetry {
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
+    sampling_filter_ratio: SamplerOption,
 
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
     meter_provider: AggregateMeterProvider,
@@ -243,14 +244,16 @@ impl Plugin for Telemetry {
             config.calculate_field_level_instrumentation_ratio()?;
         let mut metrics_builder = Self::create_metrics_builder(&config)?;
         let meter_provider = metrics_builder.meter_provider();
+        let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints(),
             metrics_exporters: metrics_builder.exporters(),
             metrics: BasicMetrics::new(&meter_provider),
             apollo_metrics_sender: metrics_builder.apollo_metrics_provider(),
             field_level_instrumentation_ratio,
-            tracer_provider: Some(Self::create_tracer_provider(&config)?),
+            tracer_provider: Some(tracer_provider),
             meter_provider,
+            sampling_filter_ratio,
             config: Arc::new(config),
         })
     }
@@ -543,6 +546,8 @@ impl Telemetry {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
+            SamplingFilter::configure(&self.sampling_filter_ratio);
+
             // The reason that this has to happen here is that we are interacting with global state.
             // If we do this logic during plugin init then if a subsequent plugin fails to init then we
             // will already have set the new tracer provider and we will be in an inconsistent state.
@@ -614,7 +619,7 @@ impl Telemetry {
 
     fn create_tracer_provider(
         config: &config::Conf,
-    ) -> Result<opentelemetry::sdk::trace::TracerProvider, BoxError> {
+    ) -> Result<(SamplerOption, opentelemetry::sdk::trace::TracerProvider), BoxError> {
         let tracing_config = config.tracing.clone().unwrap_or_default();
         let mut trace_config = tracing_config.trace_config.unwrap_or_default();
         let mut sampler = trace_config.sampler;
@@ -646,11 +651,9 @@ impl Telemetry {
         {
             sampler = SamplerOption::Always(Sampler::AlwaysOff);
         }
-        // FIXME: add a test to set to 0 if none are configured
-        SamplingFilter::configure(&sampler);
 
         let tracer_provider = builder.build();
-        Ok(tracer_provider)
+        Ok((sampler, tracer_provider))
     }
 
     fn create_metrics_builder(config: &config::Conf) -> Result<MetricsBuilder, BoxError> {
