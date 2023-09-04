@@ -271,7 +271,7 @@ impl SigningParamsConfig {
         &'s self,
         credentials: &'s Credentials,
     ) -> Result<signing_params::Builder<'s, SigningSettings>, BoxError> {
-        let settings = get_signing_settings(&self);
+        let settings = get_signing_settings(self);
         let mut builder = http_request::SigningParams::builder()
             .access_key(credentials.access_key_id())
             .secret_key(credentials.secret_access_key())
