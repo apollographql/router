@@ -13,7 +13,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 > ⚠️ This is an [Enterprise feature](https://www.apollographql.com/blog/platform/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features/) of the Apollo Router. It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
 
 If your organization doesn't currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](https://www.apollographql.com/docs/graphos/org/plans/#enterprise-trials).
-We introduce two new directives, `@requiresScopes` and `@authenticated`, that define authorization policies for fields and types in the supergraph schema.
+We introduce two new directives, `@requiresScopes` and `@authenticated`, that define authorization policies for fields and types in the supergraph schema, composed with Federation version 2.5.3 or higher.
 
 They are defined as follows:
 
