@@ -55,7 +55,7 @@ pub type BoxStream<T> = Pin<boxed::Box<dyn Stream<Item = T> + Send + Sync>>;
 
 /// Client is the Server-Sent-Events interface.
 /// This trait is sealed and cannot be implemented for types outside this crate.
-pub trait Client: Send + Sync + private::Sealed {
+pub(crate) trait Client: Send + Sync + private::Sealed {
     fn stream(&self) -> BoxStream<Result<Sse>>;
 }
 
@@ -69,7 +69,7 @@ pub trait Client: Send + Sync + private::Sealed {
 pub const DEFAULT_REDIRECT_LIMIT: u32 = 16;
 
 /// ClientBuilder provides a series of builder methods to easily construct a [`Client`].
-pub struct ClientBuilder {
+pub(crate) struct ClientBuilder {
     url: Uri,
     headers: HeaderMap,
     reconnect_opts: ReconnectOptions,
@@ -82,7 +82,7 @@ pub struct ClientBuilder {
 
 impl ClientBuilder {
     /// Create a builder for a given URL.
-    pub fn for_url(url: &str) -> Result<ClientBuilder> {
+    pub(crate) fn for_url(url: &str) -> Result<ClientBuilder> {
         let url = url
             .parse()
             .map_err(|e| Error::InvalidParameter(Box::new(e)))?;
@@ -103,15 +103,15 @@ impl ClientBuilder {
         })
     }
 
-    pub fn get_url(&self) -> &Uri {
+    pub(crate) fn get_url(&self) -> &Uri {
         &self.url
     }
 
-    pub fn get_headers(&self) -> &HeaderMap {
+    pub(crate) fn get_headers(&self) -> &HeaderMap {
         &self.headers
     }
 
-    pub fn get_body(&self) -> Option<&str> {
+    pub(crate) fn get_body(&self) -> Option<&str> {
         self.body.as_deref()
     }
 
@@ -120,26 +120,26 @@ impl ClientBuilder {
     }
 
     /// Set the request method used for the initial connection to the SSE endpoint.
-    pub fn method(mut self, method: String) -> ClientBuilder {
+    pub(crate) fn method(mut self, method: String) -> ClientBuilder {
         self.method = method;
         self
     }
 
     /// Set the request body used for the initial connection to the SSE endpoint.
-    pub fn body(mut self, body: String) -> ClientBuilder {
+    pub(crate) fn body(mut self, body: String) -> ClientBuilder {
         self.body = Some(body);
         self
     }
 
     /// Set the last event id for a stream when it is created. If it is set, it will be sent to the
     /// server in case it can replay missed events.
-    pub fn last_event_id(mut self, last_event_id: String) -> ClientBuilder {
+    pub(crate) fn last_event_id(mut self, last_event_id: String) -> ClientBuilder {
         self.last_event_id = Some(last_event_id);
         self
     }
 
     /// Set a HTTP header on the SSE request.
-    pub fn header(mut self, name: &str, value: &str) -> Result<ClientBuilder> {
+    pub(crate) fn header(mut self, name: &str, value: &str) -> Result<ClientBuilder> {
         let name = HeaderName::from_str(name).map_err(|e| Error::InvalidParameter(Box::new(e)))?;
 
         let value =
@@ -150,7 +150,7 @@ impl ClientBuilder {
     }
 
     /// Set a read timeout for the underlying connection. There is no read timeout by default.
-    pub fn read_timeout(mut self, read_timeout: Duration) -> ClientBuilder {
+    pub(crate) fn read_timeout(mut self, read_timeout: Duration) -> ClientBuilder {
         self.read_timeout = Some(read_timeout);
         self
     }
@@ -167,13 +167,13 @@ impl ClientBuilder {
     /// Customize the client's following behavior when served a redirect.
     /// To disable following redirects, pass `0`.
     /// By default, the limit is [`DEFAULT_REDIRECT_LIMIT`].
-    pub fn redirect_limit(mut self, limit: u32) -> ClientBuilder {
+    pub(crate) fn redirect_limit(mut self, limit: u32) -> ClientBuilder {
         self.max_redirects = Some(limit);
         self
     }
 
     /// Build with a specific client connector.
-    pub fn build_with_conn<C>(self, conn: C) -> impl Client
+    pub(crate) fn build_with_conn<C>(self, conn: C) -> impl Client
     where
         C: Service<Uri> + Clone + Send + Sync + 'static,
         C::Response: Connection + AsyncRead + AsyncWrite + Send + Unpin,
@@ -200,12 +200,12 @@ impl ClientBuilder {
     }
 
     /// Build with an HTTP client connector.
-    pub fn build_http(self) -> impl Client {
+    pub(crate) fn build_http(self) -> impl Client {
         self.build_with_conn(HttpConnector::new())
     }
 
     /// Build with an HTTPS client connector, using the OS root certificate store.
-    pub fn build(self) -> impl Client {
+    pub(crate) fn build(self) -> impl Client {
         let conn = hyper_rustls::HttpsConnectorBuilder::new()
             .with_native_roots()
             .https_or_http()
@@ -215,7 +215,7 @@ impl ClientBuilder {
     }
 
     /// Build with the given [`hyper::client::Client`].
-    pub fn build_with_http_client<C>(self, http: hyper::Client<C>) -> impl Client
+    pub(crate) fn build_with_http_client<C>(self, http: hyper::Client<C>) -> impl Client
     where
         C: Connect + Clone + Send + Sync + 'static,
     {
@@ -476,7 +476,9 @@ where
                             continue;
                         }
 
-                        if resp.status() == 301 || resp.status() == 307 {
+                        if resp.status() == StatusCode::MOVED_PERMANENTLY
+                            || resp.status() == StatusCode::TEMPORARY_REDIRECT
+                        {
                             tracing::debug!("got redirected ({})", resp.status());
 
                             if self.as_mut().increment_redirect_counter() {
@@ -587,7 +589,7 @@ where
                 },
                 StateProj::WaitingToReconnect { sleep: delay } => {
                     ready!(delay.poll(cx));
-                    tracing::info!("Reconnecting");
+                    tracing::info!(url = ?self.current_url, "Reconnecting sse connection");
                     self.as_mut().project().state.set(State::New);
                 }
             };
@@ -613,7 +615,7 @@ fn uri_from_header(maybe_header: &Option<HeaderValue>) -> Result<Uri> {
 }
 
 fn delay(dur: Duration, description: &str) -> Sleep {
-    tracing::info!("Waiting {:?} before {}", dur, description);
+    tracing::debug!("Waiting {:?} before {}", dur, description);
     tokio::time::sleep(dur)
 }
 

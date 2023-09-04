@@ -1668,10 +1668,114 @@ expression: "&schema"
           "default": {
             "preview_callback": null,
             "passthrough": null,
-            "sse": null
+            "experimental_sse": null
           },
           "type": "object",
           "properties": {
+            "experimental_sse": {
+              "description": "Enable sse mode for subgraph(s)",
+              "type": "object",
+              "properties": {
+                "all": {
+                  "description": "Configuration for all subgraphs",
+                  "default": null,
+                  "type": "object",
+                  "properties": {
+                    "backoff_factor": {
+                      "description": "Configure the factor by which delays between reconnect attempts will exponentially increase, up to [`delay_max`]. The [default] factor is 2, so each reconnect attempt will wait twice as long as the previous one.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "delay": {
+                      "description": "After an error, the client will wait this long before the first attempt to reconnect.  Subsequent reconnect attempts may wait longer, depending on the [`backoff_factor`].",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "delay_max": {
+                      "description": "Configure the maximum delay between reconnects (the [default] is 1 minute). The exponential backoff configured by [`backoff_factor`] will not cause a delay greater than this value.",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "path": {
+                      "description": "Path use to get the SSE stream",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "reconnect": {
+                      "description": "If `reconnect` is `true` (the [default]), the client will automatically try to reconnect if the stream ends due to an error. If it is `false`, the client will stop receiving events after an error.",
+                      "default": null,
+                      "type": "boolean",
+                      "nullable": true
+                    },
+                    "retry_initial": {
+                      "description": "If `true` (the [default]) the client will automatically retry the connection, with the same delay and backoff behaviour as for reconnects due to stream error. If `false`, the client will not retry the initial connection.",
+                      "default": null,
+                      "type": "boolean",
+                      "nullable": true
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                },
+                "subgraphs": {
+                  "description": "Configuration for specific subgraphs",
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "backoff_factor": {
+                        "description": "Configure the factor by which delays between reconnect attempts will exponentially increase, up to [`delay_max`]. The [default] factor is 2, so each reconnect attempt will wait twice as long as the previous one.",
+                        "default": null,
+                        "type": "integer",
+                        "format": "uint32",
+                        "minimum": 0.0,
+                        "nullable": true
+                      },
+                      "delay": {
+                        "description": "After an error, the client will wait this long before the first attempt to reconnect.  Subsequent reconnect attempts may wait longer, depending on the [`backoff_factor`].",
+                        "default": null,
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "delay_max": {
+                        "description": "Configure the maximum delay between reconnects (the [default] is 1 minute). The exponential backoff configured by [`backoff_factor`] will not cause a delay greater than this value.",
+                        "default": null,
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "path": {
+                        "description": "Path use to get the SSE stream",
+                        "default": null,
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "reconnect": {
+                        "description": "If `reconnect` is `true` (the [default]), the client will automatically try to reconnect if the stream ends due to an error. If it is `false`, the client will stop receiving events after an error.",
+                        "default": null,
+                        "type": "boolean",
+                        "nullable": true
+                      },
+                      "retry_initial": {
+                        "description": "If `true` (the [default]) the client will automatically retry the connection, with the same delay and backoff behaviour as for reconnects due to stream error. If `false`, the client will not retry the initial connection.",
+                        "default": null,
+                        "type": "boolean",
+                        "nullable": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
             "passthrough": {
               "description": "Enable passthrough mode for subgraph(s)",
               "type": "object",
@@ -1771,110 +1875,6 @@ expression: "&schema"
                     "type": "string"
                   },
                   "uniqueItems": true
-                }
-              },
-              "additionalProperties": false,
-              "nullable": true
-            },
-            "sse": {
-              "description": "Enable passthrough mode for subgraph(s)",
-              "type": "object",
-              "properties": {
-                "all": {
-                  "description": "Configuration for all subgraphs",
-                  "default": null,
-                  "type": "object",
-                  "properties": {
-                    "backoff_factor": {
-                      "description": "Configure the factor by which delays between reconnect attempts will exponentially increase, up to [`delay_max`]. The [default] factor is 2, so each reconnect attempt will wait twice as long as the previous one.",
-                      "default": null,
-                      "type": "integer",
-                      "format": "uint32",
-                      "minimum": 0.0,
-                      "nullable": true
-                    },
-                    "delay": {
-                      "description": "After an error, the client will wait this long before the first attempt to reconnect.  Subsequent reconnect attempts may wait longer, depending on the [`backoff_factor`].",
-                      "default": null,
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "delay_max": {
-                      "description": "Configure the maximum delay between reconnects (the [default] is 1 minute). The exponential backoff configured by [`backoff_factor`] will not cause a delay greater than this value.",
-                      "default": null,
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "path": {
-                      "description": "Path use to get the SSE stream",
-                      "default": null,
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "reconnect": {
-                      "description": "If `reconnect` is `true` (the [default]), the client will automatically try to reconnect if the stream ends due to an error. If it is `false`, the client will stop receiving events after an error.",
-                      "default": null,
-                      "type": "boolean",
-                      "nullable": true
-                    },
-                    "retry_initial": {
-                      "description": "If `true` (the [default]) the client will automatically retry the connection, with the same delay and backoff behaviour as for reconnects due to stream error. If `false`, the client will not retry the initial connection.",
-                      "default": null,
-                      "type": "boolean",
-                      "nullable": true
-                    }
-                  },
-                  "additionalProperties": false,
-                  "nullable": true
-                },
-                "subgraphs": {
-                  "description": "Configuration for specific subgraphs",
-                  "default": {},
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "object",
-                    "properties": {
-                      "backoff_factor": {
-                        "description": "Configure the factor by which delays between reconnect attempts will exponentially increase, up to [`delay_max`]. The [default] factor is 2, so each reconnect attempt will wait twice as long as the previous one.",
-                        "default": null,
-                        "type": "integer",
-                        "format": "uint32",
-                        "minimum": 0.0,
-                        "nullable": true
-                      },
-                      "delay": {
-                        "description": "After an error, the client will wait this long before the first attempt to reconnect.  Subsequent reconnect attempts may wait longer, depending on the [`backoff_factor`].",
-                        "default": null,
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "delay_max": {
-                        "description": "Configure the maximum delay between reconnects (the [default] is 1 minute). The exponential backoff configured by [`backoff_factor`] will not cause a delay greater than this value.",
-                        "default": null,
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "path": {
-                        "description": "Path use to get the SSE stream",
-                        "default": null,
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "reconnect": {
-                        "description": "If `reconnect` is `true` (the [default]), the client will automatically try to reconnect if the stream ends due to an error. If it is `false`, the client will stop receiving events after an error.",
-                        "default": null,
-                        "type": "boolean",
-                        "nullable": true
-                      },
-                      "retry_initial": {
-                        "description": "If `true` (the [default]) the client will automatically retry the connection, with the same delay and backoff behaviour as for reconnects due to stream error. If `false`, the client will not retry the initial connection.",
-                        "default": null,
-                        "type": "boolean",
-                        "nullable": true
-                      }
-                    },
-                    "additionalProperties": false
-                  }
                 }
               },
               "additionalProperties": false,

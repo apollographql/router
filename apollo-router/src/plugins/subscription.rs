@@ -95,7 +95,8 @@ pub(crate) struct SubscriptionModeConfig {
     pub(crate) callback: Option<CallbackMode>,
     /// Enable passthrough mode for subgraph(s)
     pub(crate) passthrough: Option<SubgraphPassthroughMode>,
-    /// Enable passthrough mode for subgraph(s)
+    #[serde(rename = "experimental_sse")]
+    /// Enable sse mode for subgraph(s)
     pub(crate) sse: Option<SubgraphSSEMode>,
 }
 

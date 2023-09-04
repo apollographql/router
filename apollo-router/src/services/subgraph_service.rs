@@ -354,7 +354,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         );
                     }
                     Some(SubscriptionMode::Sse(cfg)) => {
-                        // call_websocket for passthrough mode
+                        // call_sse for sse mode
                         return call_sse(
                             notify,
                             request,
@@ -537,25 +537,13 @@ async fn call_sse(
         reason: format!("cannot send the subgraph request to sse stream: {err:?}"),
     })?;
 
-    let (mut handle_sink, handle_stream) = handle.split();
+    let (handle_sink, handle_stream) = handle.split();
 
     tokio::task::spawn(async move {
-        let mut stream = gql_stream.map(Ok::<_, graphql::Error>);
-
-        while let Some(val) = stream.next().await {
-            if let Ok(val) = val {
-                if let Err(err) = handle_sink.send(val).await {
-                    tracing::trace!(
-                        "cannot send the sse stream to the subscription stream: {err:?}"
-                    );
-                    break;
-                }
-            }
-        }
-
-        if let Err(err) = handle_sink.close().await {
-            tracing::trace!("cannot close the websocket stream: {err:?}");
-        }
+        _ = gql_stream
+            .map(Ok::<_, graphql::Error>)
+            .forward(handle_sink)
+            .await;
     });
 
     subscription_stream_tx.send(handle_stream).await?;
@@ -1123,14 +1111,14 @@ fn get_sse_client(
                 status_code: None,
             })?;
     }
-    builder = builder.header("Accept", "text/event-stream").map_err(|e| {
-        FetchError::SubrequestHttpError {
+    builder = builder
+        .header(http::header::ACCEPT.as_str(), "text/event-stream")
+        .map_err(|e| FetchError::SubrequestHttpError {
             service: service_name.clone(),
             reason: format!("can not add header to sse client: {e:?}"),
             status_code: None,
-        }
-    })?;
-    builder = builder.method("POST".to_string());
+        })?;
+    builder = builder.method(http::Method::POST.to_string());
     Ok(builder)
 }
 

@@ -218,32 +218,36 @@ impl EventParser {
                         .event_data
                         .get_or_insert_with(|| EventData::new().with_id(id.clone()));
 
-                    if key == "event" {
-                        event_data.event_type = value.to_string()
-                    } else if key == "data" {
-                        event_data.append_data(value);
-                    } else if key == "id" {
-                        // If id contains a null byte, it is a non-fatal error and the rest of
-                        // the event should be parsed if possible.
-                        if value.chars().any(|c| c == '\0') {
-                            tracing::debug!("Ignoring event ID containing null byte");
-                            continue;
-                        }
-
-                        if value.is_empty() {
-                            self.last_event_id = Some("".to_string());
-                        } else {
-                            self.last_event_id = Some(value.to_string());
-                        }
-
-                        event_data.id = self.last_event_id.clone()
-                    } else if key == "retry" {
-                        match value.parse::<u64>() {
-                            Ok(retry) => {
-                                event_data.retry = Some(retry);
+                    match key {
+                        "event" => event_data.event_type = value.to_string(),
+                        "data" => event_data.append_data(value),
+                        "id" => {
+                            // If id contains a null byte, it is a non-fatal error and the rest of
+                            // the event should be parsed if possible.
+                            if value.chars().any(|c| c == '\0') {
+                                tracing::debug!("Ignoring event ID containing null byte");
+                                continue;
                             }
-                            _ => tracing::debug!("Failed to parse {:?} into retry value", value),
-                        };
+
+                            if value.is_empty() {
+                                self.last_event_id = Some("".to_string());
+                            } else {
+                                self.last_event_id = Some(value.to_string());
+                            }
+
+                            event_data.id = self.last_event_id.clone()
+                        }
+                        "retry" => {
+                            match value.parse::<u64>() {
+                                Ok(retry) => {
+                                    event_data.retry = Some(retry);
+                                }
+                                _ => {
+                                    tracing::debug!("Failed to parse {:?} into retry value", value)
+                                }
+                            };
+                        }
+                        _ => {}
                     }
                 }
             }

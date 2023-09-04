@@ -106,9 +106,6 @@ where
                                 return Poll::Ready(None);
                             }
                         }
-                        if let ServerMessage::Ping { .. } = server_message {
-                            // Send pong asynchronously
-                        }
                         match server_message.into_graphql_response() {
                             (None, true) => Poll::Ready(None),
                             // For ignored message like ACK, Ping, Pong, etc...
@@ -121,9 +118,9 @@ where
                             .error(
                                 graphql::Error::builder()
                                     .message(format!(
-                                        "cannot deserialize websocket server message: {err:?}"
+                                        "cannot deserialize sse server message: {err:?}"
                                     ))
-                                    .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
+                                    .extension_code("INVALID_SSE_SERVER_MESSAGE_FORMAT")
                                     .build(),
                             )
                             .build()
