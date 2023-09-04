@@ -74,7 +74,7 @@ impl Context {
         // This method should be removed once we have a proper way to get the operation name.
         self.entries
             .get(OPERATION_NAME)
-            .map(|v| v.value().as_str().unwrap().to_string())
+            .and_then(|v| v.value().as_str().map(|s| s.to_string()))
     }
 
     /// Returns true if the context contains a value for the specified key.
@@ -307,7 +307,7 @@ impl Default for BusyTimer {
 
 #[cfg(test)]
 mod test {
-    use crate::Context;
+    use crate::{context::OPERATION_NAME, Context};
 
     #[test]
     fn test_context_insert() {
@@ -369,5 +369,12 @@ mod test {
         });
         assert_eq!(c.get("one").unwrap(), Some(2));
         assert_eq!(c.get("two").unwrap(), Some(3));
+    }
+
+    #[test]
+    fn operation_name_defaults_to_an_empty_string() {
+        let c = Context::new();
+        c.insert(OPERATION_NAME, Option::<String>::None).unwrap();
+        assert!(c.operation_name().is_none())
     }
 }
