@@ -4,6 +4,82 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.29.0] - 2023-09-04
+
+## 🚀 Features
+
+### GraphOS Enterprise: authorization directives ([PR #3397](https://github.com/apollographql/router/pull/3397), [PR #3662](https://github.com/apollographql/router/pull/3662))
+
+We introduce two new directives, `requiresScopes` and `@authenticated`, that define authorization policies for fields and types in the supergraph schema.
+
+They are defined as follows:
+
+```graphql
+scalar federation__Scope
+directive @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+
+directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+```
+
+The implementation hooks into the request lifecycle at multiple steps:
+- In query analysis, we extract the list of scopes necessary to authorize the query.
+- In a supergraph plugin, we calculate the authorization status and put it in the request context:
+    - for `@requiresScopes`, this is the intersection of the query's required scopes and the scopes provided in the request token
+    - for `@authenticated`, it is `is_authenticated` or not
+- In the query planning phase, we filter the query to remove unauthorized fields before proceeding with query planning.
+- At the subgraph level, if query deduplication is active, the authorization status is used to group queries together.
+- At the execution service level, the response is first formatted according to the filtered query, which removed any unauthorized information, then to the shape of the original query, which propagates nulls as needed.
+- At the execution service level, errors are added to the response indicating which fields were removed because they were not authorized.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3397 https://github.com/apollographql/router/pull/3662
+
+## 🐛 Fixes
+
+### Update deno, so we can generate docs again ([Issue #3305](https://github.com/apollographql/router/issues/3305))
+
+Router docs failed to build on crates.io because of a documentation compile error in Deno.
+This updates Deno to the latest version, which allows us to generate crates.io documentation again.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3626
+
+### Fix config metrics path and test for subscription callbacks ([Issue #3687](https://github.com/apollographql/router/issues/3687))
+
+Detection of subscription callbacks has been fixed for internal Apollo metrics. This has no user facing impact.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3688
+
+### GraphQL response processing must happen under the execution span ([PR #3732](https://github.com/apollographql/router/pull/3732))
+
+Previously, any event in processing would be reported under the supergraph span, or any plugin span (like rhai) happening in between
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3732
+
+## 🛠 Maintenance
+
+### Uplink connections now reuse reqwest client ([Issue #3333](https://github.com/apollographql/router/issues/3333))
+
+Previously uplink requests created a new reqwest client each time, this may cause CPU spikes especially on OSX.
+A single client will now be shared between requests of the same type. 
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3703
+
+### Add a metric tracking authorization usage ([PR #3660](https://github.com/apollographql/router/pull/3660))
+
+The new metric is a counter called `apollo.router.operations.authorization` and contains the following boolean attributes:
+- `filtered`: the query has one or more filtered fields 
+- `requires_scopes`: the query uses fields or types tagged with the `@requiresScopes` directive
+- `authenticated`: the query uses fields or types tagged with the `@authenticated` directive
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3660
+
+### Remove unneeded schema parsing steps ([PR #3547](https://github.com/apollographql/router/pull/3547))
+
+We need access to a parsed schema in various parts of the router, sometimes before the point where it is actually parsed and integrated with the rest of the configuration, so it was parsed multiple times to mitigate that. Some architecture changes made these parsing steps obsolete so they were removed.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3547
+
+
+
 # [1.28.1] - 2023-08-28
 
 ## 🚀 Features
