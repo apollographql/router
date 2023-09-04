@@ -545,6 +545,21 @@ jobs:
           platform: << parameters.platform >>
       - when:
           condition:
+            not: << pipeline.parameters.nightly >>
+          steps:
+            - run:
+                command: >
+                  # Validate that version in the Cargo.toml matches the tag version
+                  # Fail the release if the versions don't match
+                  # Note that the tag has the prefix `v`, so this needs to be used to prefix the VERSION variable.
+                  VERSION=v$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
+                  if [[ "${VERSION}" != "${CIRCLE_TAG}" ]]; then
+                    echo "Version in Cargo.toml (${VERSION}) does not match tag (${CIRCLE_TAG})"
+                    exit 1
+                  fi
+
+      - when:
+          condition:
             equal: [ *macos_build_executor, << parameters.platform >> ]
           steps:
             - when:
