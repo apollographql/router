@@ -7,52 +7,86 @@
 //! ```
 use std::collections::HashSet;
 
+use apollo_compiler::executable::Selection;
+use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::hir;
 use apollo_compiler::hir::FieldDefinition;
 use apollo_compiler::hir::TypeDefinition;
 use apollo_compiler::hir::Value;
+use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::NamedType;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::FileId;
 use apollo_compiler::HirDatabase;
+use apollo_compiler::NodeStr;
+use apollo_compiler::ReprDatabase;
+use apollo_compiler::Schema;
 use tower::BoxError;
 
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
 use crate::spec::query::transform::get_field_type;
-use crate::spec::query::traverse;
-
-pub(crate) struct PolicyExtractionVisitor<'a> {
-    compiler: &'a ApolloCompiler,
-    file_id: FileId,
-    pub(crate) extracted_policies: HashSet<String>,
-}
 
 pub(crate) const POLICY_DIRECTIVE_NAME: &str = "policy";
+const POLICIES_ARG_NAME: &str = "policies";
 
-impl<'a> PolicyExtractionVisitor<'a> {
-    #[allow(dead_code)]
-    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Self {
-        Self {
-            compiler,
-            file_id,
-            extracted_policies: HashSet::new(),
+pub(crate) fn extract_policies(compiler: &ApolloCompiler, file_id: FileId) -> HashSet<NodeStr> {
+    fn directive(policies: &mut HashSet<NodeStr>, opt_directive: Option<impl AsRef<Directive>>) {
+        if let Some(directive) = opt_directive {
+            if let Some(arg) = directive.as_ref().argument_by_name(POLICIES_ARG_NAME) {
+                if let Some(list) = arg.as_list() {
+                    policies.extend(
+                        list.iter()
+                            .filter_map(|inner_item| inner_item.as_str())
+                            .cloned(),
+                    );
+                }
+            }
         }
     }
 
-    fn get_policies_from_field(&mut self, field: &FieldDefinition) {
-        self.extracted_policies
-            .extend(policy_argument(field.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned());
-
-        if let Some(ty) = field.ty().type_def(&self.compiler.db) {
-            self.get_policies_from_type(&ty)
+    fn type_def(policies: &mut HashSet<NodeStr>, schema: &Schema, name: &NamedType) {
+        if let Some(def) = schema.types.get(name) {
+            directive(policies, def.directive_by_name(POLICY_DIRECTIVE_NAME))
         }
     }
 
-    fn get_policies_from_type(&mut self, ty: &TypeDefinition) {
-        self.extracted_policies
-            .extend(policy_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned());
+    fn selection_set(policies: &mut HashSet<NodeStr>, schema: &Schema, set: &SelectionSet) {
+        for selection in &set.selections {
+            match selection {
+                Selection::Field(field) => {
+                    if let Some(field_def) = schema.type_field(&set.ty, &field.name) {
+                        directive(policies, field_def.directive_by_name(POLICY_DIRECTIVE_NAME))
+                    }
+                    type_def(policies, schema, field.ty.inner_named_type());
+                    selection_set(policies, schema, &field.selection_set);
+                }
+                Selection::InlineFragment(inline_fragment) => {
+                    if let Some(ty) = &inline_fragment.type_condition {
+                        type_def(policies, schema, ty);
+                    }
+                    selection_set(policies, schema, &inline_fragment.selection_set);
+                }
+                // We check fragment definitions separately
+                Selection::FragmentSpread(_) => {}
+            }
+        }
     }
+
+    let mut policies = HashSet::new();
+    let schema = compiler.db.schema();
+    if let Ok(doc) = compiler.db.executable_document(file_id) {
+        for operation in doc.all_operations() {
+            type_def(&mut policies, &schema, operation.object_type());
+            selection_set(&mut policies, &schema, &operation.selection_set);
+        }
+        for fragment in doc.fragments.values() {
+            type_def(&mut policies, &schema, fragment.type_condition());
+            selection_set(&mut policies, &schema, &fragment.selection_set);
+        }
+    }
+    policies
 }
 
 fn policy_argument(opt_directive: Option<&hir::Directive>) -> impl Iterator<Item = &String> {
@@ -68,85 +102,6 @@ fn policy_argument(opt_directive: Option<&hir::Directive>) -> impl Iterator<Item
             Value::String { value, .. } => Some(value),
             _ => None,
         })
-}
-
-impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
-    fn compiler(&self) -> &ApolloCompiler {
-        self.compiler
-    }
-
-    fn operation(&mut self, node: &hir::OperationDefinition) -> Result<(), BoxError> {
-        if let Some(ty) = node.object_type(&self.compiler.db) {
-            self.extracted_policies
-                .extend(policy_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned());
-        }
-
-        traverse::operation(self, node)
-    }
-
-    fn field(&mut self, parent_type: &str, node: &hir::Field) -> Result<(), BoxError> {
-        if let Some(ty) = self
-            .compiler
-            .db
-            .types_definitions_by_name()
-            .get(parent_type)
-        {
-            if let Some(field) = ty.field(&self.compiler.db, node.name()) {
-                self.get_policies_from_field(field);
-            }
-        }
-
-        traverse::field(self, parent_type, node)
-    }
-
-    fn fragment_definition(&mut self, node: &hir::FragmentDefinition) -> Result<(), BoxError> {
-        if let Some(ty) = self
-            .compiler
-            .db
-            .types_definitions_by_name()
-            .get(node.type_condition())
-        {
-            self.get_policies_from_type(ty);
-        }
-        traverse::fragment_definition(self, node)
-    }
-
-    fn fragment_spread(&mut self, node: &hir::FragmentSpread) -> Result<(), BoxError> {
-        let fragments = self.compiler.db.fragments(self.file_id);
-        let type_condition = fragments
-            .get(node.name())
-            .ok_or("MissingFragmentDefinition")?
-            .type_condition();
-
-        if let Some(ty) = self
-            .compiler
-            .db
-            .types_definitions_by_name()
-            .get(type_condition)
-        {
-            self.get_policies_from_type(ty);
-        }
-        traverse::fragment_spread(self, node)
-    }
-
-    fn inline_fragment(
-        &mut self,
-        parent_type: &str,
-
-        node: &hir::InlineFragment,
-    ) -> Result<(), BoxError> {
-        if let Some(type_condition) = node.type_condition() {
-            if let Some(ty) = self
-                .compiler
-                .db
-                .types_definitions_by_name()
-                .get(type_condition)
-            {
-                self.get_policies_from_type(ty);
-            }
-        }
-        traverse::inline_fragment(self, parent_type, node)
-    }
 }
 
 pub(crate) struct PolicyFilteringVisitor<'a> {
@@ -514,13 +469,12 @@ mod tests {
     use std::collections::HashSet;
 
     use apollo_compiler::ApolloCompiler;
+    use apollo_compiler::NodeStr;
     use apollo_encoder::Document;
 
     use crate::json_ext::Path;
-    use crate::plugins::authorization::policy::PolicyExtractionVisitor;
     use crate::plugins::authorization::policy::PolicyFilteringVisitor;
     use crate::spec::query::transform;
-    use crate::spec::query::traverse;
 
     static BASIC_SCHEMA: &str = r#"
     directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
@@ -562,7 +516,7 @@ mod tests {
     }
     "#;
 
-    fn extract(query: &str) -> BTreeSet<String> {
+    fn extract(query: &str) -> BTreeSet<NodeStr> {
         let mut compiler = ApolloCompiler::new();
 
         let _schema_id = compiler.add_type_system(BASIC_SCHEMA, "schema.graphql");
@@ -574,10 +528,7 @@ mod tests {
         }
         assert!(diagnostics.is_empty());
 
-        let mut visitor = PolicyExtractionVisitor::new(&compiler, id);
-        traverse::document(&mut visitor, id).unwrap();
-
-        visitor.extracted_policies.into_iter().collect()
+        super::extract_policies(&compiler, id).into_iter().collect()
     }
 
     #[test]

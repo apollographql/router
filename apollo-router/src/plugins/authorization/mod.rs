@@ -20,7 +20,7 @@ use tower::ServiceExt;
 use self::authenticated::has_authenticated;
 use self::authenticated::AuthenticatedVisitor;
 use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
-use self::policy::PolicyExtractionVisitor;
+use self::policy::extract_policies;
 use self::policy::PolicyFilteringVisitor;
 use self::policy::POLICY_DIRECTIVE_NAME;
 use self::scopes::extract_scopes;
@@ -41,7 +41,6 @@ use crate::register_plugin;
 use crate::services::execution;
 use crate::services::supergraph;
 use crate::spec::query::transform;
-use crate::spec::query::traverse;
 use crate::spec::query::QUERY_EXECUTABLE;
 use crate::spec::Query;
 use crate::spec::Schema;
@@ -151,21 +150,13 @@ impl AuthorizationPlugin {
 
         // TODO: @policy is out of scope for preview, this will be reactivated later
         if false {
-            let mut visitor = PolicyExtractionVisitor::new(&compiler, file_id);
-
-            // if this fails, the query is invalid and will fail at the query planning phase.
-            // We do not return validation errors here for now because that would imply a huge
-            // refactoring of telemetry and tests
-            if traverse::document(&mut visitor, file_id).is_ok() {
-                let policies: HashMap<String, Option<bool>> = visitor
-                    .extracted_policies
+            let policies = extract_policies(&compiler, file_id);
+            if !policies.is_empty() {
+                let policies: HashMap<String, Option<bool>> = policies
                     .into_iter()
-                    .map(|policy| (policy, None))
+                    .map(|policy| (policy.as_str().to_owned(), None))
                     .collect();
-
-                if !policies.is_empty() {
-                    context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
-                }
+                context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
             }
         }
     }
