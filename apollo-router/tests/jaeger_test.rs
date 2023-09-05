@@ -123,6 +123,34 @@ async fn test_local_root_no_sample() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_local_root_50_percent_sample() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Jaeger)
+        .config(include_str!("fixtures/jaeger-0.5-sample.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}\n","variables":{}, "operationName": "ExampleQuery"});
+
+    for _ in 0..100 {
+        let (id, result) = router.execute_untraced_query(&query).await;
+
+        if result.headers().get("apollo-custom-trace-id").is_some()
+            && validate_trace(id, &query, Some("ExampleQuery"), &["router", "products"])
+                .await
+                .is_ok()
+        {
+            router.graceful_shutdown().await;
+
+            return Ok(());
+        }
+    }
+    panic!("tried 100 requests with telemetry sampled at 50%, no traces were found")
+}
+
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_no_telemetry() -> Result<(), BoxError> {
     // This test is currently skipped because it will only pass once we default the sampler to always off if there are no exporters.
