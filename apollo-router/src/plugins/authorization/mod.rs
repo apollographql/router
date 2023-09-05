@@ -17,7 +17,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use self::authenticated::AuthenticatedCheckVisitor;
+use self::authenticated::has_authenticated;
 use self::authenticated::AuthenticatedVisitor;
 use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
 use self::policy::PolicyExtractionVisitor;
@@ -136,12 +136,10 @@ impl AuthorizationPlugin {
     ) {
         let (compiler, file_id) = Query::make_compiler(query, schema, configuration);
 
-        let mut visitor = AuthenticatedCheckVisitor::new(&compiler, file_id);
-
-        // if this fails, the query is invalid and will fail at the query planning phase.
+        // May have false negative for an invalid query that will fail at the query planning phase.
         // We do not return validation errors here for now because that would imply a huge
         // refactoring of telemetry and tests
-        if traverse::document(&mut visitor, file_id).is_ok() && !visitor.found {
+        if has_authenticated(&compiler, file_id) {
             context.insert(AUTHENTICATED_KEY, true).unwrap();
         }
 

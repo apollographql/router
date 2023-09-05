@@ -1,132 +1,74 @@
 //! Authorization plugin
 
+use apollo_compiler::executable::Selection;
+use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::hir;
 use apollo_compiler::hir::FieldDefinition;
 use apollo_compiler::hir::TypeDefinition;
+use apollo_compiler::schema::NamedType;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::FileId;
 use apollo_compiler::HirDatabase;
+use apollo_compiler::ReprDatabase;
+use apollo_compiler::Schema;
 use tower::BoxError;
 
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
 use crate::spec::query::transform::get_field_type;
-use crate::spec::query::traverse;
 
 pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: &str = "authenticated";
 
-pub(crate) struct AuthenticatedCheckVisitor<'a> {
-    compiler: &'a ApolloCompiler,
-    file_id: FileId,
-    pub(crate) found: bool,
-}
-
-impl<'a> AuthenticatedCheckVisitor<'a> {
-    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Self {
-        Self {
-            compiler,
-            file_id,
-            found: false,
-        }
+/// Returns whether any type definition or field definition relevant to this request
+/// have the `@authenticated` directive
+///
+/// May return false for invalid requests
+pub(crate) fn has_authenticated(compiler: &ApolloCompiler, file_id: FileId) -> bool {
+    fn type_def(schema: &Schema, name: &NamedType) -> bool {
+        schema.types.get(name).is_some_and(|def| {
+            def.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME)
+                .is_some()
+        })
     }
 
-    fn is_field_authenticated(&self, field: &FieldDefinition) -> bool {
-        field
-            .directive_by_name(AUTHENTICATED_DIRECTIVE_NAME)
-            .is_some()
-            || field
-                .ty()
-                .type_def(&self.compiler.db)
-                .map(|t| self.is_type_authenticated(&t))
-                .unwrap_or(false)
-    }
-
-    fn is_type_authenticated(&self, t: &TypeDefinition) -> bool {
-        t.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some()
-    }
-}
-
-impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
-    fn compiler(&self) -> &ApolloCompiler {
-        self.compiler
-    }
-
-    fn operation(&mut self, node: &hir::OperationDefinition) -> Result<(), BoxError> {
-        traverse::operation(self, node)
-    }
-
-    fn field(&mut self, parent_type: &str, node: &hir::Field) -> Result<(), BoxError> {
-        let field_name = node.name();
-
-        if self
-            .compiler
-            .db
-            .types_definitions_by_name()
-            .get(parent_type)
-            .and_then(|def| def.field(&self.compiler.db, field_name))
-            .is_some_and(|field| self.is_field_authenticated(field))
-        {
-            self.found = true;
-            return Ok(());
-        }
-        traverse::field(self, parent_type, node)
-    }
-
-    fn fragment_definition(&mut self, node: &hir::FragmentDefinition) -> Result<(), BoxError> {
-        if self
-            .compiler
-            .db
-            .types_definitions_by_name()
-            .get(node.type_condition())
-            .is_some_and(|type_definition| self.is_type_authenticated(type_definition))
-        {
-            self.found = true;
-            return Ok(());
-        }
-        traverse::fragment_definition(self, node)
-    }
-
-    fn fragment_spread(&mut self, node: &hir::FragmentSpread) -> Result<(), BoxError> {
-        let fragments = self.compiler.db.fragments(self.file_id);
-        let condition = fragments
-            .get(node.name())
-            .ok_or("MissingFragmentDefinition")?
-            .type_condition();
-
-        if self
-            .compiler
-            .db
-            .types_definitions_by_name()
-            .get(condition)
-            .is_some_and(|type_definition| self.is_type_authenticated(type_definition))
-        {
-            self.found = true;
-            return Ok(());
-        }
-        traverse::fragment_spread(self, node)
-    }
-
-    fn inline_fragment(
-        &mut self,
-        parent_type: &str,
-        node: &hir::InlineFragment,
-    ) -> Result<(), BoxError> {
-        if let Some(name) = node.type_condition() {
-            if self
-                .compiler
-                .db
-                .types_definitions_by_name()
-                .get(name)
-                .is_some_and(|type_definition| self.is_type_authenticated(type_definition))
-            {
-                self.found = true;
-                return Ok(());
+    fn selection_set(schema: &Schema, set: &SelectionSet) -> bool {
+        set.selections.iter().any(|sel| {
+            match sel {
+                Selection::Field(field) => {
+                    type_def(schema, field.ty.inner_named_type())
+                        || selection_set(schema, &field.selection_set)
+                }
+                Selection::InlineFragment(inline_fragment) => {
+                    inline_fragment
+                        .type_condition
+                        .as_ref()
+                        .is_some_and(|ty| type_def(schema, ty))
+                        || selection_set(schema, &inline_fragment.selection_set)
+                }
+                // We check fragment definitions separately
+                Selection::FragmentSpread(_) => false,
             }
-        }
-
-        traverse::inline_fragment(self, parent_type, node)
+        })
     }
+
+    let schema = compiler.db.schema();
+    let Ok(doc) = compiler.db.executable_document(file_id) else {
+        return false;
+    };
+    let in_operations = || {
+        doc.all_operations().any(|operation| {
+            type_def(&schema, operation.object_type())
+                || selection_set(&schema, &operation.selection_set)
+        })
+    };
+    let in_fragment = || {
+        doc.fragments.values().any(|fragment| {
+            type_def(&schema, fragment.type_condition())
+                || selection_set(&schema, &fragment.selection_set)
+        })
+    };
+    in_operations() || in_fragment()
 }
 
 pub(crate) struct AuthenticatedVisitor<'a> {
