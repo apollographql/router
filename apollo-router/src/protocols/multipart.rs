@@ -258,7 +258,7 @@ mod tests {
                         );
                     }
                     _ => {
-                        panic!("should not happened, test failed");
+                        panic!("should not happen, test failed");
                     }
                 }
                 curr_index += 1;
