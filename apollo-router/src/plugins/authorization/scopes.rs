@@ -7,155 +7,94 @@
 //! ```
 use std::collections::HashSet;
 
+use apollo_compiler::executable::Selection;
+use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::hir;
 use apollo_compiler::hir::FieldDefinition;
 use apollo_compiler::hir::TypeDefinition;
 use apollo_compiler::hir::Value;
+use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::NamedType;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::FileId;
 use apollo_compiler::HirDatabase;
+use apollo_compiler::NodeStr;
+use apollo_compiler::ReprDatabase;
+use apollo_compiler::Schema;
 use tower::BoxError;
 
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
 use crate::spec::query::transform::get_field_type;
-use crate::spec::query::traverse;
-
-pub(crate) struct ScopeExtractionVisitor<'a> {
-    compiler: &'a ApolloCompiler,
-    file_id: FileId,
-    pub(crate) extracted_scopes: HashSet<String>,
-}
 
 pub(crate) const REQUIRES_SCOPES_DIRECTIVE_NAME: &str = "requiresScopes";
+const SCOPES_ARG_NAME: &str = "scopes";
 
-impl<'a> ScopeExtractionVisitor<'a> {
-    #[allow(dead_code)]
-    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Self {
-        Self {
-            compiler,
-            file_id,
-            extracted_scopes: HashSet::new(),
-        }
-    }
-
-    fn scopes_from_field(&mut self, field: &FieldDefinition) {
-        self.extracted_scopes.extend(
-            scopes_argument(field.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)).cloned(),
-        );
-
-        if let Some(ty) = field.ty().type_def(&self.compiler.db) {
-            self.scopes_from_type(&ty)
-        }
-    }
-
-    fn scopes_from_type(&mut self, ty: &TypeDefinition) {
-        self.extracted_scopes
-            .extend(scopes_argument(ty.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)).cloned());
-    }
-}
-
-fn scopes_argument(opt_directive: Option<&hir::Directive>) -> impl Iterator<Item = &String> {
-    opt_directive
-        .and_then(|directive| directive.argument_by_name("scopes"))
-        // outer array
-        .and_then(|value| match value {
-            Value::List { value, .. } => Some(value),
-            _ => None,
-        })
-        .into_iter()
-        .flatten()
-        // inner array
-        .filter_map(|value| match value {
-            Value::List { value, .. } => Some(value),
-            _ => None,
-        })
-        .flatten()
-        .filter_map(|v| match v {
-            Value::String { value, .. } => Some(value),
-            _ => None,
-        })
-}
-
-impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
-    fn compiler(&self) -> &ApolloCompiler {
-        self.compiler
-    }
-
-    fn operation(&mut self, node: &hir::OperationDefinition) -> Result<(), BoxError> {
-        if let Some(ty) = node.object_type(&self.compiler.db) {
-            self.extracted_scopes.extend(
-                scopes_argument(ty.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME)).cloned(),
-            );
-        }
-
-        traverse::operation(self, node)
-    }
-
-    fn field(&mut self, parent_type: &str, node: &hir::Field) -> Result<(), BoxError> {
-        if let Some(ty) = self
-            .compiler
-            .db
-            .types_definitions_by_name()
-            .get(parent_type)
-        {
-            if let Some(field) = ty.field(&self.compiler.db, node.name()) {
-                self.scopes_from_field(field);
+pub(crate) fn extract_scopes(compiler: &ApolloCompiler, file_id: FileId) -> HashSet<NodeStr> {
+    fn directive(scopes: &mut HashSet<NodeStr>, opt_directive: Option<impl AsRef<Directive>>) {
+        if let Some(directive) = opt_directive {
+            if let Some(arg) = directive.as_ref().argument_by_name(SCOPES_ARG_NAME) {
+                if let Some(list) = arg.as_list() {
+                    scopes.extend(
+                        list.iter()
+                            .filter_map(|item| item.as_list())
+                            .flatten()
+                            .filter_map(|inner_item| inner_item.as_str())
+                            .cloned(),
+                    );
+                }
             }
         }
-
-        traverse::field(self, parent_type, node)
     }
 
-    fn fragment_definition(&mut self, node: &hir::FragmentDefinition) -> Result<(), BoxError> {
-        if let Some(ty) = self
-            .compiler
-            .db
-            .types_definitions_by_name()
-            .get(node.type_condition())
-        {
-            self.scopes_from_type(ty);
+    fn type_def(scopes: &mut HashSet<NodeStr>, schema: &Schema, name: &NamedType) {
+        if let Some(def) = schema.types.get(name) {
+            directive(
+                scopes,
+                def.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME),
+            )
         }
-        traverse::fragment_definition(self, node)
     }
 
-    fn fragment_spread(&mut self, node: &hir::FragmentSpread) -> Result<(), BoxError> {
-        let fragments = self.compiler.db.fragments(self.file_id);
-        let type_condition = fragments
-            .get(node.name())
-            .ok_or("MissingFragmentDefinition")?
-            .type_condition();
-
-        if let Some(ty) = self
-            .compiler
-            .db
-            .types_definitions_by_name()
-            .get(type_condition)
-        {
-            self.scopes_from_type(ty);
-        }
-        traverse::fragment_spread(self, node)
-    }
-
-    fn inline_fragment(
-        &mut self,
-        parent_type: &str,
-
-        node: &hir::InlineFragment,
-    ) -> Result<(), BoxError> {
-        if let Some(type_condition) = node.type_condition() {
-            if let Some(ty) = self
-                .compiler
-                .db
-                .types_definitions_by_name()
-                .get(type_condition)
-            {
-                self.scopes_from_type(ty);
+    fn selection_set(scopes: &mut HashSet<NodeStr>, schema: &Schema, set: &SelectionSet) {
+        for selection in &set.selections {
+            match selection {
+                Selection::Field(field) => {
+                    if let Some(field_def) = schema.type_field(&set.ty, &field.name) {
+                        directive(
+                            scopes,
+                            field_def.directive_by_name(REQUIRES_SCOPES_DIRECTIVE_NAME),
+                        )
+                    }
+                    type_def(scopes, schema, field.ty.inner_named_type());
+                    selection_set(scopes, schema, &field.selection_set);
+                }
+                Selection::InlineFragment(inline_fragment) => {
+                    if let Some(ty) = &inline_fragment.type_condition {
+                        type_def(scopes, schema, ty);
+                    }
+                    selection_set(scopes, schema, &inline_fragment.selection_set);
+                }
+                // We check fragment definitions separately
+                Selection::FragmentSpread(_) => {}
             }
         }
-        traverse::inline_fragment(self, parent_type, node)
     }
+
+    let mut scopes = HashSet::new();
+    let schema = compiler.db.schema();
+    if let Ok(doc) = compiler.db.executable_document(file_id) {
+        for operation in doc.all_operations() {
+            type_def(&mut scopes, &schema, operation.object_type());
+            selection_set(&mut scopes, &schema, &operation.selection_set);
+        }
+        for fragment in doc.fragments.values() {
+            type_def(&mut scopes, &schema, fragment.type_condition());
+            selection_set(&mut scopes, &schema, &fragment.selection_set);
+        }
+    }
+    scopes
 }
 
 fn scopes_sets_argument(directive: &hir::Directive) -> impl Iterator<Item = HashSet<String>> + '_ {
@@ -574,13 +513,12 @@ mod tests {
     use std::collections::HashSet;
 
     use apollo_compiler::ApolloCompiler;
+    use apollo_compiler::NodeStr;
     use apollo_encoder::Document;
 
     use crate::json_ext::Path;
-    use crate::plugins::authorization::scopes::ScopeExtractionVisitor;
     use crate::plugins::authorization::scopes::ScopeFilteringVisitor;
     use crate::spec::query::transform;
-    use crate::spec::query::traverse;
 
     static BASIC_SCHEMA: &str = r#"
     scalar federation__Scope
@@ -623,7 +561,7 @@ mod tests {
     }
     "#;
 
-    fn extract(schema: &str, query: &str) -> BTreeSet<String> {
+    fn extract(schema: &str, query: &str) -> BTreeSet<NodeStr> {
         let mut compiler = ApolloCompiler::new();
 
         let _schema_id = compiler.add_type_system(schema, "schema.graphql");
@@ -639,10 +577,7 @@ mod tests {
         }
         assert!(diagnostics.is_empty());
 
-        let mut visitor = ScopeExtractionVisitor::new(&compiler, id);
-        traverse::document(&mut visitor, id).unwrap();
-
-        visitor.extracted_scopes.into_iter().collect()
+        super::extract_scopes(&compiler, id).into_iter().collect()
     }
 
     #[test]
@@ -691,7 +626,7 @@ mod tests {
 
     struct TestResult<'a> {
         query: &'a str,
-        extracted_scopes: &'a BTreeSet<String>,
+        extracted_scopes: &'a BTreeSet<NodeStr>,
         result: apollo_encoder::Document,
         scopes: Vec<String>,
         paths: Vec<Path>,
@@ -1215,7 +1150,7 @@ mod tests {
         }
         "#;
 
-        let extracted_scopes: BTreeSet<String> = extract(INTERFACE_FIELD_SCHEMA, QUERY);
+        let extracted_scopes = extract(INTERFACE_FIELD_SCHEMA, QUERY);
 
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY, HashSet::new());
 
@@ -1243,7 +1178,7 @@ mod tests {
         }
         "#;
 
-        let extracted_scopes: BTreeSet<String> = extract(INTERFACE_FIELD_SCHEMA, QUERY2);
+        let extracted_scopes = extract(INTERFACE_FIELD_SCHEMA, QUERY2);
 
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY2, HashSet::new());
 
@@ -1289,7 +1224,7 @@ mod tests {
         }
         "#;
 
-        let extracted_scopes: BTreeSet<String> = extract(UNION_MEMBERS_SCHEMA, QUERY);
+        let extracted_scopes = extract(UNION_MEMBERS_SCHEMA, QUERY);
 
         let (doc, paths) = filter(
             UNION_MEMBERS_SCHEMA,

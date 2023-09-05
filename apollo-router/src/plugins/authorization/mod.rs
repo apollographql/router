@@ -23,7 +23,7 @@ use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
 use self::policy::PolicyExtractionVisitor;
 use self::policy::PolicyFilteringVisitor;
 use self::policy::POLICY_DIRECTIVE_NAME;
-use self::scopes::ScopeExtractionVisitor;
+use self::scopes::extract_scopes;
 use self::scopes::ScopeFilteringVisitor;
 use self::scopes::REQUIRES_SCOPES_DIRECTIVE_NAME;
 use crate::error::QueryPlannerError;
@@ -143,17 +143,10 @@ impl AuthorizationPlugin {
             context.insert(AUTHENTICATED_KEY, true).unwrap();
         }
 
-        let mut visitor = ScopeExtractionVisitor::new(&compiler, file_id);
-
-        // if this fails, the query is invalid and will fail at the query planning phase.
-        // We do not return validation errors here for now because that would imply a huge
-        // refactoring of telemetry and tests
-        if traverse::document(&mut visitor, file_id).is_ok() {
-            let scopes: Vec<String> = visitor.extracted_scopes.into_iter().collect();
-
-            if !scopes.is_empty() {
-                context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
-            }
+        let scopes = extract_scopes(&compiler, file_id);
+        if !scopes.is_empty() {
+            let scopes: Vec<String> = scopes.iter().map(|s| s.as_str().to_owned()).collect();
+            context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
         }
 
         // TODO: @policy is out of scope for preview, this will be reactivated later
