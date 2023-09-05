@@ -10,8 +10,24 @@ use crate::common::Telemetry;
 mod common;
 
 const SUBSCRIPTION_CONFIG: &str = include_str!("fixtures/subscription.router.yaml");
-const SUB_QUERY: &str = r#"subscription {  userWasCreated {    name reviews { body } }}"#;
+const SUB_QUERY: &str =
+    r#"subscription {  userWasCreated(intervalMs: 5, nbEvents: 10) {    name reviews { body } }}"#;
 const UNFEDERATED_SUB_QUERY: &str = r#"subscription {  userWasCreated { name username }}"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_subscription() -> Result<(), BoxError> {
+    let mut router = create_router(SUBSCRIPTION_CONFIG).await?;
+    router.start().await;
+    router.assert_started().await;
+
+    let (_, response) = router.run_subscription(SUB_QUERY).await;
+    assert!(response.status().is_success());
+
+    let mut stream = response.bytes_stream();
+    while let Some(_chunk) = stream.next().await {}
+
+    Ok(())
+}
 
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]
