@@ -76,7 +76,7 @@ impl QueryPlan {
             )
             .await;
         if !deferred_fetches.is_empty() {
-            tracing::info!(monotonic_counter.apollo.router.operations.defer = 1);
+            tracing::info!(monotonic_counter.apollo.router.operations.defer = 1u64);
         }
 
         Response::builder().data(value).errors(errors).build()
@@ -84,6 +84,10 @@ impl QueryPlan {
 
     pub fn contains_mutations(&self) -> bool {
         self.root.contains_mutations()
+    }
+
+    pub fn subgraph_fetches(&self) -> usize {
+        self.root.subgraph_fetches()
     }
 }
 

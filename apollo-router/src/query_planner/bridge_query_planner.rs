@@ -1076,7 +1076,7 @@ mod tests {
             .get("router-bridge")
             .expect("Cargo.toml dependencies does not have an entry for router-bridge")
             .as_str()
-            .expect("router-bridge in Cargo.toml dependencies is not a string");
+            .unwrap_or_default();
         assert!(
             router_bridge_version.contains('='),
             "router-bridge in Cargo.toml is not pinned with a '=' prefix"
