@@ -21,7 +21,7 @@ macro_rules! schemar_fn {
 }
 
 pub(crate) mod authentication;
-mod authorization;
+pub(crate) mod authorization;
 mod coprocessor;
 #[cfg(test)]
 mod coprocessor_test;

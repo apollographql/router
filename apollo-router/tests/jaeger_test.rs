@@ -35,10 +35,139 @@ async fn test_reload() -> Result<(), BoxError> {
             .get("apollo-custom-trace-id")
             .unwrap()
             .is_empty());
-        validate_trace(id, &query, Some("ExampleQuery")).await?;
+        validate_trace(
+            id,
+            &query,
+            Some("ExampleQuery"),
+            &["my_app", "router", "products"],
+        )
+        .await?;
         router.touch_config().await;
         router.assert_reloaded().await;
     }
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_remote_root() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Jaeger)
+        .config(include_str!("fixtures/jaeger-no-sample.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (id, result) = router.execute_query(&query).await;
+    assert!(!result
+        .headers()
+        .get("apollo-custom-trace-id")
+        .unwrap()
+        .is_empty());
+    validate_trace(
+        id,
+        &query,
+        Some("ExampleQuery"),
+        &["my_app", "router", "products"],
+    )
+    .await?;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_local_root() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Jaeger)
+        .config(include_str!("fixtures/jaeger.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (id, result) = router.execute_untraced_query(&query).await;
+    assert!(!result
+        .headers()
+        .get("apollo-custom-trace-id")
+        .unwrap()
+        .is_empty());
+    validate_trace(id, &query, Some("ExampleQuery"), &["router", "products"]).await?;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_local_root_no_sample() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Jaeger)
+        .config(include_str!("fixtures/jaeger-no-sample.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (_, response) = router.execute_untraced_query(&query).await;
+    assert!(response.headers().get("apollo-custom-trace-id").is_none());
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_local_root_50_percent_sample() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Jaeger)
+        .config(include_str!("fixtures/jaeger-0.5-sample.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}\n","variables":{}, "operationName": "ExampleQuery"});
+
+    for _ in 0..100 {
+        let (id, result) = router.execute_untraced_query(&query).await;
+
+        if result.headers().get("apollo-custom-trace-id").is_some()
+            && validate_trace(id, &query, Some("ExampleQuery"), &["router", "products"])
+                .await
+                .is_ok()
+        {
+            router.graceful_shutdown().await;
+
+            return Ok(());
+        }
+    }
+    panic!("tried 100 requests with telemetry sampled at 50%, no traces were found")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_no_telemetry() -> Result<(), BoxError> {
+    // This test is currently skipped because it will only pass once we default the sampler to always off if there are no exporters.
+    // Once this is fixed then we can re-enable
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Jaeger)
+        .config(include_str!("fixtures/no-telemetry.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (_, response) = router.execute_untraced_query(&query).await;
+    assert!(response.headers().get("apollo-custom-trace-id").is_none());
+
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -61,7 +190,13 @@ async fn test_default_operation() -> Result<(), BoxError> {
         .get("apollo-custom-trace-id")
         .unwrap()
         .is_empty());
-    validate_trace(id, &query, Some("ExampleQuery1")).await?;
+    validate_trace(
+        id,
+        &query,
+        Some("ExampleQuery1"),
+        &["my_app", "router", "products"],
+    )
+    .await?;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -85,7 +220,7 @@ async fn test_anonymous_operation() -> Result<(), BoxError> {
         .get("apollo-custom-trace-id")
         .unwrap()
         .is_empty());
-    validate_trace(id, &query, None).await?;
+    validate_trace(id, &query, None, &["my_app", "router", "products"]).await?;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -108,7 +243,13 @@ async fn test_selected_operation() -> Result<(), BoxError> {
         .get("apollo-custom-trace-id")
         .unwrap()
         .is_empty());
-    validate_trace(id, &query, Some("ExampleQuery2")).await?;
+    validate_trace(
+        id,
+        &query,
+        Some("ExampleQuery2"),
+        &["my_app", "router", "products"],
+    )
+    .await?;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -117,21 +258,23 @@ async fn validate_trace(
     id: String,
     query: &Value,
     operation_name: Option<&str>,
+    services: &[&'static str],
 ) -> Result<(), BoxError> {
-    let tags = json!({ "unit_test": id });
     let params = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("service", "my_app")
-        .append_pair("tags", &tags.to_string())
+        .append_pair("service", services.first().expect("expected root service"))
         .finish();
 
-    let url = format!("http://localhost:16686/api/traces?{params}");
+    let url = format!("http://localhost:16686/api/traces/{id}?{params}");
     for _ in 0..10 {
-        if find_valid_trace(&url, query, operation_name).await.is_ok() {
+        if find_valid_trace(&url, query, operation_name, services)
+            .await
+            .is_ok()
+        {
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    find_valid_trace(&url, query, operation_name).await?;
+    find_valid_trace(&url, query, operation_name, services).await?;
     Ok(())
 }
 
@@ -139,6 +282,7 @@ async fn find_valid_trace(
     url: &str,
     query: &Value,
     operation_name: Option<&str>,
+    services: &[&'static str],
 ) -> Result<(), BoxError> {
     // A valid trace has:
     // * All three services
@@ -154,13 +298,13 @@ async fn find_valid_trace(
     tracing::debug!("{}", serde_json::to_string_pretty(&trace)?);
 
     // Verify that we got all the participants in the trace
-    verify_trace_participants(&trace)?;
+    verify_trace_participants(&trace, services)?;
 
     // Verify that we got the expected span operation names
-    verify_spans_present(&trace, operation_name)?;
+    verify_spans_present(&trace, operation_name, services)?;
 
     // Verify that all spans have a path to the root 'client_request' span
-    verify_span_parenting(&trace)?;
+    verify_span_parenting(&trace, services)?;
 
     // Verify that root span fields are present
     verify_root_span_fields(&trace, operation_name)?;
@@ -267,30 +411,37 @@ fn verify_supergraph_span_fields(
     Ok(())
 }
 
-fn verify_trace_participants(trace: &Value) -> Result<(), BoxError> {
-    let services: HashSet<String> = trace
+fn verify_trace_participants(trace: &Value, services: &[&'static str]) -> Result<(), BoxError> {
+    let actual_services: HashSet<String> = trace
         .select_path("$..serviceName")?
         .into_iter()
         .filter_map(|service| service.as_string())
         .collect();
-    tracing::debug!("found services {:?}", services);
+    tracing::debug!("found services {:?}", actual_services);
 
-    let expected_services = HashSet::from(["my_app", "router", "products"].map(|s| s.into()));
-    if services != expected_services {
+    let expected_services = services
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<HashSet<_>>();
+    if actual_services != expected_services {
         return Err(BoxError::from(format!(
-            "incomplete traces, got {services:?} expected {expected_services:?}"
+            "incomplete traces, got {actual_services:?} expected {expected_services:?}"
         )));
     }
     Ok(())
 }
 
-fn verify_spans_present(trace: &Value, operation_name: Option<&str>) -> Result<(), BoxError> {
+fn verify_spans_present(
+    trace: &Value,
+    operation_name: Option<&str>,
+    services: &[&'static str],
+) -> Result<(), BoxError> {
     let operation_names: HashSet<String> = trace
         .select_path("$..operationName")?
         .into_iter()
         .filter_map(|span_name| span_name.as_string())
         .collect();
-    let expected_operation_names: HashSet<String> = HashSet::from(
+    let mut expected_operation_names: HashSet<String> = HashSet::from(
         [
             "execution",
             "HTTP POST",
@@ -303,10 +454,12 @@ fn verify_spans_present(trace: &Value, operation_name: Option<&str>) -> Result<(
             //"parse_query", Parse query will only happen once
             //"query_planning", query planning will only happen once
             "subgraph",
-            "client_request",
         ]
         .map(|s| s.into()),
     );
+    if services.contains(&"my_app") {
+        expected_operation_names.insert("client_request".into());
+    }
     tracing::debug!("found spans {:?}", operation_names);
     let missing_operation_names: Vec<_> = expected_operation_names
         .iter()
@@ -320,8 +473,12 @@ fn verify_spans_present(trace: &Value, operation_name: Option<&str>) -> Result<(
     Ok(())
 }
 
-fn verify_span_parenting(trace: &Value) -> Result<(), BoxError> {
-    let root_span = trace.select_path("$..spans[?(@.operationName == 'client_request')]")?[0];
+fn verify_span_parenting(trace: &Value, services: &[&'static str]) -> Result<(), BoxError> {
+    let root_span = if services.contains(&"my_app") {
+        trace.select_path("$..spans[?(@.operationName == 'client_request')]")?[0]
+    } else {
+        trace.select_path("$..spans[?(@.operationName == 'query ExampleQuery')]")?[0]
+    };
     let spans = trace.select_path("$..spans[*]")?;
     for span in spans {
         let mut span_path = vec![span.select_path("$.operationName")?[0]

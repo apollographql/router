@@ -1,8 +1,10 @@
+use std::error::Error as stdError;
 use std::fmt::Debug;
 use std::time::Duration;
 use std::time::Instant;
 
 use futures::Stream;
+use futures::StreamExt;
 use graphql_client::QueryBody;
 use thiserror::Error;
 use tokio::sync::mpsc::channel;
@@ -168,6 +170,17 @@ where
 {
     let query = query_name::<Query>();
     let (sender, receiver) = channel(2);
+    let client = match reqwest::Client::builder()
+        .timeout(uplink_config.timeout)
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            tracing::error!("unable to create client to query uplink: {err}", err = err);
+            return futures::stream::empty().boxed();
+        }
+    };
+
     let task = async move {
         let mut last_id = None;
         let mut endpoints = uplink_config.endpoints.unwrap_or_default();
@@ -180,13 +193,7 @@ where
 
             let query_body = Query::build_query(variables.into());
 
-            match fetch::<Query, Response>(
-                &query_body,
-                &mut endpoints.iter(),
-                uplink_config.timeout,
-            )
-            .await
-            {
+            match fetch::<Query, Response>(&client, &query_body, &mut endpoints.iter()).await {
                 Ok(response) => {
                     tracing::info!(
                         counter.apollo_router_uplink_fetch_count_total = 1,
@@ -254,13 +261,13 @@ where
     };
     drop(tokio::task::spawn(task.with_current_subscriber()));
 
-    ReceiverStream::new(receiver)
+    ReceiverStream::new(receiver).boxed()
 }
 
 pub(crate) async fn fetch<Query, Response>(
+    client: &reqwest::Client,
     request_body: &QueryBody<Query::Variables>,
     urls: &mut impl Iterator<Item = &Url>,
-    timeout: Duration,
 ) -> Result<UplinkResponse<Response>, Error>
 where
     Query: graphql_client::GraphQLQuery,
@@ -271,7 +278,7 @@ where
     let query = query_name::<Query>();
     for url in urls {
         let now = Instant::now();
-        match http_request::<Query>(url.as_str(), request_body, timeout).await {
+        match http_request::<Query>(client, url.as_str(), request_body).await {
             Ok(response) => {
                 let response = response.data.map(Into::into);
                 match &response {
@@ -351,15 +358,34 @@ fn query_name<Query>() -> &'static str {
 }
 
 async fn http_request<Query>(
+    client: &reqwest::Client,
     url: &str,
     request_body: &QueryBody<Query::Variables>,
-    timeout: Duration,
 ) -> Result<graphql_client::Response<Query::ResponseData>, reqwest::Error>
 where
     Query: graphql_client::GraphQLQuery,
 {
-    let client = reqwest::Client::builder().timeout(timeout).build()?;
-    let res = client.post(url).json(request_body).send().await?;
+    // It is possible that istio-proxy is re-configuring networking beneath us. If it is, we'll see an error something like this:
+    // level: "ERROR"
+    // message: "fetch failed from all endpoints"
+    // target: "apollo_router::router::event::schema"
+    // timestamp: "2023-08-01T10:40:28.831196Z"
+    // That's deeply confusing and very hard to debug. Let's try to help by printing out a helpful error message here
+    let res = client
+        .post(url)
+        .json(request_body)
+        .send()
+        .await
+        .map_err(|e| {
+            if let Some(hyper_err) = e.source() {
+                if let Some(os_err) = hyper_err.source() {
+                    if os_err.to_string().contains("tcp connect error: Cannot assign requested address (os error 99)") {
+                        tracing::warn!("If your router is executing within a kubernetes pod, this failure may be caused by istio-proxy injection. See https://github.com/apollographql/router/issues/3533 for more details about how to solve this");
+                    }
+                }
+            }
+            e
+        })?;
     tracing::debug!("uplink response {:?}", res);
     let response_body: graphql_client::Response<Query::ResponseData> = res.json().await?;
     Ok(response_body)

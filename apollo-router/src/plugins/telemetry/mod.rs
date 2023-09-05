@@ -27,6 +27,7 @@ use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapPropagator;
+use opentelemetry::sdk::metrics::controllers::BasicController;
 use opentelemetry::sdk::propagation::TextMapCompositePropagator;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::SpanContext;
@@ -35,6 +36,7 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry::Context as OtelContext;
 use opentelemetry::KeyValue;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
@@ -46,7 +48,6 @@ use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::fmt::format::JsonFields;
 use tracing_subscriber::Layer;
@@ -58,16 +59,19 @@ use self::apollo::SingleReport;
 use self::apollo_exporter::proto;
 use self::apollo_exporter::Sender;
 use self::config::Conf;
+use self::config::Sampler;
+use self::config::SamplerOption;
 use self::formatters::text::TextFormatter;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use self::reload::reload_fmt;
 use self::reload::reload_metrics;
+use self::reload::LayeredTracer;
 use self::reload::NullFieldFormatter;
+use self::reload::SamplingFilter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
-use self::tracing::reload::ReloadTracer;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::OPERATION_NAME;
 use crate::layers::ServiceBuilderExt;
@@ -77,8 +81,10 @@ use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config::Metrics;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::config::Tracing;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::metrics::aggregation::AggregateMeterProvider;
@@ -95,9 +101,11 @@ use crate::plugins::telemetry::metrics::MetricsExporterHandle;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::plugins::telemetry::utils::TracingUtils;
 use crate::query_planner::OperationKind;
 use crate::register_plugin;
 use crate::router_factory::Endpoint;
+use crate::services::apollo_key;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
@@ -121,6 +129,8 @@ pub(crate) mod metrics;
 mod otlp;
 pub(crate) mod reload;
 pub(crate) mod tracing;
+pub(crate) mod utils;
+
 // Tracing consts
 pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
 pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
@@ -141,13 +151,14 @@ const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 pub(crate) struct Telemetry {
     config: Arc<config::Conf>,
     metrics: BasicMetrics,
-    // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.
+    // Do not remove metrics_exporters. Metrics will not be exported if it is removed.
     // Typically the handles are a PushController but may be something else. Dropping the handle will
     // shutdown exporter.
-    _metrics_exporters: Vec<MetricsExporterHandle>,
+    metrics_exporters: Vec<MetricsExporterHandle>,
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
+    sampling_filter_ratio: SamplerOption,
 
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
     meter_provider: AggregateMeterProvider,
@@ -188,6 +199,21 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
 
 impl Drop for Telemetry {
     fn drop(&mut self) {
+        // If we can downcast the metrics exporter to be a `BasicController`, then we
+        // should stop it to ensure metrics are transmitted before the exporter is dropped.
+        for exporter in self.metrics_exporters.drain(..) {
+            if let Ok(controller) = MetricsExporterHandle::downcast::<BasicController>(exporter) {
+                ::tracing::debug!("stopping basic controller: {controller:?}");
+                let cx = OtelContext::current();
+
+                thread::spawn(move || {
+                    if let Err(e) = controller.stop(&cx) {
+                        ::tracing::error!("error during basic controller stop: {e}");
+                    }
+                    ::tracing::debug!("stopped basic controller: {controller:?}");
+                });
+            }
+        }
         // If for some reason we didn't use the trace provider then safely discard it e.g. some other plugin failed `new`
         // To ensure we don't hang tracing providers are dropped in a blocking task.
         // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
@@ -218,14 +244,16 @@ impl Plugin for Telemetry {
             config.calculate_field_level_instrumentation_ratio()?;
         let mut metrics_builder = Self::create_metrics_builder(&config)?;
         let meter_provider = metrics_builder.meter_provider();
+        let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints(),
-            _metrics_exporters: metrics_builder.exporters(),
+            metrics_exporters: metrics_builder.exporters(),
             metrics: BasicMetrics::new(&meter_provider),
             apollo_metrics_sender: metrics_builder.apollo_metrics_provider(),
             field_level_instrumentation_ratio,
-            tracer_provider: Some(Self::create_tracer_provider(&config)?),
+            tracer_provider: Some(tracer_provider),
             meter_provider,
+            sampling_filter_ratio,
             config: Arc::new(config),
         })
     }
@@ -292,6 +320,10 @@ impl Plugin for Telemetry {
             .map_future(move |fut| {
                 let start = Instant::now();
                 let config = config_later.clone();
+
+                Self::plugin_metrics(&config);
+
+
                 async move {
                     let span = Span::current();
                     let response: Result<router::Response, BoxError> = fut.await;
@@ -514,6 +546,8 @@ impl Telemetry {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
+            SamplingFilter::configure(&self.sampling_filter_ratio);
+
             // The reason that this has to happen here is that we are interacting with global state.
             // If we do this logic during plugin init then if a subsequent plugin fails to init then we
             // will already have set the new tracer provider and we will be in an inconsistent state.
@@ -588,22 +622,41 @@ impl Telemetry {
 
     fn create_tracer_provider(
         config: &config::Conf,
-    ) -> Result<opentelemetry::sdk::trace::TracerProvider, BoxError> {
+    ) -> Result<(SamplerOption, opentelemetry::sdk::trace::TracerProvider), BoxError> {
         let tracing_config = config.tracing.clone().unwrap_or_default();
-        let trace_config = &tracing_config.trace_config.unwrap_or_default();
-        let mut builder =
-            opentelemetry::sdk::trace::TracerProvider::builder().with_config(trace_config.into());
+        let mut trace_config = tracing_config.trace_config.unwrap_or_default();
+        let mut sampler = trace_config.sampler;
+        // set it to AlwaysOn: it is now done in the SamplingFilter, so whatever is sent to an exporter
+        // should be accepted
+        trace_config.sampler = SamplerOption::Always(Sampler::AlwaysOn);
 
-        builder = setup_tracing(builder, &tracing_config.jaeger, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.zipkin, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.datadog, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.otlp, trace_config)?;
-        builder = setup_tracing(builder, &config.apollo, trace_config)?;
-        // For metrics
-        builder = builder.with_simple_exporter(metrics::span_metrics_exporter::Exporter::default());
+        // if APOLLO_KEY was set, the Studio exporter must be active
+        let apollo_config = if config.apollo.is_none() && apollo_key().is_some() {
+            Some(Default::default())
+        } else {
+            config.apollo.clone()
+        };
+
+        let mut builder = opentelemetry::sdk::trace::TracerProvider::builder()
+            .with_config((&trace_config).into());
+
+        builder = setup_tracing(builder, &tracing_config.jaeger, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.zipkin, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.datadog, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.otlp, &trace_config)?;
+        builder = setup_tracing(builder, &apollo_config, &trace_config)?;
+
+        if tracing_config.jaeger.is_none()
+            && tracing_config.zipkin.is_none()
+            && tracing_config.datadog.is_none()
+            && tracing_config.otlp.is_none()
+            && apollo_config.is_none()
+        {
+            sampler = SamplerOption::Always(Sampler::AlwaysOff);
+        }
 
         let tracer_provider = builder.build();
-        Ok(tracer_provider)
+        Ok((sampler, tracer_provider))
     }
 
     fn create_metrics_builder(config: &config::Conf) -> Result<MetricsBuilder, BoxError> {
@@ -642,21 +695,7 @@ impl Telemetry {
         Ok(builder)
     }
 
-    #[allow(clippy::type_complexity)]
-    fn create_fmt_layer(
-        config: &config::Conf,
-    ) -> Box<
-        dyn Layer<
-                ::tracing_subscriber::layer::Layered<
-                    OpenTelemetryLayer<
-                        ::tracing_subscriber::Registry,
-                        ReloadTracer<::opentelemetry::sdk::trace::Tracer>,
-                    >,
-                    ::tracing_subscriber::Registry,
-                >,
-            > + Send
-            + Sync,
-    > {
+    fn create_fmt_layer(config: &config::Conf) -> Box<dyn Layer<LayeredTracer> + Send + Sync> {
         let logging = &config.logging;
         let fmt = match logging.format {
             config::LoggingFormat::Pretty => tracing_subscriber::fmt::layer()
@@ -815,6 +854,10 @@ impl Telemetry {
                 if !parts.status.is_success() {
                     metric_attrs.push(KeyValue::new("error", parts.status.to_string()));
                 }
+                ::tracing::info!(
+                    monotonic_counter.apollo.router.operations = 1u64,
+                    http.response.status_code = parts.status.as_u16(),
+                );
                 let response = http::Response::from_parts(
                     parts,
                     once(ready(first_response.unwrap_or_default()))
@@ -827,6 +870,10 @@ impl Telemetry {
             Err(err) => {
                 metric_attrs.push(KeyValue::new("status", "500"));
 
+                ::tracing::info!(
+                    monotonic_counter.apollo.router.operations = 1u64,
+                    http.response.status_code = 500,
+                );
                 Err(err)
             }
         };
@@ -1148,13 +1195,15 @@ impl Telemetry {
                 Err(e)
             }
             Ok(router_response) => {
-                let mut has_errors = !router_response.response.status().is_success();
-                if operation_kind == OperationKind::Subscription {
+                let http_status_is_success = router_response.response.status().is_success();
+
+                // Only send the subscription-request metric if it's an http status in error because we won't always enter the stream after.
+                if operation_kind == OperationKind::Subscription && !http_status_is_success {
                     Self::update_apollo_metrics(
                         ctx,
                         field_level_instrumentation_ratio,
                         sender.clone(),
-                        has_errors,
+                        true,
                         start.elapsed(),
                         operation_kind,
                         Some(OperationSubType::SubscriptionRequest),
@@ -1167,14 +1216,25 @@ impl Telemetry {
                     response_stream
                         .enumerate()
                         .map(move |(idx, response)| {
-                            if !response.errors.is_empty() {
-                                has_errors = true;
-                            }
+                            let has_errors = !response.errors.is_empty();
 
                             if !matches!(sender, Sender::Noop) {
                                 if operation_kind == OperationKind::Subscription {
-                                    // Don't send for the first empty response because it's a heartbeat
-                                    if idx != 0 {
+                                    // The first empty response is always a heartbeat except if it's an error
+                                    if idx == 0 {
+                                        // Don't count for subscription-request if http status was in error because it has been counted before
+                                        if http_status_is_success {
+                                            Self::update_apollo_metrics(
+                                                &ctx,
+                                                field_level_instrumentation_ratio,
+                                                sender.clone(),
+                                                has_errors,
+                                                start.elapsed(),
+                                                operation_kind,
+                                                Some(OperationSubType::SubscriptionRequest),
+                                            );
+                                        }
+                                    } else {
                                         // Only for subscription events
                                         Self::update_apollo_metrics(
                                             &ctx,
@@ -1443,6 +1503,57 @@ impl Telemetry {
             }
         }
         root
+    }
+
+    fn plugin_metrics(config: &Arc<Conf>) {
+        let metrics_prom_used = matches!(
+            config.metrics,
+            Some(Metrics {
+                prometheus: Some(_),
+                ..
+            })
+        );
+        let metrics_otlp_used = matches!(config.metrics, Some(Metrics { otlp: Some(_), .. }));
+        let tracing_otlp_used = matches!(config.tracing, Some(Tracing { otlp: Some(_), .. }));
+        let tracing_datadog_used = matches!(
+            config.tracing,
+            Some(Tracing {
+                datadog: Some(_),
+                ..
+            })
+        );
+        let tracing_jaeger_used = matches!(
+            config.tracing,
+            Some(Tracing {
+                jaeger: Some(_),
+                ..
+            })
+        );
+        let tracing_zipkin_used = matches!(
+            config.tracing,
+            Some(Tracing {
+                zipkin: Some(_),
+                ..
+            })
+        );
+
+        if metrics_prom_used
+            || metrics_otlp_used
+            || tracing_jaeger_used
+            || tracing_otlp_used
+            || tracing_zipkin_used
+            || tracing_datadog_used
+        {
+            ::tracing::info!(
+                monotonic_counter.apollo.router.operations.telemetry = 1u64,
+                telemetry.metrics.otlp = metrics_otlp_used.or_empty(),
+                telemetry.metrics.prometheus = metrics_prom_used.or_empty(),
+                telemetry.tracing.otlp = tracing_otlp_used.or_empty(),
+                telemetry.tracing.datadog = tracing_datadog_used.or_empty(),
+                telemetry.tracing.jaeger = tracing_jaeger_used.or_empty(),
+                telemetry.tracing.zipkin = tracing_zipkin_used.or_empty(),
+            );
+        }
     }
 }
 

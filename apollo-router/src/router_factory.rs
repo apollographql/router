@@ -3,12 +3,17 @@ use std::io;
 use std::sync::Arc;
 
 use axum::response::IntoResponse;
+use futures::future::BoxFuture;
 use http::StatusCode;
+use indexmap::IndexMap;
 use multimap::MultiMap;
 use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
+use tower::retry::Retry;
 use tower::service_fn;
+use tower::util::Either;
+use tower::util::Oneshot;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -23,6 +28,9 @@ use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
+use crate::plugins::traffic_shaping::rate;
+use crate::plugins::traffic_shaping::timeout;
+use crate::plugins::traffic_shaping::RetryPolicy;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
@@ -30,7 +38,9 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router_service::RouterCreator;
+use crate::services::subgraph;
 use crate::services::transport;
+use crate::services::HasConfig;
 use crate::services::HasSchema;
 use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::SubgraphService;
@@ -152,64 +162,34 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             }
         };
 
+        let schema_changed = previous_router
+            .map(|router| router.supergraph_creator.schema().raw_sdl.as_ref() == &schema)
+            .unwrap_or_default();
+
+        let config_changed = previous_router
+            .map(|router| router.supergraph_creator.config() == configuration)
+            .unwrap_or_default();
+
+        if config_changed {
+            configuration
+                .notify
+                .broadcast_configuration(Arc::downgrade(&configuration));
+        }
+
         let schema = bridge_query_planner.schema();
+        if schema_changed {
+            configuration.notify.broadcast_schema(schema.clone());
+        }
 
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
-        let tls_root_store: Option<RootCertStore> = configuration
-            .tls
-            .subgraph
-            .all
-            .create_certificate_store()
-            .transpose()?;
-
         let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
-
-        let subscription_plugin_conf = plugins
-            .iter()
-            .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
-            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
-            .map(|p| p.config.clone());
-
-        for (name, _) in schema.subgraphs() {
-            let subgraph_root_store = configuration
-                .tls
-                .subgraph
-                .subgraphs
-                .get(name)
-                .as_ref()
-                .and_then(|subgraph| subgraph.create_certificate_store())
-                .transpose()?
-                .or_else(|| tls_root_store.clone());
-
-            let shaping = plugins
-                .iter()
-                .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
-                .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
-                .expect("traffic shaping should always be part of the plugin list");
-
-            let subgraph_service = shaping.subgraph_service_internal(
-                name,
-                SubgraphService::new(
-                    name,
-                    configuration
-                        .apq
-                        .subgraph
-                        .subgraphs
-                        .get(name)
-                        .map(|apq| apq.enabled)
-                        .unwrap_or(configuration.apq.subgraph.all.enabled),
-                    subgraph_root_store,
-                    shaping.enable_subgraph_http2(name),
-                    subscription_plugin_conf.clone(),
-                    configuration.notify.clone(),
-                ),
-            );
-            builder = builder.with_subgraph_service(name, subgraph_service);
+        let subgraph_services = create_subgraph_services(&plugins, &schema, &configuration).await?;
+        for (name, subgraph_service) in subgraph_services {
+            builder = builder.with_subgraph_service(&name, subgraph_service);
         }
-
         for (plugin_name, plugin) in plugins {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
@@ -220,8 +200,6 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         // Instantiate the parser here so we can use it to warm up the planner below
         let query_parsing_layer =
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
-
-        let mut persisted_query_manifest_poller = None;
 
         if let Some(previous_router) = previous_router {
             if configuration.supergraph.query_planning.warmed_up_queries > 0 {
@@ -240,23 +218,114 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                         .await;
                 }
             }
-
-            // capture the manifest poller for persisted queries and pass it on to the new router
-            // so it can keep running without needing to re-fetch every single operation on reload.
-            persisted_query_manifest_poller = previous_router
-                .persisted_query_layer
-                .manifest_poller
-                .clone();
         };
 
         Ok(Self::RouterFactory::new(
             query_parsing_layer,
             Arc::new(supergraph_creator),
             configuration,
-            persisted_query_manifest_poller,
         )
         .await?)
     }
+}
+
+pub(crate) async fn create_subgraph_services(
+    plugins: &[(String, Box<dyn DynPlugin>)],
+    schema: &Schema,
+    configuration: &Configuration,
+) -> Result<
+    IndexMap<
+        String,
+        impl Service<
+                subgraph::Request,
+                Response = subgraph::Response,
+                Error = BoxError,
+                Future = Either<
+                    Either<
+                        BoxFuture<'static, Result<subgraph::Response, BoxError>>,
+                        Either<
+                            BoxFuture<'static, Result<subgraph::Response, BoxError>>,
+                            timeout::future::ResponseFuture<
+                                Oneshot<
+                                    Either<
+                                        Retry<
+                                            RetryPolicy,
+                                            Either<
+                                                rate::service::RateLimit<SubgraphService>,
+                                                SubgraphService,
+                                            >,
+                                        >,
+                                        Either<
+                                            rate::service::RateLimit<SubgraphService>,
+                                            SubgraphService,
+                                        >,
+                                    >,
+                                    subgraph::Request,
+                                >,
+                            >,
+                        >,
+                    >,
+                    <SubgraphService as Service<subgraph::Request>>::Future,
+                >,
+            > + Clone
+            + Send
+            + Sync
+            + 'static,
+    >,
+    BoxError,
+> {
+    let tls_root_store: Option<RootCertStore> = configuration
+        .tls
+        .subgraph
+        .all
+        .create_certificate_store()
+        .transpose()?;
+
+    let subscription_plugin_conf = plugins
+        .iter()
+        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
+        .map(|p| p.config.clone());
+
+    let shaping = plugins
+        .iter()
+        .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
+        .expect("traffic shaping should always be part of the plugin list");
+
+    let mut subgraph_services = IndexMap::new();
+    for (name, _) in schema.subgraphs() {
+        let subgraph_root_store = configuration
+            .tls
+            .subgraph
+            .subgraphs
+            .get(name)
+            .as_ref()
+            .and_then(|subgraph| subgraph.create_certificate_store())
+            .transpose()?
+            .or_else(|| tls_root_store.clone());
+
+        let subgraph_service = shaping.subgraph_service_internal(
+            name,
+            SubgraphService::new(
+                name,
+                configuration
+                    .apq
+                    .subgraph
+                    .subgraphs
+                    .get(name)
+                    .map(|apq| apq.enabled)
+                    .unwrap_or(configuration.apq.subgraph.all.enabled),
+                subgraph_root_store,
+                shaping.enable_subgraph_http2(name),
+                subscription_plugin_conf.clone(),
+                configuration.notify.clone(),
+            ),
+        );
+        subgraph_services.insert(name.clone(), subgraph_service);
+    }
+
+    Ok(subgraph_services)
 }
 
 impl YamlRouterFactory {
@@ -281,58 +350,12 @@ impl YamlRouterFactory {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
-        let tls_root_store = configuration
-            .tls
-            .subgraph
-            .all
-            .create_certificate_store()
-            .transpose()?;
-
         let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
-
-        let subscription_plugin_conf = plugins
-            .iter()
-            .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
-            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
-            .map(|p| p.config.clone());
-        for (name, _) in schema.subgraphs() {
-            let subgraph_root_store = configuration
-                .tls
-                .subgraph
-                .subgraphs
-                .get(name)
-                .as_ref()
-                .and_then(|subgraph| subgraph.create_certificate_store())
-                .transpose()?
-                .or_else(|| tls_root_store.clone());
-
-            let shaping = plugins
-                .iter()
-                .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
-                .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
-                .expect("traffic shaping should always be part of the plugin list");
-
-            let subgraph_service = shaping.subgraph_service_internal(
-                name,
-                SubgraphService::new(
-                    name,
-                    configuration
-                        .apq
-                        .subgraph
-                        .subgraphs
-                        .get(name)
-                        .map(|apq| apq.enabled)
-                        .unwrap_or(configuration.apq.subgraph.all.enabled),
-                    subgraph_root_store,
-                    shaping.enable_subgraph_http2(name),
-                    subscription_plugin_conf.clone(),
-                    configuration.notify.clone(),
-                ),
-            );
-            builder = builder.with_subgraph_service(name, subgraph_service);
+        let subgraph_services = create_subgraph_services(&plugins, &schema, &configuration).await?;
+        for (name, subgraph_service) in subgraph_services {
+            builder = builder.with_subgraph_service(&name, subgraph_service);
         }
-
         for (plugin_name, plugin) in plugins {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
@@ -393,7 +416,7 @@ fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
 pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
     let config: Configuration = serde_yaml::from_str(configuration).unwrap();
 
-    let service = YamlRouterFactory::default()
+    let service = YamlRouterFactory
         .create(Arc::new(config), schema.to_string(), None, None)
         .await;
     assert_eq!(
@@ -550,9 +573,11 @@ pub(crate) async fn create_plugins(
 
 fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
     if configuration.get("apollo").is_none() {
+        /*FIXME: do we really need to set a default configuration for telemetry.apollo ?
         if let Some(telemetry) = configuration.as_object_mut() {
             telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
-        }
+        }*/
+        return;
     }
     if let (Some(schema_id), Some(apollo)) = (
         &schema.api_schema().schema_id,
@@ -697,7 +722,7 @@ mod test {
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
         let schema = include_str!("testdata/supergraph.graphql");
 
-        let service = YamlRouterFactory::default()
+        let service = YamlRouterFactory
             .create(Arc::new(config), schema.to_string(), None, None)
             .await;
         service.map(|_| ())
@@ -707,7 +732,7 @@ mod test {
     fn test_inject_schema_id() {
         let schema = include_str!("testdata/starstuff@current.graphql");
         let schema = Schema::parse_test(schema, &Default::default()).unwrap();
-        let mut config = json!({});
+        let mut config = json!({ "apollo": {} });
         inject_schema_id(&schema, &mut config);
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
