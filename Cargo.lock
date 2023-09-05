@@ -340,6 +340,7 @@ dependencies = [
  "opentelemetry-prometheus",
  "opentelemetry-semantic-conventions",
  "opentelemetry-zipkin",
+ "opentelemetry_api",
  "p256 0.12.0",
  "parking_lot 0.12.1",
  "paste",
@@ -5164,9 +5165,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.4+v2.5.3"
+version = "0.5.5+v2.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82d3e1bfc37d92eab53edcd17d4290b5aa8fb95ab43d0408f5d9b56157a6d61c"
+checksum = "a33cdf930b79165fd6a0d3b94ccd930162103255db0dd1a7dd6625568b347539"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -7097,9 +7098,9 @@ checksum = "9d5b2c62b4012a3e1eca5a7e077d13b3bf498c4073e33ccd58626607748ceeca"
 
 [[package]]
 name = "walkdir"
-version = "2.3.3"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36df944cda56c7d8d8b7496af378e6b16de9284591917d307c9b4d313c44e698"
+checksum = "d71d857dc86794ca4c280d616f7da00d2dbfd8cd788846559a6813e6aa4b54ee"
 dependencies = [
  "same-file",
  "winapi-util",
@@ -7217,9 +7218,9 @@ dependencies = [
 
 [[package]]
 name = "webpki"
-version = "0.22.0"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f095d78192e208183081cc07bc5515ef55216397af48b873e5edcd72637fa1bd"
+checksum = "f0e74f82d49d545ad128049b7e88f6576df2da6b02e9ce565c6f533be576957e"
 dependencies = [
  "ring",
  "untrusted",

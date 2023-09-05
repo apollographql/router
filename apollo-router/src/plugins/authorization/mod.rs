@@ -141,7 +141,7 @@ impl AuthorizationPlugin {
         // if this fails, the query is invalid and will fail at the query planning phase.
         // We do not return validation errors here for now because that would imply a huge
         // refactoring of telemetry and tests
-        if traverse::document(&mut visitor, file_id).is_ok() && !visitor.found {
+        if traverse::document(&mut visitor, file_id).is_ok() && visitor.found {
             context.insert(AUTHENTICATED_KEY, true).unwrap();
         }
 

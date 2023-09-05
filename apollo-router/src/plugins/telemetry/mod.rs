@@ -50,7 +50,6 @@ use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::fmt::format::JsonFields;
 use tracing_subscriber::Layer;
@@ -62,14 +61,17 @@ use self::apollo::SingleReport;
 use self::apollo_exporter::proto;
 use self::apollo_exporter::Sender;
 use self::config::Conf;
+use self::config::Sampler;
+use self::config::SamplerOption;
 use self::formatters::text::TextFormatter;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use self::reload::reload_fmt;
 use self::reload::reload_metrics;
-use self::reload::LayeredRegistry;
+use self::reload::LayeredTracer;
 use self::reload::NullFieldFormatter;
+use self::reload::SamplingFilter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::reload::ReloadTracer;
@@ -109,6 +111,7 @@ use crate::plugins::telemetry::utils::TracingUtils;
 use crate::query_planner::OperationKind;
 use crate::register_plugin;
 use crate::router_factory::Endpoint;
+use crate::services::apollo_key;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
@@ -162,6 +165,7 @@ pub(crate) struct Telemetry {
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
+    sampling_filter_ratio: SamplerOption,
 
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
     meter_provider: AggregateMeterProvider,
@@ -261,6 +265,7 @@ impl Plugin for Telemetry {
                     None
                 }
             });
+        let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
 
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints(),
@@ -268,8 +273,9 @@ impl Plugin for Telemetry {
             metrics: BasicMetrics::new(&meter_provider),
             apollo_metrics_sender: metrics_builder.apollo_metrics_provider(),
             field_level_instrumentation_ratio,
-            tracer_provider: Some(Self::create_tracer_provider(&config)?),
+            tracer_provider: Some(tracer_provider),
             meter_provider,
+            sampling_filter_ratio,
             config: Arc::new(config),
             counter,
         })
@@ -580,6 +586,8 @@ impl Telemetry {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
+            SamplingFilter::configure(&self.sampling_filter_ratio);
+
             // The reason that this has to happen here is that we are interacting with global state.
             // If we do this logic during plugin init then if a subsequent plugin fails to init then we
             // will already have set the new tracer provider and we will be in an inconsistent state.
@@ -651,20 +659,41 @@ impl Telemetry {
 
     fn create_tracer_provider(
         config: &config::Conf,
-    ) -> Result<opentelemetry::sdk::trace::TracerProvider, BoxError> {
+    ) -> Result<(SamplerOption, opentelemetry::sdk::trace::TracerProvider), BoxError> {
         let tracing_config = config.tracing.clone().unwrap_or_default();
-        let trace_config = &tracing_config.trace_config.unwrap_or_default();
-        let mut builder =
-            opentelemetry::sdk::trace::TracerProvider::builder().with_config(trace_config.into());
+        let mut trace_config = tracing_config.trace_config.unwrap_or_default();
+        let mut sampler = trace_config.sampler;
+        // set it to AlwaysOn: it is now done in the SamplingFilter, so whatever is sent to an exporter
+        // should be accepted
+        trace_config.sampler = SamplerOption::Always(Sampler::AlwaysOn);
 
-        builder = setup_tracing(builder, &tracing_config.jaeger, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.zipkin, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.datadog, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.otlp, trace_config)?;
-        builder = setup_tracing(builder, &config.apollo, trace_config)?;
+        // if APOLLO_KEY was set, the Studio exporter must be active
+        let apollo_config = if config.apollo.is_none() && apollo_key().is_some() {
+            Some(Default::default())
+        } else {
+            config.apollo.clone()
+        };
+
+        let mut builder = opentelemetry::sdk::trace::TracerProvider::builder()
+            .with_config((&trace_config).into());
+
+        builder = setup_tracing(builder, &tracing_config.jaeger, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.zipkin, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.datadog, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.otlp, &trace_config)?;
+        builder = setup_tracing(builder, &apollo_config, &trace_config)?;
+
+        if tracing_config.jaeger.is_none()
+            && tracing_config.zipkin.is_none()
+            && tracing_config.datadog.is_none()
+            && tracing_config.otlp.is_none()
+            && apollo_config.is_none()
+        {
+            sampler = SamplerOption::Always(Sampler::AlwaysOff);
+        }
 
         let tracer_provider = builder.build();
-        Ok(tracer_provider)
+        Ok((sampler, tracer_provider))
     }
 
     fn create_metrics_builder(config: &config::Conf) -> Result<MetricsBuilder, BoxError> {
@@ -703,21 +732,7 @@ impl Telemetry {
         Ok(builder)
     }
 
-    #[allow(clippy::type_complexity)]
-    fn create_fmt_layer(
-        config: &config::Conf,
-    ) -> Box<
-        dyn Layer<
-                ::tracing_subscriber::layer::Layered<
-                    OpenTelemetryLayer<
-                        LayeredRegistry,
-                        ReloadTracer<::opentelemetry::sdk::trace::Tracer>,
-                    >,
-                    LayeredRegistry,
-                >,
-            > + Send
-            + Sync,
-    > {
+    fn create_fmt_layer(config: &config::Conf) -> Box<dyn Layer<LayeredTracer> + Send + Sync> {
         let logging = &config.logging;
         let fmt = match logging.format {
             config::LoggingFormat::Pretty => tracing_subscriber::fmt::layer()

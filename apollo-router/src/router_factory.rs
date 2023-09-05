@@ -573,9 +573,11 @@ pub(crate) async fn create_plugins(
 
 fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
     if configuration.get("apollo").is_none() {
+        /*FIXME: do we really need to set a default configuration for telemetry.apollo ?
         if let Some(telemetry) = configuration.as_object_mut() {
             telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
-        }
+        }*/
+        return;
     }
     if let (Some(schema_id), Some(apollo)) = (
         &schema.api_schema().schema_id,
@@ -730,7 +732,7 @@ mod test {
     fn test_inject_schema_id() {
         let schema = include_str!("testdata/starstuff@current.graphql");
         let schema = Schema::parse_test(schema, &Default::default()).unwrap();
-        let mut config = json!({});
+        let mut config = json!({ "apollo": {} });
         inject_schema_id(&schema, &mut config);
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
