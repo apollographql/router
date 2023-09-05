@@ -1689,6 +1689,12 @@ expression: "&schema"
                       "minimum": 0.0,
                       "nullable": true
                     },
+                    "close_check": {
+                      "description": "Coofigure how often the client will check if the subscription was ended from the client side used only if reconnect is enabled. Defaults to 10 seconds",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
                     "delay": {
                       "description": "After an error, the client will wait this long before the first attempt to reconnect.  Subsequent reconnect attempts may wait longer, depending on the [`backoff_factor`].",
                       "default": null,
@@ -1713,13 +1719,13 @@ expression: "&schema"
                       "nullable": true
                     },
                     "reconnect": {
-                      "description": "If `reconnect` is `true` (the [default]), the client will automatically try to reconnect if the stream ends due to an error. If it is `false`, the client will stop receiving events after an error.",
+                      "description": "If `reconnect` is `true`, the client will automatically try to reconnect if the stream ends due to an error. If it is `false`  (the [default]), the client will stop receiving events after an error.",
                       "default": null,
                       "type": "boolean",
                       "nullable": true
                     },
                     "retry_initial": {
-                      "description": "If `true` (the [default]) the client will automatically retry the connection, with the same delay and backoff behaviour as for reconnects due to stream error. If `false`, the client will not retry the initial connection.",
+                      "description": "If `true` the client will automatically retry the connection, with the same delay and backoff behaviour as for reconnects due to stream error. If `false` (the [default]), the client will not retry the initial connection.",
                       "default": null,
                       "type": "boolean",
                       "nullable": true
@@ -1741,6 +1747,12 @@ expression: "&schema"
                         "type": "integer",
                         "format": "uint32",
                         "minimum": 0.0,
+                        "nullable": true
+                      },
+                      "close_check": {
+                        "description": "Coofigure how often the client will check if the subscription was ended from the client side used only if reconnect is enabled. Defaults to 10 seconds",
+                        "default": null,
+                        "type": "string",
                         "nullable": true
                       },
                       "delay": {
@@ -1767,13 +1779,13 @@ expression: "&schema"
                         "nullable": true
                       },
                       "reconnect": {
-                        "description": "If `reconnect` is `true` (the [default]), the client will automatically try to reconnect if the stream ends due to an error. If it is `false`, the client will stop receiving events after an error.",
+                        "description": "If `reconnect` is `true`, the client will automatically try to reconnect if the stream ends due to an error. If it is `false`  (the [default]), the client will stop receiving events after an error.",
                         "default": null,
                         "type": "boolean",
                         "nullable": true
                       },
                       "retry_initial": {
-                        "description": "If `true` (the [default]) the client will automatically retry the connection, with the same delay and backoff behaviour as for reconnects due to stream error. If `false`, the client will not retry the initial connection.",
+                        "description": "If `true` the client will automatically retry the connection, with the same delay and backoff behaviour as for reconnects due to stream error. If `false` (the [default]), the client will not retry the initial connection.",
                         "default": null,
                         "type": "boolean",
                         "nullable": true

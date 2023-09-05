@@ -353,6 +353,7 @@ where
 {
     topic: K,
     pubsub_sender: mpsc::Sender<Notification<K, V>>,
+    closed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl<K, V> Clone for HandleGuard<K, V>
@@ -363,6 +364,7 @@ where
         Self {
             topic: self.topic.clone(),
             pubsub_sender: self.pubsub_sender.clone(),
+            closed: self.closed.clone(),
         }
     }
 }
@@ -378,6 +380,7 @@ where
         if let Err(err) = err {
             tracing::trace!("cannot unsubscribe {err:?}");
         }
+        self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -422,6 +425,7 @@ where
             handle_guard: HandleGuard {
                 topic,
                 pubsub_sender,
+                closed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
             msg_sender,
             msg_receiver,
@@ -440,6 +444,10 @@ where
             handle_guard: self.handle_guard,
             msg_sender: self.msg_sender,
         }
+    }
+
+    pub(crate) fn closed_ref(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        self.handle_guard.closed.clone()
     }
 
     /// Return a sink and a stream

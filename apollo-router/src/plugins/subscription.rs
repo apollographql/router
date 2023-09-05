@@ -222,14 +222,14 @@ pub(crate) struct SseConfiguration {
     /// Path use to get the SSE stream
     pub(crate) path: Option<String>,
 
-    /// If `reconnect` is `true` (the [default]), the client will automatically
-    /// try to reconnect if the stream ends due to an error. If it is `false`,
+    /// If `reconnect` is `true`, the client will automatically
+    /// try to reconnect if the stream ends due to an error. If it is `false`  (the [default]),
     /// the client will stop receiving events after an error.
     pub(crate) reconnect: Option<bool>,
 
-    /// If `true` (the [default]) the client will automatically retry the connection, with the
+    /// If `true` the client will automatically retry the connection, with the
     /// same delay and backoff behaviour as for reconnects due to stream error.
-    /// If `false`, the client will not retry the initial
+    /// If `false` (the [default]), the client will not retry the initial
     /// connection.
     pub(crate) retry_initial: Option<bool>,
 
@@ -251,6 +251,12 @@ pub(crate) struct SseConfiguration {
     #[serde(with = "humantime_serde")]
     #[schemars(with = "Option<String>")]
     pub(crate) delay_max: Option<std::time::Duration>,
+
+    /// Coofigure how often the client will check if the subscription was ended from the client side
+    /// used only if reconnect is enabled. Defaults to 10 seconds
+    #[serde(with = "humantime_serde")]
+    #[schemars(with = "Option<String>")]
+    pub(crate) close_check: Option<std::time::Duration>,
 }
 
 fn default_sse_config_enabled() -> bool {
