@@ -42,6 +42,13 @@
             "enterprise"
           ]
         ],
+        "Authorization": [
+          "/configuration/authorization",
+          [
+            "enterprise",
+            "preview"
+          ]
+        ],      
         "Subgraph Authentication": "/configuration/authn-subgraph",
         "Operation limits": [
           "/configuration/operation-limits",

@@ -66,6 +66,7 @@ use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use self::reload::reload_fmt;
 use self::reload::reload_metrics;
+use self::reload::LayeredRegistry;
 use self::reload::NullFieldFormatter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
@@ -622,8 +623,6 @@ impl Telemetry {
         builder = setup_tracing(builder, &tracing_config.datadog, trace_config)?;
         builder = setup_tracing(builder, &tracing_config.otlp, trace_config)?;
         builder = setup_tracing(builder, &config.apollo, trace_config)?;
-        // For metrics
-        builder = builder.with_simple_exporter(metrics::span_metrics_exporter::Exporter::default());
 
         let tracer_provider = builder.build();
         Ok(tracer_provider)
@@ -672,10 +671,10 @@ impl Telemetry {
         dyn Layer<
                 ::tracing_subscriber::layer::Layered<
                     OpenTelemetryLayer<
-                        ::tracing_subscriber::Registry,
+                        LayeredRegistry,
                         ReloadTracer<::opentelemetry::sdk::trace::Tracer>,
                     >,
-                    ::tracing_subscriber::Registry,
+                    LayeredRegistry,
                 >,
             > + Send
             + Sync,
@@ -840,7 +839,7 @@ impl Telemetry {
                 }
                 ::tracing::info!(
                     monotonic_counter.apollo.router.operations = 1u64,
-                    http.response.status_code = parts.status.as_u16() as i64,
+                    http.response.status_code = parts.status.as_u16(),
                 );
                 let response = http::Response::from_parts(
                     parts,
