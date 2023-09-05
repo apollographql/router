@@ -204,7 +204,7 @@ impl SigningParamsConfig {
         let (parts, body) = req.into_parts();
         // Depending on the servicve, AWS refuses sigv4 payloads that contain specific headers.
         // We'll go with default signed headers
-        let mut headers = Default::default();
+        let headers = Default::default();
         // UnsignedPayload only applies to lattice
         let body_bytes = hyper::body::to_bytes(body).await?.to_vec();
         let signable_request = SignableRequest::new(
@@ -239,7 +239,7 @@ impl SigningParamsConfig {
         let (parts, _) = req.into_parts();
         // Depending on the servicve, AWS refuses sigv4 payloads that contain specific headers.
         // We'll go with default signed headers
-        let mut headers = Default::default();
+        let headers = Default::default();
         // UnsignedPayload only applies to lattice
         let signable_request = SignableRequest::new(
             &parts.method,
