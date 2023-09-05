@@ -89,7 +89,8 @@ impl SupergraphStage {
                 let sdl = sdl.clone();
 
                 async move {
-                    process_supergraph_request_stage(
+                    let mut succeeded = true;
+                    let result = process_supergraph_request_stage(
                         http_client,
                         coprocessor_url,
                         sdl,
@@ -98,11 +99,19 @@ impl SupergraphStage {
                     )
                     .await
                     .map_err(|error| {
+                        succeeded = false;
                         tracing::error!(
                             "external extensibility: supergraph request stage error: {error}"
                         );
                         error
-                    })
+                    });
+                    tracing::info!(
+                        monotonic_counter.apollo.router.operations.coprocessor = 1u64,
+                        coprocessor.stage = %PipelineStep::SupergraphRequest,
+                        coprocessor.succeeded = succeeded,
+                        "Total operations with co-processors enabled"
+                    );
+                    result
                 }
             })
         });
@@ -119,7 +128,8 @@ impl SupergraphStage {
                 async move {
                     let response: supergraph::Response = fut.await?;
 
-                    process_supergraph_response_stage(
+                    let mut succeeded = true;
+                    let result = process_supergraph_response_stage(
                         http_client,
                         coprocessor_url,
                         sdl,
@@ -128,11 +138,19 @@ impl SupergraphStage {
                     )
                     .await
                     .map_err(|error| {
+                        succeeded = false;
                         tracing::error!(
                             "external extensibility: router response stage error: {error}"
                         );
                         error
-                    })
+                    });
+                    tracing::info!(
+                        monotonic_counter.apollo.router.operations.coprocessor = 1u64,
+                        coprocessor.stage = %PipelineStep::SupergraphResponse,
+                        coprocessor.succeeded = succeeded,
+                        "Total operations with co-processors enabled"
+                    );
+                    result
                 }
             })
         });
