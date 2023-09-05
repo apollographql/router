@@ -18,10 +18,12 @@ use std::time::Instant;
 
 use futures::ready;
 use futures::Stream;
+use http::header::ACCEPT;
+use http::header::CACHE_CONTROL;
 use hyper::body::HttpBody;
 use hyper::client::connect::Connect;
 use hyper::client::connect::Connection;
-pub use hyper::client::HttpConnector;
+use hyper::client::HttpConnector;
 use hyper::client::ResponseFuture;
 use hyper::header::HeaderMap;
 use hyper::header::HeaderName;
@@ -46,27 +48,16 @@ use super::event_parser::Sse;
 use super::retry::BackoffRetry;
 use super::retry::RetryStrategy;
 
-pub type HttpsConnector = RustlsConnector<HttpConnector>;
+pub(crate) type HttpsConnector = RustlsConnector<HttpConnector>;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Represents a [`Pin`]'d [`Send`] + [`Sync`] stream, returned by [`Client`]'s stream method.
-pub type BoxStream<T> = Pin<boxed::Box<dyn Stream<Item = T> + Send + Sync>>;
-
-/// Client is the Server-Sent-Events interface.
-/// This trait is sealed and cannot be implemented for types outside this crate.
-pub(crate) trait Client: Send + Sync + private::Sealed {
-    fn stream(&self) -> BoxStream<Result<Sse>>;
-}
-
-/*
- * TODO remove debug output
- * TODO specify list of stati to not retry (e.g. 204)
- */
+pub(crate) type BoxStream<T> = Pin<boxed::Box<dyn Stream<Item = T> + Send + Sync>>;
 
 /// Maximum amount of redirects that the client will follow before
 /// giving up, if not overridden via [ClientBuilder::redirect_limit].
-pub const DEFAULT_REDIRECT_LIMIT: u32 = 16;
+const DEFAULT_REDIRECT_LIMIT: u32 = 16;
 
 /// ClientBuilder provides a series of builder methods to easily construct a [`Client`].
 pub(crate) struct ClientBuilder {
@@ -88,8 +79,8 @@ impl ClientBuilder {
             .map_err(|e| Error::InvalidParameter(Box::new(e)))?;
 
         let mut header_map = HeaderMap::new();
-        header_map.insert("Accept", HeaderValue::from_static("text/event-stream"));
-        header_map.insert("Cache-Control", HeaderValue::from_static("no-cache"));
+        header_map.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
+        header_map.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
 
         Ok(ClientBuilder {
             url,
@@ -173,7 +164,7 @@ impl ClientBuilder {
     }
 
     /// Build with a specific client connector.
-    pub(crate) fn build_with_conn<C>(self, conn: C) -> impl Client
+    pub(crate) fn build_with_conn<C>(self, conn: C) -> Client<TimeoutConnector<C>>
     where
         C: Service<Uri> + Clone + Send + Sync + 'static,
         C::Response: Connection + AsyncRead + AsyncWrite + Send + Unpin,
@@ -185,7 +176,7 @@ impl ClientBuilder {
 
         let client = hyper::Client::builder().build::<_, hyper::Body>(connector);
 
-        ClientImpl {
+        Client {
             http: client,
             request_props: RequestProps {
                 url: self.url,
@@ -200,12 +191,12 @@ impl ClientBuilder {
     }
 
     /// Build with an HTTP client connector.
-    pub(crate) fn build_http(self) -> impl Client {
+    pub(crate) fn build_http(self) -> Client<TimeoutConnector<HttpConnector>> {
         self.build_with_conn(HttpConnector::new())
     }
 
     /// Build with an HTTPS client connector, using the OS root certificate store.
-    pub(crate) fn build(self) -> impl Client {
+    pub(crate) fn build(self) -> Client<TimeoutConnector<HttpsConnector>> {
         let conn = hyper_rustls::HttpsConnectorBuilder::new()
             .with_native_roots()
             .https_or_http()
@@ -215,11 +206,11 @@ impl ClientBuilder {
     }
 
     /// Build with the given [`hyper::client::Client`].
-    pub(crate) fn build_with_http_client<C>(self, http: hyper::Client<C>) -> impl Client
+    pub(crate) fn build_with_http_client<C>(self, http: hyper::Client<C>) -> Client<C>
     where
         C: Connect + Clone + Send + Sync + 'static,
     {
-        ClientImpl {
+        Client {
             http,
             request_props: RequestProps {
                 url: self.url,
@@ -247,13 +238,13 @@ struct RequestProps {
 /// A client implementation that connects to a server using the Server-Sent Events protocol
 /// and consumes the event stream indefinitely.
 /// Can be parameterized with different hyper Connectors, such as HTTP or HTTPS.
-struct ClientImpl<C> {
+pub(crate) struct Client<C> {
     http: hyper::Client<C>,
     request_props: RequestProps,
     last_event_id: Option<String>,
 }
 
-impl<C> Client for ClientImpl<C>
+impl<C> Client<C>
 where
     C: Connect + Clone + Send + Sync + 'static,
 {
@@ -264,7 +255,7 @@ where
     ///
     /// After the first successful connection, the stream will
     /// reconnect for retryable errors.
-    fn stream(&self) -> BoxStream<Result<Sse>> {
+    pub(crate) fn stream(&self) -> BoxStream<Result<Sse>> {
         Box::pin(ReconnectingRequest::new(
             self.http.clone(),
             self.request_props.clone(),
@@ -300,7 +291,7 @@ pin_project! {
 }
 
 impl State {
-    fn name(&self) -> &'static str {
+    fn as_str(&self) -> &'static str {
         match self {
             State::New => "new",
             State::Connecting { retry: false, .. } => "connecting(no-retry)",
@@ -315,13 +306,13 @@ impl State {
 
 impl Debug for State {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.name())
+        write!(f, "{}", self.as_str())
     }
 }
 
 pin_project! {
     #[must_use = "streams do nothing unless polled"]
-    pub struct ReconnectingRequest<C> {
+    pub(crate) struct ReconnectingRequest<C> {
         http: hyper::Client<C>,
         props: RequestProps,
         #[pin]
@@ -631,10 +622,3 @@ impl Display for StatusError {
 }
 
 impl std::error::Error for StatusError {}
-
-mod private {
-    use super::ClientImpl;
-
-    pub trait Sealed {}
-    impl<C> Sealed for ClientImpl<C> {}
-}

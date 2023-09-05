@@ -215,6 +215,10 @@ pub(crate) struct WebSocketConfiguration {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SseConfiguration {
+    /// Enable configuration
+    #[serde(default = "default_sse_config_enabled")]
+    pub(crate) enabled: bool,
+
     /// Path use to get the SSE stream
     pub(crate) path: Option<String>,
 
@@ -247,6 +251,10 @@ pub(crate) struct SseConfiguration {
     #[serde(with = "humantime_serde")]
     #[schemars(with = "Option<String>")]
     pub(crate) delay_max: Option<std::time::Duration>,
+}
+
+fn default_sse_config_enabled() -> bool {
+    true
 }
 
 fn default_path() -> String {

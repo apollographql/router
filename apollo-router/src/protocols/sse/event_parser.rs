@@ -34,7 +34,7 @@ impl EventData {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum Sse {
+pub(crate) enum Sse {
     Event(Event),
     Comment(String),
 }
@@ -76,11 +76,11 @@ impl TryFrom<EventData> for Option<Sse> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Event {
-    pub event_type: String,
-    pub data: String,
-    pub id: Option<String>,
-    pub retry: Option<u64>,
+pub(crate) struct Event {
+    pub(crate) event_type: String,
+    pub(crate) data: String,
+    pub(crate) id: Option<String>,
+    pub(crate) retry: Option<u64>,
 }
 
 const LOGIFY_MAX_CHARS: usize = 100;
@@ -133,7 +133,7 @@ fn parse_value(value: &[u8]) -> Result<&str> {
 }
 
 #[must_use = "streams do nothing unless polled"]
-pub struct EventParser {
+pub(crate) struct EventParser {
     /// buffer for lines we know are complete (terminated) but not yet parsed into event fields, in
     /// the order received
     complete_lines: VecDeque<Vec<u8>>,
@@ -151,7 +151,7 @@ pub struct EventParser {
 }
 
 impl EventParser {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             complete_lines: VecDeque::with_capacity(10),
             incomplete_line: None,
@@ -162,7 +162,7 @@ impl EventParser {
         }
     }
 
-    pub fn was_processing(&self) -> bool {
+    pub(crate) fn was_processing(&self) -> bool {
         if self.incomplete_line.is_some() || !self.complete_lines.is_empty() {
             true
         } else {
@@ -170,11 +170,11 @@ impl EventParser {
         }
     }
 
-    pub fn get_event(&mut self) -> Option<Sse> {
+    pub(crate) fn get_event(&mut self) -> Option<Sse> {
         self.sse.pop_front()
     }
 
-    pub fn process_bytes(&mut self, bytes: Bytes) -> Result<()> {
+    pub(crate) fn process_bytes(&mut self, bytes: Bytes) -> Result<()> {
         tracing::trace!("Parsing bytes {:?}", bytes);
         // We get bytes from the underlying stream in chunks.  Decoding a chunk has two phases:
         // decode the chunk into lines, and decode the lines into events.

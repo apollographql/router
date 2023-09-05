@@ -1701,6 +1701,11 @@ expression: "&schema"
                       "type": "string",
                       "nullable": true
                     },
+                    "enabled": {
+                      "description": "Enable configuration",
+                      "default": true,
+                      "type": "boolean"
+                    },
                     "path": {
                       "description": "Path use to get the SSE stream",
                       "default": null,
@@ -1749,6 +1754,11 @@ expression: "&schema"
                         "default": null,
                         "type": "string",
                         "nullable": true
+                      },
+                      "enabled": {
+                        "description": "Enable configuration",
+                        "default": true,
+                        "type": "boolean"
                       },
                       "path": {
                         "description": "Path use to get the SSE stream",

@@ -4,16 +4,17 @@ use std::task::Poll;
 
 use futures::Stream;
 use futures::StreamExt;
+use hyper::client::connect::Connect;
 use pin_project_lite::pin_project;
 
 use super::websocket::ServerMessage;
 use crate::graphql;
 use crate::protocols::websocket::ServerError;
 
-pub mod client;
+pub(crate) mod client;
 pub(crate) mod config;
 pub(crate) mod error;
-pub mod event_parser;
+pub(crate) mod event_parser;
 pub(crate) mod retry;
 
 pin_project! {
@@ -41,10 +42,13 @@ where
     }
 }
 
-pub(crate) fn convert_sse_stream(
-    client: impl client::Client,
+pub(crate) fn convert_sse_stream<C>(
+    client: client::Client<C>,
     id: String,
-) -> impl Stream<Item = serde_json::Result<ServerMessage>> {
+) -> impl Stream<Item = serde_json::Result<ServerMessage>>
+where
+    C: Connect + Clone + Send + Sync + 'static,
+{
     client.stream().filter_map(move |msg| match msg {
         Ok(sse) => match sse {
             event_parser::Sse::Event(event) => match event.event_type.as_str() {

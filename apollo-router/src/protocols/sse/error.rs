@@ -2,7 +2,7 @@ use hyper::StatusCode;
 
 /// Error type returned from this library's functions.
 #[derive(Debug)]
-pub enum Error {
+pub(crate) enum Error {
     TimedOut,
     StreamClosed,
     /// An invalid request parameter
@@ -55,22 +55,6 @@ impl PartialEq<Error> for Error {
             return true;
         }
         false
-    }
-}
-
-impl Error {
-    pub fn is_http_stream_error(&self) -> bool {
-        if let Error::HttpStream(_) = self {
-            return true;
-        }
-        false
-    }
-
-    pub fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Error::HttpStream(err) => Some(err.as_ref()),
-            _ => None,
-        }
     }
 }
 

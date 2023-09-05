@@ -1081,14 +1081,16 @@ fn get_sse_client(
     })?;
 
     let subgraph_url = match &subgraph_sse_cfg.path {
-        Some(path) => subgraph_url
-            .join(path)
-            .map_err(|_| FetchError::SubrequestHttpError {
-                service: service_name.clone(),
-                reason: "cannot parse subgraph url with the specific sse path".to_string(),
-                status_code: None,
-            })?,
-        None => subgraph_url,
+        Some(path) if subgraph_sse_cfg.enabled => {
+            subgraph_url
+                .join(path)
+                .map_err(|_| FetchError::SubrequestHttpError {
+                    service: service_name.clone(),
+                    reason: "cannot parse subgraph url with the specific sse path".to_string(),
+                    status_code: None,
+                })?
+        }
+        _ => subgraph_url,
     };
 
     let mut builder = ClientBuilder::for_url(subgraph_url.as_str()).map_err(|e| {
@@ -1099,22 +1101,30 @@ fn get_sse_client(
         }
     })?;
 
-    builder = builder.reconnect(
-        ReconnectOptions::reconnect(subgraph_sse_cfg.reconnect.unwrap_or(true))
-            .retry_initial(subgraph_sse_cfg.retry_initial.unwrap_or(true))
-            .delay(
-                subgraph_sse_cfg
-                    .delay
-                    .unwrap_or_else(|| Duration::from_secs(1)),
-            )
-            .backoff_factor(subgraph_sse_cfg.backoff_factor.unwrap_or(2))
-            .delay_max(
-                subgraph_sse_cfg
-                    .delay
-                    .unwrap_or_else(|| Duration::from_secs(60)),
-            )
-            .build(),
-    );
+    builder = if subgraph_sse_cfg.enabled {
+        builder.reconnect(
+            ReconnectOptions::reconnect(subgraph_sse_cfg.reconnect.unwrap_or(true))
+                .retry_initial(subgraph_sse_cfg.retry_initial.unwrap_or(true))
+                .delay(
+                    subgraph_sse_cfg
+                        .delay
+                        .unwrap_or_else(|| Duration::from_secs(1)),
+                )
+                .backoff_factor(subgraph_sse_cfg.backoff_factor.unwrap_or(2))
+                .delay_max(
+                    subgraph_sse_cfg
+                        .delay
+                        .unwrap_or_else(|| Duration::from_secs(60)),
+                )
+                .build(),
+        )
+    } else {
+        builder.reconnect(
+            ReconnectOptions::reconnect(true)
+                .retry_initial(true)
+                .build(),
+        )
+    };
 
     for (key, value) in parts.headers.iter() {
         builder = builder

@@ -21,6 +21,7 @@ The following configuration options are available:
 
 | option         | type      | default | description                                                                                                                                                                                                  |
 | -------------- | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --- |
+| enabled        | bool      | true    | If is set to false will ignore all the settings and use the default values.                                                                                                                                  |
 | path           | String    | None    | if provided, the SSE client will use the `subgraph_url>/<path>`.                                                                                                                                             |
 | reconnect      | bool      | true    | If it is `true` the client will automatically try to reconnect if the stream ends due to an error. If it is `false` the client will stop receiving events after an error.                                    |
 | retry_initial  | bool      | true    | If `true` the client will automatically retry the connection, with the same delay and backoff behaviour as for reconnects due to stream error. If `false`, the client will not retry the initial connection. |
