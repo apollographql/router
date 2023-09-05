@@ -431,6 +431,13 @@ async fn call_websocket(
     subgraph_cfg: &WebSocketConfiguration,
     subscription_hash: String,
 ) -> Result<SubgraphResponse, BoxError> {
+    let operation_name = request
+        .subgraph_request
+        .body()
+        .operation_name
+        .clone()
+        .unwrap_or_default();
+
     let SubgraphRequest {
         subgraph_request,
         subscription_stream,
@@ -445,7 +452,6 @@ async fn call_websocket(
     let (handle, created) = notify
         .create_or_subscribe(subscription_hash.clone(), false)
         .await?;
-    let operation_name = context.operation_name().unwrap_or_default();
     tracing::info!(
         monotonic_counter.apollo.router.operations.subscriptions = 1u64,
         subscriptions.mode = %"passthrough",

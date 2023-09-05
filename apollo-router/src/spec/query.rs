@@ -60,6 +60,8 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<SubSelectionKey, SubSelectionValue>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) unauthorized_paths: Vec<Path>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) filtered_query: Option<Arc<Query>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) defer_stats: DeferStats,
@@ -93,6 +95,7 @@ impl Query {
             },
             operations: Vec::new(),
             subselections: HashMap::new(),
+            unauthorized_paths: Vec::new(),
             filtered_query: None,
             defer_stats: DeferStats {
                 has_defer: false,
@@ -286,6 +289,7 @@ impl Query {
             fragments,
             operations,
             subselections: HashMap::new(),
+            unauthorized_paths: Vec::new(),
             filtered_query: None,
             defer_stats,
             is_original: true,

@@ -2,6 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use fred::interfaces::RedisResult;
 use fred::prelude::ClientLike;
 use fred::prelude::KeysInterface;
 use fred::prelude::RedisClient;
@@ -241,14 +242,26 @@ impl RedisCacheStorage {
     ) -> Option<RedisValue<V>> {
         tracing::trace!("getting from redis: {:?}", key);
 
-        self.inner
-            .get(key.to_string())
-            .await
-            .map_err(|e| {
-                tracing::error!("mget error: {}", e);
-                e
-            })
-            .ok()
+        let result: RedisResult<String> = self.inner.get(key.to_string()).await;
+        match result.as_ref().map(|s| s.as_str()) {
+            // Fred returns nil rather than an error with not_found
+            // See `RedisErrorKind::NotFound` for why this should work
+            // To work around this we first read the value as a string and then deal with the value explicitly
+            Ok("nil") => None,
+            Ok(value) => serde_json::from_str(value)
+                .map(RedisValue)
+                .map_err(|e| {
+                    tracing::error!("couldn't deserialize value from redis: {}", e);
+                    e
+                })
+                .ok(),
+            Err(e) => {
+                if !e.is_not_found() {
+                    tracing::error!("mget error: {}", e);
+                }
+                None
+            }
+        }
     }
 
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(

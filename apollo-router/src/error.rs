@@ -293,6 +293,9 @@ pub(crate) enum QueryPlannerError {
 
     /// complexity limit exceeded
     LimitExceeded(OperationLimits<bool>),
+
+    /// Unauthorized field or type
+    Unauthorized(Vec<Path>),
 }
 
 impl IntoGraphQLErrors for QueryPlannerError {
