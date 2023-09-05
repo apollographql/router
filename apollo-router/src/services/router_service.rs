@@ -13,6 +13,7 @@ use futures::stream::StreamExt;
 use http::header::CONTENT_TYPE;
 use http::header::VARY;
 use http::HeaderMap;
+use http::HeaderName;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
@@ -306,6 +307,11 @@ impl RouterService {
                             HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE),
                         );
                     }
+                    // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
+                    parts.headers.insert(
+                        HeaderName::from_static("x-accel-buffering"),
+                        HeaderValue::from_static("no"),
+                    );
                     let multipart_stream = match response.subscribed {
                         Some(true) => {
                             StreamBody::new(Multipart::new(body, ProtocolMode::Subscription))
@@ -315,7 +321,6 @@ impl RouterService {
                             ProtocolMode::Defer,
                         )),
                     };
-
                     let response = (parts, multipart_stream).into_response().map(|body| {
                         // Axum makes this `body` have type:
                         // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
