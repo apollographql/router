@@ -19,7 +19,7 @@ By default, the Apollo Router enables _only_ Apollo Studio to initiate browser c
     * Use this option if your supergraph is a public API with arbitrarily many web app consumers.
     * With this option enabled, the router sends the [wildcard (`*`)](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Origin#directives) value for the `Access-Control-Allow-Origin` header. This enables _any_ website to initiate browser connections to it (but they can't provide cookies or other credentials).
 
-* You _must_ use the `origins` + `match_origins` option if clients need to [authenticate their requests with cookies](#passing-credentials-with-cors).
+* You _must_ use the `origins` + `match_origins` option if clients need to [authenticate their requests with cookies](#passing-credentials).
 
 The following snippet includes an example of each option (use either `allow_any_origin`, or `origins + match_origins`):
 
