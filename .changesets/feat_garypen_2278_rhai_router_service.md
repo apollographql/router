@@ -4,7 +4,7 @@ Adds `Rhai` support for the `router_service`.
 
 It is now possible to interact with requests and responses at the `router_service` level from `Rhai`. The functionality is very similar to that provided for interacting with existing services, for example `supergraph_service`. For instance, you may map requests and responses as follows:
 
-```json
+```rust
 fn router_service(service) {
     const request_callback = Fn("process_request");
     service.map_request(request_callback);
@@ -19,7 +19,7 @@ This makes it more complex to deal with Request and Response bodies with the tra
 
 This simple example, simply logs the bodies:
 
-```json
+```rust
 // Generate a log for each request at this stage
 fn process_request(request) {
     print(`body: ${request.body}`);
@@ -33,7 +33,7 @@ fn process_response(response) {
 
 This PR also introduces two new Rhai functions:
 
-```json
+```rust
 json_encode(Object)
 json_decode(String) -> Object
 
