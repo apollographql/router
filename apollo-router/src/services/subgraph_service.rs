@@ -550,9 +550,12 @@ async fn call_websocket(
         reason: format!("cannot connect websocket to subgraph: {err}"),
     })?;
 
+    if display_headers {
+        tracing::info!(http.response.headers = ?resp.headers(), apollo.subgraph.name = %service_name, "Websocket response headers to subgraph {service_name:?}");
+    }
     if display_body {
         tracing::info!(
-            response.body = %String::from_utf8_lossy(&resp.body_mut().take().unwrap_or_default()), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+            http.response.body = %String::from_utf8_lossy(&resp.body_mut().take().unwrap_or_default()), apollo.subgraph.name = %service_name, "Websocket response body from subgraph {service_name:?} received"
         );
     }
 
@@ -720,6 +723,18 @@ async fn call_http(
     )
     .instrument(subgraph_req_span)
     .await?;
+
+    // Print out the debug for the response
+    if display_headers {
+        tracing::info!(http.response.headers = ?parts.headers(), apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}");
+    }
+    if display_body {
+        if let Some(Ok(buildstructor)) = &body {
+            tracing::info!(
+                http.response.body = %String::from_utf8_lossy(b), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+            );
+        }
+    }
 
     let mut graphql_response = match (content_type, body, parts.status.is_success()) {
         (Ok(ContentType::ApplicationGraphqlResponseJson), Some(Ok(body)), _)
