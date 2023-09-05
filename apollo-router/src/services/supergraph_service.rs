@@ -2933,10 +2933,10 @@ mod tests {
                 serde_json::json!{{"data":{"dog":{"id":"4321","name":"Spot"}}}}
             ).with_json(
                 serde_json::json!{{"query":"query dog__animal__0{dog{__typename id name}}", "operationName": "dog__animal__0"}},
-                serde_json::json!{{"data":{"dog":{"__typename":"Dog","id":"4321","name":"Spot"}}}}
+                serde_json::json!{{"data":{"dog":{"__typename":"Dog","id":"8765","name":"Spot"}}}}
             ).with_json(
                 serde_json::json!{{"query":"query dog__animal__0{dog{name id}}", "operationName": "dog__animal__0"}},
-                serde_json::json!{{"data":{"dog":{"id":"4321","name":"Spot"}}}}
+                serde_json::json!{{"data":{"dog":{"id":"0000","name":"Spot"}}}}
             ).build()),
         ].into_iter().collect());
 
@@ -3014,6 +3014,7 @@ mod tests {
         let mut stream = service.clone().oneshot(request).await.unwrap();
 
         let no_typename = stream.next_response().await.unwrap();
+        insta::assert_json_snapshot!(no_typename);
 
         let request = supergraph::Request::fake_builder()
             .context(defer_context())
@@ -3057,6 +3058,7 @@ mod tests {
             with_typename,
             no_typename
         );
+        insta::assert_json_snapshot!(with_typename);
 
         let request = supergraph::Request::fake_builder()
             .context(defer_context())
@@ -3099,5 +3101,6 @@ mod tests {
             with_reversed_fragments,
             no_typename
         );
+        insta::assert_json_snapshot!(with_reversed_fragments);
     }
 }
