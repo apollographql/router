@@ -1,4 +1,4 @@
-//! subgraph module
+//! router module
 
 use std::ops::ControlFlow;
 
@@ -6,15 +6,20 @@ use tower::BoxError;
 
 use super::ErrorDetails;
 use crate::graphql::Error;
-pub(crate) use crate::services::subgraph::*;
+pub(crate) use crate::services::router::*;
 use crate::Context;
+
+pub(crate) type FirstRequest = super::engine::RhaiRouterFirstRequest;
+pub(crate) type ChunkedRequest = super::engine::RhaiRouterChunkedRequest;
+pub(crate) type FirstResponse = super::engine::RhaiRouterResponse;
+pub(crate) type DeferredResponse = super::engine::RhaiRouterChunkedResponse;
 
 pub(super) fn request_failure(
     context: Context,
     error_details: ErrorDetails,
-) -> Result<ControlFlow<Response, Request>, BoxError> {
+) -> Result<ControlFlow<crate::services::router::Response, Request>, BoxError> {
     let res = if let Some(body) = error_details.body {
-        Response::builder()
+        crate::services::router::Response::builder()
             .extensions(body.extensions)
             .errors(body.errors)
             .status_code(error_details.status)
@@ -22,9 +27,9 @@ pub(super) fn request_failure(
             .and_data(body.data)
             .and_label(body.label)
             .and_path(body.path)
-            .build()
+            .build()?
     } else {
-        Response::error_builder()
+        crate::services::router::Response::error_builder()
             .errors(vec![Error {
                 message: error_details.message.unwrap_or_default(),
                 ..Default::default()
@@ -37,9 +42,12 @@ pub(super) fn request_failure(
     Ok(ControlFlow::Break(res))
 }
 
-pub(super) fn response_failure(context: Context, error_details: ErrorDetails) -> Response {
+pub(super) fn response_failure(
+    context: Context,
+    error_details: ErrorDetails,
+) -> crate::services::router::Response {
     if let Some(body) = error_details.body {
-        Response::builder()
+        crate::services::router::Response::builder()
             .extensions(body.extensions)
             .errors(body.errors)
             .status_code(error_details.status)
@@ -49,7 +57,7 @@ pub(super) fn response_failure(context: Context, error_details: ErrorDetails) ->
             .and_path(body.path)
             .build()
     } else {
-        Response::error_builder()
+        crate::services::router::Response::error_builder()
             .errors(vec![Error {
                 message: error_details.message.unwrap_or_default(),
                 ..Default::default()
@@ -57,6 +65,6 @@ pub(super) fn response_failure(context: Context, error_details: ErrorDetails) ->
             .status_code(error_details.status)
             .context(context)
             .build()
-            .expect("can't fail to build our error message")
     }
+    .expect("can't fail to build our error message")
 }
