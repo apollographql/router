@@ -78,7 +78,7 @@ pub enum Endpoints {
 impl Default for Endpoints {
     fn default() -> Self {
         Self::fallback(
-            vec![GCP_URL, AWS_URL]
+            [GCP_URL, AWS_URL]
                 .iter()
                 .map(|url| Url::parse(url).expect("default urls must be valid"))
                 .collect(),
