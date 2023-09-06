@@ -74,7 +74,6 @@ use self::reload::NullFieldFormatter;
 use self::reload::SamplingFilter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
-use self::tracing::reload::ReloadTracer;
 use super::traffic_shaping::cache::hash_request;
 use super::traffic_shaping::cache::hash_vary_headers;
 use super::traffic_shaping::cache::REPRESENTATIONS;
