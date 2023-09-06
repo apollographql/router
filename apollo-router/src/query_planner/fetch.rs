@@ -373,12 +373,12 @@ impl FetchNode {
                             if let Some(paths) = inverted_paths.get(&index) {
                                 if paths.len() > 1 {
                                     for path in &paths[1..] {
-                                        let _ = value.insert(&path, entity.clone());
+                                        let _ = value.insert(path, entity.clone());
                                     }
                                 }
 
                                 if let Some(path) = paths.first() {
-                                    let _ = value.insert(&path, entity);
+                                    let _ = value.insert(path, entity);
                                 }
                             }
                         }
