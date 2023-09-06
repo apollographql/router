@@ -1,3 +1,4 @@
+use std::io::IsTerminal;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
@@ -81,7 +82,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
         .with_filter(SamplingFilter::new());
 
     // We choose json or plain based on tty
-    let fmt = if atty::is(atty::Stream::Stdout) {
+    let fmt = if std::io::stdout().is_terminal() {
         tracing_subscriber::fmt::Layer::new()
             .event_format(FilteringFormatter::new(
                 TextFormatter::new()

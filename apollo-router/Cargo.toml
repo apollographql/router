@@ -64,7 +64,6 @@ async-compression = { version = "0.4.1", features = [
     "deflate",
 ] }
 async-trait = "0.1.73"
-atty = "0.2.14"
 axum = { version = "0.6.20", features = ["headers", "json", "original-uri"] }
 base64 = "0.21.2"
 bloomfilter = "1.0.12"

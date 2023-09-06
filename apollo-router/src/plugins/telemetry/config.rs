@@ -1,6 +1,7 @@
 //! Configuration for the telemetry plugin.
 use std::collections::BTreeMap;
 use std::env;
+use std::io::IsTerminal;
 
 use axum::headers::HeaderName;
 use opentelemetry::sdk::resource::EnvResourceDetector;
@@ -300,7 +301,7 @@ pub(crate) enum LoggingFormat {
 
 impl Default for LoggingFormat {
     fn default() -> Self {
-        if atty::is(atty::Stream::Stdout) {
+        if std::io::stdout().is_terminal() {
             Self::Pretty
         } else {
             Self::Json
