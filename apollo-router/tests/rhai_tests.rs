@@ -46,9 +46,12 @@ async fn all_rhai_callbacks_are_invoked() {
     .unwrap();
     dbg!(_response);
     for expected_log in [
-        "supergraph_service setup",
+        "router_service setup",
         "from_router_request",
         "from_router_response",
+        "supergraph_service setup",
+        "from_supergraph_request",
+        "from_supergraph_response",
         "execution_service setup",
         "from_execution_request",
         "from_execution_response",

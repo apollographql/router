@@ -70,13 +70,6 @@ impl Context {
 }
 
 impl Context {
-    pub(crate) fn operation_name(&self) -> Option<String> {
-        // This method should be removed once we have a proper way to get the operation name.
-        self.entries
-            .get(OPERATION_NAME)
-            .map(|v| v.value().as_str().unwrap().to_string())
-    }
-
     /// Returns true if the context contains a value for the specified key.
     pub fn contains_key<K>(&self, key: K) -> bool
     where

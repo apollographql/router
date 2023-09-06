@@ -1,5 +1,6 @@
 //! This file is to load test subscriptions and should be launched manually, not in our CI
 use futures::StreamExt;
+use http::HeaderValue;
 use serde_json::json;
 use tower::BoxError;
 
@@ -22,6 +23,10 @@ async fn test_subscription_load() -> Result<(), BoxError> {
     for i in 0..1000000i64 {
         let (_, response) = router.run_subscription(UNFEDERATED_SUB_QUERY).await;
         assert!(response.status().is_success());
+        assert_eq!(
+            response.headers().get("x-accel-buffering").unwrap(),
+            &HeaderValue::from_static("no")
+        );
 
         tokio::spawn(async move {
             let mut stream = response.bytes_stream();
