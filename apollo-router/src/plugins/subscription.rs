@@ -252,7 +252,7 @@ pub(crate) struct SseConfiguration {
     #[schemars(with = "Option<String>")]
     pub(crate) delay_max: Option<std::time::Duration>,
 
-    // Set a read timeout for the underlying connection. There is no read timeout by default.
+    /// Set a read timeout for the underlying connection. There is no read timeout by default.
     #[serde(with = "humantime_serde")]
     #[schemars(with = "Option<String>")]
     pub(crate) read_timeout: Option<std::time::Duration>,

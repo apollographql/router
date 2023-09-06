@@ -1713,6 +1713,7 @@ expression: "&schema"
                       "nullable": true
                     },
                     "read_timeout": {
+                      "description": "Set a read timeout for the underlying connection. There is no read timeout by default.",
                       "default": null,
                       "type": "string",
                       "nullable": true
@@ -1778,6 +1779,7 @@ expression: "&schema"
                         "nullable": true
                       },
                       "read_timeout": {
+                        "description": "Set a read timeout for the underlying connection. There is no read timeout by default.",
                         "default": null,
                         "type": "string",
                         "nullable": true

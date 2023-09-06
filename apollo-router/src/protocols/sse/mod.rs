@@ -7,6 +7,7 @@ use futures::StreamExt;
 use hyper::client::connect::Connect;
 use pin_project_lite::pin_project;
 
+use self::error::Error;
 use super::websocket::ServerMessage;
 use crate::graphql;
 use crate::protocols::websocket::ServerError;
@@ -30,7 +31,7 @@ pin_project! {
 
 impl<S> GraphqlSSE<S>
 where
-    S: Stream<Item = serde_json::Result<ServerMessage>>,
+    S: Stream<Item = Result<ServerMessage, Error>>,
 {
     pub(crate) fn new(stream: S, id: String) -> Result<Self, graphql::Error> {
         Ok(Self {
@@ -45,19 +46,21 @@ where
 pub(crate) fn convert_sse_stream<C>(
     client: client::Client<C>,
     id: String,
-) -> impl Stream<Item = serde_json::Result<ServerMessage>>
+) -> impl Stream<Item = Result<ServerMessage, Error>>
 where
     C: Connect + Clone + Send + Sync + 'static,
 {
     client.stream().filter_map(move |msg| match msg {
         Ok(sse) => match sse {
             event_parser::Sse::Event(event) => match event.event_type.as_str() {
-                "next" => future::ready(Some(serde_json::from_str(&event.data).map(|s| {
-                    ServerMessage::Next {
-                        id: event.id.unwrap_or_else(|| id.clone()),
-                        payload: s,
-                    }
-                }))),
+                "next" => future::ready(Some(
+                    serde_json::from_str(&event.data)
+                        .map(|s| ServerMessage::Next {
+                            id: event.id.unwrap_or_else(|| id.clone()),
+                            payload: s,
+                        })
+                        .map_err(Error::Json),
+                )),
                 "complete" => future::ready(Some(Ok(ServerMessage::Complete {
                     id: event.id.unwrap_or_else(|| id.clone()),
                 }))),
@@ -73,26 +76,15 @@ where
             },
             event_parser::Sse::Comment(_) => future::ready(None),
         },
-        Err(err) => {
-            tracing::trace!("cannot consume more message on sse stream: {err:?}");
-            future::ready(Some(Ok(ServerMessage::Error {
-                id: id.to_string(),
-                payload: ServerError::Error(
-                    graphql::Error::builder()
-                        .message(format!("cannot read message from sse: {err:?}"))
-                        .extension_code("SSE_MESSAGE_ERROR")
-                        .build(),
-                ),
-            })))
-        }
+        Err(err) => future::ready(Some(Err(err))),
     })
 }
 
 impl<S> Stream for GraphqlSSE<S>
 where
-    S: Stream<Item = serde_json::Result<ServerMessage>>,
+    S: Stream<Item = Result<ServerMessage, Error>>,
 {
-    type Item = graphql::Response;
+    type Item = Result<graphql::Response, Error>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -114,22 +106,10 @@ where
                             (None, true) => Poll::Ready(None),
                             // For ignored message like ACK, Ping, Pong, etc...
                             (None, false) => self.poll_next(cx),
-                            (Some(resp), _) => Poll::Ready(Some(resp)),
+                            (Some(resp), _) => Poll::Ready(Some(Ok(resp))),
                         }
                     }
-                    Err(err) => Poll::Ready(
-                        graphql::Response::builder()
-                            .error(
-                                graphql::Error::builder()
-                                    .message(format!(
-                                        "cannot deserialize sse server message: {err:?}"
-                                    ))
-                                    .extension_code("INVALID_SSE_SERVER_MESSAGE_FORMAT")
-                                    .build(),
-                            )
-                            .build()
-                            .into(),
-                    ),
+                    Err(err) => Poll::Ready(Some(Err(err))),
                 },
                 None => Poll::Ready(None),
             },

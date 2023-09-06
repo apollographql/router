@@ -545,7 +545,7 @@ async fn call_sse(
     let (mut handle_sink, handle_stream) = handle.split();
 
     tokio::task::spawn(async move {
-        let mut stream = gql_stream.map(Ok::<_, graphql::Error>);
+        let mut stream = gql_stream;
 
         loop {
             tokio::select! {
@@ -562,6 +562,16 @@ async fn call_sse(
                             }
                         }
                         Some(Err(err)) => {
+                            let resp = graphql::Response::builder().error(graphql::Error::builder()
+                                .message(format!("cannot read message from sse: {err:?}"))
+                                .extension_code("SSE_MESSAGE_ERROR")
+                                .build())
+                                .subscribed(false)
+                                .build();
+
+                            if let Err(err) = handle_sink.send(resp).await {
+                                tracing::trace!("cannot send the sse stream to the subscription stream: {err:?}");
+                            }
                             tracing::error!("cannot read the sse stream: {err:?}");
                             break;
                         }

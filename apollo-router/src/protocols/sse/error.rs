@@ -24,6 +24,7 @@ pub(crate) enum Error {
     MalformedLocationHeader(Box<dyn std::error::Error + Send + Sync + 'static>),
     /// Reached maximum redirect limit after encountering Location headers.
     MaxRedirectLimitReached(u32),
+    Json(serde_json::Error),
 }
 
 impl std::fmt::Display for Error {
@@ -42,6 +43,7 @@ impl std::fmt::Display for Error {
             InvalidEvent => write!(f, "invalid event"),
             MalformedLocationHeader(err) => write!(f, "malformed header: {err}"),
             MaxRedirectLimitReached(limit) => write!(f, "maximum redirect limit reached: {limit}"),
+            Json(err) => write!(f, "json error: {err}"),
         }
     }
 }

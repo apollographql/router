@@ -562,6 +562,8 @@ where
                             );
 
                             if timedout {
+                                tracing::debug!("Reconnect timeout");
+                                self.as_mut().project().state.set(State::StreamClosed);
                                 return Poll::Ready(Some(Err(Error::ReconnectTimeOut)));
                             }
 
@@ -596,6 +598,8 @@ where
                                 );
 
                                 if timedout {
+                                    tracing::debug!("Reconnect timeout");
+                                    self.as_mut().project().state.set(State::StreamClosed);
                                     return Poll::Ready(Some(Err(Error::ReconnectTimeOut)));
                                 }
 
@@ -671,6 +675,8 @@ where
                             self.props.reconnect_opts.timeout,
                         );
                         if timedout {
+                            tracing::debug!("Reconnect timeout");
+                            self.as_mut().project().state.set(State::StreamClosed);
                             return Poll::Ready(Some(Err(Error::ReconnectTimeOut)));
                         }
 
