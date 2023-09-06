@@ -901,7 +901,7 @@ Subsequent response chunks omit the `headers` and `statusCode` fields:
 
 ## Adding authorization claims via coprocessor
 
-For authorization purposes, your requests may need to include **claims**—the details of its authentication and scope. The most straightforward way to add claims is with [JWT authentication](../configuration/./authn-jwt). You can also add claims with a [`RouterService` coprocessor](#how-it-works) since it hooks into the request lifecycle directly after the router has received a client request.
+To use the [authorization directives](../configuration/authorization#authorization-directives), a request needs to include **claims**—the details of its authentication and scope. The most straightforward way to add claims is with [JWT authentication](../configuration/./authn-jwt). You can also add claims with a [`RouterService` coprocessor](#how-it-works) since it hooks into the request lifecycle directly after the router has received a client request.
 
 The router configuration needs to include at least these settings:
 
@@ -930,7 +930,7 @@ This configuration prompts the router to send an HTTP POST request to your copro
 }
 ```
 
-When your coprocessor receives this request from the router, it should add claims to the request's [`context`](#context) and return them in the response to the router. Specifically, the coprocessor should add an entry with a claims object. The key must be `apollo_authentication::JWT::claims`, and the value should be the claims required for authorization. For example:
+When your coprocessor receives this request from the router, it should add claims to the request's [`context`](#context) and return them in the response to the router. Specifically, the coprocessor should add an entry with a claims object. The key must be `apollo_authentication::JWT::claims`, and the value should be the claims required by the authorization directives you intend to use. For example, if you want to use [`@requireScopes`](../configuration/authorization#requiresscopes), the response may look something like this:
 
 ```json
 {
