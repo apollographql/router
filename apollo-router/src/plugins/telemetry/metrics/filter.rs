@@ -37,7 +37,7 @@ impl<T: MeterProvider> FilterMeterProvider<T> {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .allow(
-                Regex::new(r"apollo\.router\.(operations?|config)(\..*|$)")
+                Regex::new(r"apollo\.(graphos\.cloud|router\.(operations?|config))(\..*|$)")
                     .expect("regex should have been valid"),
             )
             .build()
@@ -212,6 +212,7 @@ mod test {
             .versioned_meter("filtered", None, None);
         filtered.u64_counter("apollo.router.operations").init();
         filtered.u64_counter("apollo.router.operations.test").init();
+        filtered.u64_counter("apollo.graphos.cloud.test").init();
         filtered.u64_counter("apollo.router.unknown.test").init();
         assert!(delegate
             .instrument_provider
@@ -225,6 +226,12 @@ mod test {
             .lock()
             .unwrap()
             .contains(&("apollo.router.operations".to_string(), None, None)));
+        assert!(delegate
+            .instrument_provider
+            .counters_created
+            .lock()
+            .unwrap()
+            .contains(&("apollo.graphos.cloud.test".to_string(), None, None)));
         assert!(!delegate
             .instrument_provider
             .counters_created
