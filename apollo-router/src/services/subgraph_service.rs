@@ -41,8 +41,6 @@ use rustls::RootCertStore;
 use schemars::JsonSchema;
 use serde::Serialize;
 use tokio::io::AsyncWriteExt;
-use tokio_stream::wrappers::IntervalStream;
-use tokio_stream::Stream;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -543,28 +541,17 @@ async fn call_sse(
         service: service_name,
         reason: format!("cannot send the subgraph request to sse stream: {err:?}"),
     })?;
-    let closed_ref = handle.closed_ref();
+    let mut closed_ref = handle.closed_receiver();
     let (mut handle_sink, handle_stream) = handle.split();
-    let mut ttl_fut: Box<dyn Stream<Item = tokio::time::Instant> + Send + Unpin> =
-        if subgraph_cfg.enabled && subgraph_cfg.reconnect.unwrap_or_default() {
-            Box::new(IntervalStream::new(tokio::time::interval(
-                subgraph_cfg
-                    .close_check
-                    .unwrap_or_else(|| std::time::Duration::from_secs(10)),
-            )))
-        } else {
-            Box::new(tokio_stream::pending())
-        };
+
     tokio::task::spawn(async move {
         let mut stream = gql_stream.map(Ok::<_, graphql::Error>);
 
         loop {
             tokio::select! {
-                _ = ttl_fut.next() => {
-                    if closed_ref.load(std::sync::atomic::Ordering::SeqCst) {
-                        tracing::trace!("The stream was closed");
-                        break;
-                    }
+                _ = closed_ref.recv() => {
+                    tracing::trace!("The stream was closed");
+                    break;
                 }
                 message = stream.next() => {
                     match message {
@@ -1146,7 +1133,7 @@ fn get_sse_client(
                 .backoff_factor(subgraph_sse_cfg.backoff_factor.unwrap_or(2))
                 .delay_max(
                     subgraph_sse_cfg
-                        .delay
+                        .delay_max
                         .unwrap_or_else(|| Duration::from_secs(60)),
                 )
                 .build(),
@@ -2692,10 +2679,8 @@ mod tests {
             .subgraphs
             .get_mut("testsse")
             .unwrap();
-        sse_config.enabled = true;
         sse_config.reconnect = Some(true);
         sse_config.retry_initial = Some(true);
-        sse_config.close_check = Some(std::time::Duration::from_millis(30));
         sse_config.delay = Some(std::time::Duration::from_millis(10));
         let subgraph_service = SubgraphService::new(
             "testsse",

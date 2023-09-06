@@ -353,7 +353,7 @@ where
 {
     topic: K,
     pubsub_sender: mpsc::Sender<Notification<K, V>>,
-    closed: Arc<std::sync::atomic::AtomicBool>,
+    close_sender: broadcast::Sender<bool>,
 }
 
 impl<K, V> Clone for HandleGuard<K, V>
@@ -364,7 +364,7 @@ where
         Self {
             topic: self.topic.clone(),
             pubsub_sender: self.pubsub_sender.clone(),
-            closed: self.closed.clone(),
+            close_sender: self.close_sender.clone(),
         }
     }
 }
@@ -380,7 +380,9 @@ where
         if let Err(err) = err {
             tracing::trace!("cannot unsubscribe {err:?}");
         }
-        self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Err(err) = self.close_sender.send(true) {
+            tracing::trace!("cannot send close message {err:?}");
+        }
     }
 }
 
@@ -394,6 +396,7 @@ where
     msg_sender: broadcast::Sender<Option<V>>,
     #[pin]
     msg_receiver: BroadcastStream<Option<V>>,
+    close_receiver: broadcast::Receiver<bool>,
 }
 }
 
@@ -405,6 +408,7 @@ where
     fn clone(&self) -> Self {
         Self {
             handle_guard: self.handle_guard.clone(),
+            close_receiver: self.close_receiver.resubscribe(),
             msg_receiver: BroadcastStream::new(self.msg_sender.subscribe()),
             msg_sender: self.msg_sender.clone(),
         }
@@ -421,14 +425,17 @@ where
         msg_sender: broadcast::Sender<Option<V>>,
         msg_receiver: BroadcastStream<Option<V>>,
     ) -> Self {
+        let (close_sender, close_receiver) = broadcast::channel::<bool>(1);
+
         Self {
             handle_guard: HandleGuard {
                 topic,
                 pubsub_sender,
-                closed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                close_sender,
             },
             msg_sender,
             msg_receiver,
+            close_receiver,
         }
     }
 
@@ -446,8 +453,8 @@ where
         }
     }
 
-    pub(crate) fn closed_ref(&self) -> Arc<std::sync::atomic::AtomicBool> {
-        self.handle_guard.closed.clone()
+    pub(crate) fn closed_receiver(&self) -> broadcast::Receiver<bool> {
+        self.close_receiver.resubscribe()
     }
 
     /// Return a sink and a stream

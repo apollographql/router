@@ -212,7 +212,7 @@ pub(crate) struct WebSocketConfiguration {
     pub(crate) protocol: WebSocketProtocol,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SseConfiguration {
     /// Enable configuration
@@ -251,12 +251,20 @@ pub(crate) struct SseConfiguration {
     #[serde(with = "humantime_serde")]
     #[schemars(with = "Option<String>")]
     pub(crate) delay_max: Option<std::time::Duration>,
+}
 
-    /// Coofigure how often the client will check if the subscription was ended from the client side
-    /// used only if reconnect is enabled. Defaults to 10 seconds
-    #[serde(with = "humantime_serde")]
-    #[schemars(with = "Option<String>")]
-    pub(crate) close_check: Option<std::time::Duration>,
+impl Default for SseConfiguration {
+    fn default() -> Self {
+        Self {
+            enabled: default_sse_config_enabled(),
+            path: None,
+            reconnect: None,
+            retry_initial: None,
+            delay: None,
+            backoff_factor: None,
+            delay_max: None,
+        }
+    }
 }
 
 fn default_sse_config_enabled() -> bool {

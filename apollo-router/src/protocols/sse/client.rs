@@ -270,6 +270,7 @@ pin_project! {
     #[allow(clippy::large_enum_variant)] // false positive
     enum State {
         New,
+        NewReconnect,
         Connecting {
             retry: bool,
             #[pin]
@@ -294,6 +295,7 @@ impl State {
     fn as_str(&self) -> &'static str {
         match self {
             State::New => "new",
+            State::NewReconnect => "new_reconnect",
             State::Connecting { retry: false, .. } => "connecting(no-retry)",
             State::Connecting { retry: true, .. } => "connecting(retry)",
             State::Connected { .. } => "connected",
@@ -454,6 +456,24 @@ where
                         }
                     }
                 }
+                StateProj::NewReconnect => {
+                    *self.as_mut().project().event_parser = EventParser::new();
+                    match self.send_request() {
+                        Ok(resp) => {
+                            let retry = self.props.reconnect_opts.reconnect;
+                            self.as_mut()
+                                .project()
+                                .state
+                                .set(State::Connecting { resp, retry })
+                        }
+                        Err(e) => {
+                            // This error seems to be unrecoverable. So we should just shut down the
+                            // stream.
+                            self.as_mut().project().state.set(State::StreamClosed);
+                            return Poll::Ready(Some(Err(e)));
+                        }
+                    }
+                }
                 StateProj::Connecting { retry, resp } => match ready!(resp.poll(cx)) {
                     Ok(resp) => {
                         tracing::debug!("HTTP response: {:#?}", resp);
@@ -547,9 +567,7 @@ where
                                 .set(State::WaitingToReconnect {
                                     sleep: delay(duration, "reconnecting"),
                                 });
-                        }
-
-                        if let Some(cause) = e.source() {
+                        } else if let Some(cause) = e.source() {
                             if let Some(downcast) = cause.downcast_ref::<std::io::Error>() {
                                 if let std::io::ErrorKind::TimedOut = downcast.kind() {
                                     return Poll::Ready(Some(Err(Error::TimedOut)));
@@ -581,7 +599,7 @@ where
                 StateProj::WaitingToReconnect { sleep: delay } => {
                     ready!(delay.poll(cx));
                     tracing::info!(url = ?self.current_url, "Reconnecting sse connection");
-                    self.as_mut().project().state.set(State::New);
+                    self.as_mut().project().state.set(State::NewReconnect);
                 }
             };
         }
