@@ -4314,6 +4314,23 @@ expression: "&schema"
                     "format": "double"
                   }
                 },
+                "experimental_cache_metrics": {
+                  "description": "Experimental metrics to know more about caching strategies",
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "description": "Enable experimental metrics",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "ttl": {
+                      "description": "Potential TTL for a cache if we had one (default: 5secs)",
+                      "default": "5s",
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                },
                 "resources": {
                   "description": "Resources",
                   "default": {},
