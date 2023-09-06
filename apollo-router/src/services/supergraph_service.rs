@@ -2924,4 +2924,183 @@ mod tests {
 
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
     }
+
+    #[tokio::test]
+    async fn no_typename_on_interface() {
+        let subgraphs = MockedSubgraphs([
+            ("animal", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"query dog__animal__0{dog{id name}}", "operationName": "dog__animal__0"}},
+                serde_json::json!{{"data":{"dog":{"id":"4321","name":"Spot"}}}}
+            ).with_json(
+                serde_json::json!{{"query":"query dog__animal__0{dog{__typename id name}}", "operationName": "dog__animal__0"}},
+                serde_json::json!{{"data":{"dog":{"__typename":"Dog","id":"8765","name":"Spot"}}}}
+            ).with_json(
+                serde_json::json!{{"query":"query dog__animal__0{dog{name id}}", "operationName": "dog__animal__0"}},
+                serde_json::json!{{"data":{"dog":{"id":"0000","name":"Spot"}}}}
+            ).build()),
+        ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(
+                r#"schema
+                @core(feature: "https://specs.apollo.dev/core/v0.2"),
+                @core(feature: "https://specs.apollo.dev/join/v0.1", for: EXECUTION)
+              {
+                query: Query
+              }
+              directive @core(as: String, feature: String!, for: core__Purpose) repeatable on SCHEMA
+              directive @join__field(graph: join__Graph, provides: join__FieldSet, requires: join__FieldSet) on FIELD_DEFINITION
+              directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+              directive @join__owner(graph: join__Graph!) on INTERFACE | OBJECT
+              directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on INTERFACE | OBJECT
+
+              interface Animal {
+                id: String!
+              }
+
+              type Dog implements Animal {
+                id: String!
+                name: String!
+              }
+
+              type Query {
+                animal: Animal! @join__field(graph: ANIMAL)
+                dog: Dog! @join__field(graph: ANIMAL)
+              }
+
+              enum core__Purpose {
+                """
+                `EXECUTION` features provide metadata necessary to for operation execution.
+                """
+                EXECUTION
+
+                """
+                `SECURITY` features provide metadata necessary to securely resolve fields.
+                """
+                SECURITY
+              }
+
+              scalar join__FieldSet
+
+              enum join__Graph {
+                ANIMAL @join__graph(name: "animal" url: "http://localhost:8080/query")
+              }
+              "#,
+            )
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .context(defer_context())
+            .query(
+                "query dog {
+                dog {
+                  ...on Animal {
+                    id
+                    ...on Dog {
+                      name
+                    }
+                  }
+                }
+              }",
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.clone().oneshot(request).await.unwrap();
+
+        let no_typename = stream.next_response().await.unwrap();
+        insta::assert_json_snapshot!(no_typename);
+
+        let request = supergraph::Request::fake_builder()
+            .context(defer_context())
+            .query(
+                "query dog {
+                dog {
+                  ...on Animal {
+                    id
+                    __typename
+                    ...on Dog {
+                      name
+                    }
+                  }
+                }
+              }",
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.clone().oneshot(request).await.unwrap();
+
+        let with_typename = stream.next_response().await.unwrap();
+        assert_eq!(
+            with_typename
+                .data
+                .clone()
+                .unwrap()
+                .get("dog")
+                .unwrap()
+                .get("name")
+                .unwrap(),
+            no_typename
+                .data
+                .clone()
+                .unwrap()
+                .get("dog")
+                .unwrap()
+                .get("name")
+                .unwrap(),
+            "{:?}\n{:?}",
+            with_typename,
+            no_typename
+        );
+        insta::assert_json_snapshot!(with_typename);
+
+        let request = supergraph::Request::fake_builder()
+            .context(defer_context())
+            .query(
+                "query dog {
+                    dog {
+                        ...on Dog {
+                            name
+                            ...on Animal {
+                                id
+                            }
+                        }
+                    }
+                }",
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+
+        let with_reversed_fragments = stream.next_response().await.unwrap();
+        assert_eq!(
+            with_reversed_fragments
+                .data
+                .clone()
+                .unwrap()
+                .get("dog")
+                .unwrap()
+                .get("name")
+                .unwrap(),
+            no_typename
+                .data
+                .clone()
+                .unwrap()
+                .get("dog")
+                .unwrap()
+                .get("name")
+                .unwrap(),
+            "{:?}\n{:?}",
+            with_reversed_fragments,
+            no_typename
+        );
+        insta::assert_json_snapshot!(with_reversed_fragments);
+    }
 }
