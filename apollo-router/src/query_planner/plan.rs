@@ -234,7 +234,7 @@ impl PlanNode {
             Self::Subscription { primary, rest } => match rest {
                 Some(rest) => Box::new(
                     rest.service_usage()
-                        .chain(Some(primary.service_name.as_str()).into_iter()),
+                        .chain(Some(primary.service_name.as_str())),
                 ) as Box<dyn Iterator<Item = &'a str> + 'a>,
                 None => Box::new(Some(primary.service_name.as_str()).into_iter()),
             },

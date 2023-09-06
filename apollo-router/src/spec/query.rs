@@ -680,18 +680,14 @@ impl Query {
                     let is_apply = if let Some(input_type) =
                         input.get(TYPENAME).and_then(|val| val.as_str())
                     {
-                        // check if the fragment matches the input type directly, and if not, check if the
+                        // Only check if the fragment matches the input type directly, and if not, check if the
                         // input type is a subtype of the fragment's type condition (interface, union)
                         input_type == type_condition.as_str()
                             || parameters.schema.is_subtype(type_condition, input_type)
                     } else {
-                        // known_type = true means that from the query's shape, we know
-                        // we should get the right type here. But in the case we get a
-                        // __typename field and it does not match, we should not apply
-                        // that fragment
-                        // If the type condition is an interface and the current known type implements it
                         known_type
                             .as_ref()
+                            // We have no typename, we apply the selection set if the known_type implements the type_condition
                             .map(|k| parameters.schema.is_subtype(type_condition, k))
                             .unwrap_or_default()
                             || known_type.as_deref() == Some(type_condition.as_str())

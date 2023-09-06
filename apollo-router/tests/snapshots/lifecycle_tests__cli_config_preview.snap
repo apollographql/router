@@ -9,5 +9,5 @@ stderr:
 stdout:
 List of all preview configurations with related GitHub discussions:
 
-	- preview_directives: https://github.com/apollographql/router/discussions/???
+	- preview_directives: https://github.com/apollographql/router/discussions/3754
 

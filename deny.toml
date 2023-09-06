@@ -26,9 +26,8 @@ git-fetch-with-cli = true
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 
-# RUSTSEC-2023-0052 and RUSTSEC-2023-0053 are pending a webpki update that is tracked by https://github.com/apollographql/router/issues/3645
-# and will be fixed by https://github.com/apollographql/router/pull/3643
-ignore = ["RUSTSEC-2023-0053", "RUSTSEC-2023-0052"]
+# rustsec advisory exemptions
+ignore = []
 
 # This section is considered when running `cargo deny check licenses`
 # More documentation for the licenses section can be found here:

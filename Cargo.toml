@@ -1,4 +1,5 @@
 [workspace]
+resolver = "2"
 default-members = ["apollo-router"]
 members = [
     "apollo-router",
@@ -40,4 +41,3 @@ incremental = false
 [profile.release-dhat]
 inherits = "release"
 debug = 1
-
