@@ -500,7 +500,7 @@ async fn handle_graphql(
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    tracing::info!(counter.apollo_router_session_count_active = 1,);
+    tracing::info!(counter.apollo_router_session_count_active = 1i64,);
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();
@@ -518,7 +518,7 @@ async fn handle_graphql(
 
     match res {
         Err(e) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1,);
+            tracing::info!(counter.apollo_router_session_count_active = -1i64,);
             if let Some(source_err) = e.source() {
                 if source_err.is::<RateLimited>() {
                     return RateLimited::new().into_response();
@@ -541,7 +541,7 @@ async fn handle_graphql(
                 .into_response()
         }
         Ok(response) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1,);
+            tracing::info!(counter.apollo_router_session_count_active = -1i64,);
             let (mut parts, body) = response.response.into_parts();
 
             let opt_compressor = accept_encoding

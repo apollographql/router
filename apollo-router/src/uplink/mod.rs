@@ -196,7 +196,7 @@ where
             match fetch::<Query, Response>(&client, &query_body, &mut endpoints.iter()).await {
                 Ok(response) => {
                     tracing::info!(
-                        counter.apollo_router_uplink_fetch_count_total = 1,
+                        monotonic_counter.apollo_router_uplink_fetch_count_total = 1u64,
                         status = "success",
                         query
                     );
@@ -245,7 +245,7 @@ where
                 }
                 Err(err) => {
                     tracing::info!(
-                        counter.apollo_router_uplink_fetch_count_total = 1,
+                        monotonic_counter.apollo_router_uplink_fetch_count_total = 1u64,
                         status = "failure",
                         query
                     );
