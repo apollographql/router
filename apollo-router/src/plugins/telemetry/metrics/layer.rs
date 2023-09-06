@@ -28,7 +28,7 @@ macro_rules! log_and_panic_in_debug_build {
     ($($tokens:tt)+) => {{
         tracing::debug!($($tokens)+);
         #[cfg(debug_assertions)]
-        panic!("metric type error, see DEBUG log for details. Release builds will not panic but will still emit an debug log message");
+        panic!("metric type error, see DEBUG log for details. Release builds will not panic but will still emit a debug log message");
     }};
 }
 
