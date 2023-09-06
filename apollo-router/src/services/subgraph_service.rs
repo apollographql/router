@@ -359,6 +359,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         // call_sse for sse mode
                         return call_sse(
                             notify,
+                            client.into_inner(),
                             request,
                             context,
                             service_name,
@@ -444,6 +445,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
 /// call sse makes  calls with modified graphql::Request (body)
 async fn call_sse(
     mut notify: Notify<String, graphql::Response>,
+    client: Client<HttpsConnector<HttpConnector>>,
     request: SubgraphRequest,
     context: Context,
     service_name: String,
@@ -531,7 +533,10 @@ async fn call_sse(
     });
 
     let gql_stream = GraphqlSSE::new(
-        convert_sse_stream(builder.build(), subscription_hash.clone()),
+        convert_sse_stream(
+            builder.build_with_http_client(client),
+            subscription_hash.clone(),
+        ),
         subscription_hash,
     )
     .map_err(|err| FetchError::SubrequestWsError {
