@@ -4,6 +4,7 @@ use hyper::StatusCode;
 #[derive(Debug)]
 pub(crate) enum Error {
     TimedOut,
+    ReconnectTimeOut,
     StreamClosed,
     /// An invalid request parameter
     InvalidParameter(Box<dyn std::error::Error + Send + Sync + 'static>),
@@ -30,6 +31,7 @@ impl std::fmt::Display for Error {
         use Error::*;
         match self {
             TimedOut => write!(f, "timed out"),
+            ReconnectTimeOut => write!(f, "reconnect timed out"),
             StreamClosed => write!(f, "stream closed"),
             InvalidParameter(err) => write!(f, "invalid parameter: {err}"),
             UnexpectedResponse(status_code) => write!(f, "unexpected response: {status_code}"),

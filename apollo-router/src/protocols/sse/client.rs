@@ -187,6 +187,7 @@ impl ClientBuilder {
                 max_redirects: self.max_redirects.unwrap_or(DEFAULT_REDIRECT_LIMIT),
             },
             last_event_id: self.last_event_id,
+            read_timeout: None,
         }
     }
 
@@ -221,6 +222,7 @@ impl ClientBuilder {
                 max_redirects: self.max_redirects.unwrap_or(DEFAULT_REDIRECT_LIMIT),
             },
             last_event_id: self.last_event_id,
+            read_timeout: self.read_timeout,
         }
     }
 }
@@ -242,6 +244,7 @@ pub(crate) struct Client<C> {
     http: hyper::Client<C>,
     request_props: RequestProps,
     last_event_id: Option<String>,
+    read_timeout: Option<Duration>,
 }
 
 impl<C> Client<C>
@@ -260,6 +263,7 @@ where
             self.http.clone(),
             self.request_props.clone(),
             self.last_event_id.clone(),
+            self.read_timeout,
         ))
     }
 }
@@ -275,6 +279,8 @@ pin_project! {
             retry: bool,
             #[pin]
             resp: ResponseFuture,
+            #[pin]
+            timeout: Option<Sleep>,
         },
         Connected {
             #[pin]
@@ -322,6 +328,7 @@ pin_project! {
         retry_strategy: Box<dyn RetryStrategy + Send + Sync>,
         current_url: Uri,
         redirect_count: u32,
+        read_timeout: Option<Duration>,
         event_parser: EventParser,
         last_event_id: Option<String>,
     }
@@ -332,6 +339,7 @@ impl<C> ReconnectingRequest<C> {
         http: hyper::Client<C>,
         props: RequestProps,
         last_event_id: Option<String>,
+        read_timeout: Option<Duration>,
     ) -> ReconnectingRequest<C> {
         let reconnect_delay = props.reconnect_opts.delay;
         let delay_max = props.reconnect_opts.delay_max;
@@ -348,6 +356,7 @@ impl<C> ReconnectingRequest<C> {
                 backoff_factor,
                 true,
             )),
+            read_timeout,
             redirect_count: 0,
             current_url: url,
             event_parser: EventParser::new(),
@@ -439,14 +448,18 @@ where
                 // New immediately transitions to Connecting, and exists only
                 // to ensure that we only connect when polled.
                 StateProj::New => {
+                    let timeout = self
+                        .read_timeout
+                        .map(|duration| delay(duration, "connecting"));
                     *self.as_mut().project().event_parser = EventParser::new();
                     match self.send_request() {
                         Ok(resp) => {
                             let retry = self.props.reconnect_opts.retry_initial;
-                            self.as_mut()
-                                .project()
-                                .state
-                                .set(State::Connecting { resp, retry })
+                            self.as_mut().project().state.set(State::Connecting {
+                                resp,
+                                retry,
+                                timeout,
+                            })
                         }
                         Err(e) => {
                             // This error seems to be unrecoverable. So we should just shut down the
@@ -461,10 +474,14 @@ where
                     match self.send_request() {
                         Ok(resp) => {
                             let retry = self.props.reconnect_opts.reconnect;
-                            self.as_mut()
-                                .project()
-                                .state
-                                .set(State::Connecting { resp, retry })
+                            let timeout = self
+                                .read_timeout
+                                .map(|duration| delay(duration, "connecting"));
+                            self.as_mut().project().state.set(State::Connecting {
+                                resp,
+                                retry,
+                                timeout,
+                            })
                         }
                         Err(e) => {
                             // This error seems to be unrecoverable. So we should just shut down the
@@ -474,67 +491,123 @@ where
                         }
                     }
                 }
-                StateProj::Connecting { retry, resp } => match ready!(resp.poll(cx)) {
-                    Ok(resp) => {
-                        tracing::debug!("HTTP response: {:#?}", resp);
+                StateProj::Connecting {
+                    retry,
+                    resp,
+                    timeout,
+                } => match resp.poll(cx) {
+                    Poll::Ready(resp) => match resp {
+                        Ok(resp) => {
+                            tracing::debug!("HTTP response: {:#?}", resp);
 
-                        if resp.status().is_success() {
-                            self.as_mut().project().retry_strategy.reset(Instant::now());
-                            self.as_mut().reset_redirects();
-                            self.as_mut().project().state.set(State::Connected {
-                                body: resp.into_body(),
-                            });
-                            continue;
-                        }
-
-                        if resp.status() == StatusCode::MOVED_PERMANENTLY
-                            || resp.status() == StatusCode::TEMPORARY_REDIRECT
-                        {
-                            tracing::debug!("got redirected ({})", resp.status());
-
-                            if self.as_mut().increment_redirect_counter() {
-                                tracing::debug!("following redirect {}", self.redirect_count);
-
-                                self.as_mut().project().state.set(State::FollowingRedirect {
-                                    redirect: resp.headers().get(hyper::header::LOCATION).cloned(),
+                            if resp.status().is_success() {
+                                self.as_mut().project().retry_strategy.reset(Instant::now());
+                                self.as_mut().reset_redirects();
+                                self.as_mut().project().state.set(State::Connected {
+                                    body: resp.into_body(),
                                 });
                                 continue;
-                            } else {
-                                tracing::debug!(
-                                    "redirect limit reached ({})",
-                                    self.props.max_redirects
+                            }
+
+                            if resp.status() == StatusCode::MOVED_PERMANENTLY
+                                || resp.status() == StatusCode::TEMPORARY_REDIRECT
+                            {
+                                tracing::debug!("got redirected ({})", resp.status());
+
+                                if self.as_mut().increment_redirect_counter() {
+                                    tracing::debug!("following redirect {}", self.redirect_count);
+
+                                    self.as_mut().project().state.set(State::FollowingRedirect {
+                                        redirect: resp
+                                            .headers()
+                                            .get(hyper::header::LOCATION)
+                                            .cloned(),
+                                    });
+                                    continue;
+                                } else {
+                                    tracing::debug!(
+                                        "redirect limit reached ({})",
+                                        self.props.max_redirects
+                                    );
+
+                                    self.as_mut().project().state.set(State::StreamClosed);
+                                    return Poll::Ready(Some(Err(Error::MaxRedirectLimitReached(
+                                        self.props.max_redirects,
+                                    ))));
+                                }
+                            }
+
+                            self.as_mut().reset_redirects();
+                            self.as_mut().project().state.set(State::New);
+                            return Poll::Ready(Some(Err(Error::UnexpectedResponse(
+                                resp.status(),
+                            ))));
+                        }
+                        Err(e) => {
+                            // This seems basically impossible. AFAIK we can only get this way if we
+                            // poll after it was already ready
+                            tracing::warn!("request returned an error: {}", e);
+                            if !*retry {
+                                self.as_mut().project().state.set(State::New);
+                                return Poll::Ready(Some(Err(Error::HttpStream(Box::new(e)))));
+                            }
+                            let duration = self
+                                .as_mut()
+                                .project()
+                                .retry_strategy
+                                .next_delay(Instant::now());
+                            let timedout = self.retry_strategy.timeout_reached(
+                                Instant::now() + duration,
+                                self.props.reconnect_opts.timeout,
+                            );
+
+                            if timedout {
+                                return Poll::Ready(Some(Err(Error::ReconnectTimeOut)));
+                            }
+
+                            self.as_mut()
+                                .project()
+                                .state
+                                .set(State::WaitingToReconnect {
+                                    sleep: delay(duration, "retrying"),
+                                })
+                        }
+                    },
+                    Poll::Pending => {
+                        match timeout
+                            .as_pin_mut()
+                            .map(|s| s.poll(cx))
+                            .unwrap_or_else(|| Poll::Pending)
+                        {
+                            Poll::Ready(_) => {
+                                tracing::warn!("request connnect timedout");
+                                if !*retry {
+                                    self.as_mut().project().state.set(State::New);
+                                    return Poll::Ready(Some(Err(Error::TimedOut)));
+                                }
+                                let duration = self
+                                    .as_mut()
+                                    .project()
+                                    .retry_strategy
+                                    .next_delay(Instant::now());
+                                let timedout = self.retry_strategy.timeout_reached(
+                                    Instant::now() + duration,
+                                    self.props.reconnect_opts.timeout,
                                 );
 
-                                self.as_mut().project().state.set(State::StreamClosed);
-                                return Poll::Ready(Some(Err(Error::MaxRedirectLimitReached(
-                                    self.props.max_redirects,
-                                ))));
-                            }
-                        }
+                                if timedout {
+                                    return Poll::Ready(Some(Err(Error::ReconnectTimeOut)));
+                                }
 
-                        self.as_mut().reset_redirects();
-                        self.as_mut().project().state.set(State::New);
-                        return Poll::Ready(Some(Err(Error::UnexpectedResponse(resp.status()))));
-                    }
-                    Err(e) => {
-                        // This seems basically impossible. AFAIK we can only get this way if we
-                        // poll after it was already ready
-                        tracing::warn!("request returned an error: {}", e);
-                        if !*retry {
-                            self.as_mut().project().state.set(State::New);
-                            return Poll::Ready(Some(Err(Error::HttpStream(Box::new(e)))));
+                                self.as_mut()
+                                    .project()
+                                    .state
+                                    .set(State::WaitingToReconnect {
+                                        sleep: delay(duration, "retrying"),
+                                    })
+                            }
+                            Poll::Pending => return Poll::Pending,
                         }
-                        let duration = self
-                            .as_mut()
-                            .project()
-                            .retry_strategy
-                            .next_delay(Instant::now());
-                        self.as_mut()
-                            .project()
-                            .state
-                            .set(State::WaitingToReconnect {
-                                sleep: delay(duration, "retrying"),
-                            })
                     }
                 },
                 StateProj::FollowingRedirect {
@@ -561,6 +634,15 @@ where
                                 .project()
                                 .retry_strategy
                                 .next_delay(Instant::now());
+                            let timedout = self.retry_strategy.timeout_reached(
+                                Instant::now() + duration,
+                                self.props.reconnect_opts.timeout,
+                            );
+
+                            if timedout {
+                                return Poll::Ready(Some(Err(Error::TimedOut)));
+                            }
+
                             self.as_mut()
                                 .project()
                                 .state
@@ -583,6 +665,15 @@ where
                             .project()
                             .retry_strategy
                             .next_delay(Instant::now());
+
+                        let timedout = self.retry_strategy.timeout_reached(
+                            Instant::now() + duration,
+                            self.props.reconnect_opts.timeout,
+                        );
+                        if timedout {
+                            return Poll::Ready(Some(Err(Error::ReconnectTimeOut)));
+                        }
+
                         self.as_mut()
                             .project()
                             .state

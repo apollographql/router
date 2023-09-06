@@ -1689,12 +1689,6 @@ expression: "&schema"
                       "minimum": 0.0,
                       "nullable": true
                     },
-                    "close_check": {
-                      "description": "Coofigure how often the client will check if the subscription was ended from the client side used only if reconnect is enabled. Defaults to 10 seconds",
-                      "default": null,
-                      "type": "string",
-                      "nullable": true
-                    },
                     "delay": {
                       "description": "After an error, the client will wait this long before the first attempt to reconnect.  Subsequent reconnect attempts may wait longer, depending on the [`backoff_factor`].",
                       "default": null,
@@ -1718,10 +1712,21 @@ expression: "&schema"
                       "type": "string",
                       "nullable": true
                     },
+                    "read_timeout": {
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
                     "reconnect": {
                       "description": "If `reconnect` is `true`, the client will automatically try to reconnect if the stream ends due to an error. If it is `false`  (the [default]), the client will stop receiving events after an error.",
                       "default": null,
                       "type": "boolean",
+                      "nullable": true
+                    },
+                    "reconnect_timeout": {
+                      "description": "Configure the maximum time it will retry to get a successful connection before giving up. The [default] is 30 seconds.",
+                      "default": null,
+                      "type": "string",
                       "nullable": true
                     },
                     "retry_initial": {
@@ -1749,12 +1754,6 @@ expression: "&schema"
                         "minimum": 0.0,
                         "nullable": true
                       },
-                      "close_check": {
-                        "description": "Coofigure how often the client will check if the subscription was ended from the client side used only if reconnect is enabled. Defaults to 10 seconds",
-                        "default": null,
-                        "type": "string",
-                        "nullable": true
-                      },
                       "delay": {
                         "description": "After an error, the client will wait this long before the first attempt to reconnect.  Subsequent reconnect attempts may wait longer, depending on the [`backoff_factor`].",
                         "default": null,
@@ -1778,10 +1777,21 @@ expression: "&schema"
                         "type": "string",
                         "nullable": true
                       },
+                      "read_timeout": {
+                        "default": null,
+                        "type": "string",
+                        "nullable": true
+                      },
                       "reconnect": {
                         "description": "If `reconnect` is `true`, the client will automatically try to reconnect if the stream ends due to an error. If it is `false`  (the [default]), the client will stop receiving events after an error.",
                         "default": null,
                         "type": "boolean",
+                        "nullable": true
+                      },
+                      "reconnect_timeout": {
+                        "description": "Configure the maximum time it will retry to get a successful connection before giving up. The [default] is 30 seconds.",
+                        "default": null,
+                        "type": "string",
                         "nullable": true
                       },
                       "retry_initial": {

@@ -8,6 +8,7 @@ pub(crate) struct ReconnectOptions {
     pub(crate) delay: Duration,
     pub(crate) backoff_factor: u32,
     pub(crate) delay_max: Duration,
+    pub(crate) timeout: Duration,
 }
 
 impl ReconnectOptions {
@@ -40,6 +41,7 @@ impl Default for ReconnectOptions {
             delay: Duration::from_secs(1),
             backoff_factor: 2,
             delay_max: Duration::from_secs(60),
+            timeout: Duration::from_secs(1800),
         }
     }
 }
@@ -111,6 +113,13 @@ impl ReconnectOptionsBuilder {
     /// [`backoff_factor`]: #method.backoff_factor
     pub(crate) fn delay_max(mut self, max: Duration) -> Self {
         self.opts.delay_max = max;
+        self
+    }
+
+    /// Configure the maximum time it will wait to get a successful connection
+    /// before giving up. The [default] is 30 minutes.
+    pub(crate) fn timeout(mut self, max: Duration) -> Self {
+        self.opts.timeout = max;
         self
     }
 

@@ -541,7 +541,7 @@ async fn call_sse(
         service: service_name,
         reason: format!("cannot send the subgraph request to sse stream: {err:?}"),
     })?;
-    let mut closed_ref = handle.closed_receiver();
+    let mut closed_receiver = handle.closed_receiver();
     let (mut handle_sink, handle_stream) = handle.split();
 
     tokio::task::spawn(async move {
@@ -549,7 +549,7 @@ async fn call_sse(
 
         loop {
             tokio::select! {
-                _ = closed_ref.recv() => {
+                _ = closed_receiver.recv() => {
                     tracing::trace!("The stream was closed");
                     break;
                 }
@@ -1122,6 +1122,10 @@ fn get_sse_client(
     })?;
 
     builder = if subgraph_sse_cfg.enabled {
+        if let Some(timeout) = subgraph_sse_cfg.read_timeout {
+            builder = builder.read_timeout(timeout);
+        }
+
         builder.reconnect(
             ReconnectOptions::reconnect(subgraph_sse_cfg.reconnect.unwrap_or(false))
                 .retry_initial(subgraph_sse_cfg.retry_initial.unwrap_or(false))
@@ -1135,6 +1139,11 @@ fn get_sse_client(
                     subgraph_sse_cfg
                         .delay_max
                         .unwrap_or_else(|| Duration::from_secs(60)),
+                )
+                .timeout(
+                    subgraph_sse_cfg
+                        .reconnect_timeout
+                        .unwrap_or_else(|| Duration::from_secs(1800)),
                 )
                 .build(),
         )
@@ -2747,6 +2756,87 @@ mod tests {
         assert!(total_calls >= 1);
         drop(gql_stream);
         tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_sse_timeout() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let mut subscription_config = subscription_config();
+        let sse_config = subscription_config
+            .mode
+            .sse
+            .as_mut()
+            .unwrap()
+            .subgraphs
+            .get_mut("testsse")
+            .unwrap();
+        sse_config.reconnect = Some(true);
+        sse_config.retry_initial = Some(true);
+        sse_config.delay = Some(std::time::Duration::from_millis(10));
+        sse_config.delay_max = Some(std::time::Duration::from_millis(200));
+        sse_config.reconnect_timeout = Some(std::time::Duration::from_millis(500));
+        sse_config.read_timeout = Some(std::time::Duration::from_millis(10));
+        let subgraph_service = SubgraphService::new(
+            "testsse",
+            true,
+            None,
+            false,
+            subscription_config.into(),
+            Notify::builder().build(),
+        );
+        let (tx, mut rx) = mpsc::channel(2);
+
+        let url = Uri::from_str(&format!("http://{socket_addr}/sse")).unwrap();
+        // The first initial response should be ok
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(
+                            Request::builder()
+                                .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                                .build(),
+                        )
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(
+                        Request::builder()
+                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Subscription,
+                context: Context::new(),
+                subscription_stream: Some(tx),
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(response.response.body().errors.is_empty());
+
+        let mut gql_stream = rx.next().await.unwrap();
+
+        let message = gql_stream.next().await.unwrap();
+
+        assert_eq!(
+            message,
+            graphql::Response::builder()
+                .subscribed(false)
+                .errors(vec![Error::builder()
+                    .message("cannot read message from sse: ReconnectTimeOut")
+                    .extension_code("SSE_MESSAGE_ERROR")
+                    .build()])
+                .build()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

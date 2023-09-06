@@ -13,6 +13,9 @@ pub(crate) trait RetryStrategy {
 
     /// Used to indicate to the strategy that it can reset as a successful connection has been made.
     fn reset(&mut self, current_time: Instant);
+
+    // Used to check if the max_time is reached
+    fn timeout_reached(&self, current_time: Instant, max_time: Duration) -> bool;
 }
 
 const DEFAULT_RESET_RETRY_INTERVAL: Duration = Duration::from_secs(60);
@@ -26,6 +29,7 @@ pub(crate) struct BackoffRetry {
     reset_interval: Duration,
     next_delay: Duration,
     good_since: Option<Instant>,
+    failing_since: Option<Instant>,
 }
 
 impl BackoffRetry {
@@ -43,6 +47,7 @@ impl BackoffRetry {
             reset_interval: DEFAULT_RESET_RETRY_INTERVAL,
             next_delay: base_delay,
             good_since: None,
+            failing_since: None,
         }
     }
 }
@@ -58,6 +63,9 @@ impl RetryStrategy for BackoffRetry {
         }
 
         self.good_since = None;
+        if self.failing_since.is_none() {
+            self.failing_since = Some(current_time);
+        }
         self.next_delay = std::cmp::min(self.max_delay, current_delay * self.backoff_factor);
 
         if self.include_jitter {
@@ -78,6 +86,14 @@ impl RetryStrategy for BackoffRetry {
         // we calculate the next delay, we can reset the strategy ONLY when it has been at least
         // DEFAULT_RESET_RETRY_INTERVAL seconds.
         self.good_since = Some(current_time);
+        self.failing_since = None;
+    }
+
+    fn timeout_reached(&self, current_time: Instant, max_time: Duration) -> bool {
+        match self.failing_since {
+            Some(failing_since) => current_time.duration_since(failing_since) > max_time,
+            None => false,
+        }
     }
 }
 
@@ -201,5 +217,20 @@ mod tests {
         let time = time.add(reset_interval);
         let delay = retry.next_delay(time);
         assert_eq!(delay, base);
+    }
+    #[test]
+    fn test_timeout_reached() {
+        let base = Duration::from_secs(10);
+        let max = Duration::from_secs(60);
+        let max_time = Duration::from_secs(180);
+        let mut retry = BackoffRetry::new(base, max, 2, false);
+        let start = Instant::now() - Duration::from_secs(60);
+        retry.next_delay(start);
+        assert!(!retry.timeout_reached(start, max_time));
+        let next_time = start + Duration::from_secs(200);
+        retry.next_delay(next_time);
+        assert!(retry.timeout_reached(next_time, max_time));
+        retry.reset(start);
+        assert!(!retry.timeout_reached(next_time, max_time));
     }
 }

@@ -251,6 +251,17 @@ pub(crate) struct SseConfiguration {
     #[serde(with = "humantime_serde")]
     #[schemars(with = "Option<String>")]
     pub(crate) delay_max: Option<std::time::Duration>,
+
+    // Set a read timeout for the underlying connection. There is no read timeout by default.
+    #[serde(with = "humantime_serde")]
+    #[schemars(with = "Option<String>")]
+    pub(crate) read_timeout: Option<std::time::Duration>,
+
+    /// Configure the maximum time it will retry to get a successful connection
+    /// before giving up. The [default] is 30 seconds.
+    #[serde(with = "humantime_serde")]
+    #[schemars(with = "Option<String>")]
+    pub(crate) reconnect_timeout: Option<std::time::Duration>,
 }
 
 impl Default for SseConfiguration {
@@ -263,6 +274,8 @@ impl Default for SseConfiguration {
             delay: None,
             backoff_factor: None,
             delay_max: None,
+            read_timeout: None,
+            reconnect_timeout: None,
         }
     }
 }
