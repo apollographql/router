@@ -111,12 +111,12 @@ To provide the router with the claims it needs, you must either configure JSON W
 
 ## Authorization directives
 
-**Authorization directives are enabled in your router by default**. If you want to _disable_ them, include the following in your router's [YAML config file](./overview/):
+While in [preview](/resources/product-launch-stages/#preview), authorization directives are turned off by default. To enable them, include the following in your router's [YAML config file](./overview/):
 
 ```yaml title="router.yaml"
 authorization:
   preview_directives:
-    enabled: false
+    enabled: true
 ```
 
 ### `@requiresScopes`
