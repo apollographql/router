@@ -501,10 +501,10 @@ mod test {
         mock.expect_call()
             .times(1)
             .withf(|request| {
+                let http_request = get_signed_request(request);
                 assert_eq!(
                     "UNSIGNED-PAYLOAD",
-                    request
-                        .subgraph_request
+                    http_request
                         .headers()
                         .get("x-amz-content-sha256")
                         .unwrap()
@@ -546,21 +546,22 @@ mod test {
         mock.expect_call()
             .times(1)
             .withf(|request| {
-                let authorization_regex = Regex::new(r"AWS4-HMAC-SHA256 Credential=id/\d{8}/us-east-1/s3/aws4_request, SignedHeaders=content-length;content-type;host;x-amz-content-sha256;x-amz-date, Signature=[a-f0-9]{64}").unwrap();
-                let authorization_header_str = request.subgraph_request.headers().get("authorization").unwrap().to_str().unwrap();
+                let http_request = get_signed_request(request);
+                let authorization_regex = Regex::new(r"AWS4-HMAC-SHA256 Credential=id/\d{8}/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=[a-f0-9]{64}").unwrap();
+                let authorization_header_str = http_request.headers().get("authorization").unwrap().to_str().unwrap();
                 assert_eq!(match authorization_regex.find(authorization_header_str) {
                     Some(m) => m.as_str(),
                     None => "no match"
                 }, authorization_header_str);
 
                 let x_amz_date_regex = Regex::new(r"\d{8}T\d{6}Z").unwrap();
-                let x_amz_date_header_str = request.subgraph_request.headers().get("x-amz-date").unwrap().to_str().unwrap();
+                let x_amz_date_header_str = http_request.headers().get("x-amz-date").unwrap().to_str().unwrap();
                 assert_eq!(match x_amz_date_regex.find(x_amz_date_header_str) {
                     Some(m) => m.as_str(),
                     None => "no match"
                 }, x_amz_date_header_str);
 
-                assert_eq!(request.subgraph_request.headers().get("x-amz-content-sha256").unwrap(), "255959b4c6e11c1080f61ce0d75eb1b565c1772173335a7828ba9c13c25c0d8c");
+                assert_eq!(http_request.headers().get("x-amz-content-sha256").unwrap(), "255959b4c6e11c1080f61ce0d75eb1b565c1772173335a7828ba9c13c25c0d8c");
 
                 true
             })
@@ -616,11 +617,32 @@ mod test {
                     .header(HOST, "rhost")
                     .header(CONTENT_LENGTH, "22")
                     .header(CONTENT_TYPE, "graphql")
+                    .uri("https://test-endpoint.com")
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
             )
             .operation_kind(OperationKind::Query)
             .context(Context::new())
             .build()
+    }
+
+    fn get_signed_request(request: &SubgraphRequest) -> hyper::Request<hyper::Body> {
+        let signing_params = {
+            let ctx = request.context.private_entries.lock();
+            let sp = ctx.get::<SigningParamsConfig>();
+            sp.cloned().unwrap()
+        };
+
+        let http_request = request
+            .clone()
+            .subgraph_request
+            .map(|body| hyper::Body::from(serde_json::to_string(&body).unwrap()));
+
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async { signing_params.sign(http_request).await.unwrap() })
+        })
+        .join()
+        .unwrap()
     }
 }
