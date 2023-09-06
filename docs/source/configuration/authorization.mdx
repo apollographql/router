@@ -270,7 +270,7 @@ type Query {
 type User {
   id: ID!
   username: String
-  email: String @requiresScopes(scopes: ["read:email"])
+  email: String @requiresScopes(scopes: [["read:email"]])
   posts: [Post!]!
 }
 
