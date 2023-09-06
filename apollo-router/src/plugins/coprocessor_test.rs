@@ -287,7 +287,7 @@ mod tests {
             Box::pin(async {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
-                        r##"{
+                        r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
                                 "control": {
@@ -299,7 +299,7 @@ mod tests {
                                         "body": "Errors need a message, this will fail to deserialize"
                                     }]
                                 }
-                            }"##,
+                            }"#,
                     ))
                     .unwrap())
             })
@@ -386,7 +386,7 @@ mod tests {
             Box::pin(async {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
-                        r##"{
+                        r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
                                 "control": "continue",
@@ -429,7 +429,7 @@ mod tests {
                                   },
                                   "serviceName": "service name shouldn't change",
                                   "uri": "http://thisurihaschanged"
-                            }"##,
+                            }"#,
                     ))
                     .unwrap())
             })
@@ -478,7 +478,7 @@ mod tests {
             Box::pin(async {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
-                        r##"{
+                        r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
                                 "control": {
@@ -495,7 +495,7 @@ mod tests {
                                 "headers": {
                                     "aheader": ["a value"]
                                 }
-                            }"##,
+                            }"#,
                     ))
                     .unwrap())
             })
@@ -556,7 +556,7 @@ mod tests {
             Box::pin(async {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
-                        r##"{
+                        r#"{
                                 "version": 1,
                                 "stage": "SubgraphResponse",
                                 "headers": {
@@ -598,7 +598,7 @@ mod tests {
                                       "this-is-a-test-context": 42
                                     }
                                   }
-                            }"##,
+                            }"#,
                     ))
                     .unwrap())
             })
