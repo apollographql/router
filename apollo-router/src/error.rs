@@ -509,9 +509,9 @@ pub(crate) enum SchemaError {
     UrlParse(String, http::uri::InvalidUri),
     /// Could not find an URL for subgraph {0}
     MissingSubgraphUrl(String),
-    /// GraphQL parser error(s).
+    /// GraphQL parser error: {0}
     Parse(ParseErrors),
-    /// GraphQL parser or validation error(s).
+    /// GraphQL validation error: {0}
     Validate(ValidationErrors),
     /// Api error(s): {0}
     Api(String),
@@ -526,11 +526,16 @@ pub(crate) struct ParseErrors {
 impl std::fmt::Display for ParseErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut errors = self.errors.iter();
-        if let Some(error) = errors.next() {
-            write!(f, "{}", error.message())?;
+        for (i, error) in errors.by_ref().take(5).enumerate() {
+            if i > 0 {
+                write!(f, "\n")?;
+            }
+            // TODO(@goto-bus-stop): display line/column once that is exposed from apollo-rs
+            write!(f, "at index {}: {}", error.index(), error.message())?;
         }
-        for error in errors {
-            write!(f, "\n{}", error.message())?;
+        let remaining = errors.count();
+        if remaining > 0 {
+            write!(f, "\n...and {remaining} other errors")?;
         }
         Ok(())
     }
@@ -546,10 +551,10 @@ impl std::fmt::Display for ValidationErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut errors = self.errors.iter();
         if let Some(error) = errors.next() {
-            write!(f, "{}", error.data)?;
+            write!(f, "at index {}: {}", error.location.offset(), error.data)?;
         }
         for error in errors {
-            write!(f, "\n{}", error.data)?;
+            write!(f, "\nat index {}: {}", error.location.offset(), error.data)?;
         }
         Ok(())
     }
