@@ -59,6 +59,8 @@ use crate::services::router;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
+const ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
+
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
 #[derive(Debug, Default)]
@@ -500,7 +502,8 @@ async fn handle_graphql(
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    tracing::info!(counter.apollo_router_session_count_active = 1i64,);
+    let session_count = ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+    tracing::info!(gauge.apollo_router_session_count_active = session_count,);
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();
@@ -518,7 +521,9 @@ async fn handle_graphql(
 
     match res {
         Err(e) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1i64,);
+            let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Relaxed) - 1;
+            tracing::info!(gauge.apollo_router_session_count_active = session_count,);
+
             if let Some(source_err) = e.source() {
                 if source_err.is::<RateLimited>() {
                     return RateLimited::new().into_response();

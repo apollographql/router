@@ -1,5 +1,6 @@
 //! Listeners and endpoints
 
+use std::atomic::AtomicU64;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -23,6 +24,8 @@ use crate::http_server_factory::NetworkStream;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::ListenAddr;
+
+pub(crate) const SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug)]
 pub(crate) struct ListenAddrAndRouter(pub(crate) ListenAddr, pub(crate) Router);
@@ -217,8 +220,9 @@ pub(super) fn serve_router_on_listen_addr(
                                 max_open_file_warning = None;
                             }
 
+                            let session_count = SESSION_COUNT.fetch_add(1, Ordering::Relaxed)+1;
                             tracing::info!(
-                                counter.apollo_router_session_count_total = 1i64,
+                                gauge.apollo_router_session_count_total = session_count,
                                 listener = &address
                             );
 
@@ -311,8 +315,9 @@ pub(super) fn serve_router_on_listen_addr(
                                     }
                                 }
 
+                                let session_count = SESSION_COUNT.fetch_sub(1, Ordering::Relaxed)-1;
                                 tracing::info!(
-                                    counter.apollo_router_session_count_total = -1i64,
+                                    gauge.apollo_router_session_count_total = session_count,
                                     listener = &address
                                 );
 
