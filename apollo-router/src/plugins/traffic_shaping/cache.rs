@@ -5,8 +5,10 @@ use std::time::Duration;
 
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use http::header;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use sha2::Digest;
 use sha2::Sha256;
@@ -24,6 +26,9 @@ use crate::graphql;
 use crate::json_ext::Object;
 use crate::services::subgraph;
 use crate::spec::TYPENAME;
+
+const ENTITIES: &str = "_entities";
+pub(crate) const REPRESENTATIONS: &str = "representations";
 
 #[derive(Clone)]
 pub(crate) struct SubgraphCacheLayer {
@@ -83,14 +88,14 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, mut request: subgraph::Request) -> Self::Future {
+    fn call(&mut self, request: subgraph::Request) -> Self::Future {
         let service = self.service.clone();
 
         if !request
             .subgraph_request
-            .body_mut()
+            .body()
             .variables
-            .contains_key("representations")
+            .contains_key(REPRESENTATIONS)
         {
             return service.oneshot(request).boxed();
         }
@@ -118,9 +123,11 @@ where
     let body = request.subgraph_request.body_mut();
     let query_hash = hash_request(body);
 
+    // TODO: compute TTL with cacheControl directive on the subgraph
+
     let representations = body
         .variables
-        .get_mut("representations")
+        .get_mut(REPRESENTATIONS)
         .and_then(|value| value.as_array_mut())
         .expect("we already checked that representations exist");
 
@@ -132,11 +139,11 @@ where
         .unwrap_or_else(|| std::iter::repeat(None).take(keys.len()).collect());
 
     let (new_representations, mut result) =
-        filter_representations(representations, keys, cache_result)?;
+        filter_representations(&name, representations, keys, cache_result)?;
 
     if !new_representations.is_empty() {
         body.variables
-            .insert("representations", new_representations.into());
+            .insert(REPRESENTATIONS, new_representations.into());
 
         let mut response = service.oneshot(request).await?;
 
@@ -145,7 +152,7 @@ where
         if let Some(mut entities) = data
             .as_mut()
             .and_then(|v| v.as_object_mut())
-            .and_then(|o| o.remove("_entities"))
+            .and_then(|o| o.remove(ENTITIES))
         {
             let new_entities = insert_entities_in_result(
                 entities
@@ -160,7 +167,7 @@ where
 
             data.as_mut()
                 .and_then(|v| v.as_object_mut())
-                .map(|o| o.insert("_entities", new_entities.into()));
+                .map(|o| o.insert(ENTITIES, new_entities.into()));
             response.response.body_mut().data = data;
         }
 
@@ -168,7 +175,7 @@ where
     } else {
         let entities = insert_entities_in_result(&mut Vec::new(), &cache, &mut result).await?;
         let mut data = Object::default();
-        data.insert("_entities", entities.into());
+        data.insert(ENTITIES, entities.into());
 
         Ok(subgraph::Response::builder()
             .data(data)
@@ -178,14 +185,42 @@ where
     }
 }
 
-fn hash_request(body: &graphql::Request) -> String {
+pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
+    let mut digest = Sha256::new();
+
+    for vary_header_value in headers.get_all(header::VARY).into_iter() {
+        if vary_header_value == "*" {
+            return String::from("*");
+        } else {
+            let header_names = match vary_header_value.to_str() {
+                Ok(header_val) => header_val.split(", "),
+                Err(_) => continue,
+            };
+            header_names.for_each(|header_name| {
+                if let Some(header_value) = headers.get(header_name).and_then(|h| h.to_str().ok()) {
+                    digest.update(header_value);
+                    digest.update(&[0u8; 1][..]);
+                }
+            });
+        }
+    }
+
+    hex::encode(digest.finalize().as_slice())
+}
+
+pub(crate) fn hash_request(body: &mut graphql::Request) -> String {
     let mut digest = Sha256::new();
     digest.update(body.query.as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);
     digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);
+    let repr_key = ByteString::from(REPRESENTATIONS);
+    // Removing the representations variable because it's already part of the cache key
+    let representations = body.variables.remove(&repr_key);
     digest.update(&serde_json::to_vec(&body.variables).unwrap());
-
+    if let Some(representations) = representations {
+        body.variables.insert(repr_key, representations);
+    }
     hex::encode(digest.finalize().as_slice())
 }
 
@@ -204,19 +239,21 @@ fn extract_cache_keys(
                 reason: "missing __typename in representation".to_string(),
             })?;
 
-        let typename = opt_type.as_str().unwrap_or("-").to_string();
+        let typename = opt_type.as_str().unwrap_or("-");
+
+        // We have to have representation because it can contains PII
+        let mut digest = Sha256::new();
+        digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
+        let hashed_repr = hex::encode(digest.finalize().as_slice());
 
         let key = format!(
             "subgraph.{}|{}|{}|{}",
-            subgraph_name,
-            &typename,
-            serde_json::to_string(&representation).unwrap(),
-            query_hash
+            subgraph_name, &typename, hashed_repr, query_hash
         );
 
         representation
             .as_object_mut()
-            .map(|o| o.insert("__typename", opt_type));
+            .map(|o| o.insert(TYPENAME, opt_type));
         res.push(key);
     }
     Ok(res)
@@ -230,6 +267,7 @@ struct IntermediateResult {
 
 // build a new list of representations without the ones we got from the cache
 fn filter_representations(
+    subgraph_name: &str,
     representations: &mut Vec<Value>,
     keys: Vec<String>,
     mut cache_result: Vec<Option<Value>>,
@@ -245,7 +283,7 @@ fn filter_representations(
     {
         let opt_type = representation
             .as_object_mut()
-            .and_then(|o| o.remove("__typename"))
+            .and_then(|o| o.remove(TYPENAME))
             .ok_or_else(|| FetchError::MalformedRequest {
                 reason: "missing __typename in representation".to_string(),
             })?;
@@ -257,7 +295,7 @@ fn filter_representations(
 
             representation
                 .as_object_mut()
-                .map(|o| o.insert("__typename", opt_type));
+                .map(|o| o.insert(TYPENAME, opt_type));
             new_representations.push(representation);
         } else {
             cache_hit.entry(typename.clone()).or_default().0 += 1;
@@ -270,11 +308,17 @@ fn filter_representations(
     }
 
     for (ty, (hit, miss)) in cache_hit {
-        tracing::event!(
-            Level::INFO,
+        tracing::info!(
+            monotonic_counter.apollo.router.operations.entity.cache = hit as u64,
             entity_type = ty.as_str(),
-            cache_hit = hit,
-            cache_miss = miss
+            hit = %true,
+            %subgraph_name
+        );
+        tracing::info!(
+            monotonic_counter.apollo.router.operations.entity.cache = miss as u64,
+            entity_type = ty.as_str(),
+            miss = %true,
+            %subgraph_name
         );
     }
 
@@ -317,6 +361,7 @@ async fn insert_entities_in_result(
     }
 
     if !to_insert.is_empty() {
+        // TODO use insert_multiple_with_ttl
         cache.insert_multiple(&to_insert).await;
     }
 

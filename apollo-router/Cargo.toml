@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.71.1"
+rust-version = "1.72.0"
 edition = "2021"
 build = "build/main.rs"
 
@@ -64,9 +64,9 @@ async-compression = { version = "0.4.1", features = [
     "deflate",
 ] }
 async-trait = "0.1.73"
-atty = "0.2.14"
 axum = { version = "0.6.20", features = ["headers", "json", "original-uri"] }
 base64 = "0.21.2"
+bloomfilter = "1.0.12"
 buildstructor = "0.5.3"
 bytes = "1.4.0"
 clap = { version = "4.4.2", default-features = false, features = [
@@ -163,6 +163,7 @@ prost = "0.11.9"
 prost-types = "0.11.9"
 proteus = "0.5.0"
 rand = "0.8.5"
+rand_core = "0.6.4"
 rhai = { version = "1.15.1", features = ["sync", "serde", "internals"] }
 regex = "1.9.5"
 reqwest = { version = "0.11.19", default-features = false, features = [
@@ -236,7 +237,6 @@ memchr = "2.6.3"
 brotli = "3.3.4"
 zstd = "0.12.4"
 zstd-safe = "6.0.6"
-rand_core = "0.6.4"
 # note: AWS dependencies should always use the same version
 aws-sigv4 = "0.56.0"
 aws-credential-types = "0.56.0"
