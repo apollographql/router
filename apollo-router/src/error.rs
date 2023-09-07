@@ -528,7 +528,7 @@ impl std::fmt::Display for ParseErrors {
         let mut errors = self.errors.iter();
         for (i, error) in errors.by_ref().take(5).enumerate() {
             if i > 0 {
-                write!(f, "\n")?;
+                f.write_str("\n")?;
             }
             // TODO(@goto-bus-stop): display line/column once that is exposed from apollo-rs
             write!(f, "at index {}: {}", error.index(), error.message())?;
