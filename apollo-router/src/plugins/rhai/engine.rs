@@ -1461,7 +1461,6 @@ impl Rhai {
         let mut module = exported_module!(router_plugin);
         combine_with_exported_module!(&mut module, "header", router_header_map);
         combine_with_exported_module!(&mut module, "method", router_method);
-        combine_with_exported_module!(&mut module, "json", router_json);
         combine_with_exported_module!(&mut module, "context", router_context);
 
         let base64_module = exported_module!(router_base64);
