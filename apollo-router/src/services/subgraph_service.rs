@@ -37,6 +37,8 @@ use mediatype::names::JSON;
 use mediatype::MediaType;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
+use rustls::Certificate;
+use rustls::PrivateKey;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -162,16 +164,22 @@ impl SubgraphService {
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
-        let tls_config = match tls_cert_store {
-            None => rustls::ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
-            Some(store) => rustls::ClientConfig::builder()
-                .with_safe_defaults()
+
+        let client_cert_config: Option<(Vec<Certificate>, PrivateKey)> = None;
+        let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
+        let tls_config = match (tls_cert_store, client_cert_config) {
+            (None, None) => tls_builder.with_native_roots().with_no_client_auth(),
+            (Some(store), None) => tls_builder
                 .with_root_certificates(store)
                 .with_no_client_auth(),
+            (None, Some((certificate_chain, key))) => tls_builder
+                .with_native_roots()
+                .with_client_auth_cert(certificate_chain, key)?,
+            (Some(store), Some((certificate_chain, key))) => tls_builder
+                .with_root_certificates(store)
+                .with_client_auth_cert(certificate_chain, key)?,
         };
+
         let builder = hyper_rustls::HttpsConnectorBuilder::new()
             .with_tls_config(tls_config)
             .https_or_http()
