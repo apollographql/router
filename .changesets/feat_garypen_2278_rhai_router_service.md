@@ -31,4 +31,13 @@ fn process_response(response) {
 }
 ```
 
+This PR also introduces two new Rhai functions:
+
+```rust
+json_encode(Object)
+json_decode(String) -> Object
+
+```
+Which will respectively encode a `Rhai` Object or decode a JSON string into a `Rhai` Object. These functions may be helpful when dealing with String bodies which represent encoded JSON objects.
+
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3234
