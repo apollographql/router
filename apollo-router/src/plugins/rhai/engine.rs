@@ -282,32 +282,6 @@ mod router_header_map {
 }
 
 #[export_module]
-mod router_json {
-    pub(crate) type Object = crate::json_ext::Object;
-    pub(crate) type Value = crate::json_ext::Value;
-
-    #[rhai_fn(name = "to_string", pure)]
-    pub(crate) fn object_to_string(x: &mut Object) -> String {
-        format!("{x:?}")
-    }
-
-    #[rhai_fn(name = "to_string", pure)]
-    pub(crate) fn value_to_string(x: &mut Value) -> String {
-        format!("{x:?}")
-    }
-
-    #[rhai_fn(pure, return_raw)]
-    pub(crate) fn json_encode(input: &mut Dynamic) -> Result<String, Box<EvalAltResult>> {
-        serde_json::to_string(input).map_err(|e| e.to_string().into())
-    }
-
-    #[rhai_fn(pure, return_raw)]
-    pub(crate) fn json_decode(input: &mut ImmutableString) -> Result<Dynamic, Box<EvalAltResult>> {
-        serde_json::from_str(input).map_err(|e| e.to_string().into())
-    }
-}
-
-#[export_module]
 mod router_context {
     pub(crate) type Context = crate::Context;
 
