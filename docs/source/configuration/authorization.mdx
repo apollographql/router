@@ -18,11 +18,11 @@ Services may have their own access controls, but enforcing authorization _in the
   flowchart LR;
     clients(Client);
     subgraph Router[" "]
-      router(["<b>Apollo Router</b>"]);
+      router(["<b>Apollo<br/>Router</b>"]);
       serviceB[Users<br/>API];
       serviceC[Posts<br/>API];
     end
-    router -.->|"❌ Subquery"| serviceB & serviceC;
+    router -.->|"❌ Subquery&nbsp&nbsp&nbsp"| serviceB & serviceC;
     clients -->|"⚠️Unauthorized <br/>request"| router;
   ```
 
@@ -32,7 +32,7 @@ Services may have their own access controls, but enforcing authorization _in the
   flowchart LR;
     clients(Client);
     subgraph Router[" "]
-      router(["<b>Apollo Router</b>"]);
+      router(["<b>Apollo<br/>Router</b>"]);
       serviceB[Users<br/>API];
       serviceC[Posts<br/>API];
     end
@@ -49,18 +49,22 @@ Services may have their own access controls, but enforcing authorization _in the
   ```mermaid
   flowchart LR;
     clients(Client);
-    Level2:::padding
-    subgraph Level1["<br>🔐 Router layer&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp"]
-      router(["<b>Apollo Router</b>"]);
-        subgraph Level2["🔐 Service layer"]
-          serviceB[Users<br/>API];
-          serviceC[Posts<br/>API];
-          end
+    
+    subgraph container[" "]
+    subgraph Level1["🔐 Router layer"]
+      router(["<b>Apollo<br/>Router</b>"]);
+    end
+    subgraph Level2["🔐 Service layer"]
+      serviceB[Users<br/>API];
+      serviceC[Posts<br/>API];
+    end
     end
 
     router -->|"Subquery"| serviceB & serviceC;
     clients -->|"Request"| router;
 
+    Level1:::padding
+    Level2:::padding
   classDef padding padding-left:1em, padding-right:1em
   ```
 
@@ -106,7 +110,7 @@ Claims are the individual details of a request's authentication and scope. They 
 To provide the router with the claims it needs, you must either configure JSON Web Token (JWT) authentication or add an external coprocessor that adds claims to a request's context. In some cases (explained below), you may require both.
 
 - **JWT authentication configuration**: If you configure [JWT authentication](./authn-jwt), the Apollo Router [automatically adds a JWT token's claims](./authn-jwt#working-with-jwt-claims) to the request's context at the `apollo_authentication::JWT::claims` key.
-- **Adding claims via coprocessor**:  If you can't use JWT authentication, you can [add claims with a coprocessor](/customizations/coprocessor#adding-authorization-claims-via-coprocessor). Coprocessors let you hook into the Apollo Router's request-handling lifecycle with custom code.
+- **Adding claims via coprocessor**:  If you can't use JWT authentication, you can [add claims with a coprocessor](../customizations/coprocessor#adding-authorization-claims-via-coprocessor). Coprocessors let you hook into the Apollo Router's request-handling lifecycle with custom code.
 - **Augmenting JWT claims via coprocessor**: Your authorization policies may require information beyond what your JSON web tokens provide. For example, a token's claims may include user IDs, which you then use to look up user roles. For situations like this, you can [augment the claims](./authn-jwt#claim-augmentation-via-coprocessors) from your JSON web tokens with coprocessors.
 
 ## Authorization directives
