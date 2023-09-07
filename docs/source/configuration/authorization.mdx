@@ -18,11 +18,11 @@ Services may have their own access controls, but enforcing authorization _in the
   flowchart LR;
     clients(Client);
     subgraph Router[" "]
-      router(["<b>Apollo<br/>Router</b>"]);
+      router(["<b>Apollo Router</b>"]);
       serviceB[Users<br/>API];
       serviceC[Posts<br/>API];
     end
-    router -.->|"❌ Subquery&nbsp&nbsp&nbsp"| serviceB & serviceC;
+    router -.->|"❌ Subquery"| serviceB & serviceC;
     clients -->|"⚠️Unauthorized <br/>request"| router;
   ```
 
@@ -32,7 +32,7 @@ Services may have their own access controls, but enforcing authorization _in the
   flowchart LR;
     clients(Client);
     subgraph Router[" "]
-      router(["<b>Apollo<br/>Router</b>"]);
+      router(["<b>Apollo Router</b>"]);
       serviceB[Users<br/>API];
       serviceC[Posts<br/>API];
     end
@@ -49,22 +49,18 @@ Services may have their own access controls, but enforcing authorization _in the
   ```mermaid
   flowchart LR;
     clients(Client);
-    
-    subgraph container[" "]
-    subgraph Level1["🔐 Router layer"]
-      router(["<b>Apollo<br/>Router</b>"]);
-    end
-    subgraph Level2["🔐 Service layer"]
-      serviceB[Users<br/>API];
-      serviceC[Posts<br/>API];
-    end
+    Level2:::padding
+    subgraph Level1["<br>🔐 Router layer&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp"]
+      router(["<b>Apollo Router</b>"]);
+        subgraph Level2["🔐 Service layer"]
+          serviceB[Users<br/>API];
+          serviceC[Posts<br/>API];
+          end
     end
 
     router -->|"Subquery"| serviceB & serviceC;
     clients -->|"Request"| router;
 
-    Level1:::padding
-    Level2:::padding
   classDef padding padding-left:1em, padding-right:1em
   ```
 
