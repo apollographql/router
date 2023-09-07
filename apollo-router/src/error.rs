@@ -10,7 +10,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinError;
-use tracing::level_filters::LevelFilter;
 
 pub(crate) use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
@@ -553,19 +552,6 @@ impl std::fmt::Display for ValidationErrors {
             write!(f, "\n{}", error.data)?;
         }
         Ok(())
-    }
-}
-
-impl ValidationErrors {
-    pub(crate) fn print(&self) {
-        if LevelFilter::current() == LevelFilter::OFF && cfg!(not(debug_assertions)) {
-            return;
-        }
-
-        self.errors.iter().for_each(|err| {
-            // Outputs a pretty colourised report on TTYs
-            eprintln!("{err}");
-        });
     }
 }
 
