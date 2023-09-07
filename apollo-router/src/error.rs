@@ -1,4 +1,5 @@
 //! Router errors.
+use std::io::IsTerminal;
 use std::sync::Arc;
 
 use displaydoc::Display;

@@ -491,6 +491,12 @@ You can configure certain caching behaviors for generated query plans and APQ (b
 
 **If you have a GraphOS Enterprise plan,** you can also configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/).
 
+### Safelisting with persisted queries
+
+You can enhance your graph's security by maintaining a persisted query list (PQL), an operation safelist made by your first-party apps. As opposed to automatic persisted queries (APQ) where operations are automatically cached, operations must be preregistered to the PQL. Once configured, the router checks incoming requests against the PQL.
+
+See [Safelisting with persisted queries](./persisted-queries) for more information.
+
 ### HTTP header rules
 
 See [Sending HTTP headers to subgraphs](./header-propagation/).
