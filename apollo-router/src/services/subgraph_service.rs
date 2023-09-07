@@ -500,7 +500,9 @@ async fn call_websocket(
     };
 
     let request = if let Some(signing_params) = signing_params {
-        signing_params.sign_empty(request).await?
+        signing_params
+            .sign_empty(request, service_name.as_str())
+            .await?
     } else {
         request
     };
@@ -707,7 +709,7 @@ async fn call_http(
     };
 
     let request = if let Some(signing_params) = signing_params {
-        signing_params.sign(request).await?
+        signing_params.sign(request, service_name).await?
     } else {
         request
     };

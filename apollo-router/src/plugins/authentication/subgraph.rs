@@ -198,7 +198,11 @@ pub(crate) struct SigningParamsConfig {
 }
 
 impl SigningParamsConfig {
-    pub(crate) async fn sign(self, mut req: Request<Body>) -> Result<Request<Body>, BoxError> {
+    pub(crate) async fn sign(
+        self,
+        mut req: Request<Body>,
+        subgraph_name: &str,
+    ) -> Result<Request<Body>, BoxError> {
         let credentials = self.credentials().await?;
         let builder = self.signing_params_builder(&credentials).await?;
         let (parts, body) = req.into_parts();
@@ -221,7 +225,7 @@ impl SigningParamsConfig {
 
         let (signing_instructions, _signature) = sign(signable_request, &signing_params)
             .map_err(|err| {
-                increment_failure_counter(self.subgraph_name.as_str());
+                increment_failure_counter(subgraph_name);
                 let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
                 tracing::error!("{}", error);
                 error
@@ -229,11 +233,15 @@ impl SigningParamsConfig {
             .into_parts();
         req = Request::<Body>::from_parts(parts, body_bytes.into());
         signing_instructions.apply_to_request(&mut req);
-        increment_success_counter(self.subgraph_name.as_str());
+        increment_success_counter(subgraph_name);
         Ok(req)
     }
     // This function is the same as above, except it's a new one because () doesn't implement HttpBody`
-    pub(crate) async fn sign_empty(self, mut req: Request<()>) -> Result<Request<()>, BoxError> {
+    pub(crate) async fn sign_empty(
+        self,
+        mut req: Request<()>,
+        subgraph_name: &str,
+    ) -> Result<Request<()>, BoxError> {
         let credentials = self.credentials().await?;
         let builder = self.signing_params_builder(&credentials).await?;
         let (parts, _) = req.into_parts();
@@ -255,7 +263,7 @@ impl SigningParamsConfig {
 
         let (signing_instructions, _signature) = sign(signable_request, &signing_params)
             .map_err(|err| {
-                increment_failure_counter(self.subgraph_name.as_str());
+                increment_failure_counter(subgraph_name);
                 let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
                 tracing::error!("{}", error);
                 error
@@ -263,7 +271,7 @@ impl SigningParamsConfig {
             .into_parts();
         req = Request::<()>::from_parts(parts, ());
         signing_instructions.apply_to_request(&mut req);
-        increment_success_counter(self.subgraph_name.as_str());
+        increment_success_counter(subgraph_name);
         Ok(req)
     }
 
@@ -501,7 +509,7 @@ mod test {
         mock.expect_call()
             .times(1)
             .withf(|request| {
-                let http_request = get_signed_request(request);
+                let http_request = get_signed_request(request, "products".to_string());
                 assert_eq!(
                     "UNSIGNED-PAYLOAD",
                     http_request
@@ -546,7 +554,7 @@ mod test {
         mock.expect_call()
             .times(1)
             .withf(|request| {
-                let http_request = get_signed_request(request);
+                let http_request = get_signed_request(request, "products".to_string());
                 let authorization_regex = Regex::new(r"AWS4-HMAC-SHA256 Credential=id/\d{8}/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=[a-f0-9]{64}").unwrap();
                 let authorization_header_str = http_request.headers().get("authorization").unwrap().to_str().unwrap();
                 assert_eq!(match authorization_regex.find(authorization_header_str) {
@@ -626,7 +634,10 @@ mod test {
             .build()
     }
 
-    fn get_signed_request(request: &SubgraphRequest) -> hyper::Request<hyper::Body> {
+    fn get_signed_request(
+        request: &SubgraphRequest,
+        service_name: String,
+    ) -> hyper::Request<hyper::Body> {
         let signing_params = {
             let ctx = request.context.private_entries.lock();
             let sp = ctx.get::<SigningParamsConfig>();
@@ -640,7 +651,12 @@ mod test {
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async { signing_params.sign(http_request).await.unwrap() })
+            rt.block_on(async {
+                signing_params
+                    .sign(http_request, service_name.as_str())
+                    .await
+                    .unwrap()
+            })
         })
         .join()
         .unwrap()
