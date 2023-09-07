@@ -39,7 +39,7 @@ tempfile = "3"
 tinytemplate = "1.2.1"
 tokio = "1.32.0"
 which = "4"
-walkdir = "2.3.3"
+walkdir = "2.4.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 base64 = "0.21"

@@ -65,8 +65,9 @@ impl<'a> Visitor for Labeler<'a> {
     ) -> Result<Option<apollo_encoder::InlineFragment>, BoxError> {
         let parent_type = hir.type_condition().unwrap_or(parent_type);
 
-        let Some(selection_set) = selection_set(self, hir.selection_set(), parent_type)?
-    else { return Ok(None) };
+        let Some(selection_set) = selection_set(self, hir.selection_set(), parent_type)? else {
+            return Ok(None);
+        };
 
         let mut encoder_node = apollo_encoder::InlineFragment::new(selection_set);
 
