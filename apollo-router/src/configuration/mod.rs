@@ -1003,14 +1003,20 @@ fn load_keys(data: &str) -> io::Result<PrivateKey> {
 pub(crate) struct TlsSubgraph {
     /// list of certificate authorities in PEM format
     pub(crate) certificate_authorities: Option<String>,
+    /// client certificate authentication
+    pub(crate) client_authentication: Option<TlsClientAuth>,
 }
 
 #[buildstructor::buildstructor]
 impl TlsSubgraph {
     #[builder]
-    pub(crate) fn new(certificate_authorities: Option<String>) -> Self {
+    pub(crate) fn new(
+        certificate_authorities: Option<String>,
+        client_authentication: Option<TlsClientAuth>,
+    ) -> Self {
         Self {
             certificate_authorities,
+            client_authentication,
         }
     }
 }
@@ -1019,6 +1025,20 @@ impl Default for TlsSubgraph {
     fn default() -> Self {
         Self::builder().build()
     }
+}
+
+/// TLS client authentication
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TlsClientAuth {
+    /// list of certificates in PEM format
+    #[serde(deserialize_with = "deserialize_certificate_chain", skip_serializing)]
+    #[schemars(with = "String")]
+    pub(crate) certificate_chain: Vec<Certificate>,
+    /// key in PEM format
+    #[serde(deserialize_with = "deserialize_key", skip_serializing)]
+    #[schemars(with = "String")]
+    pub(crate) private_key: PrivateKey,
 }
 
 /// Configuration options pertaining to the sandbox page.

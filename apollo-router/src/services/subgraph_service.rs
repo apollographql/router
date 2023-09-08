@@ -37,9 +37,7 @@ use mediatype::names::JSON;
 use mediatype::MediaType;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
-use rustls::Certificate;
 use rustls::ClientConfig;
-use rustls::PrivateKey;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -178,20 +176,40 @@ impl SubgraphService {
             .get(&name)
             .map(|apq| apq.enabled)
             .unwrap_or(configuration.apq.subgraph.all.enabled);
+        let client_cert_config = configuration
+            .tls
+            .subgraph
+            .subgraphs
+            .get(&name)
+            .as_ref()
+            .and_then(|tls| tls.client_authentication.as_ref())
+            .or_else(|| {
+                configuration
+                    .tls
+                    .subgraph
+                    .all
+                    .client_authentication
+                    .as_ref()
+            });
 
-        let client_cert_config: Option<(Vec<Certificate>, PrivateKey)> = None;
         let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
         let tls_client_config = match (tls_cert_store, client_cert_config) {
             (None, None) => tls_builder.with_native_roots().with_no_client_auth(),
             (Some(store), None) => tls_builder
                 .with_root_certificates(store)
                 .with_no_client_auth(),
-            (None, Some((certificate_chain, key))) => tls_builder
-                .with_native_roots()
-                .with_client_auth_cert(certificate_chain, key)?,
-            (Some(store), Some((certificate_chain, key))) => tls_builder
+            (None, Some(client_auth_config)) => {
+                tls_builder.with_native_roots().with_client_auth_cert(
+                    client_auth_config.certificate_chain.clone(),
+                    client_auth_config.private_key.clone(),
+                )?
+            }
+            (Some(store), Some(client_auth_config)) => tls_builder
                 .with_root_certificates(store)
-                .with_client_auth_cert(certificate_chain, key)?,
+                .with_client_auth_cert(
+                    client_auth_config.certificate_chain.clone(),
+                    client_auth_config.private_key.clone(),
+                )?,
         };
 
         Ok(SubgraphService::new(
