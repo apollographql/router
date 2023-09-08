@@ -354,7 +354,7 @@ pub(super) async fn make_signing_params(
 fn get_signing_settings(signing_params: &SigningParamsConfig) -> SigningSettings {
     let mut settings = SigningSettings::default();
     settings.payload_checksum_kind = match signing_params.service_name.as_str() {
-        "s3" | "vpc-lattice-svcs" => PayloadChecksumKind::XAmzSha256,
+        "appsync" | "s3" | "vpc-lattice-svcs" => PayloadChecksumKind::XAmzSha256,
         _ => PayloadChecksumKind::NoHeader,
     };
     settings
@@ -440,6 +440,10 @@ mod test {
             test_signing_settings("vpc-lattice-svcs")
                 .await
                 .payload_checksum_kind
+        );
+        assert_eq!(
+            PayloadChecksumKind::XAmzSha256,
+            test_signing_settings("appsync").await.payload_checksum_kind
         );
         assert_eq!(
             PayloadChecksumKind::NoHeader,
