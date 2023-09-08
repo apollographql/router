@@ -837,6 +837,10 @@ workflows:
               platform:
                 [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
       - apollo-secops/wiz-docker:
+          context:
+            - platform-docker-ro
+            - wiz
+            - github-orb
           container-dir: /tmp/workspace/built-containers
           # Disables all PR comments from this job
           do-pr-comments: false
