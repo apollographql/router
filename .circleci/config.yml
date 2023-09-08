@@ -841,6 +841,7 @@ workflows:
             - platform-docker-ro
             - wiz
             - github-orb
+          requires: [ build_release ]
           container-dir: /tmp/workspace/built-containers
           # Disables all PR comments from this job
           do-pr-comments: false
