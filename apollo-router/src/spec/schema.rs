@@ -187,8 +187,8 @@ impl Schema {
         a: &'f FieldType,
         b: &'f FieldType,
     ) -> Option<&'f FieldType> {
-        let typename_a = dbg!(a.inner_type_name().unwrap_or_default());
-        let typename_b = dbg!(b.inner_type_name().unwrap_or_default());
+        let typename_a = a.inner_type_name().unwrap_or_default();
+        let typename_b = b.inner_type_name().unwrap_or_default();
         if typename_a == typename_b {
             return Some(a);
         }

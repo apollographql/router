@@ -162,8 +162,8 @@ impl Selection {
                     // Query validation should have already verified that current type implements that interface
                     debug_assert!(
                         schema.is_subtype(
-                            dbg!(type_condition.as_str()),
-                            dbg!(current_type.inner_type_name().unwrap_or(""))
+                            type_condition.as_str(),
+                            current_type.inner_type_name().unwrap_or("")
                         ) || schema.is_implementation(
                             type_condition.as_str(),
                             current_type.inner_type_name().unwrap_or(""))
