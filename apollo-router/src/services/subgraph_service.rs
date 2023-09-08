@@ -183,14 +183,12 @@ impl SubgraphService {
             .get(&name)
             .as_ref()
             .and_then(|tls| tls.client_authentication.as_ref())
-            .or_else(|| {
-                configuration
-                    .tls
-                    .subgraph
-                    .all
-                    .client_authentication
-                    .as_ref()
-            });
+            .or(configuration
+                .tls
+                .subgraph
+                .all
+                .client_authentication
+                .as_ref());
 
         let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
         let tls_client_config = match (tls_cert_store, client_cert_config) {
@@ -2734,12 +2732,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         println!("listener on {socket_addr}");
-        tokio::task::spawn(tls_server(
-            listener,
-            certificates,
-            key,
-            r#"{"data": null}"#.into(),
-        ));
+        tokio::task::spawn(tls_server(listener, certificates, key, r#"{"data": null}"#));
 
         // we cannot parse a configuration from text, because certificates are generally
         // added by file expansion and we don't have access to that here, and inserting
