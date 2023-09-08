@@ -950,16 +950,16 @@ where
 {
     let data = String::deserialize(deserializer)?;
 
-    load_keys(&data).map_err(serde::de::Error::custom)
+    load_key(&data).map_err(serde::de::Error::custom)
 }
 
-fn load_certs(data: &str) -> io::Result<Vec<Certificate>> {
+pub(crate) fn load_certs(data: &str) -> io::Result<Vec<Certificate>> {
     certs(&mut BufReader::new(data.as_bytes()))
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cert"))
         .map(|mut certs| certs.drain(..).map(Certificate).collect())
 }
 
-fn load_keys(data: &str) -> io::Result<PrivateKey> {
+pub(crate) fn load_key(data: &str) -> io::Result<PrivateKey> {
     let mut reader = BufReader::new(data.as_bytes());
     let mut key_iterator = iter::from_fn(|| read_one(&mut reader).transpose());
 

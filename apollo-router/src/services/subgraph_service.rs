@@ -1099,6 +1099,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
+    use std::io;
     use std::net::SocketAddr;
     use std::net::TcpListener;
     use std::str::FromStr;
@@ -1116,8 +1117,13 @@ mod tests {
     use http::header::HOST;
     use http::StatusCode;
     use http::Uri;
+    use http::Version;
+    use hyper::server::conn::AddrIncoming;
     use hyper::service::make_service_fn;
     use hyper::Body;
+    use hyper_rustls::TlsAcceptor;
+    use rustls::Certificate;
+    use rustls::PrivateKey;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use tower::service_fn;
@@ -1126,6 +1132,9 @@ mod tests {
     use SubgraphRequest;
 
     use super::*;
+    use crate::configuration::load_certs;
+    use crate::configuration::load_key;
+    use crate::configuration::TlsSubgraph;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
@@ -2681,5 +2690,98 @@ mod tests {
         };
 
         assert_eq!(resp.response.body(), &expected_resp);
+    }
+
+    async fn tls_server(
+        listener: tokio::net::TcpListener,
+        certificates: Vec<Certificate>,
+        key: PrivateKey,
+        body: &'static str,
+    ) {
+        let acceptor = TlsAcceptor::builder()
+            .with_single_cert(certificates, key)
+            .unwrap()
+            .with_all_versions_alpn()
+            .with_incoming(AddrIncoming::from_listener(listener).unwrap());
+        let service = make_service_fn(|_| async {
+            Ok::<_, io::Error>(service_fn(|_req| {
+                println!("got req: {_req:?}");
+
+                async {
+                    Ok::<_, io::Error>(
+                        http::Response::builder()
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                            .status(StatusCode::OK)
+                            .version(Version::HTTP_11)
+                            .body::<Body>(body.into())
+                            .unwrap(),
+                    )
+                }
+            }))
+        });
+        let server = Server::builder(acceptor).serve(service);
+        server.await.unwrap()
+    }
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tls_self_signed() {
+        let certificate_pem = include_str!("./testdata/server_self_signed.crt");
+        let key_pem = include_str!("./testdata/server.key");
+
+        let certificates = load_certs(certificate_pem).unwrap();
+        let key = load_key(key_pem).unwrap();
+
+        println!("loaded certs: {certificates:?}");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        println!("listener on {socket_addr}");
+        tokio::task::spawn(tls_server(
+            listener,
+            certificates,
+            key,
+            r#"{"data": null}"#.into(),
+        ));
+
+        // we cannot parse a configuration from text, because certificates are generally
+        // added by file expansion and we don't have access to that here, and inserting
+        // the PEM data directly generates parsing issues due to end of line characters
+        let mut config = Configuration::default();
+        config.tls.subgraph.subgraphs.insert(
+            "test".to_string(),
+            TlsSubgraph {
+                certificate_authorities: Some(certificate_pem.into()),
+                client_authentication: None,
+            },
+        );
+        let subgraph_service = SubgraphService::from_config(
+            "test", &config,
+            &None, //&Some(create_certificate_store(certificate_pem).unwrap()),
+            false, None,
+        )
+        .unwrap();
+
+        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(Request::builder().query("query").build())
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(Request::builder().query("query").build())
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Query,
+                context: Context::new(),
+                subscription_stream: None,
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.response.body().data, Some(Value::Null));
     }
 }

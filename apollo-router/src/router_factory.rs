@@ -357,7 +357,7 @@ impl TlsSubgraph {
     }
 }
 
-fn create_certificate_store(
+pub(crate) fn create_certificate_store(
     certificate_authorities: &str,
 ) -> Result<RootCertStore, ConfigurationError> {
     let mut store = RootCertStore::empty();
