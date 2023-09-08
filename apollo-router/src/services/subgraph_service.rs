@@ -38,6 +38,7 @@ use mediatype::MediaType;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use rustls::Certificate;
+use rustls::ClientConfig;
 use rustls::PrivateKey;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
@@ -76,6 +77,7 @@ use crate::query_planner::OperationKind;
 use crate::services::layers::apq;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::Configuration;
 use crate::Context;
 use crate::Notify;
 
@@ -152,22 +154,34 @@ pub(crate) struct SubgraphService {
 }
 
 impl SubgraphService {
-    pub(crate) fn new(
+    pub(crate) fn from_config(
         service: impl Into<String>,
-        enable_apq: bool,
-        tls_cert_store: Option<RootCertStore>,
+        configuration: &Configuration,
+        tls_root_store: &Option<RootCertStore>,
         enable_http2: bool,
         subscription_config: Option<SubscriptionConfig>,
-        notify: Notify<String, graphql::Response>,
-    ) -> Self {
-        let mut http_connector = HttpConnector::new();
-        http_connector.set_nodelay(true);
-        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
-        http_connector.enforce_http(false);
+    ) -> Result<Self, BoxError> {
+        let name: String = service.into();
+        let tls_cert_store = configuration
+            .tls
+            .subgraph
+            .subgraphs
+            .get(&name)
+            .as_ref()
+            .and_then(|subgraph| subgraph.create_certificate_store())
+            .transpose()?
+            .or_else(|| tls_root_store.clone());
+        let enable_apq = configuration
+            .apq
+            .subgraph
+            .subgraphs
+            .get(&name)
+            .map(|apq| apq.enabled)
+            .unwrap_or(configuration.apq.subgraph.all.enabled);
 
         let client_cert_config: Option<(Vec<Certificate>, PrivateKey)> = None;
         let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
-        let tls_config = match (tls_cert_store, client_cert_config) {
+        let tls_client_config = match (tls_cert_store, client_cert_config) {
             (None, None) => tls_builder.with_native_roots().with_no_client_auth(),
             (Some(store), None) => tls_builder
                 .with_root_certificates(store)
@@ -179,6 +193,29 @@ impl SubgraphService {
                 .with_root_certificates(store)
                 .with_client_auth_cert(certificate_chain, key)?,
         };
+
+        Ok(SubgraphService::new(
+            name,
+            enable_apq,
+            enable_http2,
+            subscription_config,
+            tls_client_config,
+            configuration.notify.clone(),
+        ))
+    }
+
+    pub(crate) fn new(
+        service: impl Into<String>,
+        enable_apq: bool,
+        enable_http2: bool,
+        subscription_config: Option<SubscriptionConfig>,
+        tls_config: ClientConfig,
+        notify: Notify<String, graphql::Response>,
+    ) -> Self {
+        let mut http_connector = HttpConnector::new();
+        http_connector.set_nodelay(true);
+        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
+        http_connector.enforce_http(false);
 
         let builder = hyper_rustls::HttpsConnectorBuilder::new()
             .with_tls_config(tls_config)
@@ -1726,9 +1763,12 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "testbis",
             true,
-            None,
             false,
             subscription_config().into(),
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
             Notify::builder().build(),
         );
         let (tx, _rx) = mpsc::channel(2);
@@ -1775,8 +1815,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_graphql_response(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            true,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1809,8 +1858,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_json_response(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            true,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1843,8 +1901,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_ok_status_invalid_response(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            true,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1882,8 +1949,17 @@ mod tests {
         tokio::task::spawn(
             emulate_subgraph_invalid_response_invalid_status_application_json(listener),
         );
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            true,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1925,8 +2001,17 @@ mod tests {
         tokio::task::spawn(
             emulate_subgraph_invalid_response_invalid_status_application_graphql(listener),
         );
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            true,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1969,9 +2054,12 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
             false,
             subscription_config().into(),
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
             Notify::builder().build(),
         );
         let (tx, mut rx) = mpsc::channel(2);
@@ -2029,9 +2117,12 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
             false,
             subscription_config().into(),
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
             Notify::builder().build(),
         );
         let (tx, _rx) = mpsc::channel(2);
@@ -2078,8 +2169,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_bad_request(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            true,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2120,8 +2220,17 @@ mod tests {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_bad_response_format(listener));
 
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            true,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2157,8 +2266,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_compressed_response(listener));
-        let subgraph_service =
-            SubgraphService::new("test", false, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            false,
+            true,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -2198,8 +2316,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_unauthorized(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            true,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2235,8 +2362,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_persisted_query_not_supported_message(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            true,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         assert!(subgraph_service.clone().apq.as_ref().load(Relaxed));
 
@@ -2281,8 +2417,17 @@ mod tests {
         tokio::task::spawn(emulate_persisted_query_not_supported_extension_code(
             listener,
         ));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            true,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         assert!(subgraph_service.clone().apq.as_ref().load(Relaxed));
 
@@ -2325,8 +2470,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_persisted_query_not_found_message(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            true,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -2366,8 +2520,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_persisted_query_not_found_extension_code(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            true,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -2407,8 +2570,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_expected_apq_enabled_configuration(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            true,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -2448,8 +2620,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_expected_apq_disabled_configuration(listener));
-        let subgraph_service =
-            SubgraphService::new("test", false, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            false,
+            true,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service

@@ -295,32 +295,15 @@ pub(crate) async fn create_subgraph_services(
 
     let mut subgraph_services = IndexMap::new();
     for (name, _) in schema.subgraphs() {
-        let subgraph_root_store = configuration
-            .tls
-            .subgraph
-            .subgraphs
-            .get(name)
-            .as_ref()
-            .and_then(|subgraph| subgraph.create_certificate_store())
-            .transpose()?
-            .or_else(|| tls_root_store.clone());
-
         let subgraph_service = shaping.subgraph_service_internal(
             name,
-            SubgraphService::new(
+            SubgraphService::from_config(
                 name,
-                configuration
-                    .apq
-                    .subgraph
-                    .subgraphs
-                    .get(name)
-                    .map(|apq| apq.enabled)
-                    .unwrap_or(configuration.apq.subgraph.all.enabled),
-                subgraph_root_store,
+                configuration,
+                &tls_root_store,
                 shaping.enable_subgraph_http2(name),
                 subscription_plugin_conf.clone(),
-                configuration.notify.clone(),
-            ),
+            )?,
         );
         subgraph_services.insert(name.clone(), subgraph_service);
     }
@@ -365,7 +348,9 @@ impl YamlRouterFactory {
 }
 
 impl TlsSubgraph {
-    fn create_certificate_store(&self) -> Option<Result<RootCertStore, ConfigurationError>> {
+    pub(crate) fn create_certificate_store(
+        &self,
+    ) -> Option<Result<RootCertStore, ConfigurationError>> {
         self.certificate_authorities
             .as_deref()
             .map(create_certificate_store)
