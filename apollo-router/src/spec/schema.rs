@@ -13,6 +13,7 @@ use http::Uri;
 use sha2::Digest;
 use sha2::Sha256;
 
+use super::FieldType;
 use crate::configuration::GraphQLValidationMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
@@ -168,8 +169,7 @@ impl Schema {
             .map(|interface| {
                 interface
                     .implements_interfaces()
-                    .find(|i| i.interface() == implementor)
-                    .is_some()
+                    .any(|i| i.interface() == implementor)
             })
             .unwrap_or(false)
     }
@@ -179,6 +179,29 @@ impl Schema {
             .definitions
             .interfaces
             .contains_key(abstract_type)
+    }
+
+    // given two field, returns the one that implements the other, if applicable
+    pub(crate) fn most_precise<'f>(
+        &self,
+        a: &'f FieldType,
+        b: &'f FieldType,
+    ) -> Option<&'f FieldType> {
+        let typename_a = dbg!(a.inner_type_name().unwrap_or_default());
+        let typename_b = dbg!(b.inner_type_name().unwrap_or_default());
+        if typename_a == typename_b {
+            return Some(a);
+        }
+        if self.is_subtype(typename_a, typename_b) || self.is_implementation(typename_a, typename_b)
+        {
+            Some(b)
+        } else if self.is_subtype(typename_b, typename_a)
+            || self.is_implementation(typename_b, typename_a)
+        {
+            Some(a)
+        } else {
+            None
+        }
     }
 
     /// Return an iterator over subgraphs that yields the subgraph name and its URL.

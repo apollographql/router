@@ -162,8 +162,8 @@ impl Selection {
                     // Query validation should have already verified that current type implements that interface
                     debug_assert!(
                         schema.is_subtype(
-                            type_condition.as_str(),
-                            current_type.inner_type_name().unwrap_or("")
+                            dbg!(type_condition.as_str()),
+                            dbg!(current_type.inner_type_name().unwrap_or(""))
                         ) || schema.is_implementation(
                             type_condition.as_str(),
                             current_type.inner_type_name().unwrap_or(""))
@@ -172,7 +172,9 @@ impl Selection {
                         type_condition.as_str()
                             == current_type.inner_type_name().unwrap_or("")
                     );
-                    current_type
+                    let relevant_type = schema.most_precise(current_type, &fragment_type);
+                    debug_assert!(relevant_type.is_some());
+                    relevant_type.unwrap_or(&fragment_type)
                 } else {
                     &fragment_type
                 };
