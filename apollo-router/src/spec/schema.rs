@@ -200,6 +200,7 @@ impl Schema {
         {
             Some(a)
         } else {
+            // No relationship between a and b
             None
         }
     }
