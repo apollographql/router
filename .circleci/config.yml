@@ -5,6 +5,7 @@ version: 2.1
 orbs:
   gh: circleci/github-cli@2.2.0
   slack: circleci/slack@4.12.5
+  apollo-secops: apollo/circleci-secops-orb@1.1.0
 
 executors:
   amd_linux_build: &amd_linux_build_executor
@@ -623,6 +624,9 @@ jobs:
                 version: 20.10.11
                 docker_layer_caching: true
             - run:
+                command: >
+                  mkdir -p built-containers
+            - run:
                 name: Docker build
                 command: |
                   BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
@@ -639,8 +643,10 @@ jobs:
                   # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
                   # Build and push debug image
                   docker buildx build --platform linux/amd64 --push --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+                  docker save -o built-containers/${ROUTER_TAG}:${VERSION}-debug.tar ${ROUTER_TAG}:${VERSION}-debug
                   # Build and push release image
                   docker buildx build --platform linux/amd64 --push --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+                  docker save -o built-containers/${ROUTER_TAG}:${VERSION}.tar ${ROUTER_TAG}:${VERSION}
             - run:
                 name: Helm build
                 command: |
@@ -652,6 +658,10 @@ jobs:
                   echo ${GITHUB_OCI_TOKEN} | helm registry login -u apollo-bot2 --password-stdin ghcr.io
                   # Push chart to repository
                   helm push ${CHART} oci://ghcr.io/apollographql/helm-charts-nightly
+            - persist_to_workspace:
+                root: .
+                paths:
+                  - "built-containers/*.tar"
       - when:
           condition:
             equal: [ true, << parameters.nightly >> ]
@@ -826,6 +836,15 @@ workflows:
             parameters:
               platform:
                 [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
+      - apollo-secops/wiz-docker:
+          container-dir: /tmp/workspace/built-containers
+          # Disables all PR comments from this job
+          do-pr-comments: false
+          # Scan job will return 1 if findings violating the Wiz policy are found.
+          # Toggle off to prevent any CI failures OR 
+          # contact Apollo's Security team to adjust what violates the 
+          # Wiz policy used in this scan. 
+          fail-on-findings: true 
 
   release:
     when:
