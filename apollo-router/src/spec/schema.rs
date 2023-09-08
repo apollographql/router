@@ -160,6 +160,20 @@ impl Schema {
             .unwrap_or(false)
     }
 
+    pub(crate) fn is_implementation(&self, interface: &str, implementor: &str) -> bool {
+        self.type_system
+            .definitions
+            .interfaces
+            .get(interface)
+            .map(|interface| {
+                interface
+                    .implements_interfaces()
+                    .find(|i| i.interface() == implementor)
+                    .is_some()
+            })
+            .unwrap_or(false)
+    }
+
     pub(crate) fn is_interface(&self, abstract_type: &str) -> bool {
         self.type_system
             .definitions

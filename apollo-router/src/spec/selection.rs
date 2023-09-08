@@ -164,7 +164,10 @@ impl Selection {
                         schema.is_subtype(
                             type_condition.as_str(),
                             current_type.inner_type_name().unwrap_or("")
-                        ) ||
+                        ) || schema.is_implementation(
+                            type_condition.as_str(),
+                            current_type.inner_type_name().unwrap_or(""))
+                     ||
                         // if the current type and the type condition are both the same interface, it is still valid
                         type_condition.as_str()
                             == current_type.inner_type_name().unwrap_or("")
