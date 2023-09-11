@@ -605,6 +605,24 @@ issuerAltName          = issuer:copy
 > Make sure to change the `subjectAltName` field to the subgraph's name.
 This produces the file as `server.crt` which can be used in `certificate_authorities`.
 
+#### TLS client authentication for subgraph requests
+
+The router can authenticate itself to the subgraph using a certificate chain and a cryptographic key. It can be configured as follows:
+
+```yaml title="router.yaml"
+tls:
+  subgraph:
+    # Use these certificates and key unless overridden per-subgraph
+    all:
+      certificate_chain: ${file./path/to/certificate_chain.pem}
+      key: ${file./path/to/key.pem}
+    # Override global setting for individual subgraphs
+    subgraphs:
+      products:
+        certificate_chain: ${file./path/to/certificate_chain.pem}
+        key: ${file./path/to/key.pem}
+```
+
 ### Request limits
 
 > **Request limits are currently in [preview](/resources/product-launch-stages#preview).**
