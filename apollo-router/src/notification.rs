@@ -353,7 +353,7 @@ where
 {
     topic: K,
     pubsub_sender: mpsc::Sender<Notification<K, V>>,
-    close_sender: broadcast::Sender<bool>,
+    close_sender: broadcast::Sender<()>,
 }
 
 impl<K, V> Clone for HandleGuard<K, V>
@@ -380,7 +380,7 @@ where
         if let Err(err) = err {
             tracing::trace!("cannot unsubscribe {err:?}");
         }
-        if let Err(err) = self.close_sender.send(true) {
+        if let Err(err) = self.close_sender.send(()) {
             tracing::trace!("cannot send close message {err:?}");
         }
     }
@@ -396,7 +396,7 @@ where
     msg_sender: broadcast::Sender<Option<V>>,
     #[pin]
     msg_receiver: BroadcastStream<Option<V>>,
-    close_receiver: broadcast::Receiver<bool>,
+    close_receiver: broadcast::Receiver<()>,
 }
 }
 
@@ -425,7 +425,7 @@ where
         msg_sender: broadcast::Sender<Option<V>>,
         msg_receiver: BroadcastStream<Option<V>>,
     ) -> Self {
-        let (close_sender, close_receiver) = broadcast::channel::<bool>(1);
+        let (close_sender, close_receiver) = broadcast::channel::<()>(1);
 
         Self {
             handle_guard: HandleGuard {
@@ -453,7 +453,7 @@ where
         }
     }
 
-    pub(crate) fn closed_receiver(&self) -> broadcast::Receiver<bool> {
+    pub(crate) fn closed_receiver(&self) -> broadcast::Receiver<()> {
         self.close_receiver.resubscribe()
     }
 
