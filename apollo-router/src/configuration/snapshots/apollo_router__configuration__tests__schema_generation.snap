@@ -1681,21 +1681,20 @@ expression: "&schema"
                   "properties": {
                     "backoff_factor": {
                       "description": "Configure the factor by which delays between reconnect attempts will exponentially increase, up to [`delay_max`]. The [default] factor is 2, so each reconnect attempt will wait twice as long as the previous one.",
-                      "default": null,
+                      "default": 2,
                       "type": "integer",
                       "format": "uint32",
-                      "minimum": 0.0,
-                      "nullable": true
+                      "minimum": 0.0
                     },
                     "delay": {
                       "description": "After an error, the client will wait this long before the first attempt to reconnect.  Subsequent reconnect attempts may wait longer, depending on the [`backoff_factor`].",
-                      "default": null,
+                      "default": "1s",
                       "type": "string",
                       "nullable": true
                     },
                     "delay_max": {
                       "description": "Configure the maximum delay between reconnects (the [default] is 1 minute). The exponential backoff configured by [`backoff_factor`] will not cause a delay greater than this value.",
-                      "default": null,
+                      "default": "1m",
                       "type": "string",
                       "nullable": true
                     },
@@ -1723,8 +1722,8 @@ expression: "&schema"
                       "nullable": true
                     },
                     "reconnect_timeout": {
-                      "description": "Configure the maximum time it will retry to get a successful connection before giving up. The [default] is 30 seconds.",
-                      "default": null,
+                      "description": "Configure the maximum time it will retry to get a successful connection before giving up. The [default] is 60 seconds.",
+                      "default": "1m",
                       "type": "string",
                       "nullable": true
                     },
@@ -1747,21 +1746,20 @@ expression: "&schema"
                     "properties": {
                       "backoff_factor": {
                         "description": "Configure the factor by which delays between reconnect attempts will exponentially increase, up to [`delay_max`]. The [default] factor is 2, so each reconnect attempt will wait twice as long as the previous one.",
-                        "default": null,
+                        "default": 2,
                         "type": "integer",
                         "format": "uint32",
-                        "minimum": 0.0,
-                        "nullable": true
+                        "minimum": 0.0
                       },
                       "delay": {
                         "description": "After an error, the client will wait this long before the first attempt to reconnect.  Subsequent reconnect attempts may wait longer, depending on the [`backoff_factor`].",
-                        "default": null,
+                        "default": "1s",
                         "type": "string",
                         "nullable": true
                       },
                       "delay_max": {
                         "description": "Configure the maximum delay between reconnects (the [default] is 1 minute). The exponential backoff configured by [`backoff_factor`] will not cause a delay greater than this value.",
-                        "default": null,
+                        "default": "1m",
                         "type": "string",
                         "nullable": true
                       },
@@ -1789,8 +1787,8 @@ expression: "&schema"
                         "nullable": true
                       },
                       "reconnect_timeout": {
-                        "description": "Configure the maximum time it will retry to get a successful connection before giving up. The [default] is 30 seconds.",
-                        "default": null,
+                        "description": "Configure the maximum time it will retry to get a successful connection before giving up. The [default] is 60 seconds.",
+                        "default": "1m",
                         "type": "string",
                         "nullable": true
                       },

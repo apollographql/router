@@ -1190,24 +1190,12 @@ fn get_sse_client(
         }
 
         builder.reconnect(
-            ReconnectOptions::reconnect(subgraph_sse_cfg.reconnect.unwrap_or(false))
-                .retry_initial(subgraph_sse_cfg.retry_initial.unwrap_or(false))
-                .delay(
-                    subgraph_sse_cfg
-                        .delay
-                        .unwrap_or_else(|| Duration::from_secs(1)),
-                )
-                .backoff_factor(subgraph_sse_cfg.backoff_factor.unwrap_or(2))
-                .delay_max(
-                    subgraph_sse_cfg
-                        .delay_max
-                        .unwrap_or_else(|| Duration::from_secs(60)),
-                )
-                .timeout(
-                    subgraph_sse_cfg
-                        .reconnect_timeout
-                        .unwrap_or_else(|| Duration::from_secs(60)),
-                )
+            ReconnectOptions::reconnect(subgraph_sse_cfg.reconnect.unwrap_or_default())
+                .retry_initial(subgraph_sse_cfg.retry_initial.unwrap_or_default())
+                .delay(subgraph_sse_cfg.delay)
+                .backoff_factor(subgraph_sse_cfg.backoff_factor)
+                .delay_max(subgraph_sse_cfg.delay_max)
+                .timeout(subgraph_sse_cfg.reconnect_timeout)
                 .build(),
         )
     } else {
@@ -2753,7 +2741,7 @@ mod tests {
             .unwrap();
         sse_config.reconnect = Some(true);
         sse_config.retry_initial = Some(true);
-        sse_config.delay = Some(std::time::Duration::from_millis(10));
+        sse_config.delay = std::time::Duration::from_millis(10);
         let subgraph_service = SubgraphService::new(
             "testsse",
             true,
@@ -2837,9 +2825,9 @@ mod tests {
             .unwrap();
         sse_config.reconnect = Some(true);
         sse_config.retry_initial = Some(true);
-        sse_config.delay = Some(std::time::Duration::from_millis(10));
-        sse_config.delay_max = Some(std::time::Duration::from_millis(200));
-        sse_config.reconnect_timeout = Some(std::time::Duration::from_millis(500));
+        sse_config.delay = std::time::Duration::from_millis(10);
+        sse_config.delay_max = std::time::Duration::from_millis(200);
+        sse_config.reconnect_timeout = std::time::Duration::from_millis(500);
         sse_config.read_timeout = Some(std::time::Duration::from_millis(10));
         let subgraph_service = SubgraphService::new(
             "testsse",

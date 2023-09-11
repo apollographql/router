@@ -237,21 +237,23 @@ pub(crate) struct SseConfiguration {
     /// After an error, the client will wait this long before the first attempt
     /// to reconnect.  Subsequent reconnect attempts may wait longer, depending
     /// on the [`backoff_factor`].
-    #[serde(with = "humantime_serde")]
+    #[serde(with = "humantime_serde", default = "default_delay")]
     #[schemars(with = "Option<String>")]
-    pub(crate) delay: Option<std::time::Duration>,
+    pub(crate) delay: std::time::Duration,
 
     /// Configure the factor by which delays between reconnect attempts will
     /// exponentially increase, up to [`delay_max`]. The [default] factor is 2,
     /// so each reconnect attempt will wait twice as long as the previous one.
-    pub(crate) backoff_factor: Option<u32>,
+    ///
+    #[serde(default = "default_backoff_factor")]
+    pub(crate) backoff_factor: u32,
 
     /// Configure the maximum delay between reconnects (the [default] is 1
     /// minute). The exponential backoff configured by [`backoff_factor`] will
     /// not cause a delay greater than this value.
-    #[serde(with = "humantime_serde")]
+    #[serde(with = "humantime_serde", default = "default_delay_max")]
     #[schemars(with = "Option<String>")]
-    pub(crate) delay_max: Option<std::time::Duration>,
+    pub(crate) delay_max: std::time::Duration,
 
     /// Set a read timeout for the underlying connection. There is no read timeout by default.
     #[serde(with = "humantime_serde")]
@@ -259,10 +261,10 @@ pub(crate) struct SseConfiguration {
     pub(crate) read_timeout: Option<std::time::Duration>,
 
     /// Configure the maximum time it will retry to get a successful connection
-    /// before giving up. The [default] is 30 seconds.
-    #[serde(with = "humantime_serde")]
+    /// before giving up. The [default] is 60 seconds.
+    #[serde(with = "humantime_serde", default = "default_reconnect_timeout")]
     #[schemars(with = "Option<String>")]
-    pub(crate) reconnect_timeout: Option<std::time::Duration>,
+    pub(crate) reconnect_timeout: std::time::Duration,
 }
 
 impl Default for SseConfiguration {
@@ -272,17 +274,33 @@ impl Default for SseConfiguration {
             path: None,
             reconnect: None,
             retry_initial: None,
-            delay: None,
-            backoff_factor: None,
-            delay_max: None,
+            delay: default_delay(),
+            backoff_factor: default_backoff_factor(),
+            delay_max: default_delay_max(),
             read_timeout: None,
-            reconnect_timeout: None,
+            reconnect_timeout: default_reconnect_timeout(),
         }
     }
 }
 
 fn default_sse_config_enabled() -> bool {
     true
+}
+
+fn default_backoff_factor() -> u32 {
+    2
+}
+
+fn default_delay() -> std::time::Duration {
+    std::time::Duration::from_secs(1)
+}
+
+fn default_reconnect_timeout() -> std::time::Duration {
+    std::time::Duration::from_secs(60)
+}
+
+fn default_delay_max() -> std::time::Duration {
+    std::time::Duration::from_secs(60)
 }
 
 fn default_path() -> String {

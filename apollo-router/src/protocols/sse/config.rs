@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 /// Configuration for a [`Client`]'s reconnect behaviour.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct ReconnectOptions {
     pub(crate) retry_initial: bool,
     pub(crate) reconnect: bool,
@@ -22,28 +22,6 @@ impl ReconnectOptions {
     /// [default]: #method.default
     pub(crate) fn reconnect(reconnect: bool) -> ReconnectOptionsBuilder {
         ReconnectOptionsBuilder::new(reconnect)
-    }
-}
-
-// FIXME: Do not set default values here, but set them in the subscrption plugin config directly
-impl Default for ReconnectOptions {
-    /// The default reconnect behaviour is to automatically try to reconnect if
-    /// the stream ends due to an error, but not to retry if the initial
-    /// connection fails.
-    ///
-    /// The client will wait before each reconnect attempt, to allow time for
-    /// the error condition to be resolved (e.g. for the SSE server to restart
-    /// if it went down). It will wait 1 second before the first attempt, and
-    /// then back off exponentially, up to a maximum wait of 1 minute.
-    fn default() -> ReconnectOptions {
-        ReconnectOptions {
-            retry_initial: false,
-            reconnect: true,
-            delay: Duration::from_secs(1),
-            backoff_factor: 2,
-            delay_max: Duration::from_secs(60),
-            timeout: Duration::from_secs(60),
-        }
     }
 }
 
