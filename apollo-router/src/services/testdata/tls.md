@@ -12,7 +12,7 @@ openssl x509 -req -in server_self_signed.csr -signkey server.key -out server_sel
 
 ```
 openssl genrsa -out server.key 4096
-openssl req -new -x509 -days 10000 -key ca.key -out ca.cert.pem
+openssl req -new -x509 -days 10000 -key ca.key -out ca.crt
 
 You are about to be asked to enter information that will be incorporated
 into your certificate request.
@@ -35,7 +35,7 @@ Email Address []:
 ```
 openssl genrsa -out server.key 4096
 openssl req -new -key server.key -out server.csr
-openssl x509 -req -in server.csr -CA ./CA/ca.cert.pem -CAkey ./CA/ca.key -out server.cert.pem -CAcreateserial -days 10000 -sha256 -extfile server.ext
+openssl x509 -req -in server.csr -CA ./CA/ca.crt -CAkey ./CA/ca.key -out server.crt -CAcreateserial -days 10000 -sha256 -extfile server.ext
 Certificate request self-signature ok
 subject=C = FR, O = Apollo GraphQL, CN = router
 ```
@@ -51,7 +51,7 @@ openssl genrsa -out client.key.pem 4096
 Certificate signing request:
 
 ```
-openssl req -new -key client.key.pem -out client.csr
+openssl req -new -key client.key -out client.csr
 
 You are about to be asked to enter information that will be incorporated   
 into your certificate request.                                             
@@ -76,7 +76,7 @@ An optional company name []:
 
 Generate the certificate:
 ```
-openssl x509 -req -in client.csr -CA ./CA/ca.cert.pem -CAkey ./CA/ca.key -out client.cert.pem -CAcreateserial -days 10000 -sha256 -extfile client.ext
+openssl x509 -req -in client.csr -CA ./CA/ca.crt -CAkey ./CA/ca.key -out client.crt -CAcreateserial -days 10000 -sha256 -extfile client.ext
 Certificate request self-signature ok
 subject=C = FR, O = Apollo GraphQL, CN = router
 ```
