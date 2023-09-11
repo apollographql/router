@@ -25,6 +25,7 @@ impl ReconnectOptions {
     }
 }
 
+// FIXME: Do not set default values here, but set them in the subscrption plugin config directly
 impl Default for ReconnectOptions {
     /// The default reconnect behaviour is to automatically try to reconnect if
     /// the stream ends due to an error, but not to retry if the initial
@@ -41,7 +42,7 @@ impl Default for ReconnectOptions {
             delay: Duration::from_secs(1),
             backoff_factor: 2,
             delay_max: Duration::from_secs(60),
-            timeout: Duration::from_secs(1800),
+            timeout: Duration::from_secs(60),
         }
     }
 }
