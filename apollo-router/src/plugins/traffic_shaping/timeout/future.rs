@@ -49,7 +49,7 @@ where
         match Pin::new(&mut this.sleep).poll(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(_) => {
-                tracing::info!(monotonic_counter.apollo_router_timeout = 1,);
+                tracing::info!(monotonic_counter.apollo_router_timeout = 1u64,);
                 Poll::Ready(Err(Elapsed::new().into()))
             }
         }

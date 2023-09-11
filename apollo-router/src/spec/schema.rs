@@ -91,7 +91,6 @@ impl Schema {
             let errors = ValidationErrors {
                 errors: diagnostics.clone(),
             };
-            errors.print();
 
             // Only error out if new validation is used: with `Both`, we take the legacy
             // validation as authoritative and only use the new result for comparison
@@ -158,6 +157,13 @@ impl Schema {
             .get(abstract_type)
             .map(|x| x.contains(maybe_subtype))
             .unwrap_or(false)
+    }
+
+    pub(crate) fn is_interface(&self, abstract_type: &str) -> bool {
+        self.type_system
+            .definitions
+            .interfaces
+            .contains_key(abstract_type)
     }
 
     /// Return an iterator over subgraphs that yields the subgraph name and its URL.
