@@ -139,11 +139,13 @@ impl LicenseEnforcementReport {
                 .name("Coprocessor plugin")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.supergraph.query_planning.experimental_cache.redis")
+                .path("$.supergraph.query_planning.experimental_cache.redis.enabled")
+                .value(true)
                 .name("Query plan caching")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.apq.router.cache.redis")
+                .path("$.apq.router.cache.redis.enabled")
+                .value(true)
                 .name("APQ caching")
                 .build(),
             ConfigurationRestriction::builder()

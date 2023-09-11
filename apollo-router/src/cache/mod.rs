@@ -48,7 +48,11 @@ where
     ) -> Self {
         Self::with_capacity(
             config.in_memory.limit,
-            config.redis.as_ref().map(|c| c.urls.clone()),
+            config
+                .redis
+                .as_ref()
+                .filter(|c| c.enabled)
+                .map(|c| c.urls.clone()),
             caller,
         )
         .await

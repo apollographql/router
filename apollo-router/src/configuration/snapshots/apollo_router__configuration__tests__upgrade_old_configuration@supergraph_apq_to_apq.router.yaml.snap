@@ -12,4 +12,5 @@ apq:
       redis:
         urls:
           - "http://example.com"
+        enabled: true
 
