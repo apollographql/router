@@ -827,11 +827,12 @@ impl Default for Apq {
 pub(crate) struct QueryPlanning {
     /// Cache configuration
     pub(crate) experimental_cache: Cache,
-    /// Warm up the cache on reloads by running the query plan over
-    /// a list of the most used queries
-    /// Defaults to 0 (do not warm up the cache)
+    /// Warms up the cache on reloads by running the query plan over
+    /// a list of the most used queries (from the in memory cache)
+    /// Configures the number of queries warmed up. Defaults to 1/3 of
+    /// the in memory cache
     #[serde(default)]
-    pub(crate) warmed_up_queries: usize,
+    pub(crate) warmed_up_queries: Option<usize>,
 }
 
 /// Cache configuration
