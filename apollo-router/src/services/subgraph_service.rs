@@ -557,11 +557,25 @@ async fn call_sse(
                 }
                 message = stream.next() => {
                     match message {
-                        Some(val) => {
+                        Some(Ok(val)) => {
                             if let Err(err) = handle_sink.send(val).await {
                                 tracing::trace!("cannot send the sse stream to the subscription stream: {err:?}");
                                 break;
                             }
+                        }
+                        Some(Err(err)) => {
+                            let resp = graphql::Response::builder().error(graphql::Error::builder()
+                                .message(format!("cannot read message from sse: {err:?}"))
+                                .extension_code("SSE_MESSAGE_ERROR")
+                                .build())
+                                .subscribed(false)
+                                .build();
+
+                            if let Err(err) = handle_sink.send(resp).await {
+                                tracing::trace!("cannot send the sse stream to the subscription stream: {err:?}");
+                            }
+                            tracing::error!("cannot read the sse stream: {err:?}");
+                            break;
                         }
                         None => {
                             break;
@@ -1192,7 +1206,7 @@ fn get_sse_client(
                 .timeout(
                     subgraph_sse_cfg
                         .reconnect_timeout
-                        .unwrap_or_else(|| Duration::from_secs(1800)),
+                        .unwrap_or_else(|| Duration::from_secs(60)),
                 )
                 .build(),
         )

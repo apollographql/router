@@ -84,7 +84,7 @@ impl<S> Stream for GraphqlSSE<S>
 where
     S: Stream<Item = Result<ServerMessage, Error>>,
 {
-    type Item = graphql::Response;
+    type Item = Result<graphql::Response, Error>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -106,21 +106,10 @@ where
                             (None, true) => Poll::Ready(None),
                             // For ignored message like ACK, Ping, Pong, etc...
                             (None, false) => self.poll_next(cx),
-                            (Some(resp), _) => Poll::Ready(Some(resp)),
+                            (Some(resp), _) => Poll::Ready(Some(Ok(resp))),
                         }
                     }
-                    Err(err) => {
-                        let resp = graphql::Response::builder()
-                            .error(
-                                graphql::Error::builder()
-                                    .message(format!("cannot read message from sse: {err:?}"))
-                                    .extension_code("SSE_MESSAGE_ERROR")
-                                    .build(),
-                            )
-                            .subscribed(false)
-                            .build();
-                        Poll::Ready(Some(resp))
-                    }
+                    Err(err) => Poll::Ready(Some(Err(err))),
                 },
                 None => Poll::Ready(None),
             },
