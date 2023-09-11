@@ -69,9 +69,12 @@ pub(crate) struct Query {
     pub(crate) is_original: bool,
     /// Validation errors, used for comparison with the JS implementation.
     ///
+    /// `ValidationErrors` is not serde-serializable. If this comes from cache,
+    /// the plan ought also to be cached, so we should not need this value anyways.
     /// XXX(@goto-bus-stop): Remove when only Rust validation is used
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) validation_error: Option<SpecError>,
+    #[serde(skip)]
+    pub(crate) validation_error: Option<ValidationErrors>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -318,7 +321,10 @@ impl Query {
     }
 
     /// Check for validation errors in a query in the compiler.
-    pub(crate) fn validate_query(compiler: &ApolloCompiler, id: FileId) -> Result<(), SpecError> {
+    pub(crate) fn validate_query(
+        compiler: &ApolloCompiler,
+        id: FileId,
+    ) -> Result<(), ValidationErrors> {
         // Bail out on validation errors, only if the input is expected to be valid
         let diagnostics = compiler.db.validate_executable(id);
         let errors = diagnostics
@@ -330,10 +336,7 @@ impl Query {
             return Ok(());
         }
 
-        let errors = ValidationErrors { errors };
-        errors.print();
-
-        Err(SpecError::ValidationError(errors.to_string()))
+        Err(ValidationErrors { errors })
     }
 
     /// Extract serializable data structures from the apollo-compiler HIR.

@@ -1642,17 +1642,15 @@ expression: "&schema"
     "subscription": {
       "description": "Subscriptions configuration",
       "type": "object",
-      "required": [
-        "enabled"
-      ],
       "properties": {
         "enable_deduplication": {
           "description": "Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode) (default: true)",
-          "default": false,
+          "default": true,
           "type": "boolean"
         },
         "enabled": {
           "description": "Enable subscription",
+          "default": true,
           "type": "boolean"
         },
         "max_opened_subscriptions": {
