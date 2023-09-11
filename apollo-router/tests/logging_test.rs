@@ -179,7 +179,6 @@ async fn simple_query_should_display_logs_for_subgraph_and_supergraph() {
         logging_count.count(event.fields());
     }
 
-    dbg!(&logging_count);
     assert_eq!(logging_count.supergraph_request_headers_count, 1);
     assert_eq!(logging_count.supergraph_request_body_count, 0);
     assert_eq!(logging_count.supergraph_response_body_count, 0);
