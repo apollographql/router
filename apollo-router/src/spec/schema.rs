@@ -91,7 +91,6 @@ impl Schema {
             let errors = ValidationErrors {
                 errors: diagnostics.clone(),
             };
-            errors.print();
 
             // Only error out if new validation is used: with `Both`, we take the legacy
             // validation as authoritative and only use the new result for comparison
