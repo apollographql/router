@@ -7,6 +7,8 @@ use apollo_compiler::InputDatabase;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use sha2::Digest;
@@ -105,7 +107,7 @@ where
     pub(crate) async fn warm_up(
         &mut self,
         query_analysis: &QueryAnalysisLayer,
-        cache_keys: Vec<WarmUpCachingQueryKey>,
+        mut cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
         let schema_id = self.schema.schema_id.clone();
 
@@ -117,6 +119,9 @@ where
                     e.query_planner_service(acc)
                 }),
         );
+
+        let mut rng = thread_rng();
+        cache_keys.shuffle(&mut rng);
 
         let mut count = 0usize;
         for WarmUpCachingQueryKey {
