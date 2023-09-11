@@ -263,7 +263,7 @@ impl Metrics {
         log_usage_metrics!(
             value.apollo.router.config.traffic_shaping,
             "$.traffic_shaping",
-            opt.router.timout,
+            opt.router.timeout,
             "$$[?(@.router.timeout)]",
             opt.router.rate_limit,
             "$.router.global_rate_limit",
