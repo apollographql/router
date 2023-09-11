@@ -1,4 +1,3 @@
-use core::ops::ControlFlow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -11,14 +10,16 @@ use aws_sigv4::http_request::PayloadChecksumKind;
 use aws_sigv4::http_request::SignableBody;
 use aws_sigv4::http_request::SignableRequest;
 use aws_sigv4::http_request::SigningSettings;
+use aws_sigv4::signing_params;
 use aws_types::region::Region;
+use http::Request;
+use hyper::Body;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use crate::layers::ServiceBuilderExt;
 use crate::services::SubgraphRequest;
 
 /// Hardcoded Config using access_key and secret.
@@ -193,6 +194,114 @@ pub(crate) struct SigningParamsConfig {
     credentials_provider: Arc<dyn ProvideCredentials>,
     region: Region,
     service_name: String,
+    subgraph_name: String,
+}
+
+impl SigningParamsConfig {
+    pub(crate) async fn sign(
+        self,
+        mut req: Request<Body>,
+        subgraph_name: &str,
+    ) -> Result<Request<Body>, BoxError> {
+        let credentials = self.credentials().await?;
+        let builder = self.signing_params_builder(&credentials).await?;
+        let (parts, body) = req.into_parts();
+        // Depending on the servicve, AWS refuses sigv4 payloads that contain specific headers.
+        // We'll go with default signed headers
+        let headers = Default::default();
+        // UnsignedPayload only applies to lattice
+        let body_bytes = hyper::body::to_bytes(body).await?.to_vec();
+        let signable_request = SignableRequest::new(
+            &parts.method,
+            &parts.uri,
+            &headers,
+            match self.service_name.as_str() {
+                "vpc-lattice-svcs" => SignableBody::UnsignedPayload,
+                _ => SignableBody::Bytes(body_bytes.as_slice()),
+            },
+        );
+
+        let signing_params = builder.build().expect("all required fields set");
+
+        let (signing_instructions, _signature) = sign(signable_request, &signing_params)
+            .map_err(|err| {
+                increment_failure_counter(subgraph_name);
+                let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
+                tracing::error!("{}", error);
+                error
+            })?
+            .into_parts();
+        req = Request::<Body>::from_parts(parts, body_bytes.into());
+        signing_instructions.apply_to_request(&mut req);
+        increment_success_counter(subgraph_name);
+        Ok(req)
+    }
+    // This function is the same as above, except it's a new one because () doesn't implement HttpBody`
+    pub(crate) async fn sign_empty(
+        self,
+        mut req: Request<()>,
+        subgraph_name: &str,
+    ) -> Result<Request<()>, BoxError> {
+        let credentials = self.credentials().await?;
+        let builder = self.signing_params_builder(&credentials).await?;
+        let (parts, _) = req.into_parts();
+        // Depending on the servicve, AWS refuses sigv4 payloads that contain specific headers.
+        // We'll go with default signed headers
+        let headers = Default::default();
+        // UnsignedPayload only applies to lattice
+        let signable_request = SignableRequest::new(
+            &parts.method,
+            &parts.uri,
+            &headers,
+            match self.service_name.as_str() {
+                "vpc-lattice-svcs" => SignableBody::UnsignedPayload,
+                _ => SignableBody::Bytes(&[]),
+            },
+        );
+
+        let signing_params = builder.build().expect("all required fields set");
+
+        let (signing_instructions, _signature) = sign(signable_request, &signing_params)
+            .map_err(|err| {
+                increment_failure_counter(subgraph_name);
+                let error = format!("failed to sign GraphQL body for AWS SigV4: {}", err);
+                tracing::error!("{}", error);
+                error
+            })?
+            .into_parts();
+        req = Request::<()>::from_parts(parts, ());
+        signing_instructions.apply_to_request(&mut req);
+        increment_success_counter(subgraph_name);
+        Ok(req)
+    }
+
+    async fn signing_params_builder<'s>(
+        &'s self,
+        credentials: &'s Credentials,
+    ) -> Result<signing_params::Builder<'s, SigningSettings>, BoxError> {
+        let settings = get_signing_settings(self);
+        let mut builder = http_request::SigningParams::builder()
+            .access_key(credentials.access_key_id())
+            .secret_key(credentials.secret_access_key())
+            .region(self.region.as_ref())
+            .service_name(&self.service_name)
+            .time(SystemTime::now())
+            .settings(settings);
+        builder.set_security_token(credentials.session_token());
+        Ok(builder)
+    }
+
+    async fn credentials(&self) -> Result<Credentials, BoxError> {
+        self.credentials_provider
+            .provide_credentials()
+            .await
+            .map_err(|err| {
+                increment_failure_counter(self.subgraph_name.as_str());
+                let error = format!("failed to get credentials for AWS SigV4 signing: {}", err);
+                tracing::error!("{}", error);
+                error.into()
+            })
+    }
 }
 
 fn increment_success_counter(subgraph_name: &str) {
@@ -234,6 +343,7 @@ pub(super) async fn make_signing_params(
                 region: config.region(),
                 service_name: config.service_name(),
                 credentials_provider,
+                subgraph_name: subgraph_name.to_string(),
             })
         }
     }
@@ -244,7 +354,7 @@ pub(super) async fn make_signing_params(
 fn get_signing_settings(signing_params: &SigningParamsConfig) -> SigningSettings {
     let mut settings = SigningSettings::default();
     settings.payload_checksum_kind = match signing_params.service_name.as_str() {
-        "s3" | "vpc-lattice-svcs" => PayloadChecksumKind::XAmzSha256,
+        "appsync" | "s3" | "vpc-lattice-svcs" => PayloadChecksumKind::XAmzSha256,
         _ => PayloadChecksumKind::NoHeader,
     };
     settings
@@ -261,77 +371,12 @@ impl SubgraphAuth {
         service: crate::services::subgraph::BoxService,
     ) -> crate::services::subgraph::BoxService {
         if let Some(signing_params) = self.params_for_service(name) {
-            let name = name.to_string();
             ServiceBuilder::new()
-                .checkpoint_async(move |mut req: SubgraphRequest| {
+                .map_request(move |req: SubgraphRequest| {
                     let signing_params = signing_params.clone();
-                    let name = name.clone();
-                    async move {
-                        let credentials = signing_params
-                            .credentials_provider
-                            .provide_credentials()
-                            .await
-                            .map_err(|err| {
-                                increment_failure_counter(name.as_str());
-                                let error = format!(
-                                    "failed to get credentials for AWS SigV4 signing: {}",
-                                    err
-                                );
-                                tracing::error!("{}", error);
-                                error
-                            })?;
-
-                        let settings = get_signing_settings(&signing_params);
-                        let mut builder = http_request::SigningParams::builder()
-                            .access_key(credentials.access_key_id())
-                            .secret_key(credentials.secret_access_key())
-                            .region(signing_params.region.as_ref())
-                            .service_name(&signing_params.service_name)
-                            .time(SystemTime::now())
-                            .settings(settings);
-                        builder.set_security_token(credentials.session_token());
-                        let body_bytes =
-                            serde_json::to_vec(&req.subgraph_request.body()).map_err(|err| {
-                                increment_failure_counter(name.as_str());
-                                let error = format!(
-                                    "failed to serialize GraphQL body for AWS SigV4 signing: {}",
-                                    err
-                                );
-                                tracing::error!("{}", error);
-                                error
-                            })?;
-
-                        // UnsignedPayload only applies to lattice
-                        let signable_request = SignableRequest::new(
-                            req.subgraph_request.method(),
-                            req.subgraph_request.uri(),
-                            req.subgraph_request.headers(),
-                            match signing_params.service_name.as_str() {
-                                "vpc-lattice-svcs" => SignableBody::UnsignedPayload,
-                                _ => SignableBody::Bytes(&body_bytes),
-                            },
-                        );
-
-                        let signing_params = builder.build().expect("all required fields set");
-
-                        let (signing_instructions, _signature) =
-                            sign(signable_request, &signing_params)
-                                .map_err(|err| {
-                                    increment_failure_counter(name.as_str());
-                                    let error = format!(
-                                        "failed to sign GraphQL body for AWS SigV4: {}",
-                                        err
-                                    );
-                                    tracing::error!("{}", error);
-                                    error
-                                })?
-                                .into_parts();
-                        signing_instructions.apply_to_request(&mut req.subgraph_request);
-                        increment_success_counter(name.as_str());
-                        Ok(ControlFlow::Continue(req))
-                    }
+                    req.context.private_entries.lock().insert(signing_params);
+                    req
                 })
-                .buffered()
                 .service(service)
                 .boxed()
         } else {
@@ -395,6 +440,10 @@ mod test {
             test_signing_settings("vpc-lattice-svcs")
                 .await
                 .payload_checksum_kind
+        );
+        assert_eq!(
+            PayloadChecksumKind::XAmzSha256,
+            test_signing_settings("appsync").await.payload_checksum_kind
         );
         assert_eq!(
             PayloadChecksumKind::NoHeader,
@@ -464,10 +513,10 @@ mod test {
         mock.expect_call()
             .times(1)
             .withf(|request| {
+                let http_request = get_signed_request(request, "products".to_string());
                 assert_eq!(
                     "UNSIGNED-PAYLOAD",
-                    request
-                        .subgraph_request
+                    http_request
                         .headers()
                         .get("x-amz-content-sha256")
                         .unwrap()
@@ -509,21 +558,22 @@ mod test {
         mock.expect_call()
             .times(1)
             .withf(|request| {
-                let authorization_regex = Regex::new(r"AWS4-HMAC-SHA256 Credential=id/\d{8}/us-east-1/s3/aws4_request, SignedHeaders=content-length;content-type;host;x-amz-content-sha256;x-amz-date, Signature=[a-f0-9]{64}").unwrap();
-                let authorization_header_str = request.subgraph_request.headers().get("authorization").unwrap().to_str().unwrap();
+                let http_request = get_signed_request(request, "products".to_string());
+                let authorization_regex = Regex::new(r"AWS4-HMAC-SHA256 Credential=id/\d{8}/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=[a-f0-9]{64}").unwrap();
+                let authorization_header_str = http_request.headers().get("authorization").unwrap().to_str().unwrap();
                 assert_eq!(match authorization_regex.find(authorization_header_str) {
                     Some(m) => m.as_str(),
                     None => "no match"
                 }, authorization_header_str);
 
                 let x_amz_date_regex = Regex::new(r"\d{8}T\d{6}Z").unwrap();
-                let x_amz_date_header_str = request.subgraph_request.headers().get("x-amz-date").unwrap().to_str().unwrap();
+                let x_amz_date_header_str = http_request.headers().get("x-amz-date").unwrap().to_str().unwrap();
                 assert_eq!(match x_amz_date_regex.find(x_amz_date_header_str) {
                     Some(m) => m.as_str(),
                     None => "no match"
                 }, x_amz_date_header_str);
 
-                assert_eq!(request.subgraph_request.headers().get("x-amz-content-sha256").unwrap(), "255959b4c6e11c1080f61ce0d75eb1b565c1772173335a7828ba9c13c25c0d8c");
+                assert_eq!(http_request.headers().get("x-amz-content-sha256").unwrap(), "255959b4c6e11c1080f61ce0d75eb1b565c1772173335a7828ba9c13c25c0d8c");
 
                 true
             })
@@ -579,11 +629,40 @@ mod test {
                     .header(HOST, "rhost")
                     .header(CONTENT_LENGTH, "22")
                     .header(CONTENT_TYPE, "graphql")
+                    .uri("https://test-endpoint.com")
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
             )
             .operation_kind(OperationKind::Query)
             .context(Context::new())
             .build()
+    }
+
+    fn get_signed_request(
+        request: &SubgraphRequest,
+        service_name: String,
+    ) -> hyper::Request<hyper::Body> {
+        let signing_params = {
+            let ctx = request.context.private_entries.lock();
+            let sp = ctx.get::<SigningParamsConfig>();
+            sp.cloned().unwrap()
+        };
+
+        let http_request = request
+            .clone()
+            .subgraph_request
+            .map(|body| hyper::Body::from(serde_json::to_string(&body).unwrap()));
+
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                signing_params
+                    .sign(http_request, service_name.as_str())
+                    .await
+                    .unwrap()
+            })
+        })
+        .join()
+        .unwrap()
     }
 }

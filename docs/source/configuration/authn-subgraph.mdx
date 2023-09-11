@@ -7,6 +7,12 @@ The Apollo Router supports subgraph request authentication and key rotation via 
 
 This allows you to secure communication to AWS subgraphs by making sure a subgraph request was made by the Apollo Router, and the payload hasn't been tampered with.
 
+We have tested the feature against the following services:
+  - AWS Lambda URL
+  - AWS Appsync
+  - AWS Amazon API Gateway
+  - VPC Lattice ⚠️ VPC Lattice doesn't support websockets, you won't be able to use Subscriptions in passthrough mode.
+
 **To use this feature:**
 
 To use this feature, your AWS hosted subgraphs must be configured with IAM to accept [signed requests](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_aws-signing.html).
