@@ -198,17 +198,32 @@ impl FetchNode {
             ..
         } = self;
 
-        let Variables { variables, paths } = match Variables::new(
-            &self.requires,
-            self.variable_usages.as_ref(),
-            data,
-            current_dir,
-            // Needs the original request here
-            parameters.supergraph_request,
-            parameters.schema,
-            &self.input_rewrites,
-        )
-        .await
+        let Variables { variables, paths } = match tracing::info_span!("Variables::new")
+            .in_scope(|| {
+                for _ in 0..1000 {
+                    let _ = Variables::new(
+                        &self.requires,
+                        self.variable_usages.as_ref(),
+                        data,
+                        current_dir,
+                        // Needs the original request here
+                        parameters.supergraph_request,
+                        parameters.schema,
+                        &self.input_rewrites,
+                    );
+                }
+                Variables::new(
+                    &self.requires,
+                    self.variable_usages.as_ref(),
+                    data,
+                    current_dir,
+                    // Needs the original request here
+                    parameters.supergraph_request,
+                    parameters.schema,
+                    &self.input_rewrites,
+                )
+            })
+            .await
         {
             Some(variables) => variables,
             None => {
@@ -254,7 +269,7 @@ impl FetchNode {
         // TODO not sure if we need a RouterReponse here as we don't do anything with it
         let (_parts, response) = service
             .oneshot(subgraph_request)
-            .instrument(tracing::trace_span!("subfetch_stream"))
+            .instrument(tracing::info_span!("subfetch_stream"))
             .await
             // TODO this is a problem since it restores details about failed service
             // when errors have been redacted in the include_subgraph_errors module.
@@ -286,8 +301,8 @@ impl FetchNode {
             });
         }
 
-        let (value, errors) =
-            self.response_at_path(parameters.schema, current_dir, paths, response);
+        let (value, errors) = tracing::info_span!("response_at_path")
+            .in_scope(|| self.response_at_path(parameters.schema, current_dir, paths, response));
         if let Some(id) = &self.id {
             if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
                 tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1u64);

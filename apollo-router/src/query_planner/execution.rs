@@ -132,7 +132,8 @@ impl PlanNode {
                                 )
                                 .in_current_span()
                                 .await;
-                            value.deep_merge(v);
+                            tracing::info_span!("sequence deep_merge")
+                                .in_scope(|| value.deep_merge(v));
                             errors.extend(err.into_iter());
                         }
                     }
@@ -160,7 +161,8 @@ impl PlanNode {
                             .collect();
 
                         while let Some((v, err)) = stream.next().in_current_span().await {
-                            value.deep_merge(v);
+                            tracing::info_span!("parallel deep_merge")
+                                .in_scope(|| value.deep_merge(v));
                             errors.extend(err.into_iter());
                         }
                     }
@@ -349,7 +351,7 @@ impl PlanNode {
                                         "otel.kind" = "INTERNAL"
                                     ))
                                     .await;
-                                value.deep_merge(v);
+                                tracing::info_span!("deep_merge").in_scope(|| value.deep_merge(v));
                                 errors.extend(err.into_iter());
                             }
                         } else if let Some(node) = else_clause {
