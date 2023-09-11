@@ -12,6 +12,7 @@ use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
 use futures::TryStreamExt;
+use http::header;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
@@ -1117,7 +1118,7 @@ pub(super) fn internalize_header_map(
     // better than nothing even though it doesnt account for the values len
     let mut output = HeaderMap::with_capacity(input.len());
     for (k, values) in input {
-        if k.as_str() != "content-length" {
+        if k == header::CONTENT_LENGTH.as_str() {
             for v in values {
                 let key = HeaderName::from_str(k.as_ref())?;
                 let value = HeaderValue::from_str(v.as_ref())?;
