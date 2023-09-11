@@ -46,8 +46,8 @@ You enable JWT authentication for your router with the following steps:
       router:
         jwt:
           jwks: # This key is required.
-          - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
-            issuer: <optional name of issuer>
+            - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+              issuer: <optional name of issuer>
 
           # These keys are optional. Default values are shown.
           header_name: Authorization
@@ -204,7 +204,7 @@ fn process_request(request) {
         status: 401
       };
     }
-    request.subgraph.extensions["claims"] = claims;
+    request.subgraph.body.extensions["claims"] = claims;
 }
 ```
 
@@ -650,7 +650,7 @@ This matching strategy is necessary because some identity providers (IdPs) don't
 
 ## Forwarding JWTs to subgraphs
 
-Because the Apollo Router handles validating incoming JWTs, you rarely need to pass those JWTs to individual subgraphs in their entirety. Instead, you usually want to [pass JWT _claims_ to subgraphs](#example-forwarding-claims-to-subgraphs) to enable fine-grained access control.
+Because the Apollo Router handles validating incoming JWTs, you rarely need to pass those JWTs to individual subgraphs in their entirety. Instead, you usually want to [pass JWT _claims_ to subgraphs](#example-forwarding-claims-to-subgraphs-as-headers) to enable fine-grained access control.
 
 If you _do_ need to pass entire JWTs to subgraphs, you can do so via the Apollo Router's general-purpose [HTTP header propagation settings](./header-propagation).
 
