@@ -493,11 +493,11 @@ async fn call_websocket(
     let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
-    let signing_params = {
-        let ctx = context.private_entries.lock();
-        let sp = ctx.get::<SigningParamsConfig>();
-        sp.cloned()
-    };
+    let signing_params = context
+        .private_entries
+        .lock()
+        .get::<SigningParamsConfig>()
+        .cloned();
 
     let request = if let Some(signing_params) = signing_params {
         signing_params
@@ -702,11 +702,11 @@ async fn call_http(
     let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
-    let signing_params = {
-        let ctx = context.private_entries.lock();
-        let sp = ctx.get::<SigningParamsConfig>();
-        sp.cloned()
-    };
+    let signing_params = context
+        .private_entries
+        .lock()
+        .get::<SigningParamsConfig>()
+        .cloned();
 
     let request = if let Some(signing_params) = signing_params {
         signing_params.sign(request, service_name).await?
