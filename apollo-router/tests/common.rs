@@ -168,7 +168,7 @@ impl IntegrationTest {
             std::env::var("TEST_APOLLO_GRAPH_REF"),
         ) {
             router
-                .env("APOLLO_GRAPH_KEY", apollo_key)
+                .env("APOLLO_KEY", apollo_key)
                 .env("APOLLO_GRAPH_REF", apollo_graph_ref);
         }
 
