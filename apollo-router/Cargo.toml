@@ -164,7 +164,7 @@ prost-types = "0.11.9"
 proteus = "0.5.0"
 rand = "0.8.5"
 rand_core = "0.6.4"
-rhai = { version = "1.15.1", features = ["sync", "serde", "internals"] }
+rhai = { version = "1.16.1", features = ["sync", "serde", "internals"] }
 regex = "1.9.5"
 reqwest = { version = "0.11.19", default-features = false, features = [
     "rustls-tls",
@@ -182,7 +182,7 @@ shellexpand = "3.1.0"
 sha2 = "0.10.7"
 serde = { version = "1.0.188", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.1", features = ["preserve_order"] }
-serde_json = { version = "1.0.105", features = [
+serde_json = { version = "1.0.106", features = [
     "preserve_order",
     "float_roundtrip",
 ] }
@@ -275,7 +275,7 @@ reqwest = { version = "0.11.19", default-features = false, features = [
     "json",
     "stream",
 ] }
-rhai = { version = "1.15.1", features = [
+rhai = { version = "1.16.1", features = [
     "sync",
     "serde",
     "internals",
