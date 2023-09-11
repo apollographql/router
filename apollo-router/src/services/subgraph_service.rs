@@ -55,11 +55,12 @@ use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
-use super::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
+use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
+use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -293,11 +294,16 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             request.subscription_stream.clone().ok_or_else(|| {
                                 FetchError::SubrequestWsError {
                                     service: service_name.clone(),
-                                    reason: "cannot get the websocket stream".to_string(),
+                                    reason: "cannot get the callback stream".to_string(),
                                 }
                             })?;
                         stream_tx.send(handle.into_stream()).await?;
-
+                        tracing::info!(
+                            monotonic_counter.apollo.router.operations.subscriptions = 1u64,
+                            subscriptions.mode = %"callback",
+                            subscriptions.deduplicated = !created,
+                            subgraph.service.name = service_name,
+                        );
                         if !created {
                             tracing::info!(
                                 monotonic_counter.apollo_router_deduplicated_subscriptions_total = 1u64,
@@ -426,16 +432,18 @@ async fn call_websocket(
     subgraph_cfg: &WebSocketConfiguration,
     subscription_hash: String,
 ) -> Result<SubgraphResponse, BoxError> {
+    let operation_name = request
+        .subgraph_request
+        .body()
+        .operation_name
+        .clone()
+        .unwrap_or_default();
+
     let SubgraphRequest {
         subgraph_request,
         subscription_stream,
         ..
     } = request;
-    let operation_name = subgraph_request
-        .body()
-        .operation_name
-        .clone()
-        .unwrap_or_default();
     let mut subscription_stream_tx =
         subscription_stream.ok_or_else(|| FetchError::SubrequestWsError {
             service: service_name.clone(),
@@ -445,6 +453,12 @@ async fn call_websocket(
     let (handle, created) = notify
         .create_or_subscribe(subscription_hash.clone(), false)
         .await?;
+    tracing::info!(
+        monotonic_counter.apollo.router.operations.subscriptions = 1u64,
+        subscriptions.mode = %"passthrough",
+        subscriptions.deduplicated = !created,
+        subgraph.service.name = service_name,
+    );
     if !created {
         subscription_stream_tx.send(handle.into_stream()).await?;
         tracing::info!(
@@ -475,11 +489,28 @@ async fn call_websocket(
     };
 
     let request = get_websocket_request(service_name.clone(), parts, subgraph_cfg)?;
+
     let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
+
+    let signing_params = context
+        .private_entries
+        .lock()
+        .get::<SigningParamsConfig>()
+        .cloned();
+
+    let request = if let Some(signing_params) = signing_params {
+        signing_params
+            .sign_empty(request, service_name.as_str())
+            .await?
+    } else {
+        request
+    };
+
     if display_headers {
         tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Websocket request headers to subgraph {service_name:?}");
     }
+
     if display_body {
         tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Websocket request body to subgraph {service_name:?}");
     }
@@ -517,14 +548,24 @@ async fn call_websocket(
         }
         _ => connect_async(request).instrument(subgraph_req_span).await,
     }
-    .map_err(|err| FetchError::SubrequestWsError {
-        service: service_name.clone(),
-        reason: format!("cannot connect websocket to subgraph: {err}"),
+    .map_err(|err| {
+        if display_body || display_headers {
+            tracing::info!(
+                http.response.error = format!("{:?}", &err), apollo.subgraph.name = %service_name, "Websocket connection error from subgraph {service_name:?} received"
+            );
+        }
+        FetchError::SubrequestWsError {
+            service: service_name.clone(),
+            reason: format!("cannot connect websocket to subgraph: {err}"),
+        }
     })?;
 
+    if display_headers {
+        tracing::info!(response.headers = ?resp.headers(), apollo.subgraph.name = %service_name, "Websocket response headers to subgraph {service_name:?}");
+    }
     if display_body {
         tracing::info!(
-            response.body = %String::from_utf8_lossy(&resp.body_mut().take().unwrap_or_default()), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+            response.body = %String::from_utf8_lossy(&resp.body_mut().take().unwrap_or_default()), apollo.subgraph.name = %service_name, "Websocket response body from subgraph {service_name:?} received"
         );
     }
 
@@ -661,6 +702,18 @@ async fn call_http(
     let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
+    let signing_params = context
+        .private_entries
+        .lock()
+        .get::<SigningParamsConfig>()
+        .cloned();
+
+    let request = if let Some(signing_params) = signing_params {
+        signing_params.sign(request, service_name).await?
+    } else {
+        request
+    };
+
     // Print out the debug for the request
     if display_headers {
         tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Request headers to subgraph {service_name:?}");
@@ -680,6 +733,18 @@ async fn call_http(
     )
     .instrument(subgraph_req_span)
     .await?;
+
+    // Print out the debug for the response
+    if display_headers {
+        tracing::info!(response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}");
+    }
+    if display_body {
+        if let Some(Ok(b)) = &body {
+            tracing::info!(
+                response.body = %String::from_utf8_lossy(b), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+            );
+        }
+    }
 
     let mut graphql_response = match (content_type, body, parts.status.is_success()) {
         (Ok(ContentType::ApplicationGraphqlResponseJson), Some(Ok(body)), _)

@@ -2,7 +2,7 @@
 
 [router](https://github.com/apollographql/router) Rust Graph Routing runtime for Apollo Federation
 
-![Version: 1.26.0](https://img.shields.io/badge/Version-1.26.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.26.0](https://img.shields.io/badge/AppVersion-v1.26.0-informational?style=flat-square)
+![Version: 1.29.1](https://img.shields.io/badge/Version-1.29.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.29.1](https://img.shields.io/badge/AppVersion-v1.29.1-informational?style=flat-square)
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@
 ## Get Repo Info
 
 ```console
-helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.26.0
+helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.29.1
 ```
 
 ## Install Chart
@@ -19,7 +19,7 @@ helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.26.0
 **Important:** only helm3 is supported
 
 ```console
-helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.26.0 --values my-values.yaml
+helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.29.1 --values my-values.yaml
 ```
 
 _See [configuration](#configuration) below._
@@ -63,6 +63,8 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | ingress.hosts[0].paths[0].path | string | `"/"` |  |
 | ingress.hosts[0].paths[0].pathType | string | `"ImplementationSpecific"` |  |
 | ingress.tls | list | `[]` |  |
+| initContainers | list | `[]` | An array of init containers to include in the router pod Example: initContainers:   - name: init-myservice     image: busybox:1.28     command: ["sh"] |
+| lifecycle | object | `{}` |  |
 | managedFederation.apiKey | string | `nil` | If using managed federation, the graph API key to identify router to Studio |
 | managedFederation.existingSecret | string | `nil` | If using managed federation, use existing Secret which stores the graph API key instead of creating a new one. If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as name |
 | managedFederation.graphRef | string | `""` | If using managed federation, the variant of which graph to use |

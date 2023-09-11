@@ -13,6 +13,7 @@ use futures::stream::StreamExt;
 use http::header::CONTENT_TYPE;
 use http::header::VARY;
 use http::HeaderMap;
+use http::HeaderName;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
@@ -29,7 +30,7 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::layers::apq::APQLayer;
-use super::layers::content_negociation;
+use super::layers::content_negotiation;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::layers::static_page::StaticPageLayer;
 use super::new_service::ServiceFactory;
@@ -50,10 +51,10 @@ use crate::plugin::test::MockSupergraphService;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::QueryPlanResult;
+use crate::query_planner::WarmUpCachingQueryKey;
 use crate::router_factory::RouterFactory;
-use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
+use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::persisted_queries::PersistedQueryManifestPoller;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphRequest;
@@ -124,7 +125,6 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
         QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
         Arc::new(supergraph_creator),
         configuration,
-        None,
     )
     .await
     .unwrap()
@@ -174,7 +174,6 @@ pub(crate) async fn empty() -> impl Service<
         QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
         Arc::new(supergraph_creator),
         Arc::new(Configuration::default()),
-        None,
     )
     .await
     .unwrap()
@@ -241,7 +240,14 @@ impl RouterService {
             Err(response) => response,
             Ok(request) => match self.query_analysis_layer.supergraph_request(request).await {
                 Err(response) => response,
-                Ok(request) => self.supergraph_creator.create().oneshot(request).await?,
+                Ok(request) => match self
+                    .persisted_query_layer
+                    .supergraph_request_with_analyzed_query(request)
+                    .await
+                {
+                    Err(response) => response,
+                    Ok(request) => self.supergraph_creator.create().oneshot(request).await?,
+                },
             },
         };
 
@@ -301,6 +307,11 @@ impl RouterService {
                             HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE),
                         );
                     }
+                    // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
+                    parts.headers.insert(
+                        HeaderName::from_static("x-accel-buffering"),
+                        HeaderValue::from_static("no"),
+                    );
                     let multipart_stream = match response.subscribed {
                         Some(true) => {
                             StreamBody::new(Multipart::new(body, ProtocolMode::Subscription))
@@ -310,7 +321,6 @@ impl RouterService {
                             ProtocolMode::Defer,
                         )),
                     };
-
                     let response = (parts, multipart_stream).into_response().map(|body| {
                         // Axum makes this `body` have type:
                         // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
@@ -378,7 +388,7 @@ impl RouterService {
                 .unwrap_or_else(|| {
                     Err((
                         StatusCode::BAD_REQUEST,
-                        "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.", 
+                        "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.",
                         "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.".to_string()
                     ))
                 })
@@ -451,7 +461,7 @@ fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
-    supergraph_creator: Arc<SupergraphCreator>,
+    pub(crate) supergraph_creator: Arc<SupergraphCreator>,
     static_page: StaticPageLayer,
     apq_layer: APQLayer,
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
@@ -488,7 +498,6 @@ impl RouterCreator {
         query_analysis_layer: QueryAnalysisLayer,
         supergraph_creator: Arc<SupergraphCreator>,
         configuration: Arc<Configuration>,
-        persisted_query_manifest_poller: Option<Arc<PersistedQueryManifestPoller>>,
     ) -> Result<Self, BoxError> {
         let static_page = StaticPageLayer::new(&configuration);
         let apq_layer = if configuration.apq.enabled {
@@ -500,9 +509,7 @@ impl RouterCreator {
             APQLayer::disabled()
         };
 
-        let persisted_query_layer = Arc::new(
-            PersistedQueryLayer::new(&configuration, persisted_query_manifest_poller).await?,
-        );
+        let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
 
         Ok(Self {
             supergraph_creator,
@@ -524,7 +531,7 @@ impl RouterCreator {
         Error = BoxError,
         Future = BoxFuture<'static, router::ServiceResult>,
     > + Send {
-        let router_service = content_negociation::RouterLayer::default().layer(RouterService::new(
+        let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
             self.supergraph_creator.clone(),
             self.apq_layer.clone(),
             self.persisted_query_layer.clone(),
@@ -545,7 +552,7 @@ impl RouterCreator {
 }
 
 impl RouterCreator {
-    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<WarmUpCachingQueryKey> {
         self.supergraph_creator.cache_keys(count).await
     }
 

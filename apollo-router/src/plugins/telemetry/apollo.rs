@@ -33,6 +33,8 @@ use crate::services::apollo_key;
 pub(crate) const ENDPOINT_DEFAULT: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 
+pub(crate) const OTLP_ENDPOINT_DEFAULT: &str = "https://usage-reporting.api.apollographql.com";
+
 #[derive(Derivative)]
 #[derivative(Debug)]
 #[derive(Clone, Deserialize, JsonSchema)]
@@ -41,6 +43,10 @@ pub(crate) struct Config {
     /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "String", default = "endpoint_default")]
     pub(crate) endpoint: Url,
+
+    /// The Apollo Studio endpoint for exporting traces and metrics.
+    #[schemars(with = "String", default = "otlp_endpoint_default")]
+    pub(crate) experimental_otlp_endpoint: Url,
 
     /// The Apollo Studio API key.
     #[schemars(skip)]
@@ -145,6 +151,10 @@ fn endpoint_default() -> Url {
     Url::parse(ENDPOINT_DEFAULT).expect("must be valid url")
 }
 
+fn otlp_endpoint_default() -> Url {
+    Url::parse(OTLP_ENDPOINT_DEFAULT).expect("must be valid url")
+}
+
 const fn client_name_header_default_str() -> &'static str {
     "apollographql-client-name"
 }
@@ -169,6 +179,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             endpoint: endpoint_default(),
+            experimental_otlp_endpoint: otlp_endpoint_default(),
             apollo_key: apollo_key(),
             apollo_graph_ref: apollo_graph_reference(),
             client_name_header: client_name_header_default(),

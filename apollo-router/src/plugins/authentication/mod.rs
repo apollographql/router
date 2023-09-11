@@ -1,5 +1,6 @@
 //! Authentication plugin
 
+use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::time::Duration;
@@ -29,6 +30,9 @@ use tower::ServiceExt;
 use url::Url;
 
 use self::jwks::JwksManager;
+use self::subgraph::SigningParams;
+use self::subgraph::SigningParamsConfig;
+use self::subgraph::SubgraphAuth;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -40,6 +44,8 @@ use crate::services::router;
 use crate::Context;
 
 mod jwks;
+pub(crate) mod subgraph;
+
 #[cfg(test)]
 mod tests;
 
@@ -94,12 +100,18 @@ pub(crate) enum Error {
     BadHeaderValuePrefix,
 }
 
-struct AuthenticationPlugin {
+struct Router {
     configuration: JWTConf,
     jwks_manager: JwksManager,
 }
 
+struct AuthenticationPlugin {
+    router: Option<Router>,
+    subgraph: Option<SubgraphAuth>,
+}
+
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct JWTConf {
     /// List of JWKS used to verify tokens
     jwks: Vec<JwksConf>,
@@ -112,6 +124,7 @@ struct JWTConf {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct JwksConf {
     /// Retrieve the JWK Set
     url: String,
@@ -133,12 +146,22 @@ impl Default for JWTConf {
     }
 }
 
+/// Authentication
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct Conf {
+    /// Router configuration
+    router: Option<RouterConf>,
+    /// Subgraph configuration
+    subgraph: Option<subgraph::Config>,
+}
+
 // We may support additional authentication mechanisms in future, so all
 // configuration (which is currently JWT specific) is isolated to the
 // JWTConf structure.
-/// Authentication
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
-struct Conf {
+#[serde(deny_unknown_fields)]
+struct RouterConf {
     /// The JWT configuration
     jwt: JWTConf,
 }
@@ -327,60 +350,103 @@ impl Plugin for AuthenticationPlugin {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        if init
-            .config
-            .jwt
-            .header_value_prefix
-            .as_bytes()
-            .iter()
-            .any(u8::is_ascii_whitespace)
-        {
-            return Err(Error::BadHeaderValuePrefix.into());
-        }
-        let mut list = vec![];
-        for jwks_conf in &init.config.jwt.jwks {
-            let url: Url = Url::from_str(jwks_conf.url.as_str())?;
-            list.push(JwksConfig {
-                url,
-                issuer: jwks_conf.issuer.clone(),
-                algorithms: jwks_conf
-                    .algorithms
-                    .as_ref()
-                    .map(|algs| algs.iter().cloned().collect()),
-            });
-        }
+        let subgraph = if let Some(config) = init.config.subgraph {
+            let all = if let Some(config) = &config.all {
+                Some(subgraph::make_signing_params(config, "all").await?)
+            } else {
+                None
+            };
 
-        tracing::info!(jwks=?init.config.jwt.jwks, "JWT authentication using JWKSets from");
+            let mut subgraphs: HashMap<String, SigningParamsConfig> = Default::default();
+            for (subgraph_name, config) in &config.subgraphs {
+                subgraphs.insert(
+                    subgraph_name.clone(),
+                    subgraph::make_signing_params(config, subgraph_name.as_str()).await?,
+                );
+            }
 
-        let jwks_manager = JwksManager::new(list).await?;
+            Some(SubgraphAuth {
+                signing_params: { SigningParams { all, subgraphs } },
+            })
+        } else {
+            None
+        };
 
-        Ok(AuthenticationPlugin {
-            configuration: init.config.jwt,
-            jwks_manager,
-        })
+        let router = if let Some(router_conf) = init.config.router {
+            if router_conf
+                .jwt
+                .header_value_prefix
+                .as_bytes()
+                .iter()
+                .any(u8::is_ascii_whitespace)
+            {
+                return Err(Error::BadHeaderValuePrefix.into());
+            }
+            let mut list = vec![];
+            for jwks_conf in &router_conf.jwt.jwks {
+                let url: Url = Url::from_str(jwks_conf.url.as_str())?;
+                list.push(JwksConfig {
+                    url,
+                    issuer: jwks_conf.issuer.clone(),
+                    algorithms: jwks_conf
+                        .algorithms
+                        .as_ref()
+                        .map(|algs| algs.iter().cloned().collect()),
+                });
+            }
+
+            tracing::info!(jwks=?router_conf.jwt.jwks, "JWT authentication using JWKSets from");
+
+            let jwks_manager = JwksManager::new(list).await?;
+
+            Some(Router {
+                configuration: router_conf.jwt,
+                jwks_manager,
+            })
+        } else {
+            None
+        };
+
+        Ok(Self { router, subgraph })
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        let request_full_config = self.configuration.clone();
-        let jwks_manager = self.jwks_manager.clone();
+        if let Some(config) = &self.router {
+            let jwks_manager = config.jwks_manager.clone();
+            let configuration = config.configuration.clone();
 
-        fn authentication_service_span() -> impl Fn(&router::Request) -> tracing::Span + Clone {
-            move |_request: &router::Request| {
-                tracing::info_span!(
-                    AUTHENTICATION_SPAN_NAME,
-                    "authentication service" = stringify!(router::Request),
-                    "otel.kind" = "INTERNAL"
-                )
+            fn authentication_service_span() -> impl Fn(&router::Request) -> tracing::Span + Clone {
+                move |_request: &router::Request| {
+                    tracing::info_span!(
+                        AUTHENTICATION_SPAN_NAME,
+                        "authentication service" = stringify!(router::Request),
+                        "otel.kind" = "INTERNAL"
+                    )
+                }
             }
-        }
 
-        ServiceBuilder::new()
-            .instrument(authentication_service_span())
-            .checkpoint(move |request: router::Request| {
-                authenticate(&request_full_config, &jwks_manager, request)
-            })
-            .service(service)
-            .boxed()
+            ServiceBuilder::new()
+                .instrument(authentication_service_span())
+                .checkpoint(move |request: router::Request| {
+                    authenticate(&configuration, &jwks_manager, request)
+                })
+                .service(service)
+                .boxed()
+        } else {
+            service
+        }
+    }
+
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: crate::services::subgraph::BoxService,
+    ) -> crate::services::subgraph::BoxService {
+        if let Some(auth) = &self.subgraph {
+            auth.subgraph_service(name, service)
+        } else {
+            service
+        }
     }
 }
 
@@ -402,6 +468,15 @@ fn authenticate(
         tracing::info!(
             monotonic_counter.apollo_authentication_failure_count = 1u64,
             kind = %AUTHENTICATION_KIND
+        );
+        tracing::info!(
+            monotonic_counter
+                .apollo
+                .router
+                .operations
+                .authentication
+                .jwt = 1,
+            authentication.jwt.failed = true
         );
         tracing::info!(message = %error, "jwt authentication failure");
         let response = router::Response::error_builder()
@@ -552,6 +627,7 @@ fn authenticate(
             monotonic_counter.apollo_authentication_success_count = 1u64,
             kind = %AUTHENTICATION_KIND
         );
+        tracing::info!(monotonic_counter.apollo.router.operations.jwt = 1u64);
         return Ok(ControlFlow::Continue(request));
     }
 

@@ -144,7 +144,7 @@ impl ValueExt for Value {
                     a_value.deep_merge(b_value);
                 }
 
-                a.extend(b.into_iter());
+                a.extend(b);
             }
             (_, Value::Null) => {}
             (Value::Object(_), Value::Array(_)) => {

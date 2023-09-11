@@ -6,11 +6,11 @@
 //! * Compression
 //! * Rate limiting
 //!
-mod cache;
+pub(crate) mod cache;
 mod deduplication;
-mod rate;
+pub(crate) mod rate;
 mod retry;
-mod timeout;
+pub(crate) mod timeout;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
@@ -34,7 +34,7 @@ use self::cache::SubgraphCacheLayer;
 use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
 pub(crate) use self::rate::RateLimited;
-use self::retry::RetryPolicy;
+pub(crate) use self::retry::RetryPolicy;
 pub(crate) use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
 use crate::cache::redis::RedisCacheStorage;
@@ -379,10 +379,9 @@ impl TrafficShaping {
         let all_config = self.config.all.as_ref();
         let subgraph_config = self.config.subgraphs.get(name);
         let final_config = Self::merge_config(all_config, subgraph_config);
-
         let entity_caching = if let (Some(storage), Some(caching_config)) = (
             self.storage.clone(),
-            subgraph_config
+            final_config
                 .as_ref()
                 .and_then(|c| c.experimental_entity_caching.as_ref()),
         ) {
@@ -601,7 +600,6 @@ mod test {
             QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
             Arc::new(supergraph_creator),
             Arc::new(Configuration::default()),
-            Default::default(),
         )
         .await
         .unwrap()

@@ -2,6 +2,7 @@
 pub(crate) mod cors;
 pub(crate) mod expansion;
 mod experimental;
+pub(crate) mod metrics;
 mod persisted_queries;
 mod schema;
 pub(crate) mod subgraph;
@@ -27,6 +28,7 @@ use displaydoc::Display;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 pub(crate) use persisted_queries::PersistedQueries;
+#[cfg(test)]
 pub(crate) use persisted_queries::PersistedQueriesSafelist;
 use regex::Regex;
 use rustls::Certificate;
@@ -57,6 +59,8 @@ use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::graphql;
 use crate::notification::Notify;
+#[cfg(not(test))]
+use crate::notification::RouterBroadcasts;
 use crate::plugin::plugins;
 #[cfg(not(test))]
 use crate::plugins::subscription::SubscriptionConfig;
@@ -182,6 +186,12 @@ pub struct Configuration {
 
     #[serde(default, skip_serializing, skip_deserializing)]
     pub(crate) notify: Notify<String, graphql::Response>,
+}
+
+impl PartialEq for Configuration {
+    fn eq(&self, other: &Self) -> bool {
+        self.validated_yaml == other.validated_yaml
+    }
 }
 
 /// GraphQL validation modes.
@@ -317,7 +327,7 @@ impl Configuration {
             notify: notify.unwrap_or_default(),
             #[cfg(not(test))]
             notify: notify.map(|n| n.set_queue_size(notify_queue_cap))
-                .unwrap_or_else(|| Notify::builder().and_queue_size(notify_queue_cap).ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS)).heartbeat_error_message(graphql::Response::builder().errors(vec![graphql::Error::builder().message("the connection has been closed because it hasn't heartbeat for a while").extension_code("SUBSCRIPTION_HEARTBEAT_ERROR").build()]).build()).build()),
+                .unwrap_or_else(|| Notify::builder().and_queue_size(notify_queue_cap).ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS)).router_broadcasts(Arc::new(RouterBroadcasts::new())).heartbeat_error_message(graphql::Response::builder().errors(vec![graphql::Error::builder().message("the connection has been closed because it hasn't heartbeat for a while").extension_code("SUBSCRIPTION_HEARTBEAT_ERROR").build()]).build()).build()),
         };
 
         conf.validate()
@@ -427,6 +437,36 @@ impl Configuration {
                     ),
                 },
             );
+        }
+
+        // PQs.
+        if self.preview_persisted_queries.enabled {
+            if self.preview_persisted_queries.safelist.enabled && self.apq.enabled {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "apqs must be disabled to enable safelisting",
+                    error: "either set preview_persisted_queries.safelist.enabled: false or apq.enabled: false in your router yaml configuration".into()
+                });
+            } else if !self.preview_persisted_queries.safelist.enabled
+                && self.preview_persisted_queries.safelist.require_id
+            {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "safelist must be enabled to require IDs",
+                    error: "either set preview_persisted_queries.safelist.enabled: true or preview_persisted_queries.safelist.require_id: false in your router yaml configuration".into()
+                });
+            }
+        } else {
+            // If the feature isn't enabled, sub-features shouldn't be.
+            if self.preview_persisted_queries.safelist.enabled {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "persisted queries must be enabled to enable safelisting",
+                    error: "either set preview_persisted_queries.safelist.enabled: false or preview_persisted_queries.enabled: true in your router yaml configuration".into()
+                });
+            } else if self.preview_persisted_queries.log_unknown {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "persisted queries must be enabled to enable logging unknown operations",
+                    error: "either set preview_persisted_queries.log_unknown: false or preview_persisted_queries.enabled: true in your router yaml configuration".into()
+                });
+            }
         }
 
         Ok(self)

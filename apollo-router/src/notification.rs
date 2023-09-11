@@ -1,9 +1,10 @@
 //! Internal pub/sub facility for subscription
-
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::Weak;
 use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
@@ -25,6 +26,8 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::IntervalStream;
 
 use crate::graphql;
+use crate::spec::Schema;
+use crate::Configuration;
 
 static NOTIFY_CHANNEL_SIZE: usize = 1024;
 static DEFAULT_MSG_CHANNEL_SIZE: usize = 128;
@@ -104,6 +107,7 @@ pub struct Notify<K, V> {
     sender: mpsc::Sender<Notification<K, V>>,
     /// Size (number of events) of the channel to receive message
     pub(crate) queue_size: Option<usize>,
+    router_broadcasts: Arc<RouterBroadcasts>,
 }
 
 #[buildstructor::buildstructor]
@@ -117,10 +121,16 @@ where
         ttl: Option<Duration>,
         heartbeat_error_message: Option<V>,
         queue_size: Option<usize>,
+        router_broadcasts: Option<Arc<RouterBroadcasts>>,
     ) -> Notify<K, V> {
         let (sender, receiver) = mpsc::channel(NOTIFY_CHANNEL_SIZE);
         tokio::task::spawn(task(receiver, ttl, heartbeat_error_message));
-        Notify { sender, queue_size }
+        Notify {
+            sender,
+            queue_size,
+            router_broadcasts: router_broadcasts
+                .unwrap_or_else(|| Arc::new(RouterBroadcasts::new())),
+        }
     }
 
     #[doc(hidden)]
@@ -130,9 +140,30 @@ where
         Notify {
             sender,
             queue_size: None,
+            router_broadcasts: Arc::new(RouterBroadcasts::new()),
         }
     }
 }
+
+impl<K, V> Notify<K, V> {
+    /// Broadcast a new configuration
+    pub(crate) fn broadcast_configuration(&self, configuration: Weak<Configuration>) {
+        self.router_broadcasts.configuration.0.send(configuration).expect("cannot send the configuration update to the static channel. Should not happen because the receiver will always live in this struct; qed");
+    }
+    /// Receive the new configuration everytime we have a new router configuration
+    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Weak<Configuration>> {
+        self.router_broadcasts.subscribe_configuration()
+    }
+    /// Receive the new schema everytime we have a new schema
+    pub(crate) fn broadcast_schema(&self, schema: Arc<Schema>) {
+        self.router_broadcasts.schema.0.send(schema).expect("cannot send the schema update to the static channel. Should not happen because the receiver will always live in this struct; qed");
+    }
+    /// Receive the new schema everytime we have a new schema
+    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> {
+        self.router_broadcasts.subscribe_schema()
+    }
+}
+
 impl<K, V> Notify<K, V>
 where
     K: Send + Hash + Eq + Clone + 'static,
@@ -840,6 +871,36 @@ where
             .retain(|k, s| s.msg_sender.receiver_count() > 0 && !sub_to_clean.contains(k));
 
         Some(())
+    }
+}
+
+pub(crate) struct RouterBroadcasts {
+    configuration: (
+        broadcast::Sender<Weak<Configuration>>,
+        broadcast::Receiver<Weak<Configuration>>,
+    ),
+    schema: (
+        broadcast::Sender<Arc<Schema>>,
+        broadcast::Receiver<Arc<Schema>>,
+    ),
+}
+
+impl RouterBroadcasts {
+    pub(crate) fn new() -> Self {
+        Self {
+            configuration: broadcast::channel(1),
+            schema: broadcast::channel(1),
+        }
+    }
+
+    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Weak<Configuration>> {
+        BroadcastStream::new(self.configuration.0.subscribe())
+            .filter_map(|cfg| futures::future::ready(cfg.ok()))
+    }
+
+    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> {
+        BroadcastStream::new(self.schema.0.subscribe())
+            .filter_map(|schema| futures::future::ready(schema.ok()))
     }
 }
 

@@ -21,11 +21,15 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
+use tracing::event;
 use tracing::Instrument;
+use tracing::Span;
+use tracing_core::Level;
 
 use super::new_service::ServiceFactory;
 use super::Plugins;
 use super::SubgraphServiceFactory;
+use crate::graphql::Error;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
 use crate::json_ext::Object;
@@ -168,17 +172,21 @@ impl ExecutionService {
         let schema = self.schema.clone();
         let mut nullified_paths: Vec<Path> = vec![];
 
+        let execution_span = Span::current();
+
         let stream = stream
             .filter_map(move |response: Response| {
-                ready(Self::process_graphql_response(
-                    &query,
-                    operation_name.as_deref(),
-                    &variables,
-                    is_deferred,
-                    &schema,
-                    &mut nullified_paths,
-                    response,
-                ))
+                ready(execution_span.in_scope(|| {
+                    Self::process_graphql_response(
+                        &query,
+                        operation_name.as_deref(),
+                        &variables,
+                        is_deferred,
+                        &schema,
+                        &mut nullified_paths,
+                        response,
+                    )
+                }))
             })
             .boxed();
 
@@ -229,6 +237,11 @@ impl ExecutionService {
         tracing::debug_span!("format_response").in_scope(|| {
             let mut paths = Vec::new();
             if let Some(filtered_query) = query.filtered_query.as_ref() {
+                let unauthorized_paths = query.unauthorized_paths.iter().map(|path| path.to_string()).collect::<Vec<_>>();
+                if !unauthorized_paths.is_empty() {
+                    event!(Level::ERROR, unauthorized_query_paths = ?unauthorized_paths, "Authorization error",);
+                }
+
                 paths = filtered_query.format_response(
                     &mut response,
                     operation_name,
@@ -236,6 +249,13 @@ impl ExecutionService {
                     schema.api_schema(),
                     variables_set,
                 );
+
+                for path in &query.unauthorized_paths {
+                    response.errors.push(Error::builder()
+                    .message("Unauthorized field or type")
+                    .path(path.clone())
+                    .extension_code("UNAUTHORIZED_FIELD_OR_TYPE").build());
+                }
             }
 
             paths.extend(
@@ -247,9 +267,9 @@ impl ExecutionService {
                         schema.api_schema(),
                         variables_set,
                     )
-                    .into_iter(),
+                    ,
             );
-            nullified_paths.extend(paths.into_iter());
+            nullified_paths.extend(paths);
         });
 
         match (response.path.as_ref(), response.data.as_ref()) {

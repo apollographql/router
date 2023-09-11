@@ -28,6 +28,7 @@ use url::Url;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::Discussed;
+use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
@@ -158,7 +159,7 @@ pub struct Opt {
     )]
     log_level: String,
 
-    /// Reload configuration and schema files automatically.
+    /// Reload locally provided configuration and supergraph files automatically.  This only affects watching of local files and does not affect supergraphs and configuration provided by GraphOS through Uplink, which is always reloaded immediately.
     #[clap(
         alias = "hr",
         long = "hot-reload",
@@ -614,6 +615,17 @@ impl Executable {
                 _ => LicenseSource::default(),
             }
         };
+
+        // If there are custom plugins then if RUST_LOG hasn't been set and APOLLO_ROUTER_LOG contains one of the defaults.
+        let user_plugins_present = plugins().filter(|p| !p.is_apollo()).count() > 0;
+        let rust_log_set = std::env::var("RUST_LOG").is_ok();
+        let apollo_router_log = std::env::var("APOLLO_ROUTER_LOG").unwrap_or_default();
+        if user_plugins_present
+            && !rust_log_set
+            && ["trace", "debug", "warn", "error", "info"].contains(&apollo_router_log.as_str())
+        {
+            tracing::info!("Custom plugins are present. To see log messages from your plugins you must configure `RUST_LOG` or `APOLLO_ROUTER_LOG` environment variables. See the Router logging documentation for more details");
+        }
 
         let router = RouterHttpServer::builder()
             .configuration(configuration)

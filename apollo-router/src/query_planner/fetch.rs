@@ -290,6 +290,7 @@ impl FetchNode {
             self.response_at_path(parameters.schema, current_dir, paths, response);
         if let Some(id) = &self.id {
             if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
+                tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1u64);
                 if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
                     tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, self.id, e);
                 }
@@ -366,11 +367,19 @@ impl FetchNode {
                     if let Value::Array(array) = entities {
                         let mut value = Value::default();
 
-                        for (path, entity_idx) in paths {
-                            if let Some(entity) = array.get(entity_idx) {
-                                let mut data = entity.clone();
-                                rewrites::apply_rewrites(schema, &mut data, &self.output_rewrites);
-                                let _ = value.insert(&path, data);
+                        for (index, mut entity) in array.into_iter().enumerate() {
+                            rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
+
+                            if let Some(paths) = inverted_paths.get(&index) {
+                                if paths.len() > 1 {
+                                    for path in &paths[1..] {
+                                        let _ = value.insert(path, entity.clone());
+                                    }
+                                }
+
+                                if let Some(path) = paths.first() {
+                                    let _ = value.insert(path, entity);
+                                }
                             }
                         }
                         return (value, errors);
