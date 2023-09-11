@@ -1,4 +1,5 @@
 [workspace]
+resolver = "2"
 default-members = ["apollo-router"]
 members = [
     "apollo-router",
@@ -40,11 +41,3 @@ incremental = false
 [profile.release-dhat]
 inherits = "release"
 debug = 1
-
-[patch.crates-io]
-# TODO: to delete
-# opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
-# opentelemetry-http = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
-# opentelemetry-jaeger = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
-# opentelemetry-zipkin = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
-# opentelemetry-datadog = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
