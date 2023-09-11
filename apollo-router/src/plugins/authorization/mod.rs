@@ -482,9 +482,9 @@ impl Plugin for AuthorizationPlugin {
                 if needs_authenticated || needs_requires_scopes {
                     tracing::info!(
                         monotonic_counter.apollo.router.operations.authorization = 1u64,
-                        filtered = filtered,
-                        authenticated = needs_authenticated,
-                        requires_scopes = needs_requires_scopes,
+                        authorization.filtered = filtered,
+                        authorization.needs_authenticated = needs_authenticated,
+                        authorization.needs_requires_scopes = needs_requires_scopes,
                     );
                 }
 
