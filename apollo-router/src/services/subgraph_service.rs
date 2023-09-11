@@ -2743,12 +2743,8 @@ mod tests {
                 client_authentication: None,
             },
         );
-        let subgraph_service = SubgraphService::from_config(
-            "test", &config,
-            &None, //&Some(create_certificate_store(certificate_pem).unwrap()),
-            false, None,
-        )
-        .unwrap();
+        let subgraph_service =
+            SubgraphService::from_config("test", &config, &None, false, None).unwrap();
 
         let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
         let response = subgraph_service
@@ -2801,12 +2797,8 @@ mod tests {
                 client_authentication: None,
             },
         );
-        let subgraph_service = SubgraphService::from_config(
-            "test", &config,
-            &None, //&Some(create_certificate_store(certificate_pem).unwrap()),
-            false, None,
-        )
-        .unwrap();
+        let subgraph_service =
+            SubgraphService::from_config("test", &config, &None, false, None).unwrap();
 
         let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
         let response = subgraph_service
@@ -2883,7 +2875,6 @@ mod tests {
         server_certificates.push(ca_certificate.clone());
         let key = load_key(server_key_pem).unwrap();
 
-        //println!("loaded certs: {certificates:?}");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(tls_server_with_client_auth(
@@ -2914,12 +2905,8 @@ mod tests {
                 }),
             },
         );
-        let subgraph_service = SubgraphService::from_config(
-            "test", &config,
-            &None, //&Some(create_certificate_store(certificate_pem).unwrap()),
-            false, None,
-        )
-        .unwrap();
+        let subgraph_service =
+            SubgraphService::from_config("test", &config, &None, false, None).unwrap();
 
         let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
         let response = subgraph_service
