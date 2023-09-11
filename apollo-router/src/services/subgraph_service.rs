@@ -542,7 +542,7 @@ async fn call_websocket(
 
     let (ws_stream, mut resp) = match request.uri().scheme_str() {
         Some("wss") => {
-            connect_async_tls_with_config(request, None, None)
+            connect_async_tls_with_config(request, None, false, None)
                 .instrument(subgraph_req_span)
                 .await
         }
