@@ -265,6 +265,10 @@ expression: get_spans()
                         "[REDACTED]"
                       ],
                       [
+                        "phase",
+                        "plan"
+                      ],
+                      [
                         "value.apollo_router_cache_size",
                         1
                       ],
