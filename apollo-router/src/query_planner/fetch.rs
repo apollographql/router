@@ -126,25 +126,25 @@ impl Variables {
             let mut paths: HashMap<Path, usize> = HashMap::new();
             let mut values: IndexSet<Value> = IndexSet::new();
 
-            tracing::info_span!("select_values_and_path").in_scope(|| {
-                data.select_values_and_paths(schema, current_dir, |path, value| {
-                    if let Value::Object(content) = value {
-                        //tracing::info_span!("select_object").in_scope(|| {
-                        if let Ok(Some(mut value)) = select_object(content, requires, schema) {
-                            rewrites::apply_rewrites(schema, &mut value, input_rewrites);
-                            match values.get_index_of(&value) {
-                                Some(index) => {
-                                    paths.insert(path.clone(), index);
-                                }
-                                None => {
-                                    paths.insert(path.clone(), values.len());
-                                    values.insert(value);
-                                }
+            //tracing::info_span!("select_values_and_path").in_scope(|| {
+            data.select_values_and_paths(schema, current_dir, |path, value| {
+                if let Value::Object(content) = value {
+                    //tracing::info_span!("select_object").in_scope(|| {
+                    if let Ok(Some(mut value)) = select_object(content, requires, schema) {
+                        rewrites::apply_rewrites(schema, &mut value, input_rewrites);
+                        match values.get_index_of(&value) {
+                            Some(index) => {
+                                paths.insert(path.clone(), index);
+                            }
+                            None => {
+                                paths.insert(path.clone(), values.len());
+                                values.insert(value);
                             }
                         }
-                        //})
                     }
-                })
+                    //})
+                }
+                //})
             });
 
             if values.is_empty() {
@@ -202,8 +202,8 @@ impl FetchNode {
             ..
         } = self;
 
-        let Variables { variables, paths } = match tracing::info_span!("Variables::new")
-            .in_scope(|| {
+        let Variables { variables, paths } = match /*tracing::info_span!("Variables::new")
+            .in_scope(|| {*/
                 Variables::new(
                     &self.requires,
                     self.variable_usages.as_ref(),
@@ -214,7 +214,7 @@ impl FetchNode {
                     parameters.schema,
                     &self.input_rewrites,
                 )
-            })
+            //})
             .await
         {
             Some(variables) => variables,
