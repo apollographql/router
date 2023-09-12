@@ -1717,9 +1717,8 @@ expression: "&schema"
                     },
                     "reconnect": {
                       "description": "If `reconnect` is `true`, the client will automatically try to reconnect if the stream ends due to an error. If it is `false`  (the [default]), the client will stop receiving events after an error.",
-                      "default": null,
-                      "type": "boolean",
-                      "nullable": true
+                      "default": false,
+                      "type": "boolean"
                     },
                     "reconnect_timeout": {
                       "description": "Configure the maximum time it will retry to get a successful connection before giving up. The [default] is 60 seconds.",
@@ -1729,9 +1728,8 @@ expression: "&schema"
                     },
                     "retry_initial": {
                       "description": "If `true` the client will automatically retry the connection, with the same delay and backoff behaviour as for reconnects due to stream error. If `false` (the [default]), the client will not retry the initial connection.",
-                      "default": null,
-                      "type": "boolean",
-                      "nullable": true
+                      "default": false,
+                      "type": "boolean"
                     }
                   },
                   "additionalProperties": false,
@@ -1782,9 +1780,8 @@ expression: "&schema"
                       },
                       "reconnect": {
                         "description": "If `reconnect` is `true`, the client will automatically try to reconnect if the stream ends due to an error. If it is `false`  (the [default]), the client will stop receiving events after an error.",
-                        "default": null,
-                        "type": "boolean",
-                        "nullable": true
+                        "default": false,
+                        "type": "boolean"
                       },
                       "reconnect_timeout": {
                         "description": "Configure the maximum time it will retry to get a successful connection before giving up. The [default] is 60 seconds.",
@@ -1794,9 +1791,8 @@ expression: "&schema"
                       },
                       "retry_initial": {
                         "description": "If `true` the client will automatically retry the connection, with the same delay and backoff behaviour as for reconnects due to stream error. If `false` (the [default]), the client will not retry the initial connection.",
-                        "default": null,
-                        "type": "boolean",
-                        "nullable": true
+                        "default": false,
+                        "type": "boolean"
                       }
                     },
                     "additionalProperties": false

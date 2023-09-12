@@ -226,13 +226,13 @@ pub(crate) struct SseConfiguration {
     /// If `reconnect` is `true`, the client will automatically
     /// try to reconnect if the stream ends due to an error. If it is `false`  (the [default]),
     /// the client will stop receiving events after an error.
-    pub(crate) reconnect: Option<bool>,
+    pub(crate) reconnect: bool,
 
     /// If `true` the client will automatically retry the connection, with the
     /// same delay and backoff behaviour as for reconnects due to stream error.
     /// If `false` (the [default]), the client will not retry the initial
     /// connection.
-    pub(crate) retry_initial: Option<bool>,
+    pub(crate) retry_initial: bool,
 
     /// After an error, the client will wait this long before the first attempt
     /// to reconnect.  Subsequent reconnect attempts may wait longer, depending
@@ -272,8 +272,8 @@ impl Default for SseConfiguration {
         Self {
             enabled: default_sse_config_enabled(),
             path: None,
-            reconnect: None,
-            retry_initial: None,
+            reconnect: false,
+            retry_initial: false,
             delay: default_delay(),
             backoff_factor: default_backoff_factor(),
             delay_max: default_delay_max(),

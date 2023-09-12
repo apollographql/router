@@ -1190,8 +1190,8 @@ fn get_sse_client(
         }
 
         builder.reconnect(
-            ReconnectOptions::reconnect(subgraph_sse_cfg.reconnect.unwrap_or_default())
-                .retry_initial(subgraph_sse_cfg.retry_initial.unwrap_or_default())
+            ReconnectOptions::reconnect(subgraph_sse_cfg.reconnect)
+                .retry_initial(subgraph_sse_cfg.retry_initial)
                 .delay(subgraph_sse_cfg.delay)
                 .backoff_factor(subgraph_sse_cfg.backoff_factor)
                 .delay_max(subgraph_sse_cfg.delay_max)
@@ -2739,8 +2739,8 @@ mod tests {
             .subgraphs
             .get_mut("testsse")
             .unwrap();
-        sse_config.reconnect = Some(true);
-        sse_config.retry_initial = Some(true);
+        sse_config.reconnect = true;
+        sse_config.retry_initial = true;
         sse_config.delay = std::time::Duration::from_millis(10);
         let subgraph_service = SubgraphService::new(
             "testsse",
@@ -2823,8 +2823,8 @@ mod tests {
             .subgraphs
             .get_mut("testsse")
             .unwrap();
-        sse_config.reconnect = Some(true);
-        sse_config.retry_initial = Some(true);
+        sse_config.reconnect = true;
+        sse_config.retry_initial = true;
         sse_config.delay = std::time::Duration::from_millis(10);
         sse_config.delay_max = std::time::Duration::from_millis(200);
         sse_config.reconnect_timeout = std::time::Duration::from_millis(500);
