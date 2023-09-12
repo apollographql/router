@@ -104,7 +104,7 @@ pub(crate) struct Variables {
 impl Variables {
     #[instrument(skip_all, level = "debug", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn new(
+    pub(super) fn new(
         requires: &[Selection],
         variable_usages: &[String],
         data: &Value,
@@ -215,7 +215,6 @@ impl FetchNode {
                     &self.input_rewrites,
                 )
             //})
-            .await
         {
             Some(variables) => variables,
             None => {
