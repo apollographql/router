@@ -289,7 +289,7 @@ Note: get() may fail, so it's best to handle exceptions when using it.
 
 ## `Request` interface
 
-All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, most of which a callback can modify in-place (read-write):
+All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields:
 
 ```
 request.context
@@ -302,9 +302,9 @@ request.body.extensions
 request.uri.host
 request.uri.path
 ```
-Note: `method` is read-only.
+Note: These fields are typically modifiable, apart from `method` which is always read-only. However, when the callback service is `subgraph_service`,the only modifiable field is `request.context`.
 
-**For `subgraph_service` callbacks only,** the `request` object provides _additional_ fields for interacting with the request that will be sent to the corresponding subgraph:
+**For `subgraph_service` callbacks only,** the `request` object provides _additional_ modifiable fields for interacting with the request that will be sent to the corresponding subgraph:
 
 ```
 request.subgraph.headers
