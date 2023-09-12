@@ -864,29 +864,12 @@ fn default_redis_cache() -> bool {
     true
 }
 
-impl Default for RedisCache {
-    fn default() -> Self {
-        Self::builder().build()
-    }
-}
-
-#[buildstructor::buildstructor]
-impl RedisCache {
-    #[builder]
-    pub(crate) fn new(enabled: Option<bool>, urls: Vec<url::Url>) -> Self {
-        Self {
-            enabled: enabled.unwrap_or_else(default_redis_cache),
-            urls,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[serde(default)]
 /// Redis cache configuration
 pub(crate) struct RedisCache {
     /// Set to false to disable the Redis cache
+    #[serde(default = "default_redis_cache")]
     pub(crate) enabled: bool,
     /// List of URLs to the Redis cluster
     pub(crate) urls: Vec<url::Url>,

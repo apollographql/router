@@ -79,6 +79,9 @@ expression: "&schema"
                   "description": "Configures and activates the Redis cache",
                   "default": null,
                   "type": "object",
+                  "required": [
+                    "urls"
+                  ],
                   "properties": {
                     "enabled": {
                       "description": "Set to false to disable the Redis cache",
@@ -87,7 +90,6 @@ expression: "&schema"
                     },
                     "urls": {
                       "description": "List of URLs to the Redis cluster",
-                      "default": [],
                       "type": "array",
                       "items": {
                         "type": "string",
@@ -1890,6 +1892,9 @@ expression: "&schema"
                   "description": "Configures and activates the Redis cache",
                   "default": null,
                   "type": "object",
+                  "required": [
+                    "urls"
+                  ],
                   "properties": {
                     "enabled": {
                       "description": "Set to false to disable the Redis cache",
@@ -1898,7 +1903,6 @@ expression: "&schema"
                     },
                     "urls": {
                       "description": "List of URLs to the Redis cluster",
-                      "default": [],
                       "type": "array",
                       "items": {
                         "type": "string",
@@ -5489,6 +5493,9 @@ expression: "&schema"
           "description": "Experimental URLs of Redis cache used for subgraph response caching",
           "default": null,
           "type": "object",
+          "required": [
+            "urls"
+          ],
           "properties": {
             "enabled": {
               "description": "Set to false to disable the Redis cache",
@@ -5497,7 +5504,6 @@ expression: "&schema"
             },
             "urls": {
               "description": "List of URLs to the Redis cluster",
-              "default": [],
               "type": "array",
               "items": {
                 "type": "string",
