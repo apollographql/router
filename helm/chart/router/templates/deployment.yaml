@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "router.labels" . | nindent 4 }}
     {{- if .Values.extraLabels }}
-    {{- include "common.templatizeExtraLabels" . | nindent 4 }}
+    {{- include "common.templatizeExtraLabels" . | trim | nindent 4 }}
     {{- end }}
   {{/* There may not be much configuration so check that there is something */}}
   {{- if (((((.Values.router).configuration).telemetry).metrics).prometheus).enabled }}
@@ -34,7 +34,7 @@ spec:
       labels:
         {{- include "router.selectorLabels" . | nindent 8 }}
         {{- if .Values.extraLabels }}
-        {{- include "common.templatizeExtraLabels" . | nindent 8 }}
+        {{- include "common.templatizeExtraLabels" . | trim | nindent 8 }}
         {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
