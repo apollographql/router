@@ -880,25 +880,23 @@ apq:
         Mode::NoUpgrade,
     )
     .expect("should have resulted in a configuration");
-    assert_eq!(
+    assert!(
         config
             .supergraph
             .query_planning
             .experimental_cache
             .redis
             .expect("redis must be set")
-            .enabled,
-        true
+            .enabled
     );
-    assert_eq!(
+    assert!(
         config
             .apq
             .router
             .cache
             .redis
             .expect("redis must be set")
-            .enabled,
-        true
+            .enabled
     );
 }
 
@@ -930,25 +928,23 @@ apq:
         Mode::NoUpgrade,
     )
     .expect("should have resulted in a configuration");
-    assert_eq!(
+    assert!(
         config
             .supergraph
             .query_planning
             .experimental_cache
             .redis
             .expect("redis must be set")
-            .enabled,
-        true
+            .enabled
     );
-    assert_eq!(
+    assert!(
         config
             .apq
             .router
             .cache
             .redis
             .expect("redis must be set")
-            .enabled,
-        true
+            .enabled
     );
 }
 
@@ -980,24 +976,22 @@ apq:
         Mode::NoUpgrade,
     )
     .expect("should have resulted in a configuration");
-    assert_eq!(
-        config
+    assert!(
+        !config
             .supergraph
             .query_planning
             .experimental_cache
             .redis
             .expect("redis must be set")
-            .enabled,
-        false
+            .enabled
     );
-    assert_eq!(
-        config
+    assert!(
+        !config
             .apq
             .router
             .cache
             .redis
             .expect("redis must be set")
-            .enabled,
-        false
+            .enabled
     );
 }
