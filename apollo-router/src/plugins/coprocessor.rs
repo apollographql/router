@@ -46,6 +46,9 @@ use crate::tracer::TraceId;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
+// TODO: are there better extension codes we could use here?
+const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
+const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
 type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
 
@@ -593,8 +596,7 @@ where
             serde_json::Value::Null => crate::graphql::Response::builder()
                 .errors(vec![Error::builder()
                     .message(co_processor_output.body.take().unwrap_or_default())
-                    // TODO: is there a better extension code we could use here?
-                    .extension_code("ERROR")
+                    .extension_code(COPROCESSOR_ERROR_EXTENSION)
                     .build()])
                 .build(),
             _ => serde_json::from_value(body_as_value).unwrap_or_else(|error| {
@@ -603,7 +605,7 @@ where
                         .message(format!(
                             "couldn't deserialize coprocessor output body: {error}"
                         ))
-                        .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
+                        .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
                         .build()])
                     .build()
             }),
@@ -924,7 +926,7 @@ where
                         .errors(vec![Error::builder()
                             .message(s)
                             // TODO: is there a better extension code we could use here?
-                            .extension_code("ERROR")
+                            .extension_code(COPROCESSOR_ERROR_EXTENSION)
                             .build()])
                         .build(),
                     value => serde_json::from_value(value).unwrap_or_else(|error| {
@@ -933,7 +935,7 @@ where
                                 .message(format!(
                                     "couldn't deserialize coprocessor output body: {error}"
                                 ))
-                                .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
+                                .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
                                 .build()])
                             .build()
                     }),
