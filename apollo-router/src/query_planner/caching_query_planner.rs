@@ -22,6 +22,7 @@ use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
@@ -107,6 +108,9 @@ where
         query_analysis: &QueryAnalysisLayer,
         cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
+        let _timer = Timer::new(|duration| {
+            ::tracing::info!(histogram.apollo_router_query_planning_time = duration.as_secs_f64(), phase = %"warmup");
+        });
         let schema_id = self.schema.schema_id.clone();
 
         let mut service = ServiceBuilder::new().service(
