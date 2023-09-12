@@ -126,10 +126,8 @@ impl Variables {
             let mut paths: HashMap<Path, usize> = HashMap::new();
             let mut values: IndexSet<Value> = IndexSet::new();
 
-            //tracing::info_span!("select_values_and_path").in_scope(|| {
             data.select_values_and_paths(schema, current_dir, |path, value| {
                 if let Value::Object(content) = value {
-                    //tracing::info_span!("select_object").in_scope(|| {
                     if let Ok(Some(mut value)) = select_object(content, requires, schema) {
                         rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                         match values.get_index_of(&value) {
@@ -142,9 +140,7 @@ impl Variables {
                             }
                         }
                     }
-                    //})
                 }
-                //})
             });
 
             if values.is_empty() {
@@ -202,20 +198,16 @@ impl FetchNode {
             ..
         } = self;
 
-        let Variables { variables, paths } = match /*tracing::info_span!("Variables::new")
-            .in_scope(|| {*/
-                Variables::new(
-                    &self.requires,
-                    self.variable_usages.as_ref(),
-                    data,
-                    current_dir,
-                    // Needs the original request here
-                    parameters.supergraph_request,
-                    parameters.schema,
-                    &self.input_rewrites,
-                )
-            //})
-        {
+        let Variables { variables, paths } = match Variables::new(
+            &self.requires,
+            self.variable_usages.as_ref(),
+            data,
+            current_dir,
+            // Needs the original request here
+            parameters.supergraph_request,
+            parameters.schema,
+            &self.input_rewrites,
+        ) {
             Some(variables) => variables,
             None => {
                 return Ok((Value::Object(Object::default()), Vec::new()));
@@ -260,7 +252,7 @@ impl FetchNode {
         // TODO not sure if we need a RouterReponse here as we don't do anything with it
         let (_parts, response) = service
             .oneshot(subgraph_request)
-            .instrument(tracing::info_span!("subfetch_stream"))
+            .instrument(tracing::trace_span!("subfetch_stream"))
             .await
             // TODO this is a problem since it restores details about failed service
             // when errors have been redacted in the include_subgraph_errors module.
@@ -292,8 +284,8 @@ impl FetchNode {
             });
         }
 
-        let (value, errors) = tracing::info_span!("response_at_path")
-            .in_scope(|| self.response_at_path(parameters.schema, current_dir, paths, response));
+        let (value, errors) =
+            self.response_at_path(parameters.schema, current_dir, paths, response);
         if let Some(id) = &self.id {
             if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
                 tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1u64);
