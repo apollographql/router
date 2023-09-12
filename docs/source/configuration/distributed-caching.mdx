@@ -23,7 +23,7 @@ Whenever a router instance requires a query plan or APQ query string to resolve 
 1. The router instance checks its own [in-memory cache](#in-memory-caching) for the required value and uses it if found.
 2. If _not_ found, the router instance then checks the distributed Redis cache for the required value and uses it if found. It also then replicates the found value in its own in-memory cache.
 3. If _not_ found, the router instance _generates_ the required query plan or requests the full operation string from the client for APQ.
-4. The router instance stores the obtained value in both the distributed cache _and_ its in-memory cache. 
+4. The router instance stores the obtained value in both the distributed cache _and_ its in-memory cache.
 
 ## Redis URL configuration
 
@@ -87,6 +87,7 @@ supergraph:
   query_planning:
     experimental_cache:
       redis: #highlight-line
+        enabled: true #highlight-line
         urls: ["redis://..."] #highlight-line
 ```
 
@@ -103,6 +104,7 @@ apq:
   router:
     cache:
       redis: #highlight-line
+        enabled: true #highlight-line
         urls: ["redis://..."] #highlight-line
 ```
 
