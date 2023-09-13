@@ -1117,10 +1117,9 @@ pub(super) fn internalize_header_map(
 ) -> Result<HeaderMap<HeaderValue>, BoxError> {
     // better than nothing even though it doesnt account for the values len
     let mut output = HeaderMap::with_capacity(input.len());
-    for (k, values) in input {
-        if k == header::CONTENT_LENGTH.as_str() {
-            continue;
-        }
+    for (k, values) in input
+        .into_iter()
+        .filter(|(k, _)| k != header::CONTENT_LENGTH.as_str()) {
         for v in values {
             let key = HeaderName::from_str(k.as_ref())?;
             let value = HeaderValue::from_str(v.as_ref())?;
