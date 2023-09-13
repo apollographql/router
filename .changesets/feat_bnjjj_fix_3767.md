@@ -2,7 +2,7 @@
 
 It adds histogram metrics for `apollo_router_query_planning_duration` in warmup phase and `apollo_router_schema_loading_duration`.
 
-Example in Prometheusn:
+Example in Prometheus:
 
 ```
 # HELP apollo_router_query_planning_duration apollo_router_query_planning_duration
