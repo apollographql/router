@@ -119,8 +119,9 @@ pub(crate) fn directive(
 
 #[cfg(test)]
 mod tests {
-    use super::add_defer_labels;
     use apollo_compiler::ApolloCompiler;
+
+    use super::add_defer_labels;
 
     #[test]
     fn large_float_written_as_int() {
