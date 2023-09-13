@@ -395,7 +395,7 @@ impl Create {
                                     // In the future, we will use the "start metadata" HTML tag, but for now,
                                     // we support both.
                                     let pr_body_trailer_regex = regex::Regex::new(
-                                    r"(?ms)(^<!-- start metadata -->\n$\n)?^\*\*Checklist\*\*$[\s\S]*",
+                                    r"(?ms)(^<!-- start metadata -->\n---$\n)?^\*\*Checklist\*\*$[\s\S]*",
                                     )?;
 
                                     // Remove all the "Fixes" references, since we're already going to reference
