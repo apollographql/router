@@ -332,6 +332,7 @@ dependencies = [
  "nu-ansi-term 0.49.0",
  "once_cell",
  "opentelemetry",
+ "opentelemetry-aws",
  "opentelemetry-datadog",
  "opentelemetry-http",
  "opentelemetry-jaeger",
@@ -4078,6 +4079,16 @@ checksum = "5f4b8347cc26099d3aeee044065ecc3ae11469796b4d65d065a23a584ed92a6f"
 dependencies = [
  "opentelemetry_api",
  "opentelemetry_sdk",
+]
+
+[[package]]
+name = "opentelemetry-aws"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72a394d24777936802edd6c03a68daab4db39630418c7e431a5648e9befa80b8"
+dependencies = [
+ "once_cell",
+ "opentelemetry",
 ]
 
 [[package]]
