@@ -4993,6 +4993,11 @@ expression: "&schema"
               "description": "Propagation configuration",
               "type": "object",
               "properties": {
+                "awsxray": {
+                  "description": "Propagate AWS X-Ray",
+                  "default": false,
+                  "type": "boolean"
+                },
                 "baggage": {
                   "description": "Propagate baggage https://www.w3.org/TR/baggage/",
                   "default": false,

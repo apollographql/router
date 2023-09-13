@@ -94,7 +94,7 @@ extraContainers: []
 #     command: ["sh"]
 initContainers: []
 
-# -- A map of extra labels to apply to the router deploment and containers
+# -- A map of extra labels to apply to the resources created by this chart
 # Example:
 # extraLabels:
 #   label_one_name: "label_one_value"
