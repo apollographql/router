@@ -131,7 +131,9 @@ impl Schema {
         let mut hasher = Sha256::new();
         hasher.update(sdl.as_bytes());
         let schema_id = Some(format!("{:x}", hasher.finalize()));
-        tracing::info!(histogram.apollo_router_schema_loading_time = start.elapsed().as_secs_f64());
+        tracing::info!(
+            histogram.apollo.router.schema_loading.duration = start.elapsed().as_secs_f64()
+        );
 
         Ok(Schema {
             raw_sdl: Arc::new(sdl.to_string()),

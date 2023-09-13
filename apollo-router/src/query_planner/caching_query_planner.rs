@@ -109,7 +109,7 @@ where
         cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
         let _timer = Timer::new(|duration| {
-            ::tracing::info!(histogram.apollo_router_query_planning_time = duration.as_secs_f64(), phase = %"warmup");
+            ::tracing::info!(histogram.apollo.router.query_planning.duration = duration.as_secs_f64(), phase = %"warmup");
         });
         let schema_id = self.schema.schema_id.clone();
 
