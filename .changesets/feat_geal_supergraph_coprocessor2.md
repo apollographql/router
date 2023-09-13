@@ -1,6 +1,5 @@
 ### Supergraph coprocessor implementation ([PR #3647](https://github.com/apollographql/router/pull/3647))
 
-
 Coprocessors now support supergraph service interception. 
 
 On the request side, the coprocessor payload can contain:
