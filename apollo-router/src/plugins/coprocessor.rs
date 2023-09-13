@@ -12,8 +12,9 @@ use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
 use futures::TryStreamExt;
-use http::header::HeaderName;
+use http::header;
 use http::HeaderMap;
+use http::HeaderName;
 use http::HeaderValue;
 use hyper::client::HttpConnector;
 use hyper::Body;
@@ -1133,8 +1134,12 @@ pub(super) fn externalize_header_map(
 pub(super) fn internalize_header_map(
     input: HashMap<String, Vec<String>>,
 ) -> Result<HeaderMap<HeaderValue>, BoxError> {
-    let mut output = HeaderMap::new();
-    for (k, values) in input {
+    // better than nothing even though it doesnt account for the values len
+    let mut output = HeaderMap::with_capacity(input.len());
+    for (k, values) in input
+        .into_iter()
+        .filter(|(k, _)| k != header::CONTENT_LENGTH.as_str())
+    {
         for v in values {
             let key = HeaderName::from_str(k.as_ref())?;
             let value = HeaderValue::from_str(v.as_ref())?;
