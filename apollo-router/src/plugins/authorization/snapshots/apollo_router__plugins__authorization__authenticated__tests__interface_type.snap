@@ -16,4 +16,4 @@ query {
   test
 }
 
-paths: ["/itf"]
+paths: ["/itf/id"]

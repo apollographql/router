@@ -11,8 +11,8 @@ use tower::BoxError;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
-use crate::spec::query::transform::get_field_type;
 use crate::spec::query::traverse;
+use crate::spec::TYPENAME;
 
 pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: &str = "authenticated";
 
@@ -163,19 +163,22 @@ impl<'a> AuthenticatedVisitor<'a> {
         t.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some()
     }
 
-    fn implementors_with_different_requirements(
+    fn parent_implementors_with_different_requirements(
         &self,
         parent_type: &str,
         node: &hir::Field,
     ) -> bool {
-        // if all selections under the interface field are fragments with type conditions
-        // then we don't need to check that they have the same authorization requirements
-        if node.selection_set().fields().is_empty() {
+        // we can request __typename outside of fragments even if the types have different
+        // authorization requirements
+        if node.name() == TYPENAME {
             return false;
         }
 
-        if let Some(type_definition) = get_field_type(self, parent_type, node.name())
-            .and_then(|ty| self.compiler.db.find_type_definition_by_name(ty))
+        if let Some(type_definition) = self
+            .compiler
+            .db
+            .types_definitions_by_name()
+            .get(parent_type)
         {
             if self.implementors_with_different_type_requirements(&type_definition) {
                 return true;
@@ -309,7 +312,7 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         }
 
         let implementors_with_different_requirements =
-            self.implementors_with_different_requirements(parent_type, node);
+            self.parent_implementors_with_different_requirements(parent_type, node);
 
         let implementors_with_different_field_requirements =
             self.implementors_with_different_field_requirements(parent_type, node);
@@ -913,6 +916,84 @@ mod tests {
 
         insta::assert_display_snapshot!(TestResult {
             query: QUERY,
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
+    fn interface_typename() {
+        static SCHEMA: &str = r#"
+        directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+
+        type Query {
+            post(id: ID!): Post
+          }
+          
+          interface Post {
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+          }
+          
+          type Stats {
+            views: Int
+          }
+          
+          type PublicBlog implements Post {
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+            stats: Stats @authenticated
+          }
+          
+          type PrivateBlog implements Post @authenticated {
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+            publishAt: String
+          }
+        "#;
+
+        static QUERY: &str = r#"
+        query Anonymous {
+            post(id: "1") {
+              ... on PublicBlog {
+                __typename
+                title
+              }
+            }
+          }
+        "#;
+
+        let (doc, paths) = filter(SCHEMA, QUERY);
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
+
+        static QUERY2: &str = r#"
+        query Anonymous {
+            post(id: "1") {
+              __typename
+              ... on PublicBlog {
+                __typename
+                title
+              }
+            }
+          }
+        "#;
+
+        let (doc, paths) = filter(SCHEMA, QUERY2);
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY2,
             result: doc,
             paths
         });
