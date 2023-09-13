@@ -1119,7 +1119,8 @@ pub(super) fn internalize_header_map(
     let mut output = HeaderMap::with_capacity(input.len());
     for (k, values) in input
         .into_iter()
-        .filter(|(k, _)| k != header::CONTENT_LENGTH.as_str()) {
+        .filter(|(k, _)| k != header::CONTENT_LENGTH.as_str())
+    {
         for v in values {
             let key = HeaderName::from_str(k.as_ref())?;
             let value = HeaderValue::from_str(v.as_ref())?;
