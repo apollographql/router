@@ -180,7 +180,7 @@ impl<'a> AuthenticatedVisitor<'a> {
             .types_definitions_by_name()
             .get(parent_type)
         {
-            if self.implementors_with_different_type_requirements(&type_definition) {
+            if self.implementors_with_different_type_requirements(type_definition) {
                 return true;
             }
         }
