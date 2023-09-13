@@ -146,7 +146,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 This exposes a new key in the `Context`, `apollo_operation_id`, which identifies operation you can find in studio:
 
 ```
-https://studio.apollographql.com/graph/<your_graph_variant>/variant/<your_graph_variant>/operations?query=<apollo_operation_id>
+https://studio.apollographql.com/graph/<your_graph_id>/variant/<your_graph_variant>/operations?query=<apollo_operation_id>
 ```
 
 The `apollo_operation_id` context key is exposed during:
