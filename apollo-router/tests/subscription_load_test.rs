@@ -16,18 +16,20 @@ const UNFEDERATED_SUB_QUERY: &str = r#"subscription {  userWasCreated { name use
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscription() -> Result<(), BoxError> {
-    let mut router = create_router(SUBSCRIPTION_CONFIG).await?;
-    router.start().await;
-    router.assert_started().await;
+    if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
+        let mut router = create_router(SUBSCRIPTION_CONFIG).await?;
+        router.start().await;
+        router.assert_started().await;
 
-    let (_, response) = router.run_subscription(SUB_QUERY).await;
-    assert!(response.status().is_success());
+        let (_, response) = router.run_subscription(SUB_QUERY).await;
+        assert!(response.status().is_success());
 
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.unwrap();
-        assert!(chunk.starts_with(b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"));
-        assert!(chunk.ends_with(b"\r\n--graphql--\r\n"));
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.unwrap();
+            assert!(chunk.starts_with(b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"));
+            assert!(chunk.ends_with(b"\r\n--graphql--\r\n"));
+        }
     }
 
     Ok(())
