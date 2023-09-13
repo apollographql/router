@@ -618,7 +618,7 @@ mod tests {
             Box::pin(async {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
-                        r##"{
+                        r#"{
                                 "version": 1,
                                 "stage": "SupergraphRequest",
                                 "control": "continue",
@@ -662,7 +662,7 @@ mod tests {
                                   },
                                   "serviceName": "service name shouldn't change",
                                   "uri": "http://thisurihaschanged"
-                            }"##,
+                            }"#,
                     ))
                     .unwrap())
             })
@@ -713,7 +713,7 @@ mod tests {
             Box::pin(async {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
-                        r##"{
+                        r#"{
                                 "version": 1,
                                 "stage": "SupergraphRequest",
                                 "control": {
@@ -730,7 +730,7 @@ mod tests {
                                 "headers": {
                                     "aheader": ["a value"]
                                 }
-                            }"##,
+                            }"#,
                     ))
                     .unwrap())
             })
