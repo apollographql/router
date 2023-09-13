@@ -88,6 +88,7 @@ supergraph:
     experimental_cache:
       redis: #highlight-line
         urls: ["redis://..."] #highlight-line
+        timeout: 5ms # Optional, by default: 2ms
 ```
 
 The value of `urls` is a list of URLs for all Redis instances in your cluster.
@@ -104,6 +105,7 @@ apq:
     cache:
       redis: #highlight-line
         urls: ["redis://..."] #highlight-line
+        timeout: 5ms # Optional, by default: 2ms
 ```
 
 The value of `urls` is a list of URLs for all Redis instances in your cluster.
