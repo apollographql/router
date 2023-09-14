@@ -120,8 +120,7 @@ where
                 }),
         );
 
-        let mut rng = thread_rng();
-        cache_keys.shuffle(&mut rng);
+        cache_keys.shuffle(&mut thread_rng());
 
         let mut count = 0usize;
         for WarmUpCachingQueryKey {
