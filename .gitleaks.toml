@@ -14,17 +14,25 @@
     [ rules.allowlist ]
         commits = [
             "7fdb0a5a0831d309524e98503760c16bd3de160c",
-            # Example private key for test cases
+            # Example private keys for test cases
             "9d6464b96eed3a20c48d5ec653bf9986757c89e5",
-            
+            "74ebb0269933c703efd9143c029f69e30330478b",
         ]
 
 [[ rules ]]
     id = "jwt"
     [ rules.allowlist ]
         commits = [
-            # Example jwt
+            # Example jwts
             "f12bcddc663aa4c4d90218a1bb718fe74e0e7be3",
+            "6ff43869e0cf8ab0de8dd0e898f80c08ad135552",
+            "b11412918d58db34693488b29495e148dbb27cc2",
+            "a4ceefc8d51879330f10861438401a3a3deb316e",
+            "d19de3cbca36981676ff03c7f3cab113609772b1",
+            "3ee3d4bda9efcf4f175fdcfd59abc16cb9a4657e",
+            "76aaa5ec21d4fbde65676c6cf0dc265dd6daee99",
+            "d2b85acee5cf94120b47093f87ae80a7365d7b28",
+            "f107c2a42292d0c8068395f5cb8f491377559a42",
         ]
 
 [[ rules ]]
