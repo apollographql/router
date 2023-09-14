@@ -48,7 +48,7 @@ flowchart TB;
 
 > This diagram shows request execution proceeding "down" from a client, through the router, to individual subgraphs. Execution then proceeds back "up" to the client in the reverse order.
 
-As shown in the diagram above, only the `RouterService` and `SubgraphService` of the [request-handling lifecycle](./rhai/#router-request-lifecycle) can send these POST requests (also called **coprocessor requests**).
+As shown in the diagram above, the `RouterService`, `SupergraphService` and `SubgraphService` steps of the [request-handling lifecycle](./rhai/#router-request-lifecycle) can send these POST requests (also called **coprocessor requests**).
 
 Each supported service can send its coprocessor requests at two different **stages**:
 
@@ -87,6 +87,19 @@ coprocessor:
       path: false
       method: false
     response: # By including this key, the `RouterService` sends a coprocessor request whenever it's about to send response data to a client (including incremental data via @defer).
+      headers: true
+      body: false
+      context: false
+      sdl: false
+      status_code: false
+  supergraph: # This coprocessor hooks into the `SupergraphService`
+    request: # By including this key, the `SupergraphService` sends a coprocessor request whenever it first receives a client request.
+      headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
+      body: false
+      context: false
+      sdl: false
+      method: false
+    response: # By including this key, the `SupergraphService` sends a coprocessor request whenever it's about to send response data to a client (including incremental data via @defer).
       headers: true
       body: false
       context: false
@@ -636,6 +649,7 @@ If your coprocessor [returns a _different_ value](#responding-to-coprocessor-req
 An object mapping of all HTTP header names and values for the corresponding request or response.
 
 If your coprocessor [returns a _different_ value](#responding-to-coprocessor-requests) for `headers`, the router replaces the existing headers with that value.
+⚠️ `content-length` sent by Coprocessors are discarded by the router. (Wrong `content-length` values could lead to failure for HTTP requests to be sent)
 
 </td>
 </tr>

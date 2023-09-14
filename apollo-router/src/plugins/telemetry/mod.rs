@@ -647,6 +647,9 @@ impl Telemetry {
         if propagation.datadog || tracing.datadog.is_some() {
             propagators.push(Box::<opentelemetry_datadog::DatadogPropagator>::default());
         }
+        if propagation.awsxray {
+            propagators.push(Box::<opentelemetry_aws::XrayPropagator>::default());
+        }
         if let Some(from_request_header) = &propagation.request.header_name {
             propagators.push(Box::new(CustomTraceIdPropagator::new(
                 from_request_header.to_string(),
