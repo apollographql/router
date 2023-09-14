@@ -369,9 +369,10 @@ pub(crate) fn ty(hir: &hir::Type) -> apollo_encoder::Type_ {
 pub(crate) fn value(hir: &hir::Value) -> Result<apollo_encoder::Value, BoxError> {
     Ok(match hir {
         hir::Value::Variable(val) => apollo_encoder::Value::Variable(val.name().into()),
-        hir::Value::Int { value, .. } => {
-            apollo_encoder::Value::Int(value.to_i32_checked().ok_or("Int value overflows i32")?)
-        }
+        hir::Value::Int { value, .. } => value
+            .to_i32_checked()
+            .map(apollo_encoder::Value::Int)
+            .unwrap_or_else(|| apollo_encoder::Value::Float(value.get())),
         hir::Value::Float { value, .. } => apollo_encoder::Value::Float(value.get()),
         hir::Value::String { value, .. } => apollo_encoder::Value::String(value.clone()),
         hir::Value::Boolean { value, .. } => apollo_encoder::Value::Boolean(*value),
