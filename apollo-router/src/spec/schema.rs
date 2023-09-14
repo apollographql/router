@@ -132,7 +132,7 @@ impl Schema {
         hasher.update(sdl.as_bytes());
         let schema_id = Some(format!("{:x}", hasher.finalize()));
         tracing::info!(
-            histogram.apollo.router.schema_loading.duration = start.elapsed().as_secs_f64()
+            histogram.apollo.router.schema.load.duration = start.elapsed().as_secs_f64()
         );
 
         Ok(Schema {
