@@ -567,7 +567,7 @@ The router expects the file referenced in the `certificate_chain` value to be a 
 
 The router verifies TLS connections to subgraphs using the list of certificate authorities the system provides. You can override this list with a combination of global and per-subgraph settings:
 
-```yaml title="router.yaml"
+```yaml
 tls:
   subgraph:
     # Use these certificate authorities unless overridden per-subgraph
@@ -609,7 +609,7 @@ This produces the file as `server.crt` which can be used in `certificate_authori
 
 The router support mutual TLS authentication (mTLS) with the subgraphs. This means that it can authenticate itself to the subgraph using a certificate chain and a cryptographic key. It can be configured as follows:
 
-```yaml title="router.yaml"
+```yaml
 tls:
   subgraph:
     # Use these certificates and key unless overridden per-subgraph
