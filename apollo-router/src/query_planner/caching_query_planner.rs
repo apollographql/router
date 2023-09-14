@@ -92,7 +92,7 @@ where
 
     pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
         let keys = self.cache.in_memory_keys().await;
-        let count = count.unwrap_or_else(|| keys.len() / 3);
+        let count = count.unwrap_or(keys.len() / 3);
         keys.into_iter()
             .take(count)
             .map(|key| WarmUpCachingQueryKey {
