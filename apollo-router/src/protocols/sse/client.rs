@@ -450,7 +450,7 @@ where
                 StateProj::New => {
                     let timeout = self
                         .read_timeout
-                        .map(|duration| delay(duration, "connecting"));
+                        .map(|duration| tokio::time::sleep(duration));
                     *self.as_mut().project().event_parser = EventParser::new();
                     match self.send_request() {
                         Ok(resp) => {
@@ -476,7 +476,7 @@ where
                             let retry = self.props.reconnect_opts.reconnect;
                             let timeout = self
                                 .read_timeout
-                                .map(|duration| delay(duration, "connecting"));
+                                .map(|duration| tokio::time::sleep(duration));
                             self.as_mut().project().state.set(State::Connecting {
                                 resp,
                                 retry,
