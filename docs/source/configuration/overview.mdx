@@ -607,7 +607,7 @@ This produces the file as `server.crt` which can be used in `certificate_authori
 
 #### TLS client authentication for subgraph requests
 
-The router can authenticate itself to the subgraph using a certificate chain and a cryptographic key. It can be configured as follows:
+The router support mutual TLS authentication (mTLS) with the subgraphs. This means that it can authenticate itself to the subgraph using a certificate chain and a cryptographic key. It can be configured as follows:
 
 ```yaml title="router.yaml"
 tls:
