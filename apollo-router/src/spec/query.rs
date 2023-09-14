@@ -69,9 +69,12 @@ pub(crate) struct Query {
     pub(crate) is_original: bool,
     /// Validation errors, used for comparison with the JS implementation.
     ///
+    /// `ValidationErrors` is not serde-serializable. If this comes from cache,
+    /// the plan ought also to be cached, so we should not need this value anyways.
     /// XXX(@goto-bus-stop): Remove when only Rust validation is used
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) validation_error: Option<SpecError>,
+    #[serde(skip)]
+    pub(crate) validation_error: Option<ValidationErrors>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -318,7 +321,10 @@ impl Query {
     }
 
     /// Check for validation errors in a query in the compiler.
-    pub(crate) fn validate_query(compiler: &ApolloCompiler, id: FileId) -> Result<(), SpecError> {
+    pub(crate) fn validate_query(
+        compiler: &ApolloCompiler,
+        id: FileId,
+    ) -> Result<(), ValidationErrors> {
         // Bail out on validation errors, only if the input is expected to be valid
         let diagnostics = compiler.db.validate_executable(id);
         let errors = diagnostics
@@ -330,10 +336,7 @@ impl Query {
             return Ok(());
         }
 
-        let errors = ValidationErrors { errors };
-        errors.print();
-
-        Err(SpecError::ValidationError(errors.to_string()))
+        Err(ValidationErrors { errors })
     }
 
     /// Extract serializable data structures from the apollo-compiler HIR.
@@ -680,18 +683,14 @@ impl Query {
                     let is_apply = if let Some(input_type) =
                         input.get(TYPENAME).and_then(|val| val.as_str())
                     {
-                        // check if the fragment matches the input type directly, and if not, check if the
+                        // Only check if the fragment matches the input type directly, and if not, check if the
                         // input type is a subtype of the fragment's type condition (interface, union)
                         input_type == type_condition.as_str()
                             || parameters.schema.is_subtype(type_condition, input_type)
                     } else {
-                        // known_type = true means that from the query's shape, we know
-                        // we should get the right type here. But in the case we get a
-                        // __typename field and it does not match, we should not apply
-                        // that fragment
-                        // If the type condition is an interface and the current known type implements it
                         known_type
                             .as_ref()
+                            // We have no typename, we apply the selection set if the known_type implements the type_condition
                             .map(|k| parameters.schema.is_subtype(type_condition, k))
                             .unwrap_or_default()
                             || known_type.as_deref() == Some(type_condition.as_str())

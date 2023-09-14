@@ -10,7 +10,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinError;
-use tracing::level_filters::LevelFilter;
 
 pub(crate) use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
@@ -437,6 +436,14 @@ impl From<SpecError> for QueryPlannerError {
     }
 }
 
+impl From<ValidationErrors> for QueryPlannerError {
+    fn from(err: ValidationErrors) -> Self {
+        // This needs to be serializable, so eagerly stringify the non-serializable
+        // ApolloDiagnostics.
+        QueryPlannerError::SpecError(SpecError::ValidationError(err.to_string()))
+    }
+}
+
 impl From<router_bridge::error::Error> for QueryPlannerError {
     fn from(error: router_bridge::error::Error) -> Self {
         QueryPlannerError::RouterBridgeError(error)
@@ -502,9 +509,9 @@ pub(crate) enum SchemaError {
     UrlParse(String, http::uri::InvalidUri),
     /// Could not find an URL for subgraph {0}
     MissingSubgraphUrl(String),
-    /// GraphQL parser error(s).
+    /// GraphQL parser error: {0}
     Parse(ParseErrors),
-    /// GraphQL parser or validation error(s).
+    /// GraphQL validation error: {0}
     Validate(ValidationErrors),
     /// Api error(s): {0}
     Api(String),
@@ -519,11 +526,16 @@ pub(crate) struct ParseErrors {
 impl std::fmt::Display for ParseErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut errors = self.errors.iter();
-        if let Some(error) = errors.next() {
-            write!(f, "{}", error.message())?;
+        for (i, error) in errors.by_ref().take(5).enumerate() {
+            if i > 0 {
+                f.write_str("\n")?;
+            }
+            // TODO(@goto-bus-stop): display line/column once that is exposed from apollo-rs
+            write!(f, "at index {}: {}", error.index(), error.message())?;
         }
-        for error in errors {
-            write!(f, "\n{}", error.message())?;
+        let remaining = errors.count();
+        if remaining > 0 {
+            write!(f, "\n...and {remaining} other errors")?;
         }
         Ok(())
     }
@@ -539,36 +551,12 @@ impl std::fmt::Display for ValidationErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut errors = self.errors.iter();
         if let Some(error) = errors.next() {
-            write!(f, "{}", error.data)?;
+            write!(f, "at index {}: {}", error.location.offset(), error.data)?;
         }
         for error in errors {
-            write!(f, "\n{}", error.data)?;
+            write!(f, "\nat index {}: {}", error.location.offset(), error.data)?;
         }
         Ok(())
-    }
-}
-
-impl ValidationErrors {
-    #[allow(clippy::needless_return)]
-    pub(crate) fn print(&self) {
-        if LevelFilter::current() == LevelFilter::OFF && cfg!(not(debug_assertions)) {
-            return;
-        } else if atty::is(atty::Stream::Stdout) {
-            // Fancy reports for TTYs
-            self.errors.iter().for_each(|err| {
-                // `format!` works around https://github.com/rust-lang/rust/issues/107118
-                // to test the panic from https://github.com/apollographql/router/issues/2269
-                #[allow(clippy::format_in_format_args)]
-                {
-                    println!("{}", format!("{err}"));
-                }
-            });
-        } else {
-            // Best effort to display errors
-            self.errors.iter().for_each(|diag| {
-                println!("{}", diag.data);
-            });
-        };
     }
 }
 

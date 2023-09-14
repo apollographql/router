@@ -11,6 +11,7 @@ use ::tracing::field;
 use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
+use bloomfilter::Bloom;
 use dashmap::DashMap;
 use futures::future::ready;
 use futures::future::BoxFuture;
@@ -38,6 +39,7 @@ use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::Context as OtelContext;
 use opentelemetry::KeyValue;
+use parking_lot::Mutex;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
 use serde_json_bytes::json;
@@ -48,7 +50,6 @@ use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::fmt::format::JsonFields;
 use tracing_subscriber::Layer;
@@ -60,16 +61,22 @@ use self::apollo::SingleReport;
 use self::apollo_exporter::proto;
 use self::apollo_exporter::Sender;
 use self::config::Conf;
+use self::config::Sampler;
+use self::config::SamplerOption;
 use self::formatters::text::TextFormatter;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use self::reload::reload_fmt;
 use self::reload::reload_metrics;
+use self::reload::LayeredTracer;
 use self::reload::NullFieldFormatter;
+use self::reload::SamplingFilter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
-use self::tracing::reload::ReloadTracer;
+use super::traffic_shaping::cache::hash_request;
+use super::traffic_shaping::cache::hash_vary_headers;
+use super::traffic_shaping::cache::REPRESENTATIONS;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::OPERATION_NAME;
 use crate::layers::ServiceBuilderExt;
@@ -103,6 +110,7 @@ use crate::plugins::telemetry::utils::TracingUtils;
 use crate::query_planner::OperationKind;
 use crate::register_plugin;
 use crate::router_factory::Endpoint;
+use crate::services::apollo_key;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
@@ -114,6 +122,7 @@ use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::spec::TYPENAME;
 use crate::tracer::TraceId;
 use crate::Context;
 use crate::ListenAddr;
@@ -155,9 +164,11 @@ pub(crate) struct Telemetry {
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
+    sampling_filter_ratio: SamplerOption,
 
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
     meter_provider: AggregateMeterProvider,
+    counter: Option<Arc<Mutex<CacheCounter>>>,
 }
 
 #[derive(Debug)]
@@ -240,15 +251,32 @@ impl Plugin for Telemetry {
             config.calculate_field_level_instrumentation_ratio()?;
         let mut metrics_builder = Self::create_metrics_builder(&config)?;
         let meter_provider = metrics_builder.meter_provider();
+        let counter = config
+            .metrics
+            .as_ref()
+            .and_then(|m| m.common.as_ref())
+            .and_then(|c| {
+                if c.experimental_cache_metrics.enabled {
+                    Some(Arc::new(Mutex::new(CacheCounter::new(
+                        c.experimental_cache_metrics.ttl,
+                    ))))
+                } else {
+                    None
+                }
+            });
+        let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
+
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints(),
             metrics_exporters: metrics_builder.exporters(),
             metrics: BasicMetrics::new(&meter_provider),
             apollo_metrics_sender: metrics_builder.apollo_metrics_provider(),
             field_level_instrumentation_ratio,
-            tracer_provider: Some(Self::create_tracer_provider(&config)?),
+            tracer_provider: Some(tracer_provider),
             meter_provider,
+            sampling_filter_ratio,
             config: Arc::new(config),
+            counter,
         })
     }
 
@@ -471,7 +499,10 @@ impl Plugin for Telemetry {
         let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
         let subgraph_name = ByteString::from(name);
+        let cache_metrics_enabled = self.counter.is_some();
+        let counter = self.counter.clone();
         let name = name.to_owned();
+        let subgraph_name_arc = Arc::new(name.to_owned());
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| {
                 let query = req
@@ -496,7 +527,16 @@ impl Plugin for Telemetry {
                     "apollo_private.ftv1" = field::Empty
                 )
             })
-            .map_request(request_ftv1)
+            .map_request(move |mut req: SubgraphRequest| {
+                let cache_attributes = cache_metrics_enabled
+                    .then(|| Self::get_cache_attributes(subgraph_name_arc.clone(), &mut req))
+                    .flatten();
+                if let Some(cache_attributes) = cache_attributes {
+                    req.context.private_entries.lock().insert(cache_attributes);
+                }
+
+                request_ftv1(req)
+            })
             .map_response(move |resp| store_ftv1(&subgraph_name, resp))
             .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
@@ -504,13 +544,16 @@ impl Plugin for Telemetry {
                         subgraph_metrics_conf_req.clone(),
                         sub_request,
                     );
-                    sub_request.context.clone()
+                    let cache_attributes = sub_request.context.private_entries.lock().remove();
+
+                    (sub_request.context.clone(), cache_attributes)
                 },
-                move |context: Context,
+                move |(context, cache_attributes): (Context, Option<CacheAttributes>),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let metrics = metrics.clone();
                     let subgraph_attribute = subgraph_attribute.clone();
                     let subgraph_metrics_conf = subgraph_metrics_conf_resp.clone();
+                    let counter = counter.clone();
                     // Using Instant because it is guaranteed to be monotonically increasing.
                     let now = Instant::now();
                     f.map(move |result: Result<SubgraphResponse, BoxError>| {
@@ -520,6 +563,8 @@ impl Plugin for Telemetry {
                             subgraph_attribute,
                             subgraph_metrics_conf,
                             now,
+                            counter,
+                            cache_attributes,
                             &result,
                         );
                         result
@@ -540,6 +585,8 @@ impl Telemetry {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
+            SamplingFilter::configure(&self.sampling_filter_ratio);
+
             // The reason that this has to happen here is that we are interacting with global state.
             // If we do this logic during plugin init then if a subsequent plugin fails to init then we
             // will already have set the new tracer provider and we will be in an inconsistent state.
@@ -611,22 +658,41 @@ impl Telemetry {
 
     fn create_tracer_provider(
         config: &config::Conf,
-    ) -> Result<opentelemetry::sdk::trace::TracerProvider, BoxError> {
+    ) -> Result<(SamplerOption, opentelemetry::sdk::trace::TracerProvider), BoxError> {
         let tracing_config = config.tracing.clone().unwrap_or_default();
-        let trace_config = &tracing_config.trace_config.unwrap_or_default();
-        let mut builder =
-            opentelemetry::sdk::trace::TracerProvider::builder().with_config(trace_config.into());
+        let mut trace_config = tracing_config.trace_config.unwrap_or_default();
+        let mut sampler = trace_config.sampler;
+        // set it to AlwaysOn: it is now done in the SamplingFilter, so whatever is sent to an exporter
+        // should be accepted
+        trace_config.sampler = SamplerOption::Always(Sampler::AlwaysOn);
 
-        builder = setup_tracing(builder, &tracing_config.jaeger, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.zipkin, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.datadog, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.otlp, trace_config)?;
-        builder = setup_tracing(builder, &config.apollo, trace_config)?;
-        // For metrics
-        builder = builder.with_simple_exporter(metrics::span_metrics_exporter::Exporter::default());
+        // if APOLLO_KEY was set, the Studio exporter must be active
+        let apollo_config = if config.apollo.is_none() && apollo_key().is_some() {
+            Some(Default::default())
+        } else {
+            config.apollo.clone()
+        };
+
+        let mut builder = opentelemetry::sdk::trace::TracerProvider::builder()
+            .with_config((&trace_config).into());
+
+        builder = setup_tracing(builder, &tracing_config.jaeger, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.zipkin, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.datadog, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.otlp, &trace_config)?;
+        builder = setup_tracing(builder, &apollo_config, &trace_config)?;
+
+        if tracing_config.jaeger.is_none()
+            && tracing_config.zipkin.is_none()
+            && tracing_config.datadog.is_none()
+            && tracing_config.otlp.is_none()
+            && apollo_config.is_none()
+        {
+            sampler = SamplerOption::Always(Sampler::AlwaysOff);
+        }
 
         let tracer_provider = builder.build();
-        Ok(tracer_provider)
+        Ok((sampler, tracer_provider))
     }
 
     fn create_metrics_builder(config: &config::Conf) -> Result<MetricsBuilder, BoxError> {
@@ -665,21 +731,7 @@ impl Telemetry {
         Ok(builder)
     }
 
-    #[allow(clippy::type_complexity)]
-    fn create_fmt_layer(
-        config: &config::Conf,
-    ) -> Box<
-        dyn Layer<
-                ::tracing_subscriber::layer::Layered<
-                    OpenTelemetryLayer<
-                        ::tracing_subscriber::Registry,
-                        ReloadTracer<::opentelemetry::sdk::trace::Tracer>,
-                    >,
-                    ::tracing_subscriber::Registry,
-                >,
-            > + Send
-            + Sync,
-    > {
+    fn create_fmt_layer(config: &config::Conf) -> Box<dyn Layer<LayeredTracer> + Send + Sync> {
         let logging = &config.logging;
         let fmt = match logging.format {
             config::LoggingFormat::Pretty => tracing_subscriber::fmt::layer()
@@ -840,7 +892,7 @@ impl Telemetry {
                 }
                 ::tracing::info!(
                     monotonic_counter.apollo.router.operations = 1u64,
-                    http.response.status_code = parts.status.as_u16(),
+                    http.response.status_code = parts.status.as_u16() as i64,
                 );
                 let response = http::Response::from_parts(
                     parts,
@@ -856,7 +908,7 @@ impl Telemetry {
 
                 ::tracing::info!(
                     monotonic_counter.apollo.router.operations = 1u64,
-                    http.response.status_code = 500,
+                    http.response.status_code = 500i64,
                 );
                 Err(err)
             }
@@ -1019,6 +1071,63 @@ impl Telemetry {
         )
     }
 
+    fn get_cache_attributes(
+        subgraph_name: Arc<String>,
+        sub_request: &mut Request,
+    ) -> Option<CacheAttributes> {
+        let body = dbg!(sub_request.subgraph_request.body_mut());
+        let hashed_query = hash_request(body);
+        let representations = body
+            .variables
+            .get(REPRESENTATIONS)
+            .and_then(|value| value.as_array())?;
+
+        let keys = extract_cache_attributes(representations).ok()?;
+
+        Some(CacheAttributes {
+            subgraph_name,
+            headers: sub_request.subgraph_request.headers().clone(),
+            hashed_query: Arc::new(hashed_query),
+            representations: keys,
+        })
+    }
+
+    fn update_cache_metrics(
+        counter: Arc<Mutex<CacheCounter>>,
+        sub_response: &SubgraphResponse,
+        cache_attributes: CacheAttributes,
+    ) {
+        let mut vary_headers = sub_response
+            .response
+            .headers()
+            .get_all(header::VARY)
+            .into_iter()
+            .filter_map(|val| {
+                val.to_str().ok().map(|v| {
+                    v.to_string()
+                        .split(", ")
+                        .map(|s| s.to_string())
+                        .collect::<Vec<String>>()
+                })
+            })
+            .flatten()
+            .collect::<Vec<String>>();
+        vary_headers.sort();
+        let vary_headers = vary_headers.join(", ");
+
+        let hashed_headers = if vary_headers.is_empty() {
+            Arc::default()
+        } else {
+            Arc::new(hash_vary_headers(&cache_attributes.headers))
+        };
+        counter.lock().record(
+            cache_attributes.hashed_query.clone(),
+            cache_attributes.subgraph_name.clone(),
+            hashed_headers,
+            cache_attributes.representations,
+        );
+    }
+
     fn store_subgraph_request_attributes(
         attribute_forward_config: Arc<Option<AttributesForwardConf>>,
         sub_request: &Request,
@@ -1039,12 +1148,15 @@ impl Telemetry {
             .insert(SubgraphMetricsAttributes(attributes)); //.unwrap();
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn store_subgraph_response_attributes(
         context: &Context,
         metrics: BasicMetrics,
         subgraph_attribute: KeyValue,
         attribute_forward_config: Arc<Option<AttributesForwardConf>>,
         now: Instant,
+        counter: Option<Arc<Mutex<CacheCounter>>>,
+        cache_attributes: Option<CacheAttributes>,
         result: &Result<Response, BoxError>,
     ) {
         let mut metric_attrs = {
@@ -1075,6 +1187,21 @@ impl Telemetry {
 
         match &result {
             Ok(response) => {
+                if let Some(cache_attributes) = cache_attributes {
+                    if let Ok(cache_control) = response
+                        .response
+                        .headers()
+                        .get(header::CACHE_CONTROL)
+                        .ok_or(())
+                        .and_then(|val| val.to_str().map(|v| v.to_string()).map_err(|_| ()))
+                    {
+                        metric_attrs.push(KeyValue::new("cache_control", cache_control));
+                    }
+
+                    if let Some(counter) = counter {
+                        Self::update_cache_metrics(counter, response, cache_attributes)
+                    }
+                }
                 metric_attrs.push(KeyValue::new(
                     "status",
                     response.response.status().as_u16().to_string(),
@@ -1538,6 +1665,113 @@ impl Telemetry {
                 telemetry.tracing.zipkin = tracing_zipkin_used.or_empty(),
             );
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CacheAttributes {
+    subgraph_name: Arc<String>,
+    headers: http::HeaderMap,
+    hashed_query: Arc<String>,
+    // Typename + hashed_representation
+    representations: Vec<(Arc<String>, Value)>,
+}
+
+#[derive(Debug, Hash, Clone)]
+struct CacheKey {
+    representation: Value,
+    typename: Arc<String>,
+    query: Arc<String>,
+    subgraph_name: Arc<String>,
+    hashed_headers: Arc<String>,
+}
+
+// Get typename and hashed representation for each representations in the subgraph query
+fn extract_cache_attributes(
+    representations: &[Value],
+) -> Result<Vec<(Arc<String>, Value)>, BoxError> {
+    let mut res = Vec::new();
+    for representation in representations {
+        let opt_type = representation
+            .as_object()
+            .and_then(|o| o.get(TYPENAME))
+            .ok_or("missing __typename in representation")?;
+        let typename = opt_type.as_str().unwrap_or("");
+
+        res.push((Arc::new(typename.to_string()), representation.clone()));
+    }
+    Ok(res)
+}
+
+struct CacheCounter {
+    primary: Bloom<CacheKey>,
+    secondary: Bloom<CacheKey>,
+    created_at: Instant,
+    ttl: Duration,
+}
+
+impl CacheCounter {
+    fn new(ttl: Duration) -> Self {
+        Self {
+            primary: Self::make_filter(),
+            secondary: Self::make_filter(),
+            created_at: Instant::now(),
+            ttl,
+        }
+    }
+
+    fn make_filter() -> Bloom<CacheKey> {
+        // the filter is around 4kB in size (can be calculated with `Bloom::compute_bitmap_size`)
+        Bloom::new_for_fp_rate(10000, 0.2)
+    }
+
+    fn record(
+        &mut self,
+        query: Arc<String>,
+        subgraph_name: Arc<String>,
+        hashed_headers: Arc<String>,
+        representations: Vec<(Arc<String>, Value)>,
+    ) {
+        if self.created_at.elapsed() >= self.ttl {
+            self.clear();
+        }
+
+        // typename -> (nb of cache hits, nb of entities)
+        let mut seen: HashMap<Arc<String>, (usize, usize)> = HashMap::new();
+        for (typename, representation) in representations {
+            let cache_hit = self.check(&CacheKey {
+                representation,
+                typename: typename.clone(),
+                query: query.clone(),
+                subgraph_name: subgraph_name.clone(),
+                hashed_headers: hashed_headers.clone(),
+            });
+
+            let seen_entry = seen.entry(typename.clone()).or_default();
+            if cache_hit {
+                seen_entry.0 += 1;
+            }
+            seen_entry.1 += 1;
+        }
+
+        for (typename, (cache_hit, total_entities)) in seen.into_iter() {
+            ::tracing::info!(
+                histogram.apollo.router.operations.entity.cache_hit = (cache_hit as f64 / total_entities as f64) * 100f64,
+                entity_type = %typename,
+                subgraph = %subgraph_name,
+            );
+        }
+    }
+
+    fn check(&mut self, key: &CacheKey) -> bool {
+        self.primary.check_and_set(key) || self.secondary.check(key)
+    }
+
+    fn clear(&mut self) {
+        let secondary = std::mem::replace(&mut self.primary, Self::make_filter());
+        self.secondary = secondary;
+
+        self.created_at = Instant::now();
     }
 }
 

@@ -1641,17 +1641,15 @@ expression: "&schema"
     "subscription": {
       "description": "Subscriptions configuration",
       "type": "object",
-      "required": [
-        "enabled"
-      ],
       "properties": {
         "enable_deduplication": {
           "description": "Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode) (default: true)",
-          "default": false,
+          "default": true,
           "type": "boolean"
         },
         "enabled": {
           "description": "Enable subscription",
+          "default": true,
           "type": "boolean"
         },
         "max_opened_subscriptions": {
@@ -4313,6 +4311,23 @@ expression: "&schema"
                     "type": "number",
                     "format": "double"
                   }
+                },
+                "experimental_cache_metrics": {
+                  "description": "Experimental metrics to know more about caching strategies",
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "description": "Enable experimental metrics",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "ttl": {
+                      "description": "Potential TTL for a cache if we had one (default: 5secs)",
+                      "default": "5s",
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
                 },
                 "resources": {
                   "description": "Resources",
