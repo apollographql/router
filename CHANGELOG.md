@@ -45,19 +45,19 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) and [@geal](https://github.c
 
 [Subscription deduplication](https://www.apollographql.com/docs/router/executing-operations/subscription-support#subscription-deduplication) is again enabled by default as it was intended to be.  This important performance feature for subscriptions at scale was inadvertently disabled in v1.25.0 due to a bug.
 
-Should you still wish to disable it, you can still explicitly [set `enable_deduplication` to `false` in your configuration](https://www.apollographql.com/docs/router/executing-operations/subscription-support/#disabling-deduplication).
+To explicitly disable deduplication, [set `enable_deduplication` to `false` in your configuration](https://www.apollographql.com/docs/router/executing-operations/subscription-support/#disabling-deduplication).
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3773
 
 ### Metrics are no longer coerced incorrectly ([Issue #3687](https://github.com/apollographql/router/issues/3687))
 
-Metric attributes are no longer incorrectly coerced to strings.  In addition, the logic around types which are accepted as metrics attributes has been simplified to avoid this in the future.  Going forward, if the wrong type is specified, values will be ignored and a log message will be emitted.
+Metric attributes are no longer incorrectly coerced to strings.  In addition, the logic around types which are accepted as metrics attributes has been simplified to avoid this in the future.  Going forward, if the wrong type is specified, values will be ignored and a log message (at debug level) will be emitted.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3724
 
 ### Optimizations applied to header-handling operations ([Issue #3068](https://github.com/apollographql/router/issues/3068))
 
-We've taken advantage of an opportunity to reduce latency and overhead by reducing the allocations which take place when handling the list of headers passed to subgraph queries.
+Latency and overhead of passing headers to subgraph queries has been reduced.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3721
 
@@ -103,14 +103,6 @@ Our Rust Toolchain has been updated to v1.72.0 after we've unblocked some downst
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3707
 
-### `Cargo.toml` metadata cleanup ([PR #3746](https://github.com/apollographql/router/pull/3746))
-
-The following changes are not material for most users of the Router (especially those who are not compiling Rust themselves):
-
-* Removed unused `[patch]` entries in in our `Cargo.toml`.
-* Removed prior exemptions for [`chrono`](https://crates.io/crates/chrono) security advisories which are now resolved.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3746
 
 ### Replace `atty` crate with `std` ([PR #3729](https://github.com/apollographql/router/pull/3729))
 
@@ -140,11 +132,6 @@ New [Authorization documentation](https://www.apollographql.com/docs/router/conf
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3719
 
-### Anchor links in CORS documentation have been fixed
-
-This documentation change fixes an incorrect anchor link in the [CORS documentation](https://www.apollographql.com/docs/router/configuration/cors/) and removes links to authorization docs which have not yet been released.
-
-By [@Meschreiber](https://github.com/Meschreiber) in https://github.com/apollographql/router/pull/3711
 
 # [1.29.1] - 2023-09-04
 
