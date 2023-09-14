@@ -614,13 +614,15 @@ tls:
   subgraph:
     # Use these certificates and key unless overridden per-subgraph
     all:
-      certificate_chain: ${file./path/to/certificate_chain.pem}
-      key: ${file./path/to/key.pem}
+      client_authentication:
+        certificate_chain: ${file./path/to/certificate_chain.pem}
+        key: ${file./path/to/key.pem}
     # Override global setting for individual subgraphs
     subgraphs:
       products:
-        certificate_chain: ${file./path/to/certificate_chain.pem}
-        key: ${file./path/to/key.pem}
+        client_authentication:
+          certificate_chain: ${file./path/to/certificate_chain.pem}
+          key: ${file./path/to/key.pem}
 ```
 
 ### Request limits
