@@ -37,7 +37,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Handle interfaces in fragment spreads when `__typename` is omitted ([Issue #2587](https://github.com/apollographql/router/issues/2587))
 
-We now check the parent type when using an inline-fragment, rather than relying on the expectation that `__typename` will be present, since that is not a guarantee.  For cases where `__typename` was being omitted, this corrects cases where a portion of the selection set was silently dropped and not returned.
+We now check the parent type when using an inline-fragment, rather than relying on the expectation that `__typename` will be present.  For cases where `__typename` was being omitted, this fixes responses where a portion of the selection set was silently dropped and not returned.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) and [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/3718
 
@@ -89,7 +89,7 @@ Multi-part response streams (which are used for [subscriptions](https://www.apol
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3748
 
-### Subscriptions: Include `x-accel-buffering`` header on multipart responses ([Issue #3683](https://github.com/apollographql/router/issues/3683))
+### Subscriptions: Include `x-accel-buffering` header on multipart responses ([Issue #3683](https://github.com/apollographql/router/issues/3683))
 
 Setting the `x-accel-buffering` header to `no` for multipart responses allows certain proxies to configure themselves in a mode that is compatible with the buffering used by subscriptions.  This should improve Subscriptions' compatibility with existing infrastructure.
 
