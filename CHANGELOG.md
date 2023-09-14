@@ -63,9 +63,9 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Avoid request overhead when telemetry is not enabled
 
-We have removed overhead that was being incurred on every request within the OpenTelemetry code, even when telemetry was not enabled or configured.  The introduction of a sampling filter now disables it entirely when no OpenTelemetry exporters are enabled, providing an improvement for basic setups where telemetry is not desired.
+The overhead of OpenTelemetry has been removed when no tracing exporters are configured.
 
-This improvement also manifests when the sampling criteria is _not_ met since the sampling filter will only propagate sampled traces to the rest of the stack, further reducing overhead.
+This also improves performance when sampling criteria has _not_ been met by preventing unsampled sampled trace events from propagating to the rest of the OpenTelemetry stack.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2999
 
@@ -73,7 +73,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 The router will now _sign_ subgraph requests _just before_ they are sent to the subgraph (i.e., a bit later than previously), following up on the functionality of [subgraph authentication](https://www.apollographql.com/docs/router/configuration/authn-subgraph) which was first introduced in v1.27.0.
 
-While the initial implementation did work in many cases, there were interactions with other subgraph features which might be enabled which required additional considerations, including interactions with:
+This fixes interactions with:
 
   - Subgraph Automatic Persisted Queries (APQ)
   - Subgraph HTTP compression
@@ -85,13 +85,13 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ### Handle multipart stream if the original stream was empty ([Issue #3293](https://github.com/apollographql/router/issues/3293))
 
-Multi-part response streams (which are used for [subscriptions](https://www.apollographql.com/docs/router/executing-operations/subscription-support/) and operations which include [`@defer` directive](https://www.apollographql.com/docs/router/executing-operations/defer-support/)) will now be handled correctly (and end correctly) when the response stream is empty.
+Multi-part response streams (which are used for [subscriptions](https://www.apollographql.com/docs/router/executing-operations/subscription-support/) and operations which include [`@defer` directive](https://www.apollographql.com/docs/router/executing-operations/defer-support/)) are now terminated correctly when the response stream is empty.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3748
 
 ### Subscriptions: Include `x-accel-buffering` header on multipart responses ([Issue #3683](https://github.com/apollographql/router/issues/3683))
 
-Setting the `x-accel-buffering` header to `no` for multipart responses allows certain proxies to configure themselves in a mode that is compatible with the buffering used by subscriptions.  This should improve Subscriptions' compatibility with existing infrastructure.
+Setting the `x-accel-buffering` header to `no` for multipart responses allows certain proxies to configure themselves in a mode that is compatible with the buffering used by subscriptions.  This improves Subscriptions' compatibility with existing infrastructure.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3749
 
@@ -99,7 +99,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Our Rust Toolchain has been updated to v1.72.0 ([PR #3707](https://github.com/apollographql/router/pull/3707))
 
-Our Rust Toolchain has been updated to v1.72.0 after we've unblocked some downstream dependency juggling within our `router-bridge` dependency.  For the majority of our users (those who do not compile their own Router from source), this change will not have any impact.  If you are compiling the Router using the new Rust 1.72.0, it should now work.
+Our Rust Toolchain has been updated to v1.72.0.  For the majority of our users (those who do not compile their own Router from source), this change will not have any impact. Otherwise, Rust 1.72.0 can now be used.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3707
 
