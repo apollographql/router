@@ -6,7 +6,5 @@ implementors have different security requirements. For the __typename
 field though, we must make an exception, because it should be available
 for all implementors
 
-<!-- start metadata -->
----
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3821
