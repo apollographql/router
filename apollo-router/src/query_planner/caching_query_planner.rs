@@ -25,6 +25,7 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::Compiler;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::query_planner;
@@ -105,7 +106,8 @@ where
     pub(crate) async fn warm_up(
         &mut self,
         query_analysis: &QueryAnalysisLayer,
-        cache_keys: Vec<WarmUpCachingQueryKey>,
+        persisted_query_layer: &PersistedQueryLayer,
+        mut cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
         let schema_id = self.schema.schema_id.clone();
 
@@ -117,6 +119,16 @@ where
                     e.query_planner_service(acc)
                 }),
         );
+
+        if let Some(queries) = persisted_query_layer.all_operations() {
+            for query in queries {
+                cache_keys.push(WarmUpCachingQueryKey {
+                    query,
+                    operation: None,
+                    metadata: CacheKeyMetadata::default(),
+                });
+            }
+        }
 
         let mut count = 0usize;
         for WarmUpCachingQueryKey {

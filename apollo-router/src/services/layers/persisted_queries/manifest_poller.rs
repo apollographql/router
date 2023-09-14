@@ -285,6 +285,14 @@ impl PersistedQueryManifestPoller {
             .cloned()
     }
 
+    pub(crate) fn get_all_operations(&self) -> Vec<String> {
+        let state = self
+            .state
+            .read()
+            .expect("could not acquire read lock on persisted query manifest state");
+        state.persisted_query_manifest.values().cloned().collect()
+    }
+
     pub(crate) fn action_for_freeform_graphql(
         &self,
         query: &str,

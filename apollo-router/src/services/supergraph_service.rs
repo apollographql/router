@@ -763,10 +763,11 @@ impl SupergraphCreator {
     pub(crate) async fn warm_up_query_planner(
         &mut self,
         query_parser: &QueryAnalysisLayer,
+        persisted_query_layer: &PersistedQueryLayer,
         cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
         self.query_planner_service
-            .warm_up(query_parser, cache_keys)
+            .warm_up(query_parser, persisted_query_layer, cache_keys)
             .await
     }
 }
