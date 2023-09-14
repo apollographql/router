@@ -643,10 +643,10 @@ jobs:
                   # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
                   # Build and push debug image
                   docker buildx build --platform linux/amd64 --push --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
-                  docker save -o built-containers/router:${VERSION}-debug.tar router:${VERSION}-debug
+                  docker save -o built-containers/router:${VERSION}-debug.tar ${ROUTER_TAG}:${VERSION}-debug
                   # Build and push release image
                   docker buildx build --platform linux/amd64 --push --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
-                  docker save -o built-containers/router:${VERSION}.tar router:${VERSION}
+                  docker save -o built-containers/router:${VERSION}.tar ${ROUTER_TAG}:${VERSION}
             - run:
                 name: Helm build
                 command: |
