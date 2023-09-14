@@ -116,8 +116,9 @@ pub(crate) fn operation(
         .ok_or("ObjectTypeDefMissing")?;
     let type_name = object_type.name();
 
-    let Some(selection_set) = selection_set(visitor, def.selection_set(), type_name)?
-    else { return Ok(None) };
+    let Some(selection_set) = selection_set(visitor, def.selection_set(), type_name)? else {
+        return Ok(None);
+    };
 
     let mut encoder_node =
         apollo_encoder::OperationDefinition::new(operation_type(def.operation_ty()), selection_set);
@@ -151,8 +152,9 @@ pub(crate) fn fragment_definition(
     let name = hir.name();
     let type_condition = hir.type_condition();
 
-    let Some(selection_set) = selection_set(visitor, hir.selection_set(), type_condition)?
-    else { return Ok(None) };
+    let Some(selection_set) = selection_set(visitor, hir.selection_set(), type_condition)? else {
+        return Ok(None);
+    };
 
     let type_condition = apollo_encoder::TypeCondition::new(type_condition.into());
     let mut encoder_node =
@@ -237,8 +239,9 @@ pub(crate) fn inline_fragment(
 ) -> Result<Option<apollo_encoder::InlineFragment>, BoxError> {
     let parent_type = hir.type_condition().unwrap_or(parent_type);
 
-    let Some(selection_set) = selection_set(visitor, hir.selection_set(), parent_type)?
-    else { return Ok(None) };
+    let Some(selection_set) = selection_set(visitor, hir.selection_set(), parent_type)? else {
+        return Ok(None);
+    };
 
     let mut encoder_node = apollo_encoder::InlineFragment::new(selection_set);
 
@@ -366,9 +369,10 @@ pub(crate) fn ty(hir: &hir::Type) -> apollo_encoder::Type_ {
 pub(crate) fn value(hir: &hir::Value) -> Result<apollo_encoder::Value, BoxError> {
     Ok(match hir {
         hir::Value::Variable(val) => apollo_encoder::Value::Variable(val.name().into()),
-        hir::Value::Int { value, .. } => {
-            apollo_encoder::Value::Int(value.to_i32_checked().ok_or("Int value overflows i32")?)
-        }
+        hir::Value::Int { value, .. } => value
+            .to_i32_checked()
+            .map(apollo_encoder::Value::Int)
+            .unwrap_or_else(|| apollo_encoder::Value::Float(value.get())),
         hir::Value::Float { value, .. } => apollo_encoder::Value::Float(value.get()),
         hir::Value::String { value, .. } => apollo_encoder::Value::String(value.clone()),
         hir::Value::Boolean { value, .. } => apollo_encoder::Value::Boolean(*value),

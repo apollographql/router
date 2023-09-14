@@ -65,8 +65,9 @@ impl<'a> Visitor for Labeler<'a> {
     ) -> Result<Option<apollo_encoder::InlineFragment>, BoxError> {
         let parent_type = hir.type_condition().unwrap_or(parent_type);
 
-        let Some(selection_set) = selection_set(self, hir.selection_set(), parent_type)?
-    else { return Ok(None) };
+        let Some(selection_set) = selection_set(self, hir.selection_set(), parent_type)? else {
+            return Ok(None);
+        };
 
         let mut encoder_node = apollo_encoder::InlineFragment::new(selection_set);
 
@@ -114,4 +115,20 @@ pub(crate) fn directive(
     }
 
     Ok(encoder_directive)
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::ApolloCompiler;
+
+    use super::add_defer_labels;
+
+    #[test]
+    fn large_float_written_as_int() {
+        let mut compiler = ApolloCompiler::new();
+        compiler.add_type_system("type Query { field(id: Float): String! }", "schema.graphql");
+        let file_id = compiler.add_executable(r#"{ field(id: 1234567890123) }"#, "query.graphql");
+        let result = add_defer_labels(file_id, &compiler).unwrap();
+        insta::assert_snapshot!(result);
+    }
 }

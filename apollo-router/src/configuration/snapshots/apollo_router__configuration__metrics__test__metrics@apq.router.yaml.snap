@@ -4,7 +4,7 @@ expression: "&metrics.metrics"
 ---
 value.apollo.router.config.apq:
   - 1
-  - opt__router__cache__in_memory__: "true"
-    opt__router__cache__redis__: "true"
-    opt__subgraph__: "true"
+  - opt__router__cache__in_memory__: true
+    opt__router__cache__redis__: true
+    opt__subgraph__: true
 

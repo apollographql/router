@@ -151,18 +151,44 @@ impl Selection {
                     .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?;
 
                 let fragment_type = FieldType::new_named(type_condition.clone());
+                let known_type = current_type.inner_type_name().map(|s| s.to_string());
+
+                // this is the type we pass when extracting the fragment's selections
+                // If the type condition is a union or interface and the current type implements it, then we want
+                // to keep the current type when extracting the fragment's selections, as it is more precise
+                // than the interface.
+                // If it is not, then we use the type condition
+                let relevant_type = if schema.is_interface(type_condition.as_str()) {
+                    // Query validation should have already verified that current type implements that interface
+                    debug_assert!(
+                        schema.is_subtype(
+                            type_condition.as_str(),
+                            current_type.inner_type_name().unwrap_or("")
+                        ) || schema.is_implementation(
+                            type_condition.as_str(),
+                            current_type.inner_type_name().unwrap_or(""))
+                     ||
+                        // if the current type and the type condition are both the same interface, it is still valid
+                        type_condition.as_str()
+                            == current_type.inner_type_name().unwrap_or("")
+                    );
+                    let relevant_type = schema.most_precise(current_type, &fragment_type);
+                    debug_assert!(relevant_type.is_some());
+                    relevant_type.unwrap_or(&fragment_type)
+                } else {
+                    &fragment_type
+                };
 
                 let selection_set = inline_fragment
                     .selection_set()
                     .selection()
                     .iter()
                     .filter_map(|selection| {
-                        Selection::from_hir(selection, &fragment_type, schema, count, defer_stats)
+                        Selection::from_hir(selection, relevant_type, schema, count, defer_stats)
                             .transpose()
                     })
                     .collect::<Result<_, _>>()?;
 
-                let known_type = current_type.inner_type_name().map(|s| s.to_string());
                 Some(Self::InlineFragment {
                     type_condition,
                     selection_set,

@@ -17,7 +17,7 @@ mod tests {
     use tower::BoxError;
     use tower::ServiceExt;
 
-    use super::super::coprocessor::*;
+    use super::super::*;
     use crate::plugin::test::MockHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
@@ -287,7 +287,7 @@ mod tests {
             Box::pin(async {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
-                        r##"{
+                        r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
                                 "control": {
@@ -299,7 +299,7 @@ mod tests {
                                         "body": "Errors need a message, this will fail to deserialize"
                                     }]
                                 }
-                            }"##,
+                            }"#,
                     ))
                     .unwrap())
             })
@@ -386,7 +386,7 @@ mod tests {
             Box::pin(async {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
-                        r##"{
+                        r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
                                 "control": "continue",
@@ -429,7 +429,7 @@ mod tests {
                                   },
                                   "serviceName": "service name shouldn't change",
                                   "uri": "http://thisurihaschanged"
-                            }"##,
+                            }"#,
                     ))
                     .unwrap())
             })
@@ -478,7 +478,7 @@ mod tests {
             Box::pin(async {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
-                        r##"{
+                        r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
                                 "control": {
@@ -495,7 +495,7 @@ mod tests {
                                 "headers": {
                                     "aheader": ["a value"]
                                 }
-                            }"##,
+                            }"#,
                     ))
                     .unwrap())
             })
@@ -556,7 +556,7 @@ mod tests {
             Box::pin(async {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
-                        r##"{
+                        r#"{
                                 "version": 1,
                                 "stage": "SubgraphResponse",
                                 "headers": {
@@ -598,7 +598,7 @@ mod tests {
                                       "this-is-a-test-context": 42
                                     }
                                   }
-                            }"##,
+                            }"#,
                     ))
                     .unwrap())
             })
@@ -1158,6 +1158,9 @@ mod tests {
                 TEXT_HTML.essence_str().to_string(),
             ],
         );
+
+        // This header should be stripped
+        external_form.insert("content-length".to_string(), vec!["1024".to_string()]);
 
         let actual = internalize_header_map(external_form).expect("internalized header map");
 

@@ -4,10 +4,10 @@ expression: "&metrics.metrics"
 ---
 value.apollo.router.config.coprocessor:
   - 1
-  - opt__router__request__: "true"
-    opt__router__response__: "true"
-    opt__subgraph__request__: "true"
-    opt__subgraph__response__: "true"
-    opt__supergraph__request__: "false"
-    opt__supergraph__response__: "false"
+  - opt__router__request__: true
+    opt__router__response__: true
+    opt__subgraph__request__: true
+    opt__subgraph__response__: true
+    opt__supergraph__request__: true
+    opt__supergraph__response__: true
 

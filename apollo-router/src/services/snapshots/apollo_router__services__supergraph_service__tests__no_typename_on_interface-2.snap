@@ -1,0 +1,13 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+expression: with_typename
+---
+{
+  "data": {
+    "dog": {
+      "id": "8765",
+      "__typename": "Dog",
+      "name": "Spot"
+    }
+  }
+}

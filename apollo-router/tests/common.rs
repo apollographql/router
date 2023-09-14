@@ -162,7 +162,17 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn start(&mut self) {
-        let mut router = Command::new(&self.router_location)
+        let mut router = Command::new(&self.router_location);
+        if let (Ok(apollo_key), Ok(apollo_graph_ref)) = (
+            std::env::var("TEST_APOLLO_KEY"),
+            std::env::var("TEST_APOLLO_GRAPH_REF"),
+        ) {
+            router
+                .env("APOLLO_KEY", apollo_key)
+                .env("APOLLO_GRAPH_REF", apollo_graph_ref);
+        }
+
+        router
             .args([
                 "--hr",
                 "--config",
@@ -173,9 +183,9 @@ impl IntegrationTest {
                 "--log",
                 "error,apollo_router=info",
             ])
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("router should start");
+            .stdout(Stdio::piped());
+
+        let mut router = router.spawn().expect("router should start");
         let reader = BufReader::new(router.stdout.take().expect("out"));
         let stdio_tx = self.stdio_tx.clone();
         let collect_stdio = self.collect_stdio.take();

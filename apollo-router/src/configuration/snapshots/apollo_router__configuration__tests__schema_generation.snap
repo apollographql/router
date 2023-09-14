@@ -779,6 +779,106 @@ expression: "&schema"
           },
           "additionalProperties": false
         },
+        "supergraph": {
+          "description": "The supergraph stage request/response configuration",
+          "default": {
+            "request": {
+              "headers": false,
+              "context": false,
+              "body": false,
+              "sdl": false,
+              "method": false
+            },
+            "response": {
+              "headers": false,
+              "context": false,
+              "body": false,
+              "sdl": false,
+              "status_code": false
+            }
+          },
+          "type": "object",
+          "properties": {
+            "request": {
+              "description": "The request configuration",
+              "default": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "sdl": false,
+                "method": false
+              },
+              "type": "object",
+              "properties": {
+                "body": {
+                  "description": "Send the body",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "context": {
+                  "description": "Send the context",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "headers": {
+                  "description": "Send the headers",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "method": {
+                  "description": "Send the method",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "sdl": {
+                  "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "response": {
+              "description": "What information is passed to a router request/response stage",
+              "default": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "sdl": false,
+                "status_code": false
+              },
+              "type": "object",
+              "properties": {
+                "body": {
+                  "description": "Send the body",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "context": {
+                  "description": "Send the context",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "headers": {
+                  "description": "Send the headers",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "sdl": {
+                  "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "status_code": {
+                  "description": "Send the HTTP status",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
         "timeout": {
           "description": "The timeout for external requests",
           "default": {
@@ -1641,17 +1741,15 @@ expression: "&schema"
     "subscription": {
       "description": "Subscriptions configuration",
       "type": "object",
-      "required": [
-        "enabled"
-      ],
       "properties": {
         "enable_deduplication": {
           "description": "Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode) (default: true)",
-          "default": false,
+          "default": true,
           "type": "boolean"
         },
         "enabled": {
           "description": "Enable subscription",
+          "default": true,
           "type": "boolean"
         },
         "max_opened_subscriptions": {
@@ -4314,6 +4412,23 @@ expression: "&schema"
                     "format": "double"
                   }
                 },
+                "experimental_cache_metrics": {
+                  "description": "Experimental metrics to know more about caching strategies",
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "description": "Enable experimental metrics",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "ttl": {
+                      "description": "Potential TTL for a cache if we had one (default: 5secs)",
+                      "default": "5s",
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                },
                 "resources": {
                   "description": "Resources",
                   "default": {},
@@ -4978,6 +5093,11 @@ expression: "&schema"
               "description": "Propagation configuration",
               "type": "object",
               "properties": {
+                "awsxray": {
+                  "description": "Propagate AWS X-Ray",
+                  "default": false,
+                  "type": "boolean"
+                },
                 "baggage": {
                   "description": "Propagate baggage https://www.w3.org/TR/baggage/",
                   "default": false,

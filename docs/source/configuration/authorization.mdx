@@ -141,6 +141,39 @@ claims = context["apollo_authentication::JWT::claims"]
 claims["scope"] = "scope1 scope2 scope3"
 ```
 
+<ExpansionPanel title="What if my request scopes aren't in OAuth2 format?">
+
+If the `apollo_authentication::JWT::claims` object holds scopes in another format, for example, an array of strings, or at a key other than `"scope"`, you can edit the claims with a [Rhai script](../customizations/rhai).
+
+The example below extracts an array of scopes from the `"roles"` claim and reformats them as a space-separated string.
+
+```Rhai
+fn router_service(service) {
+  let request_callback = |request| {
+    let claims = request.context["apollo_authentication::JWT::claims"];
+    let roles = claims["roles"];
+
+    let scope = "";
+    if roles.len() > 1 {
+      scope = roles[0];
+    }
+
+    if roles.len() > 2 {
+      for role in roles[1..] {
+        scope += ' ';
+        scope += role;
+      }
+    }
+
+    claims["scope"] = scope;
+    request.context["apollo_authentication::JWT::claims"] = claims;
+  };
+  service.map_request(request_callback);
+}
+```
+
+</ExpansionPanel>
+
 #### Usage
 
 To use the `@requiresScopes` directive in a subgraph, you can [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
