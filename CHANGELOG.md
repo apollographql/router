@@ -8,9 +8,9 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Rhai Support at the `router_service` ([Issue #2278](https://github.com/apollographql/router/issues/2278))
+### Preliminary Rhai Support at the `router_service` ([Issue #2278](https://github.com/apollographql/router/issues/2278))
 
-It is now possible to interact with requests and responses at the `router_service` level [using Rhai-based customizations](https://www.apollographql.com/docs/router/customizations/rhai/). The functionality is very similar to that provided for interacting with existing services, for example `supergraph_service`. For instance, you may "map" requests and responses as follows:
+It is now possible to interact with some aspects of requests and responses at the `router_service` level [using Rhai-based customizations](https://www.apollographql.com/docs/router/customizations/rhai/). The functionality is very similar to that provided for interacting with existing services, for example `supergraph_service`. For instance, you may "map" requests and responses as follows:
 
 ```rust
 fn router_service(service) {
@@ -21,23 +21,9 @@ fn router_service(service) {
 }
 ```
 
-The main difference from [existing services](https://www.apollographql.com/docs/router/customizations/rhai/#router-request-lifecycle) is that the `router_service` allows operating on _HTTP bodies_ rather than the more structured representations available at later service layers, like the [supergraph service](https://www.apollographql.com/docs/router/customizations/rhai/#supergraphservice).
+The main difference from [existing services](https://www.apollographql.com/docs/router/customizations/rhai/#router-request-lifecycle) is that the `router_service` allows operating at an HTTP transport layer rather than the more structured GraphQL representations available at later service layers, like the [supergraph service](https://www.apollographql.com/docs/router/customizations/rhai/#supergraphservice).
 
-This means that `Request.body` and `Response.body` are both strings, which provides flexibility to make more substantial modifications to the body.  Users should choose the most convenient service for the types of changes they're needing to make, since operating on the strings will require more work than operating on properties of the structured objects in the supergraph service.
-
-As another example, this logs the bodies of requests:
-
-```rust
-// Generate a log for each request at this stage
-fn process_request(request) {
-    print(`body: ${request.body}`);
-}
-
-// Generate a log for each response at this stage
-fn process_response(response) {
-    print(`body: ${response.body}`);
-}
-```
+Initially, we are **not** allowing access to the `body` property itself.  [This issue](https://github.com/apollographql/router/issues/3642) tracks changing that in the future.  For now, it is possible to access the `context` and `headers`.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3234
 
