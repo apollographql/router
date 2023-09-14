@@ -643,10 +643,8 @@ jobs:
                   # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
                   # Build and push debug image
                   docker buildx build --platform linux/amd64 --push --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
-                  docker save -o built-containers/router:${VERSION}-debug.tar ${ROUTER_TAG}:${VERSION}-debug
                   # Build and push release image
                   docker buildx build --platform linux/amd64 --push --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
-                  docker save -o built-containers/router:${VERSION}.tar ${ROUTER_TAG}:${VERSION}
             - run:
                 name: Helm build
                 command: |
@@ -658,6 +656,15 @@ jobs:
                   echo ${GITHUB_OCI_TOKEN} | helm registry login -u apollo-bot2 --password-stdin ghcr.io
                   # Push chart to repository
                   helm push ${CHART} oci://ghcr.io/apollographql/helm-charts-nightly
+            - run:
+                name: Save containers for analysis
+                command: |
+                  BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
+                  ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/artifacts/router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+                  VERSION="v$(echo "${BASE_VERSION}" | tr "+" "-")"
+                  ROUTER_TAG=ghcr.io/apollographql/nightly/router
+                  docker save -o built-containers/router:${VERSION}-debug.tar ${ROUTER_TAG}:${VERSION}-debug
+                  docker save -o built-containers/router:${VERSION}.tar ${ROUTER_TAG}:${VERSION}
             - persist_to_workspace:
                 root: .
                 paths:
