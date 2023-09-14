@@ -4,6 +4,226 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.30.0] - 2023-09-14
+
+## 🚀 Features
+
+### Provide a rhai interface to the router service ([Issue #2278](https://github.com/apollographql/router/issues/2278))
+
+Adds `Rhai` support for the `router_service`.
+
+It is now possible to interact with requests and responses at the `router_service` level from `Rhai`. The functionality is very similar to that provided for interacting with existing services, for example `supergraph_service`. For instance, you may map requests and responses as follows:
+
+```rust
+fn router_service(service) {
+    const request_callback = Fn("process_request");
+    service.map_request(request_callback);
+    const response_callback = Fn("process_response");
+    service.map_response(response_callback);
+}
+
+```
+The main difference from existing services is that the router_service is dealing with HTTP Bodies, not well formatted GraphQL objects. This means that the `Request.body` or `Response.body` is not a well structured object that you may interact with, but is simply a String.
+
+This makes it more complex to deal with Request and Response bodies with the tradeoff being that a script author has more power and can perform tasks which are just not possible within the confines of a well-formed GraphQL object.
+
+This simple example, simply logs the bodies:
+
+```rust
+// Generate a log for each request at this stage
+fn process_request(request) {
+    print(`body: `);
+}
+
+// Generate a log for each response at this stage
+fn process_response(response) {
+    print(`body: `);
+}
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3234
+
+## 🐛 Fixes
+
+### small performance improvements for telemetry ([PR #3656](https://github.com/apollographql/router/pull/3656))
+
+The SpanMetricsExporter, used to report span timings hade a few inefficiencies in the way it recognized spans, and it brought a constant overhead to the router usage, even when telemetry was not configured. It has now been isolated and optimized
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3656
+
+### Deal with interfaces on fragment spreads when no __typename is queried ([Issue #2587](https://github.com/apollographql/router/issues/2587))
+
+Operations would over rely on the presence of __typename to resolve selection sets on interface implementers. This changeset checks for the parent type in an InlineFragment, so we don't drop relevant selection set when applicable.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) and [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/3718
+
+### fix(subscription): force the deduplication to be enabled by default as it's documented ([PR #3773](https://github.com/apollographql/router/pull/3773))
+
+A bug was introduced in router v1.25.0 which caused [subscription deduplication](https://www.apollographql.com/docs/router/executing-operations/subscription-support#subscription-deduplication) to be disabled by default.
+As documented, the router will enable deduplication by default, providing you with subscriptions that scale.
+
+Should you decide to disable it, you can still explicitly set `enable_deduplication` to `false`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3773
+
+### Fix metrics attribute types ([Issue #3687](https://github.com/apollographql/router/issues/3687))
+
+Metrics attributes were being coerced to strings. This is now fixed.
+In addition, the logic around types accepted as metrics attributes has been simplified. It will log and ignore values of the wrong type.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3724
+
+### remove clones from the header plugin ([Issue #3068](https://github.com/apollographql/router/issues/3068))
+
+The list of header operations was cloned for every subgraph query, and this was increasing latency. We made sure the overhead is minimal by removing those allocations
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3721
+
+### Subscriptions: Correct v1.28.x regression allowing panic via un-named subscription operation
+
+Correct a regression that was introduced in Router v1.28.0 which made a Router **panic** possible when the following _three_ conditions are _all_ met:
+
+1. When sending an un-named (i.e., "anonymous") `subscription` operation (e.g., `subscription { ... }`); **and**;
+2. The Router has a `subscription` type defined in the Supergraph schema; **and**
+3. Have subscriptions enabled (they are disabled by default) in the Router's YAML configuration, either by setting `enabled: true` _or_ by setting a `mode` within the `subscriptions` object (as seen in [the subscriptions documentation](https://www.apollographql.com/docs/router/executing-operations/subscription-support/#router-setup).
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3738
+
+### Do not record a trace if telemetry is not configured
+
+The OpenTelemetry handling code had a constant overhead on every request, due to the OpenTelemetryLayer recording data for every span, even when telemetry is not actually set up. We introduce a sampling filter that disables it entirely when no exporters are configured, which provides a performance boost in basic setups.
+It also provides performance gains when exporters are set up: if a sampling ratio or client defined sampling are used, then the filter will only send the sampled traces to the rest of the stack, thus reducing the overhead again.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2999
+
+### Subgraph authentication: Make sure Request signing happens after Compression and APQ ([Issue #3608](https://github.com/apollographql/router/issues/3608))
+
+[Subgraph authentication](https://www.apollographql.com/docs/router/configuration/authn-subgraph) is available since router v1.27.0.
+
+Unfortunately this first version didn't work well with features that operate with the SubgraphService, for example:
+  - Subgraph APQ
+  - Subgraph HTTP compression
+  - Custom plugins that operate on the Subgraph level, written either via coprocessors, in rhai, or native.
+
+The router will now sign subgraph requests just before they are sent to subgraphs.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3735
+
+### Fix authenticated directive reporting ([PR #3753](https://github.com/apollographql/router/pull/3753))
+
+The context key for the `@authenticated` directive  only affects usage reporting
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3753
+
+### Handle multipart stream if the original stream is empty ([Issue #3293](https://github.com/apollographql/router/issues/3293))
+
+For subscription and defer, in case the multipart response stream is empty then it should end correctly.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3748
+
+### fix(subscription): add x-accel-buffering header for multipart response ([Issue #3683](https://github.com/apollographql/router/issues/3683))
+
+Set `x-accel-buffering` to `no` when it's a multipart response because proxies need this configuration.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3749
+
+## 🛠 Maintenance
+
+### Update rust toolchain to 1.72.0 ([PR #3707](https://github.com/apollographql/router/pull/3707))
+
+The router-bridge update now allows us to use the latest rust version.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3707
+
+### Add support GraphOS Cloud metrics ([Issue #3760](https://github.com/apollographql/router/issues/3760))
+
+Add support for GraphOS Cloud metrics in the Apollo OTLP Exporter.
+
+By [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollographql/router/pull/3761
+
+### Metadata cleanup ([PR #3746](https://github.com/apollographql/router/pull/3746))
+
+* remove unused patch entries in Cargo.toml
+* remove exemptions for the chrono security advisories (they are fixed now)
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3746
+
+### Replace atty crate with std ([PR #3729](https://github.com/apollographql/router/pull/3729))
+
+The crate is unmaintained, and the standard library has equivalent functionality since Rust 1.70.0
+
+* https://github.com/apollographql/router/security/dependabot/68 
+* https://doc.rust-lang.org/stable/std/io/trait.IsTerminal.html
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/3729
+
+### Add experimental caching metrics ([PR #3532](https://github.com/apollographql/router/pull/3532))
+
+It adds a metric only if you configure `telemetry.metrics.common.experimental_cache_metrics.enabled` to `true`. It will generate metrics to evaluate which entities would benefit from caching. It simulates a cache with a TTL, configurable at `telemetry.metrics.common.experimental_cache_metrics.ttl` (default: 5 seconds), and measures the cache hit rate per entity type and subgraph.
+
+example
+
+```
+# HELP apollo.router.operations.entity.cache_hit
+# TYPE apollo_router_operations_entity.cache_hit histogram
+apollo_router_operations_entity_cache_hitbucket{entity_type="Product",service_name="apollo-router",subgraph="products",otel_scope_name="apollo/router",otel_scope_version="",le="0.05"} 0
+apollo_router_operations_entity_cache_hitbucket{entity_type="Product",service_name="apollo-router",subgraph="products",otel_scope_name="apollo/router",otel_scope_version="",le="0.1"} 0
+apollo_router_operations_entity_cache_hitbucket{entity_type="Product",service_name="apollo-router",subgraph="products",otel_scope_name="apollo/router",otel_scope_version="",le="0.25"} 0
+apollo_router_operations_entity_cache_hitbucket{entity_type="Product",service_name="apollo-router",subgraph="products",otel_scope_name="apollo/router",otel_scope_version="",le="0.5"} 0
+apollo_router_operations_entity_cache_hitbucket{entity_type="Product",service_name="apollo-router",subgraph="products",otel_scope_name="apollo/router",otel_scope_version="",le="1"} 0
+apollo_router_operations_entity_cache_hitbucket{entity_type="Product",service_name="apollo-router",subgraph="products",otel_scope_name="apollo/router",otel_scope_version="",le="2.5"} 3
+apollo_router_operations_entity_cache_hitbucket{entity_type="Product",service_name="apollo-router",subgraph="products",otel_scope_name="apollo/router",otel_scope_version="",le="5"} 4
+apollo_router_operations_entity_cache_hitbucket{entity_type="Product",service_name="apollo-router",subgraph="products",otel_scope_name="apollo/router",otel_scope_version="",le="10"} 4
+apollo_router_operations_entity_cache_hitbucket{entity_type="Product",service_name="apollo-router",subgraph="products",otel_scope_name="apollo/router",otel_scope_version="",le="20"} 4
+apollo_router_operations_entity_cache_hitbucket{entity_type="Product",service_name="apollo-router",subgraph="products",otel_scope_name="apollo/router",otel_scope_version="",le="1000"} 4
+apollo_router_operations_entity_cache_hitbucket{entity_type="Product",service_name="apollo-router",subgraph="products",otel_scope_name="apollo/router",otel_scope_version="",le="+Inf"} 4
+apollo_router_operations_entity_cache_hitsum{entity_type="Product",service_name="apollo-router",subgraph="products",otel_scope_name="apollo/router",otel_scope_version=""} 7
+apollo_router_operations_entity_cache_hitcount{entity_type="Product",service_name="apollo-router",subgraph="products",otel_scope_name="apollo/router",otel_scope_version=""} 4
+apollo_router_operations_entity_cache_hitbucket{entity_type="User",service_name="apollo-router",subgraph="users",otel_scope_name="apollo/router",otel_scope_version="",le="0.05"} 0
+apollo_router_operations_entity_cache_hitbucket{entity_type="User",service_name="apollo-router",subgraph="users",otel_scope_name="apollo/router",otel_scope_version="",le="0.1"} 0
+apollo_router_operations_entity_cache_hitbucket{entity_type="User",service_name="apollo-router",subgraph="users",otel_scope_name="apollo/router",otel_scope_version="",le="0.25"} 0
+apollo_router_operations_entity_cache_hitbucket{entity_type="User",service_name="apollo-router",subgraph="users",otel_scope_name="apollo/router",otel_scope_version="",le="0.5"} 0
+apollo_router_operations_entity_cache_hitbucket{entity_type="User",service_name="apollo-router",subgraph="users",otel_scope_name="apollo/router",otel_scope_version="",le="1"} 0
+apollo_router_operations_entity_cache_hitbucket{entity_type="User",service_name="apollo-router",subgraph="users",otel_scope_name="apollo/router",otel_scope_version="",le="2.5"} 1
+apollo_router_operations_entity_cache_hitbucket{entity_type="User",service_name="apollo-router",subgraph="users",otel_scope_name="apollo/router",otel_scope_version="",le="5"} 1
+apollo_router_operations_entity_cache_hitbucket{entity_type="User",service_name="apollo-router",subgraph="users",otel_scope_name="apollo/router",otel_scope_version="",le="10"} 1
+apollo_router_operations_entity_cache_hitbucket{entity_type="User",service_name="apollo-router",subgraph="users",otel_scope_name="apollo/router",otel_scope_version="",le="20"} 1
+apollo_router_operations_entity_cache_hitbucket{entity_type="User",service_name="apollo-router",subgraph="users",otel_scope_name="apollo/router",otel_scope_version="",le="1000"} 1
+apollo_router_operations_entity_cache_hitbucket{entity_type="User",service_name="apollo-router",subgraph="users",otel_scope_name="apollo/router",otel_scope_version="",le="+Inf"} 1
+apollo_router_operations_entity_cache_hitsum{entity_type="User",service_name="apollo-router",subgraph="users",otel_scope_name="apollo/router",otel_scope_version=""} 1
+apollo_router_operations_entity_cache_hitcount{entity_type="User",service_name="apollo-router",subgraph="users",otel_scope_name="apollo/router",otel_scope_version=""} 1
+```
+
+By [@bnjjj](https://github.com/bnjjj) [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/3532
+
+### Upgrade webpki and rustls-webpki crates ([PR #3728](https://github.com/apollographql/router/pull/3728))
+
+Brings fixes for:
+
+* https://rustsec.org/advisories/RUSTSEC-2023-0052
+* https://rustsec.org/advisories/RUSTSEC-2023-0053
+
+Because Apollo Router does not accept client certificates, it could only be affected
+if a subgraph supplied a pathological TLS server certificate.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/3728
+
+## 📚 Documentation
+
+### GraphOS authorization: add an example of scope manipulation with router service level rhai ([PR #3719](https://github.com/apollographql/router/pull/3719))
+
+The router authorization directive `@requiresScopes` expects scopes to come from the `scope` claim in the OAuth2 access token format ( https://datatracker.ietf.org/doc/html/rfc6749#section-3.3 ). Some tokens may have scopes stored in a different way, like an array of strings, or even in different claims. This documents a way to extract the scopes and prepare them in the right format for consumption by `@requiresScopes`, ushing Rhai.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3719
+
+### Fix broken links
+
+This documentation change fixes an incorrect anchor link in the [CORS documentation](https://www.apollographql.com/docs/router/configuration/cors/) and removes links to authorization docs which have not yet been released. 
+
+By [@Meschreiber](https://github.com/Meschreiber) in https://github.com/apollographql/router/pull/3711
+
+
+
 # [1.29.1] - 2023-09-04
 
 ## 🚀 Features
