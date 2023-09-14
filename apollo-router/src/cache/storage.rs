@@ -187,7 +187,7 @@ where
     }
 }
 
-enum CacheStorageName {
+pub(crate) enum CacheStorageName {
     Redis,
     Memory,
 }

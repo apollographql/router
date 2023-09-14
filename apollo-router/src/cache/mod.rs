@@ -1,19 +1,23 @@
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::Instant;
 
-use tokio::sync::broadcast;
+use lru::LruCache;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
+use tokio::sync::OwnedRwLockWriteGuard;
+use tokio::sync::RwLock;
 
 use self::storage::CacheStorage;
 use self::storage::KeyType;
 use self::storage::ValueType;
+use crate::cache::storage::CacheStorageName;
 
 pub(crate) mod redis;
 pub(crate) mod storage;
 
-type WaitMap<K, V> = Arc<Mutex<HashMap<K, broadcast::Sender<V>>>>;
+type WaitMap<K, V> = Arc<Mutex<HashMap<K, Arc<RwLock<Option<V>>>>>>;
 pub(crate) const DEFAULT_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(512) {
     Some(v) => v,
     None => unreachable!(),
@@ -23,6 +27,8 @@ pub(crate) const DEFAULT_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(
 #[derive(Clone)]
 pub(crate) struct DeduplicatingCache<K: KeyType, V: ValueType> {
     wait_map: WaitMap<K, V>,
+    memory: Arc<Mutex<LruCache<K, V>>>,
+    caller: String,
     storage: CacheStorage<K, V>,
 }
 
@@ -38,6 +44,8 @@ where
     ) -> Self {
         Self {
             wait_map: Arc::new(Mutex::new(HashMap::new())),
+            memory: Arc::new(Mutex::new(LruCache::new(capacity))),
+            caller: caller.to_string(),
             storage: CacheStorage::new(capacity, redis_urls, caller).await,
         }
     }
@@ -55,24 +63,64 @@ where
     }
 
     pub(crate) async fn get(&self, key: &K) -> Entry<K, V> {
+        match self.get_in_memory(key).await {
+            Some(v) => Entry {
+                inner: EntryInner::Value(v),
+            },
+            None => self.get_dedup(key).await,
+        }
+    }
+
+    async fn get_in_memory(&self, key: &K) -> Option<V> {
+        let instant_memory = Instant::now();
+
+        match self.memory.lock().await.get(key).cloned() {
+            Some(v) => {
+                tracing::info!(
+                    monotonic_counter.apollo_router_cache_hit_count = 1u64,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                let duration = instant_memory.elapsed().as_secs_f64();
+                tracing::info!(
+                    histogram.apollo_router_cache_hit_time = duration,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                Some(v)
+            }
+            None => {
+                let duration = instant_memory.elapsed().as_secs_f64();
+                tracing::info!(
+                    histogram.apollo_router_cache_miss_time = duration,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                tracing::info!(
+                    monotonic_counter.apollo_router_cache_miss_count = 1u64,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                None
+            }
+        }
+    }
+
+    pub(crate) async fn get_dedup(&self, key: &K) -> Entry<K, V> {
         // waiting on a value from the cache is a potentially long(millisecond scale) task that
         // can involve a network call to an external database. To reduce the waiting time, we
         // go through a wait map to register interest in data associated with a key.
         // If the data is present, it is sent directly to all the tasks that were waiting for it.
         // If it is not present, the first task that requested it can perform the work to create
         // the data, store it in the cache and send the value to all the other tasks.
-        let mut locked_wait_map = self.wait_map.lock().await;
-        match locked_wait_map.get(key) {
-            Some(waiter) => {
+        match self.get_or_insert_wait_map(key).await {
+            Err(receiver) => {
                 // Register interest in key
-                let receiver = waiter.subscribe();
                 Entry {
                     inner: EntryInner::Receiver { receiver },
                 }
             }
-            None => {
-                let (sender, _receiver) = broadcast::channel(1);
-
+            Ok(sender) => {
                 let k = key.clone();
                 // when _drop_signal is dropped, either by getting out of the block, returning
                 // the error from ready_oneshot or by cancellation, the drop_sentinel future will
@@ -81,16 +129,8 @@ where
                 let wait_map = self.wait_map.clone();
                 tokio::task::spawn(async move {
                     let _ = drop_sentinel.await;
-                    let mut locked_wait_map = wait_map.lock().await;
-                    let _ = locked_wait_map.remove(&k);
+                    Self::remove_from_wait_map(&wait_map, &k).await;
                 });
-
-                locked_wait_map.insert(key.clone(), sender.clone());
-
-                // we must not hold a lock over the wait map while we are waiting for a value from the
-                // cache. This way, other tasks can come and register interest in the same key, or
-                // request other keys independently
-                drop(locked_wait_map);
 
                 if let Some(value) = self.storage.get(key).await {
                     self.send(sender, key, value.clone()).await;
@@ -112,16 +152,66 @@ where
         }
     }
 
+    #[allow(clippy::type_complexity)]
+    async fn get_or_insert_wait_map(
+        &self,
+        key: &K,
+    ) -> Result<OwnedRwLockWriteGuard<Option<V>>, Arc<RwLock<Option<V>>>> {
+        let mut locked_wait_map = self.wait_map.lock().await;
+        match locked_wait_map.get_mut(key) {
+            Some(waiter) => {
+                // Register interest in key
+                let receiver = waiter.clone();
+                drop(locked_wait_map);
+
+                Err(receiver)
+            }
+            None => {
+                let value = Arc::new(RwLock::new(None));
+                let w = value
+                    .clone()
+                    .try_write_owned()
+                    .expect("the RwLock was just created");
+
+                locked_wait_map.insert(key.clone(), value);
+                drop(locked_wait_map);
+
+                Ok(w)
+            }
+        }
+    }
+
+    async fn remove_from_wait_map(wait_map: &WaitMap<K, V>, key: &K) {
+        let mut locked_wait_map = wait_map.lock().await;
+        let _ = locked_wait_map.remove(key);
+    }
+
     pub(crate) async fn insert(&self, key: K, value: V) {
+        self.insert_in_memory(key.clone(), value.clone()).await;
+
         self.storage.insert(key, value).await;
     }
 
-    async fn send(&self, sender: broadcast::Sender<V>, key: &K, value: V) {
+    async fn insert_in_memory(&self, key: K, value: V) {
+        let size = {
+            let mut in_memory = self.memory.lock().await;
+            in_memory.put(key, value);
+            in_memory.len() as u64
+        };
+        tracing::info!(
+            value.apollo_router_cache_size = size,
+            kind = %self.caller,
+            storage = &tracing::field::display(CacheStorageName::Memory),
+        );
+    }
+
+    async fn send(&self, mut sender: OwnedRwLockWriteGuard<Option<V>>, key: &K, value: V) {
+        *sender = Some(value);
+        drop(sender);
+
         // Lock the wait map to prevent more subscribers racing with our send
         // notification
-        let mut locked_wait_map = self.wait_map.lock().await;
-        let _ = locked_wait_map.remove(key);
-        let _ = sender.send(value);
+        Self::remove_from_wait_map(&self.wait_map, key).await;
     }
 
     pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
@@ -135,20 +225,20 @@ pub(crate) struct Entry<K: KeyType, V: ValueType> {
 enum EntryInner<K: KeyType, V: ValueType> {
     First {
         key: K,
-        sender: broadcast::Sender<V>,
+        sender: OwnedRwLockWriteGuard<Option<V>>,
         cache: DeduplicatingCache<K, V>,
         _drop_signal: oneshot::Sender<()>,
     },
     Receiver {
-        receiver: broadcast::Receiver<V>,
+        receiver: Arc<RwLock<Option<V>>>,
     },
     Value(V),
 }
 
 #[derive(Debug)]
 pub(crate) enum EntryError {
-    Closed,
     IsFirst,
+    NoValue,
 }
 
 impl<K, V> Entry<K, V>
@@ -164,8 +254,9 @@ where
         match self.inner {
             // there was already a value in cache
             EntryInner::Value(v) => Ok(v),
-            EntryInner::Receiver { mut receiver } => {
-                receiver.recv().await.map_err(|_| EntryError::Closed)
+            EntryInner::Receiver { receiver } => {
+                let r = receiver.read().await;
+                (*r).clone().ok_or(EntryError::NoValue)
             }
             _ => Err(EntryError::IsFirst),
         }
@@ -191,7 +282,7 @@ where
             sender, cache, key, ..
         } = self.inner
         {
-            cache.send(sender, &key, value).await;
+            cache.send(sender, &key, value);
         }
     }
 }

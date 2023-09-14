@@ -249,8 +249,44 @@ expression: get_spans()
                         "memory"
                       ],
                       [
+                        "histogram.apollo_router_cache_miss_time",
+                        "[REDACTED]"
+                      ],
+                      [
+                        "kind",
+                        "query planner"
+                      ],
+                      [
+                        "storage",
+                        "memory"
+                      ],
+                      [
+                        "monotonic_counter.apollo_router_cache_miss_count",
+                        1
+                      ],
+                      [
+                        "kind",
+                        "query planner"
+                      ],
+                      [
+                        "storage",
+                        "memory"
+                      ],
+                      [
                         "histogram.apollo_router_query_planning_time",
                         "[REDACTED]"
+                      ],
+                      [
+                        "value.apollo_router_cache_size",
+                        1
+                      ],
+                      [
+                        "kind",
+                        "query planner"
+                      ],
+                      [
+                        "storage",
+                        "memory"
                       ],
                       [
                         "value.apollo_router_cache_size",

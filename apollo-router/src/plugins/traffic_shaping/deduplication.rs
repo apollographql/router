@@ -7,10 +7,10 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
-use futures::lock::Mutex;
-use tokio::sync::broadcast::Sender;
-use tokio::sync::broadcast::{self};
 use tokio::sync::oneshot;
+use tokio::sync::Mutex;
+use tokio::sync::OwnedRwLockWriteGuard;
+use tokio::sync::RwLock;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceExt;
@@ -38,7 +38,8 @@ where
 
 type CacheKey = (http_ext::Request<Request>, CacheKeyMetadata);
 
-type WaitMap = Arc<Mutex<HashMap<CacheKey, Sender<Result<CloneSubgraphResponse, String>>>>>;
+type WaitMap =
+    Arc<Mutex<HashMap<CacheKey, Arc<RwLock<Option<Result<CloneSubgraphResponse, String>>>>>>>;
 
 struct CloneSubgraphResponse(SubgraphResponse);
 
@@ -74,27 +75,14 @@ where
         request: SubgraphRequest,
     ) -> Result<SubgraphResponse, BoxError> {
         loop {
-            let mut locked_wait_map = wait_map.lock().await;
-            let cache_key = (
-                (&request.subgraph_request).into(),
-                request
-                    .context
-                    .private_entries
-                    .lock()
-                    .get::<CacheKeyMetadata>()
-                    .cloned()
-                    .unwrap_or_default(),
-            );
-
-            match locked_wait_map.get_mut(&cache_key) {
-                Some(waiter) => {
-                    // Register interest in key
-                    let mut receiver = waiter.subscribe();
-                    drop(locked_wait_map);
-
-                    match receiver.recv().await {
-                        Ok(value) => {
-                            return value
+            match get_or_insert_wait_map(&wait_map, &request).await {
+                Err(receiver) => {
+                    let r = receiver.read().await;
+                    match (*r).clone() {
+                        // there was an issue with the initial request, retry fetching
+                        None => continue,
+                        Some(res) => {
+                            return res
                                 .map(|response| {
                                     SubgraphResponse::new_from_response(
                                         response.0.response,
@@ -103,16 +91,9 @@ where
                                 })
                                 .map_err(|e| e.into())
                         }
-                        // there was an issue with the broadcast channel, retry fetching
-                        Err(_) => continue,
                     }
                 }
-                None => {
-                    let (tx, _rx) = broadcast::channel(1);
-
-                    locked_wait_map.insert(cache_key, tx.clone());
-                    drop(locked_wait_map);
-
+                Ok(mut tx) => {
                     let context = request.context.clone();
                     let cache_key = (
                         (&request.subgraph_request).into(),
@@ -131,6 +112,7 @@ where
                         let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
                         tokio::task::spawn(async move {
                             let _ = drop_sentinel.await;
+
                             let mut locked_wait_map = wait_map.lock().await;
                             locked_wait_map.remove(&cache_key);
                         });
@@ -151,16 +133,56 @@ where
 
                     // We may get errors here, for instance if a task is cancelled,
                     // so just ignore the result of send
-                    let _ = tokio::task::spawn_blocking(move || {
-                        tx.send(broadcast_value)
-                    }).await
-                    .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");
+                    //let _ = tx.send(Some(broadcast_value));
+                    *tx = Some(broadcast_value);
 
                     return res.map(|response| {
                         SubgraphResponse::new_from_response(response.0.response, context)
                     });
                 }
             }
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+async fn get_or_insert_wait_map(
+    wait_map: &WaitMap,
+    request: &SubgraphRequest,
+) -> Result<
+    OwnedRwLockWriteGuard<Option<Result<CloneSubgraphResponse, String>>>,
+    Arc<RwLock<Option<Result<CloneSubgraphResponse, String>>>>,
+> {
+    let cache_key = (
+        (&request.subgraph_request).into(),
+        request
+            .context
+            .private_entries
+            .lock()
+            .get::<CacheKeyMetadata>()
+            .cloned()
+            .unwrap_or_default(),
+    );
+    let mut locked_wait_map = wait_map.lock().await;
+    match locked_wait_map.get(&cache_key) {
+        Some(waiter) => {
+            // Register interest in key
+            let receiver = waiter.clone();
+            drop(locked_wait_map);
+
+            Err(receiver)
+        }
+        None => {
+            let value = Arc::new(RwLock::new(None));
+            let w = value
+                .clone()
+                .try_write_owned()
+                .expect("the lock was just created");
+
+            locked_wait_map.insert(cache_key, value);
+            drop(locked_wait_map);
+
+            Ok(w)
         }
     }
 }
