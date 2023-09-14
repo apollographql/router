@@ -13,6 +13,7 @@ use std::marker::PhantomData;
 use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::task::Poll;
 
 use futures::future::BoxFuture;
 use futures::Future;
@@ -121,10 +122,11 @@ where
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner
-            .as_mut()
-            .expect("One shot must only be called once")
-            .poll_ready(cx)
+        // Return an error if we no longer have an inner service
+        match self.inner.as_mut() {
+            Some(inner) => inner.poll_ready(cx),
+            None => Poll::Ready(Err("One shot must only be called once".into())),
+        }
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
@@ -444,6 +446,38 @@ mod async_checkpoint_tests {
             .unwrap();
 
         assert_eq!(actual_label, expected_label)
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn test_service_builder_buffered_oneshot() {
+        let expected_label = "from_mock_service";
+
+        let mut execution_service = MockExecutionService::new();
+        execution_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: ExecutionRequest| {
+                Ok(ExecutionResponse::fake_builder()
+                    .label(expected_label.to_string())
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+
+        let mut service_stack = ServiceBuilder::new()
+            .oneshot_checkpoint_async(|req: ExecutionRequest| async {
+                Ok(ControlFlow::Continue(req))
+            })
+            .buffered()
+            .service(execution_service);
+
+        let request = ExecutionRequest::fake_builder().build();
+        let request_again = ExecutionRequest::fake_builder().build();
+
+        let _ = service_stack.call(request).await.unwrap();
+        // Trying to use the service again should cause a panic
+        let _ = service_stack.call(request_again).await.unwrap();
     }
 
     #[tokio::test]
