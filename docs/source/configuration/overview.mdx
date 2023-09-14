@@ -616,13 +616,13 @@ tls:
     all:
       client_authentication:
         certificate_chain: ${file./path/to/certificate_chain.pem}
-        key: ${file./path/to/key.pem}
+        private_key: ${file./path/to/key.pem}
     # Override global setting for individual subgraphs
     subgraphs:
       products:
         client_authentication:
           certificate_chain: ${file./path/to/certificate_chain.pem}
-          key: ${file./path/to/key.pem}
+          private_key: ${file./path/to/key.pem}
 ```
 
 ### Request limits
