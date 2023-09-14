@@ -92,6 +92,7 @@ mod test {
     use crate::plugin::DynPlugin;
     use crate::query_planner::BridgeQueryPlanner;
     use crate::router_factory::create_plugins;
+    use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::services::router;
     use crate::services::router_service::RouterCreator;
@@ -214,6 +215,7 @@ mod test {
 
         RouterCreator::new(
             QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
+            Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
             Arc::new(supergraph_creator),
             Arc::new(Configuration::default()),
         )

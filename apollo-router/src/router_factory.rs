@@ -217,7 +217,11 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     );
 
                     supergraph_creator
-                        .warm_up_query_planner(&query_analysis_layer, cache_keys)
+                        .warm_up_query_planner(
+                            &query_analysis_layer,
+                            &persisted_query_layer,
+                            cache_keys,
+                        )
                         .await;
                 }
             }

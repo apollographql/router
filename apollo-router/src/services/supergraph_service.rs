@@ -28,6 +28,7 @@ use tracing_futures::Instrument;
 use super::execution::QueryPlan;
 use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use super::layers::content_negotiation;
+use super::layers::persisted_queries::PersistedQueryLayer;
 use super::layers::query_analysis::Compiler;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
