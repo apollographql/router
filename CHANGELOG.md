@@ -8,7 +8,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Preliminary Rhai Support at the `router_service` ([Issue #2278](https://github.com/apollographql/router/issues/2278))
+### Rhai Support at the `router_service` ([Issue #2278](https://github.com/apollographql/router/issues/2278))
 
 It is now possible to interact with some aspects of requests and responses at the `router_service` level [using Rhai-based customizations](https://www.apollographql.com/docs/router/customizations/rhai/). The functionality is very similar to that provided for interacting with existing services, for example `supergraph_service`. For instance, you may "map" requests and responses as follows:
 
