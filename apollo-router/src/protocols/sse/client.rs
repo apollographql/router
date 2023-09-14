@@ -448,9 +448,7 @@ where
                 // New immediately transitions to Connecting, and exists only
                 // to ensure that we only connect when polled.
                 StateProj::New => {
-                    let timeout = self
-                        .read_timeout
-                        .map(|duration| tokio::time::sleep(duration));
+                    let timeout = self.read_timeout.map(tokio::time::sleep);
                     *self.as_mut().project().event_parser = EventParser::new();
                     match self.send_request() {
                         Ok(resp) => {
@@ -474,9 +472,7 @@ where
                     match self.send_request() {
                         Ok(resp) => {
                             let retry = self.props.reconnect_opts.reconnect;
-                            let timeout = self
-                                .read_timeout
-                                .map(|duration| tokio::time::sleep(duration));
+                            let timeout = self.read_timeout.map(tokio::time::sleep);
                             self.as_mut().project().state.set(State::Connecting {
                                 resp,
                                 retry,
