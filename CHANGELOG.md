@@ -30,12 +30,12 @@ As another example, this logs the bodies of requests:
 ```rust
 // Generate a log for each request at this stage
 fn process_request(request) {
-    print(`body: `);
+    print(`body: ${request.body}`);
 }
 
 // Generate a log for each response at this stage
 fn process_response(response) {
-    print(`body: `);
+    print(`body: ${response.body}`);
 }
 ```
 
