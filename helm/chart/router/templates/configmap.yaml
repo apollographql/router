@@ -9,6 +9,9 @@ metadata:
   name: {{ $routerFullName }}
   labels:
     {{- include "router.labels" . | nindent 4 }}
+    {{- if .Values.extraLabels }}
+    {{- include "common.templatizeExtraLabels" . | trim | nindent 4 }}
+    {{- end }}
 data:
   configuration.yaml: |
     {{- toYaml $configuration | nindent 4 }}

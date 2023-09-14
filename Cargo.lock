@@ -285,7 +285,7 @@ dependencies = [
  "buildstructor 0.5.3",
  "bytes",
  "ci_info",
- "clap 4.4.2",
+ "clap 4.4.3",
  "console-subscriber",
  "dashmap",
  "derivative",
@@ -332,6 +332,7 @@ dependencies = [
  "nu-ansi-term 0.49.0",
  "once_cell",
  "opentelemetry",
+ "opentelemetry-aws",
  "opentelemetry-datadog",
  "opentelemetry-http",
  "opentelemetry-jaeger",
@@ -380,7 +381,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.24.1",
  "tokio-stream",
- "tokio-tungstenite 0.18.0",
+ "tokio-tungstenite",
  "tokio-util",
  "toml 0.7.6",
  "tonic 0.8.3",
@@ -429,7 +430,7 @@ version = "1.29.1"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
- "clap 4.4.2",
+ "clap 4.4.3",
  "copy_dir",
  "regex",
  "str_inflector",
@@ -972,7 +973,7 @@ dependencies = [
  "sha1 0.10.5",
  "sync_wrapper",
  "tokio",
- "tokio-tungstenite 0.20.0",
+ "tokio-tungstenite",
  "tower",
  "tower-layer",
  "tower-service",
@@ -1346,9 +1347,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.4.2"
+version = "4.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a13b88d2c62ff462f88e4a121f17a82c1af05693a2f192b5c38d14de73c19f6"
+checksum = "84ed82781cea27b43c9b106a979fe450a13a31aab0500595fb3fc06616de08e6"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1666,7 +1667,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.4.2",
+ "clap 4.4.3",
  "criterion-plot",
  "futures",
  "is-terminal",
@@ -4081,6 +4082,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry-aws"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72a394d24777936802edd6c03a68daab4db39630418c7e431a5648e9befa80b8"
+dependencies = [
+ "once_cell",
+ "opentelemetry",
+]
+
+[[package]]
 name = "opentelemetry-datadog"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5580,9 +5591,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.106"
+version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cc66a619ed80bf7a0f6b17dd063a84b88f6dea1813737cf469aef1d081142c2"
+checksum = "6b420ce6e3d8bd882e9b243c6eed35dbc9a6110c9769e74b584e0d68d1f20c65"
 dependencies = [
  "indexmap 2.0.0",
  "itoa",
@@ -6376,30 +6387,17 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54319c93411147bced34cb5609a80e0a8e44c5999c93903a81cd866630ec0bfd"
-dependencies = [
- "futures-util",
- "log",
- "rustls 0.20.8",
- "rustls-native-certs",
- "tokio",
- "tokio-rustls 0.23.4",
- "tungstenite 0.18.0",
- "webpki",
-]
-
-[[package]]
-name = "tokio-tungstenite"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b2dbec703c26b00d74844519606ef15d09a7d6857860f84ad223dec002ddea2"
 dependencies = [
  "futures-util",
  "log",
+ "rustls 0.21.6",
+ "rustls-native-certs",
  "tokio",
- "tungstenite 0.20.0",
+ "tokio-rustls 0.24.1",
+ "tungstenite",
 ]
 
 [[package]]
@@ -6780,27 +6778,6 @@ dependencies = [
 
 [[package]]
 name = "tungstenite"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30ee6ab729cd4cf0fd55218530c4522ed30b7b6081752839b68fcec8d0960788"
-dependencies = [
- "base64 0.13.1",
- "byteorder",
- "bytes",
- "http",
- "httparse",
- "log",
- "rand 0.8.5",
- "rustls 0.20.8",
- "sha1 0.10.5",
- "thiserror",
- "url",
- "utf-8",
- "webpki",
-]
-
-[[package]]
-name = "tungstenite"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e862a1c4128df0112ab625f55cd5c934bcb4312ba80b39ae4b4835a3fd58e649"
@@ -6812,6 +6789,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.8.5",
+ "rustls 0.21.6",
  "sha1 0.10.5",
  "thiserror",
  "url",
