@@ -522,7 +522,7 @@ impl RouterService {
             0,
             SupergraphRequest {
                 supergraph_request: sg,
-                context: context.clone(),
+                context,
             },
         );
         Ok(results)
