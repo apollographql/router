@@ -85,6 +85,7 @@ expression: "&schema"
                   "properties": {
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
@@ -1898,6 +1899,7 @@ expression: "&schema"
                   "properties": {
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
@@ -5504,6 +5506,7 @@ expression: "&schema"
           "properties": {
             "timeout": {
               "description": "Redis request timeout (default: 2ms)",
+              "default": null,
               "type": "string",
               "nullable": true
             },
