@@ -1,6 +1,4 @@
-use std::any::Any;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use ::serde::Deserialize;
 use access_json::JSONQuery;
@@ -8,9 +6,9 @@ use http::header::HeaderName;
 use http::response::Parts;
 use http::HeaderMap;
 use multimap::MultiMap;
-use opentelemetry::metrics::Counter;
-use opentelemetry::metrics::Histogram;
-use opentelemetry::metrics::MeterProvider;
+use opentelemetry::sdk::metrics::reader::AggregationSelector;
+use opentelemetry::sdk::metrics::Aggregation;
+use opentelemetry::sdk::metrics::InstrumentKind;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -25,25 +23,14 @@ use crate::plugin::serde::deserialize_regex;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::aggregation::AggregateMeterProvider;
 use crate::router_factory::Endpoint;
 use crate::Context;
 use crate::ListenAddr;
 
-pub(crate) mod aggregation;
 pub(crate) mod apollo;
-pub(crate) mod filter;
-pub(crate) mod layer;
 pub(crate) mod otlp;
 pub(crate) mod prometheus;
 pub(crate) mod span_metrics_exporter;
-
-pub(crate) const METRIC_PREFIX_MONOTONIC_COUNTER: &str = "monotonic_counter.";
-pub(crate) const METRIC_PREFIX_COUNTER: &str = "counter.";
-pub(crate) const METRIC_PREFIX_HISTOGRAM: &str = "histogram.";
-pub(crate) const METRIC_PREFIX_VALUE: &str = "value.";
-
-pub(crate) type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -489,51 +476,11 @@ impl AttributesForwardConf {
 
 #[derive(Default)]
 pub(crate) struct MetricsBuilder {
-    exporters: Vec<MetricsExporterHandle>,
-    meter_providers: Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>,
-    custom_endpoints: MultiMap<ListenAddr, Endpoint>,
-    apollo_metrics: Sender,
-}
-
-impl MetricsBuilder {
-    pub(crate) fn exporters(&mut self) -> Vec<MetricsExporterHandle> {
-        std::mem::take(&mut self.exporters)
-    }
-    pub(crate) fn meter_provider(&mut self) -> AggregateMeterProvider {
-        AggregateMeterProvider::new(std::mem::take(&mut self.meter_providers))
-    }
-    pub(crate) fn custom_endpoints(&mut self) -> MultiMap<ListenAddr, Endpoint> {
-        std::mem::take(&mut self.custom_endpoints)
-    }
-
-    pub(crate) fn apollo_metrics_provider(&mut self) -> Sender {
-        self.apollo_metrics.clone()
-    }
-}
-
-impl MetricsBuilder {
-    fn with_exporter<T: Send + Sync + 'static>(mut self, handle: T) -> Self {
-        self.exporters.push(Box::new(handle));
-        self
-    }
-
-    fn with_meter_provider<T: MeterProvider + Send + Sync + 'static>(
-        mut self,
-        meter_provider: T,
-    ) -> Self {
-        self.meter_providers.push(Arc::new(meter_provider));
-        self
-    }
-
-    fn with_custom_endpoint(mut self, listen_addr: ListenAddr, endpoint: Endpoint) -> Self {
-        self.custom_endpoints.insert(listen_addr, endpoint);
-        self
-    }
-
-    fn with_apollo_metrics_collector(mut self, apollo_metrics: Sender) -> Self {
-        self.apollo_metrics = apollo_metrics;
-        self
-    }
+    pub(crate) public_meter_provider_builder: opentelemetry::sdk::metrics::MeterProviderBuilder,
+    pub(crate) apollo_meter_provider_builder: opentelemetry::sdk::metrics::MeterProviderBuilder,
+    pub(crate) prometheus_meter_provider: Option<opentelemetry::sdk::metrics::MeterProvider>,
+    pub(crate) custom_endpoints: MultiMap<ListenAddr, Endpoint>,
+    pub(crate) apollo_metrics_sender: Sender,
 }
 
 pub(crate) trait MetricsConfigurator {
@@ -544,24 +491,38 @@ pub(crate) trait MetricsConfigurator {
     ) -> Result<MetricsBuilder, BoxError>;
 }
 
-#[derive(Clone)]
-pub(crate) struct BasicMetrics {
-    pub(crate) http_requests_total: Counter<u64>,
-    pub(crate) http_requests_duration: Histogram<f64>,
+#[derive(Clone, Default, Debug)]
+pub(crate) struct CustomAggregationSelector {
+    boundaries: Vec<f64>,
+    record_min_max: bool,
 }
 
-impl BasicMetrics {
-    pub(crate) fn new(meter_provider: &impl MeterProvider) -> BasicMetrics {
-        let meter = meter_provider.meter("apollo/router");
-        BasicMetrics {
-            http_requests_total: meter
-                .u64_counter("apollo_router_http_requests_total")
-                .with_description("Total number of HTTP requests made.")
-                .init(),
-            http_requests_duration: meter
-                .f64_histogram("apollo_router_http_request_duration_seconds")
-                .with_description("Duration of HTTP requests.")
-                .init(),
+#[buildstructor::buildstructor]
+impl CustomAggregationSelector {
+    #[builder]
+    pub(crate) fn new(
+        boundaries: Vec<f64>,
+        record_min_max: Option<bool>,
+    ) -> CustomAggregationSelector {
+        Self {
+            boundaries,
+            record_min_max: record_min_max.unwrap_or(true),
+        }
+    }
+}
+
+impl AggregationSelector for CustomAggregationSelector {
+    fn aggregation(&self, kind: InstrumentKind) -> Aggregation {
+        match kind {
+            InstrumentKind::Counter
+            | InstrumentKind::UpDownCounter
+            | InstrumentKind::ObservableCounter
+            | InstrumentKind::ObservableUpDownCounter => Aggregation::Sum,
+            InstrumentKind::ObservableGauge => Aggregation::LastValue,
+            InstrumentKind::Histogram => Aggregation::ExplicitBucketHistogram {
+                boundaries: self.boundaries.clone(),
+                record_min_max: self.record_min_max,
+            },
         }
     }
 }
