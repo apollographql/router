@@ -866,8 +866,8 @@ pub(crate) struct RedisCache {
     /// List of URLs to the Redis cluster
     pub(crate) urls: Vec<url::Url>,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
-    #[schemars(with = "Option<String>")]
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
     /// Redis request timeout (default: 2ms)
     pub(crate) timeout: Option<Duration>,
 }
