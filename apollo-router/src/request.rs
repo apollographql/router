@@ -197,7 +197,7 @@ impl Request {
                 result.push(Request::process_value(entry)?);
             }
         } else {
-            result.push(Request::process_value(&value)?)
+            result.push(Request::process_value(value)?)
         }
         Ok(result)
     }

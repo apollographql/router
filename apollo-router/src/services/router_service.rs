@@ -439,7 +439,7 @@ impl RouterService {
                                 return Err((
                                 StatusCode::BAD_REQUEST,
                                 "batching not enabled",
-                                format!("batching not enabled"),
+                                "batching not enabled".to_string(),
                                 ));
                             }
                         }
@@ -512,7 +512,7 @@ impl RouterService {
                                 return Err((
                                 StatusCode::BAD_REQUEST,
                                 "batching not enabled",
-                                format!("batching not enabled"),
+                                "batching not enabled".to_string(),
                                 ));
                             }
                             }

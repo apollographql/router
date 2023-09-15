@@ -369,6 +369,7 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
+        batching: Option<Batching>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -391,6 +392,7 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             preview_persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
+            batching: batching.unwrap_or_default(),
         };
 
         configuration.validate()
