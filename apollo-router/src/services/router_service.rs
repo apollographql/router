@@ -373,9 +373,8 @@ impl RouterService {
                 }
             }
         }
-        // XXX Need some logic here to make a single result from results. For now, just pop off the
-        // first result
-        // Can we just grab the bodies of all of the responses and string them together?
+        // If we only have one result, go ahead and return it. Otherwise, create a new result
+        // which is an array of all results.
         if results.len() == 1 {
             Ok(results.pop().expect("should be at least one response"))
         } else {
