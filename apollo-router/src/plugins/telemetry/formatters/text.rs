@@ -17,6 +17,8 @@ use tracing_subscriber::fmt::time::SystemTime;
 use tracing_subscriber::fmt::FmtContext;
 use tracing_subscriber::registry::LookupSpan;
 
+use crate::plugins::telemetry::reload::IsSampled;
+
 #[derive(Debug, Clone)]
 pub(crate) struct TextFormatter {
     pub(crate) timer: SystemTime,
@@ -185,7 +187,11 @@ impl TextFormatter {
                     }
                     writer.write_char(' ')?;
                 }
-                None => eprintln!("Unable to find OtelData in extensions; this is a bug"),
+                None => {
+                    if span.is_sampled() {
+                        eprintln!("Unable to find OtelData in extensions; this is a bug");
+                    }
+                }
             }
         }
 
