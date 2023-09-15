@@ -80,13 +80,13 @@ expression: "&schema"
                   "default": null,
                   "type": "object",
                   "required": [
-                    "timeout",
                     "urls"
                   ],
                   "properties": {
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
-                      "type": "string"
+                      "type": "string",
+                      "nullable": true
                     },
                     "urls": {
                       "description": "List of URLs to the Redis cluster",
@@ -1893,13 +1893,13 @@ expression: "&schema"
                   "default": null,
                   "type": "object",
                   "required": [
-                    "timeout",
                     "urls"
                   ],
                   "properties": {
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
-                      "type": "string"
+                      "type": "string",
+                      "nullable": true
                     },
                     "urls": {
                       "description": "List of URLs to the Redis cluster",
@@ -5499,13 +5499,13 @@ expression: "&schema"
           "default": null,
           "type": "object",
           "required": [
-            "timeout",
             "urls"
           ],
           "properties": {
             "timeout": {
               "description": "Redis request timeout (default: 2ms)",
-              "type": "string"
+              "type": "string",
+              "nullable": true
             },
             "urls": {
               "description": "List of URLs to the Redis cluster",
