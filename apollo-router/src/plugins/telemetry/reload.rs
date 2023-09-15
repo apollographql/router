@@ -254,7 +254,7 @@ where
     }
 }
 
-pub(crate) struct SampledSpan;
+struct SampledSpan;
 
 pub(crate) trait IsSampled {
     fn is_sampled(&self) -> bool;
