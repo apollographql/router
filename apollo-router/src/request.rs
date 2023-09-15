@@ -168,24 +168,10 @@ impl Request {
     pub(crate) fn batch_from_urlencoded_query(
         url_encoded_query: String,
     ) -> Result<Vec<Request>, serde_json::Error> {
-        let urldecoded: serde_json::Value =
-            serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
-                .map_err(serde_json::Error::custom)?;
+        let value: serde_json::Value = serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
+            .map_err(serde_json::Error::custom)?;
 
-        let mut result = vec![];
-
-        // XXX Also need to check if batch encoded is supported in config
-        if urldecoded.is_array() {
-            for entry in urldecoded
-                .as_array()
-                .expect("We already checked that it was an array")
-            {
-                result.push(Request::process_value(entry)?);
-            }
-        } else {
-            result.push(Request::process_value(&urldecoded)?)
-        }
-        Ok(result)
+        Request::process_values(&value)
     }
 
     /// Convert Bytes into a GraphQL [`Request`].
@@ -196,6 +182,10 @@ impl Request {
         let value: serde_json::Value =
             serde_json::from_slice(bytes).map_err(serde_json::Error::custom)?;
 
+        Request::process_values(&value)
+    }
+
+    fn process_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
         let mut result = vec![];
 
         // XXX Also need to check if batch encoded is supported in config
