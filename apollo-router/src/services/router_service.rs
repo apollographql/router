@@ -45,6 +45,7 @@ use super::SupergraphCreator;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
 use super::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
 use crate::cache::DeduplicatingCache;
+use crate::configuration::Batching;
 use crate::graphql;
 use crate::http_ext;
 #[cfg(test)]
@@ -72,6 +73,7 @@ pub(crate) struct RouterService {
     persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     experimental_http_max_request_bytes: usize,
+    batching: Batching,
 }
 
 impl RouterService {
@@ -81,6 +83,7 @@ impl RouterService {
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         experimental_http_max_request_bytes: usize,
+        batching: Batching,
     ) -> Self {
         RouterService {
             supergraph_creator,
@@ -88,6 +91,7 @@ impl RouterService {
             persisted_query_layer,
             query_analysis_layer,
             experimental_http_max_request_bytes,
+            batching,
         }
     }
 }
@@ -423,6 +427,7 @@ impl RouterService {
                         Err(_err) => {
                             // It may be a batch of requests, so try that (if config allows) before
                             // erroring out
+                            if self.batching.enabled && self.batching.mode == "batch_http_link" {
                             result = graphql::Request::batch_from_urlencoded_query(q.to_string()).map_err(|e| {
                             (
                                 StatusCode::BAD_REQUEST,
@@ -430,9 +435,16 @@ impl RouterService {
                                 format!("failed to decode a valid GraphQL request from path {e}"),
                             )
                         })?;
+                            } else {
+                                return Err((
+                                StatusCode::BAD_REQUEST,
+                                "batching not enabled",
+                                format!("batching not enabled"),
+                                ));
+                            }
                         }
                     };
-                            Ok(result)
+                    Ok(result)
                 })
                 .unwrap_or_else(|| {
                     Err((
@@ -486,6 +498,7 @@ impl RouterService {
                                 result.push(request);
                             },
                             Err(_err) => {
+                            if self.batching.enabled && self.batching.mode == "batch_http_link" {
                                 result = graphql::Request::batch_from_bytes(&bytes).map_err(|e| {
                                 (
                                     StatusCode::BAD_REQUEST,
@@ -495,6 +508,13 @@ impl RouterService {
                                     )
                                 )
                                 })?;
+                            } else {
+                                return Err((
+                                StatusCode::BAD_REQUEST,
+                                "batching not enabled",
+                                format!("batching not enabled"),
+                                ));
+                            }
                             }
                         };
                         Ok(result)
@@ -546,6 +566,7 @@ pub(crate) struct RouterCreator {
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     experimental_http_max_request_bytes: usize,
+    batching: Batching,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -599,6 +620,7 @@ impl RouterCreator {
                 .limits
                 .experimental_http_max_request_bytes,
             persisted_query_layer,
+            batching: configuration.batching.clone(),
         })
     }
 
@@ -616,6 +638,7 @@ impl RouterCreator {
             self.persisted_query_layer.clone(),
             self.query_analysis_layer.clone(),
             self.experimental_http_max_request_bytes,
+            self.batching.clone(),
         ));
 
         ServiceBuilder::new()

@@ -186,6 +186,10 @@ pub struct Configuration {
 
     #[serde(default, skip_serializing, skip_deserializing)]
     pub(crate) notify: Notify<String, graphql::Response>,
+
+    /// Batching configuration.
+    #[serde(default)]
+    pub(crate) batching: Batching,
 }
 
 impl PartialEq for Configuration {
@@ -235,6 +239,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: Limits,
             experimental_chaos: Chaos,
             experimental_graphql_validation_mode: GraphQLValidationMode,
+            batching: Batching,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -253,6 +258,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .chaos(ad_hoc.experimental_chaos)
             .uplink(ad_hoc.uplink)
             .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
+            .batching(ad_hoc.batching)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -289,6 +295,7 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
+        batching: Option<Batching>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -323,6 +330,7 @@ impl Configuration {
             },
             tls: tls.unwrap_or_default(),
             uplink,
+            batching: batching.unwrap_or_default(),
             #[cfg(test)]
             notify: notify.unwrap_or_default(),
             #[cfg(not(test))]
@@ -1249,4 +1257,16 @@ fn default_graphql_path() -> String {
 
 fn default_graphql_introspection() -> bool {
     false
+}
+
+/// Configuration for Batching
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct Batching {
+    /// Activates Batching (disabled by default)
+    pub(crate) enabled: bool,
+
+    #[serde(default)]
+    pub(crate) mode: String,
 }
