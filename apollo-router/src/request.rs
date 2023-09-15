@@ -165,27 +165,68 @@ impl Request {
     ///
     /// An error will be produced in the event that the query string parameters
     /// cannot be turned into a valid GraphQL `Request`.
-    pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
+    pub(crate) fn batch_from_urlencoded_query(
+        url_encoded_query: String,
+    ) -> Result<Vec<Request>, serde_json::Error> {
         let urldecoded: serde_json::Value =
             serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
                 .map_err(serde_json::Error::custom)?;
 
-        let operation_name = if let Some(serde_json::Value::String(operation_name)) =
-            urldecoded.get("operationName")
-        {
-            Some(operation_name.clone())
-        } else {
-            None
-        };
+        let mut result = vec![];
 
-        let query = if let Some(serde_json::Value::String(query)) = urldecoded.get("query") {
+        // XXX Also need to check if batch encoded is supported in config
+        if urldecoded.is_array() {
+            for entry in urldecoded
+                .as_array()
+                .expect("We already checked that it was an array")
+            {
+                result.push(Request::process_value(entry)?);
+            }
+        } else {
+            result.push(Request::process_value(&urldecoded)?)
+        }
+        Ok(result)
+    }
+
+    /// Convert Bytes into a GraphQL [`Request`].
+    ///
+    /// An error will be produced in the event that the query string parameters
+    /// cannot be turned into a valid GraphQL `Request`.
+    pub(crate) fn batch_from_bytes(bytes: &[u8]) -> Result<Vec<Request>, serde_json::Error> {
+        let value: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(serde_json::Error::custom)?;
+
+        let mut result = vec![];
+
+        // XXX Also need to check if batch encoded is supported in config
+        if value.is_array() {
+            for entry in value
+                .as_array()
+                .expect("We already checked that it was an array")
+            {
+                result.push(Request::process_value(entry)?);
+            }
+        } else {
+            result.push(Request::process_value(&value)?)
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn process_value(value: &serde_json::Value) -> Result<Request, serde_json::Error> {
+        let operation_name =
+            if let Some(serde_json::Value::String(operation_name)) = value.get("operationName") {
+                Some(operation_name.clone())
+            } else {
+                None
+            };
+
+        let query = if let Some(serde_json::Value::String(query)) = value.get("query") {
             Some(query.as_str())
         } else {
             None
         };
-        let variables: Object = get_from_urldecoded(&urldecoded, "variables")?.unwrap_or_default();
-        let extensions: Object =
-            get_from_urldecoded(&urldecoded, "extensions")?.unwrap_or_default();
+        let variables: Object = get_from_value(value, "variables")?.unwrap_or_default();
+        let extensions: Object = get_from_value(value, "extensions")?.unwrap_or_default();
 
         let request_builder = Self::builder()
             .variables(variables)
@@ -200,9 +241,22 @@ impl Request {
 
         Ok(request)
     }
+
+    /// Convert encoded URL query string parameters (also known as "search
+    /// params") into a GraphQL [`Request`].
+    ///
+    /// An error will be produced in the event that the query string parameters
+    /// cannot be turned into a valid GraphQL `Request`.
+    pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
+        let urldecoded: serde_json::Value =
+            serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
+                .map_err(serde_json::Error::custom)?;
+
+        Request::process_value(&urldecoded)
+    }
 }
 
-fn get_from_urldecoded<'a, T: Deserialize<'a>>(
+fn get_from_value<'a, T: Deserialize<'a>>(
     object: &'a serde_json::Value,
     key: &str,
 ) -> Result<Option<T>, serde_json::Error> {

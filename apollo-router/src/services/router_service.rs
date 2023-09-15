@@ -46,6 +46,7 @@ use super::MULTIPART_DEFER_CONTENT_TYPE;
 use super::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
 use crate::cache::DeduplicatingCache;
 use crate::graphql;
+use crate::http_ext;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::protocols::multipart::Multipart;
@@ -203,8 +204,8 @@ impl RouterService {
     async fn call_inner(&self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
         let context = req.context.clone();
 
-        let supergraph_request = match self.translate_request(req).await {
-            Ok(request) => request,
+        let supergraph_requests = match self.translate_request(req).await {
+            Ok(requests) => requests,
             Err((status_code, error, extension_details)) => {
                 ::tracing::error!(
                     monotonic_counter.apollo_router_http_requests_total = 1u64,
@@ -228,119 +229,131 @@ impl RouterService {
             }
         };
 
-        let mut request_res = self
-            .persisted_query_layer
-            .supergraph_request(supergraph_request);
+        let mut results = vec![];
 
-        if let Ok(supergraph_request) = request_res {
-            request_res = self.apq_layer.supergraph_request(supergraph_request).await;
-        }
+        for supergraph_request in supergraph_requests {
+            let mut request_res = self
+                .persisted_query_layer
+                .supergraph_request(supergraph_request);
 
-        let SupergraphResponse { response, context } = match request_res {
-            Err(response) => response,
-            Ok(request) => match self.query_analysis_layer.supergraph_request(request).await {
-                Err(response) => response,
-                Ok(request) => match self
-                    .persisted_query_layer
-                    .supergraph_request_with_analyzed_query(request)
-                    .await
-                {
-                    Err(response) => response,
-                    Ok(request) => self.supergraph_creator.create().oneshot(request).await?,
-                },
-            },
-        };
-
-        let ClientRequestAccepts {
-            wildcard: accepts_wildcard,
-            json: accepts_json,
-            multipart_defer: accepts_multipart_defer,
-            multipart_subscription: accepts_multipart_subscription,
-        } = context
-            .private_entries
-            .lock()
-            .get()
-            .cloned()
-            .unwrap_or_default();
-
-        let (mut parts, mut body) = response.into_parts();
-        process_vary_header(&mut parts.headers);
-
-        match body.next().await {
-            None => {
-                tracing::error!("router service is not available to process request",);
-                Ok(router::Response {
-                    response: http::Response::builder()
-                        .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .body(Body::from(
-                            "router service is not available to process request",
-                        ))
-                        .expect("cannot fail"),
-                    context,
-                })
+            if let Ok(supergraph_request) = request_res {
+                request_res = self.apq_layer.supergraph_request(supergraph_request).await;
             }
-            Some(response) => {
-                if !response.has_next.unwrap_or(false)
-                    && !response.subscribed.unwrap_or(false)
-                    && (accepts_json || accepts_wildcard)
-                {
-                    parts.headers.insert(
-                        CONTENT_TYPE,
-                        HeaderValue::from_static(APPLICATION_JSON.essence_str()),
-                    );
-                    tracing::trace_span!("serialize_response").in_scope(|| {
-                        let body = serde_json::to_string(&response)?;
-                        Ok(router::Response {
-                            response: http::Response::from_parts(parts, Body::from(body)),
-                            context,
-                        })
-                    })
-                } else if accepts_multipart_defer || accepts_multipart_subscription {
-                    if accepts_multipart_defer {
-                        parts.headers.insert(
-                            CONTENT_TYPE,
-                            HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
-                        );
-                    } else if accepts_multipart_subscription {
-                        parts.headers.insert(
-                            CONTENT_TYPE,
-                            HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE),
-                        );
-                    }
-                    // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
-                    parts.headers.insert(
-                        HeaderName::from_static("x-accel-buffering"),
-                        HeaderValue::from_static("no"),
-                    );
-                    let multipart_stream = match response.subscribed {
-                        Some(true) => {
-                            StreamBody::new(Multipart::new(body, ProtocolMode::Subscription))
-                        }
-                        _ => StreamBody::new(Multipart::new(
-                            once(ready(response)).chain(body),
-                            ProtocolMode::Defer,
-                        )),
-                    };
-                    let response = (parts, multipart_stream).into_response().map(|body| {
-                        // Axum makes this `body` have type:
-                        // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
-                        let mut body = Box::pin(body);
-                        // We make a stream based on its `poll_data` method
-                        // in order to create a `hyper::Body`.
-                        Body::wrap_stream(stream::poll_fn(move |ctx| body.as_mut().poll_data(ctx)))
-                        // … but we ignore the `poll_trailers` method:
-                        // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
-                        // Apparently HTTP/2 trailers are like headers, except after the response body.
-                        // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
-                        // so ignoring `poll_trailers` is fine.
-                        // If we want to use trailers, we may need remove this convertion to `hyper::Body`
-                        // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
-                    });
 
-                    Ok(RouterResponse { response, context })
-                } else {
-                    // this should be unreachable due to a previous check, but just to be sure...
-                    router::Response::error_builder()
+            let SupergraphResponse { response, context } = match request_res {
+                Err(response) => response,
+                Ok(request) => match self.query_analysis_layer.supergraph_request(request).await {
+                    Err(response) => response,
+                    Ok(request) => match self
+                        .persisted_query_layer
+                        .supergraph_request_with_analyzed_query(request)
+                        .await
+                    {
+                        Err(response) => response,
+                        Ok(request) => self.supergraph_creator.create().oneshot(request).await?,
+                    },
+                },
+            };
+
+            let ClientRequestAccepts {
+                wildcard: accepts_wildcard,
+                json: accepts_json,
+                multipart_defer: accepts_multipart_defer,
+                multipart_subscription: accepts_multipart_subscription,
+            } = context
+                .private_entries
+                .lock()
+                .get()
+                .cloned()
+                .unwrap_or_default();
+
+            let (mut parts, mut body) = response.into_parts();
+            process_vary_header(&mut parts.headers);
+
+            match body.next().await {
+                None => {
+                    tracing::error!("router service is not available to process request",);
+                    results.push(router::Response {
+                        response: http::Response::builder()
+                            .status(StatusCode::SERVICE_UNAVAILABLE)
+                            .body(Body::from(
+                                "router service is not available to process request",
+                            ))
+                            .expect("cannot fail"),
+                        context,
+                    });
+                }
+                Some(response) => {
+                    if !response.has_next.unwrap_or(false)
+                        && !response.subscribed.unwrap_or(false)
+                        && (accepts_json || accepts_wildcard)
+                    {
+                        parts.headers.insert(
+                            CONTENT_TYPE,
+                            HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+                        );
+                        tracing::trace_span!("serialize_response").in_scope(|| {
+                            let body = serde_json::to_string(&response)?;
+                            /*
+                            Ok::<(), BoxError>(results.push(router::Response {
+                                response: http::Response::from_parts(parts, Body::from(body)),
+                                context,
+                            }))
+                            */
+                            results.push(router::Response {
+                                response: http::Response::from_parts(parts, Body::from(body)),
+                                context,
+                            });
+                            Ok::<(), BoxError>(())
+                        })?;
+                    } else if accepts_multipart_defer || accepts_multipart_subscription {
+                        if accepts_multipart_defer {
+                            parts.headers.insert(
+                                CONTENT_TYPE,
+                                HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
+                            );
+                        } else if accepts_multipart_subscription {
+                            parts.headers.insert(
+                                CONTENT_TYPE,
+                                HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE),
+                            );
+                        }
+                        // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
+                        parts.headers.insert(
+                            HeaderName::from_static("x-accel-buffering"),
+                            HeaderValue::from_static("no"),
+                        );
+                        let multipart_stream = match response.subscribed {
+                            Some(true) => {
+                                StreamBody::new(Multipart::new(body, ProtocolMode::Subscription))
+                            }
+                            _ => StreamBody::new(Multipart::new(
+                                once(ready(response)).chain(body),
+                                ProtocolMode::Defer,
+                            )),
+                        };
+                        let response = (parts, multipart_stream).into_response().map(|body| {
+                            // Axum makes this `body` have type:
+                            // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
+                            let mut body = Box::pin(body);
+                            // We make a stream based on its `poll_data` method
+                            // in order to create a `hyper::Body`.
+                            Body::wrap_stream(stream::poll_fn(move |ctx| {
+                                body.as_mut().poll_data(ctx)
+                            }))
+                            // … but we ignore the `poll_trailers` method:
+                            // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
+                            // Apparently HTTP/2 trailers are like headers, except after the response body.
+                            // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
+                            // so ignoring `poll_trailers` is fine.
+                            // If we want to use trailers, we may need remove this convertion to `hyper::Body`
+                            // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
+                        });
+
+                        results.push(RouterResponse { response, context });
+                    } else {
+                        // this should be unreachable due to a previous check, but just to be sure...
+                        results.push(router::Response::error_builder()
                                 .error(
                                     graphql::Error::builder()
                                         .message(format!(
@@ -355,16 +368,44 @@ impl RouterService {
                                 .status_code(StatusCode::NOT_ACCEPTABLE)
                                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                                 .context(context)
-                                .build()
+                                .build()?);
+                    }
                 }
             }
+        }
+        // XXX Need some logic here to make a single result from results. For now, just pop off the
+        // first result
+        // Can we just grab the bodies of all of the responses and string them together?
+        if results.len() == 1 {
+            Ok(results.pop().expect("should be at least one response"))
+        } else {
+            let first = results.pop().expect("we should have at least one response");
+            let (parts, body) = first.response.into_parts();
+            let context = first.context;
+            let mut array_result = "[".to_string();
+            array_result +=
+                &String::from_utf8(hyper::body::to_bytes(body).await?.to_vec()).unwrap();
+            for result in results {
+                array_result += ", ";
+                array_result += &String::from_utf8(
+                    hyper::body::to_bytes(result.response.into_body())
+                        .await?
+                        .to_vec(),
+                )
+                .unwrap();
+            }
+            array_result += "]";
+            Ok(RouterResponse {
+                response: http::Response::from_parts(parts, Body::from(array_result)),
+                context,
+            })
         }
     }
 
     async fn translate_request(
         &self,
         req: RouterRequest,
-    ) -> Result<SupergraphRequest, (StatusCode, &str, String)> {
+    ) -> Result<Vec<SupergraphRequest>, (StatusCode, &str, String)> {
         let RouterRequest {
             router_request,
             context,
@@ -372,18 +413,33 @@ impl RouterService {
 
         let (parts, body) = router_request.into_parts();
 
-        let graphql_request = if parts.method == Method::GET {
+        let graphql_requests: Result<Vec<graphql::Request>, (StatusCode, &str, String)> = if parts
+            .method
+            == Method::GET
+        {
             parts
                 .uri
                 .query()
                 .map(|q| {
-                    graphql::Request::from_urlencoded_query(q.to_string()).map_err(|e| {
-                        (
-                            StatusCode::BAD_REQUEST,
-                            "failed to decode a valid GraphQL request from path",
-                            format!("failed to decode a valid GraphQL request from path {e}"),
-                        )
-                    })
+                    let mut result = vec![];
+
+                    match graphql::Request::from_urlencoded_query(q.to_string()) {
+                        Ok(request) => {
+                            result.push(request);
+                        },
+                        Err(_err) => {
+                            // It may be a batch of requests, so try that (if config allows) before
+                            // erroring out
+                            result = graphql::Request::batch_from_urlencoded_query(q.to_string()).map_err(|e| {
+                            (
+                                StatusCode::BAD_REQUEST,
+                                "failed to decode a valid GraphQL request from path",
+                                format!("failed to decode a valid GraphQL request from path {e}"),
+                            )
+                        })?;
+                        }
+                    };
+                            Ok(result)
                 })
                 .unwrap_or_else(|| {
                     Err((
@@ -430,23 +486,53 @@ impl RouterService {
                         }
                     })
                     .and_then(|bytes| {
-                        graphql::Request::deserialize_from_bytes(&bytes).map_err(|err| {
-                            (
-                                StatusCode::BAD_REQUEST,
-                                "failed to deserialize the request body into JSON",
-                                format!(
-                                    "failed to deserialize the request body into JSON: {err}"
-                                ),
-                            )
-                        })
+                        let mut result = vec![];
+
+                        match graphql::Request::deserialize_from_bytes(&bytes) {
+                            Ok(request) => {
+                                result.push(request);
+                            },
+                            Err(_err) => {
+                                result = graphql::Request::batch_from_bytes(&bytes).map_err(|e| {
+                                (
+                                    StatusCode::BAD_REQUEST,
+                                    "failed to deserialize the request body into JSON",
+                                    format!(
+                                        "failed to deserialize the request body into JSON: {e}"
+                                    )
+                                )
+                                })?;
+                            }
+                        };
+                        Ok(result)
                     })
             }
         };
 
-        Ok(SupergraphRequest {
-            supergraph_request: http::Request::from_parts(parts, graphql_request?),
-            context,
-        })
+        let mut results = vec![];
+        let mut ok_results = graphql_requests?;
+        let first = ok_results
+            .pop()
+            .expect("We must have at least one response");
+        let sg = http::Request::from_parts(parts, first);
+
+        for graphql_request in ok_results {
+            // XXX Lose extensions, is that ok?
+            let mut new = http_ext::clone_http_request(&sg);
+            *new.body_mut() = graphql_request;
+            results.push(SupergraphRequest {
+                supergraph_request: new,
+                context: context.clone(),
+            });
+        }
+        results.insert(
+            0,
+            SupergraphRequest {
+                supergraph_request: sg,
+                context: context.clone(),
+            },
+        );
+        Ok(results)
     }
 }
 
