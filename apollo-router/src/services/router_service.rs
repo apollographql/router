@@ -294,12 +294,6 @@ impl RouterService {
                         );
                         tracing::trace_span!("serialize_response").in_scope(|| {
                             let body = serde_json::to_string(&response)?;
-                            /*
-                            Ok::<(), BoxError>(results.push(router::Response {
-                                response: http::Response::from_parts(parts, Body::from(body)),
-                                context,
-                            }))
-                            */
                             results.push(router::Response {
                                 response: http::Response::from_parts(parts, Body::from(body)),
                                 context,
