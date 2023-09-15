@@ -212,7 +212,7 @@ impl Request {
         Ok(result)
     }
 
-    pub(crate) fn process_value(value: &serde_json::Value) -> Result<Request, serde_json::Error> {
+    fn process_value(value: &serde_json::Value) -> Result<Request, serde_json::Error> {
         let operation_name =
             if let Some(serde_json::Value::String(operation_name)) = value.get("operationName") {
                 Some(operation_name.clone())
