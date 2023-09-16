@@ -531,6 +531,27 @@ expression: "&schema"
         }
       }
     },
+    "batching": {
+      "description": "Batching configuration.",
+      "default": {
+        "enabled": false,
+        "mode": ""
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Activates Batching (disabled by default)",
+          "default": false,
+          "type": "boolean"
+        },
+        "mode": {
+          "description": "Batching mode (batch_http_link is supported)",
+          "default": "",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "coprocessor": {
       "description": "Configures the externalization plugin",
       "type": "object",

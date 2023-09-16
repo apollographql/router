@@ -424,7 +424,7 @@ impl RouterService {
                         Ok(request) => {
                             result.push(request);
                         },
-                        Err(_err) => {
+                        Err(err) => {
                             // It may be a batch of requests, so try that (if config allows) before
                             // erroring out
                             if self.batching.enabled && self.batching.mode == "batch_http_link" {
@@ -435,13 +435,19 @@ impl RouterService {
                                 format!("failed to decode a valid GraphQL request from path {e}"),
                             )
                         })?;
-                            } else {
-                                return Err((
-                                StatusCode::BAD_REQUEST,
-                                "batching not enabled",
-                                "batching not enabled".to_string(),
-                                ));
-                            }
+                                                        } else if !q.is_empty() && q.as_bytes()[0] == b'[' {
+                                 return Err((
+                                     StatusCode::BAD_REQUEST,
+                                     "batching not enabled",
+                                     "batching not enabled".to_string(),
+                                 ));
+                             } else {
+                                 return Err((
+                                     StatusCode::BAD_REQUEST,
+                                     "failed to decode a valid GraphQL request from path",
+                                     format!("failed to decode a valid GraphQL request from path {err}"),
+                                 ));
+                             }
                         }
                     };
                     Ok(result)
@@ -497,7 +503,7 @@ impl RouterService {
                             Ok(request) => {
                                 result.push(request);
                             },
-                            Err(_err) => {
+                            Err(err) => {
                             if self.batching.enabled && self.batching.mode == "batch_http_link" {
                                 result = graphql::Request::batch_from_bytes(&bytes).map_err(|e| {
                                 (
@@ -508,13 +514,23 @@ impl RouterService {
                                     )
                                 )
                                 })?;
-                            } else {
-                                return Err((
-                                StatusCode::BAD_REQUEST,
-                                "batching not enabled",
-                                "batching not enabled".to_string(),
-                                ));
-                            }
+                             } else if !bytes.is_empty() && bytes[0] == b'[' {
+                                 return Err((
+                                     StatusCode::BAD_REQUEST,
+                                     "batching not enabled",
+                                     "batching not enabled".to_string(),
+                                 ));
+                             } else {
+                                 return Err(
+                             (
+                                 StatusCode::BAD_REQUEST,
+                                 "failed to deserialize the request body into JSON",
+                                 format!(
+                                     "failed to deserialize the request body into JSON: {err}"
+                                 )
+                             )
+                                 );
+                             }
                             }
                         };
                         Ok(result)

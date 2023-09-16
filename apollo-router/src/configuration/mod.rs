@@ -1269,6 +1269,7 @@ pub(crate) struct Batching {
     /// Activates Batching (disabled by default)
     pub(crate) enabled: bool,
 
+    /// Batching mode (batch_http_link is supported)
     #[serde(default)]
     pub(crate) mode: String,
 }
