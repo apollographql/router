@@ -531,27 +531,6 @@ expression: "&schema"
         }
       }
     },
-    "batching": {
-      "description": "Batching configuration.",
-      "default": {
-        "enabled": false,
-        "mode": ""
-      },
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "description": "Activates Batching (disabled by default)",
-          "default": false,
-          "type": "boolean"
-        },
-        "mode": {
-          "description": "Batching mode (batch_http_link is supported)",
-          "default": "",
-          "type": "string"
-        }
-      },
-      "additionalProperties": false
-    },
     "coprocessor": {
       "description": "Configures the externalization plugin",
       "type": "object",
@@ -1020,6 +999,27 @@ expression: "&schema"
           "description": "The CSRF plugin is enabled by default; set unsafe_disabled = true to disable the plugin behavior Note that setting this to true is deemed unsafe. See <https://developer.mozilla.org/en-US/docs/Glossary/CSRF>.",
           "default": false,
           "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "experimental_batching": {
+      "description": "Batching configuration.",
+      "default": {
+        "enabled": false,
+        "mode": ""
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Activates Batching (disabled by default)",
+          "default": false,
+          "type": "boolean"
+        },
+        "mode": {
+          "description": "Batching mode (batch_http_link is supported)",
+          "default": "",
+          "type": "string"
         }
       },
       "additionalProperties": false

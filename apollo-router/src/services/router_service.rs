@@ -73,7 +73,7 @@ pub(crate) struct RouterService {
     persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     experimental_http_max_request_bytes: usize,
-    batching: Batching,
+    experimental_batching: Batching,
 }
 
 impl RouterService {
@@ -83,7 +83,7 @@ impl RouterService {
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         experimental_http_max_request_bytes: usize,
-        batching: Batching,
+        experimental_batching: Batching,
     ) -> Self {
         RouterService {
             supergraph_creator,
@@ -91,7 +91,7 @@ impl RouterService {
             persisted_query_layer,
             query_analysis_layer,
             experimental_http_max_request_bytes,
-            batching,
+            experimental_batching,
         }
     }
 }
@@ -210,7 +210,7 @@ impl RouterService {
 
         let supergraph_requests = match self.translate_request(req).await {
             Ok(requests) => requests,
-            Err((status_code, error, extension_details)) => {
+            Err((status_code, error, extension_code, extension_details)) => {
                 ::tracing::error!(
                     monotonic_counter.apollo_router_http_requests_total = 1u64,
                     status = %status_code.as_u16(),
@@ -222,7 +222,7 @@ impl RouterService {
                     .error(
                         graphql::Error::builder()
                             .message(String::from("Invalid GraphQL request"))
-                            .extension_code("INVALID_GRAPHQL_REQUEST")
+                            .extension_code(extension_code)
                             .extension("details", extension_details)
                             .build(),
                     )
@@ -402,7 +402,7 @@ impl RouterService {
     async fn translate_request(
         &self,
         req: RouterRequest,
-    ) -> Result<Vec<SupergraphRequest>, (StatusCode, &str, String)> {
+    ) -> Result<Vec<SupergraphRequest>, (StatusCode, &str, &str, String)> {
         let RouterRequest {
             router_request,
             context,
@@ -410,11 +410,9 @@ impl RouterService {
 
         let (parts, body) = router_request.into_parts();
 
-        let graphql_requests: Result<Vec<graphql::Request>, (StatusCode, &str, String)> = if parts
-            .method
-            == Method::GET
-        {
-            parts
+        let graphql_requests: Result<Vec<graphql::Request>, (StatusCode, &str, &str, String)> =
+            if parts.method == Method::GET {
+                parts
                 .uri
                 .query()
                 .map(|q| {
@@ -427,11 +425,12 @@ impl RouterService {
                         Err(err) => {
                             // It may be a batch of requests, so try that (if config allows) before
                             // erroring out
-                            if self.batching.enabled && self.batching.mode == "batch_http_link" {
+                            if self.experimental_batching.enabled && self.experimental_batching.mode == "batch_http_link" {
                             result = graphql::Request::batch_from_urlencoded_query(q.to_string()).map_err(|e| {
                             (
                                 StatusCode::BAD_REQUEST,
                                 "failed to decode a valid GraphQL request from path",
+                                "INVALID_GRAPHQL_REQUEST",
                                 format!("failed to decode a valid GraphQL request from path {e}"),
                             )
                         })?;
@@ -439,12 +438,14 @@ impl RouterService {
                                  return Err((
                                      StatusCode::BAD_REQUEST,
                                      "batching not enabled",
+                                "BATCHING_NOT_ENABLED",
                                      "batching not enabled".to_string(),
                                  ));
                              } else {
                                  return Err((
                                      StatusCode::BAD_REQUEST,
                                      "failed to decode a valid GraphQL request from path",
+                                    "INVALID_GRAPHQL_REQUEST",
                                      format!("failed to decode a valid GraphQL request from path {err}"),
                                  ));
                              }
@@ -456,29 +457,32 @@ impl RouterService {
                     Err((
                         StatusCode::BAD_REQUEST,
                         "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.",
+                                "INVALID_GRAPHQL_REQUEST",
                         "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.".to_string()
                     ))
                 })
-        } else {
-            // FIXME: use a try block when available: https://github.com/rust-lang/rust/issues/31436
-            let content_length = (|| {
-                parts
-                    .headers
-                    .get(http::header::CONTENT_LENGTH)?
-                    .to_str()
-                    .ok()?
-                    .parse()
-                    .ok()
-            })();
-            if content_length.unwrap_or(0) > self.experimental_http_max_request_bytes {
-                Err((
+            } else {
+                // FIXME: use a try block when available: https://github.com/rust-lang/rust/issues/31436
+                let content_length = (|| {
+                    parts
+                        .headers
+                        .get(http::header::CONTENT_LENGTH)?
+                        .to_str()
+                        .ok()?
+                        .parse()
+                        .ok()
+                })();
+                if content_length.unwrap_or(0) > self.experimental_http_max_request_bytes {
+                    Err((
                     StatusCode::PAYLOAD_TOO_LARGE,
                     "payload too large for the `experimental_http_max_request_bytes` configuration",
+                                "INVALID_GRAPHQL_REQUEST",
                     "payload too large".to_string(),
                 ))
-            } else {
-                let body = http_body::Limited::new(body, self.experimental_http_max_request_bytes);
-                hyper::body::to_bytes(body)
+                } else {
+                    let body =
+                        http_body::Limited::new(body, self.experimental_http_max_request_bytes);
+                    hyper::body::to_bytes(body)
                     .instrument(tracing::debug_span!("receive_body"))
                     .await
                     .map_err(|e| {
@@ -486,12 +490,14 @@ impl RouterService {
                             (
                                 StatusCode::PAYLOAD_TOO_LARGE,
                                 "payload too large for the `experimental_http_max_request_bytes` configuration",
+                                "INVALID_GRAPHQL_REQUEST",
                                 "payload too large".to_string(),
                             )
                         } else {
                             (
                                 StatusCode::BAD_REQUEST,
                                 "failed to get the request body",
+                                "INVALID_GRAPHQL_REQUEST",
                                 format!("failed to get the request body: {e}"),
                             )
                         }
@@ -504,11 +510,12 @@ impl RouterService {
                                 result.push(request);
                             },
                             Err(err) => {
-                            if self.batching.enabled && self.batching.mode == "batch_http_link" {
+                            if self.experimental_batching.enabled && self.experimental_batching.mode == "batch_http_link" {
                                 result = graphql::Request::batch_from_bytes(&bytes).map_err(|e| {
                                 (
                                     StatusCode::BAD_REQUEST,
                                     "failed to deserialize the request body into JSON",
+                                "INVALID_GRAPHQL_REQUEST",
                                     format!(
                                         "failed to deserialize the request body into JSON: {e}"
                                     )
@@ -518,6 +525,7 @@ impl RouterService {
                                  return Err((
                                      StatusCode::BAD_REQUEST,
                                      "batching not enabled",
+                                "BATCHING_NOT_ENABLED",
                                      "batching not enabled".to_string(),
                                  ));
                              } else {
@@ -525,6 +533,7 @@ impl RouterService {
                              (
                                  StatusCode::BAD_REQUEST,
                                  "failed to deserialize the request body into JSON",
+                                "INVALID_GRAPHQL_REQUEST",
                                  format!(
                                      "failed to deserialize the request body into JSON: {err}"
                                  )
@@ -535,8 +544,8 @@ impl RouterService {
                         };
                         Ok(result)
                     })
-            }
-        };
+                }
+            };
 
         let mut results = vec![];
         let mut ok_results = graphql_requests?;
@@ -582,7 +591,7 @@ pub(crate) struct RouterCreator {
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     experimental_http_max_request_bytes: usize,
-    batching: Batching,
+    experimental_batching: Batching,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -636,7 +645,7 @@ impl RouterCreator {
                 .limits
                 .experimental_http_max_request_bytes,
             persisted_query_layer,
-            batching: configuration.batching.clone(),
+            experimental_batching: configuration.experimental_batching.clone(),
         })
     }
 
@@ -654,7 +663,7 @@ impl RouterCreator {
             self.persisted_query_layer.clone(),
             self.query_analysis_layer.clone(),
             self.experimental_http_max_request_bytes,
-            self.batching.clone(),
+            self.experimental_batching.clone(),
         ));
 
         ServiceBuilder::new()

@@ -189,7 +189,7 @@ pub struct Configuration {
 
     /// Batching configuration.
     #[serde(default)]
-    pub(crate) batching: Batching,
+    pub(crate) experimental_batching: Batching,
 }
 
 impl PartialEq for Configuration {
@@ -239,7 +239,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: Limits,
             experimental_chaos: Chaos,
             experimental_graphql_validation_mode: GraphQLValidationMode,
-            batching: Batching,
+            experimental_batching: Batching,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -258,7 +258,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .chaos(ad_hoc.experimental_chaos)
             .uplink(ad_hoc.uplink)
             .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
-            .batching(ad_hoc.batching)
+            .experimental_batching(ad_hoc.experimental_batching)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -295,7 +295,7 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
-        batching: Option<Batching>,
+        experimental_batching: Option<Batching>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -330,7 +330,7 @@ impl Configuration {
             },
             tls: tls.unwrap_or_default(),
             uplink,
-            batching: batching.unwrap_or_default(),
+            experimental_batching: experimental_batching.unwrap_or_default(),
             #[cfg(test)]
             notify: notify.unwrap_or_default(),
             #[cfg(not(test))]
@@ -369,7 +369,7 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
-        batching: Option<Batching>,
+        experimental_batching: Option<Batching>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -392,7 +392,7 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             preview_persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
-            batching: batching.unwrap_or_default(),
+            experimental_batching: experimental_batching.unwrap_or_default(),
         };
 
         configuration.validate()
