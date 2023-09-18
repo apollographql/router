@@ -1,0 +1,170 @@
+---
+title: Query batching
+---
+
+The Apollo Router provides experimental support for Query Batching.
+
+## Configuration
+
+By default this feature is disabled. If enabled, a single mode of operation is supported, `batch_http_link`.
+
+```yaml title="router.yaml"
+experimental_batching:
+  enabled: true
+  mode: batch_http_link
+```
+
+If a router receives a query batch from a client and batching is *not* enabled, the client will receive an error which clearly identifies this as `BATCHING_NOT_ENABLED`.
+
+## Metrics
+
+<table class="field-table metrics">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Attributes</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+<tr class="required">
+<td style="min-width: 150px;">
+
+##### `apollo.router.operations.batching`
+
+</td>
+<td>
+
+mode
+
+</td>
+<td>
+
+counter for the number of batched requests received
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `apollo.router.config.batching`
+
+</td>
+<td>
+
+mode
+
+</td>
+<td>
+
+Gauge for whether batching was enabled (internal)
+
+</td>
+</tr>
+
+</tbody>
+</table>
+
+## mode: batch_http_link
+
+Query batching is only supported in `batch_http_link` mode.
+
+### Client
+
+To enable batching in a client, configure `BatchHttpLink`. For details on implementing `BatchHttpLink`, see [batching operations](https://www.apollographql.com/docs/react/api/link/apollo-link-batch-http/).
+
+### Request Format
+
+```graphql
+[
+query MyFirstQuery {
+  me {
+    id
+  }
+},
+query MySecondQuery {
+  me {
+    name
+  }
+}
+]
+```
+
+> **Note** this mode of query batching does *not* support `@defer`, `subscriptions` or, more generally, any mode of querying that will result in a stream of responses.
+
+### Response Format
+
+Responses are provided in JSON array, with ordering of responses matching the supplied request.
+
+```json
+[
+  {"data":{"me":{"id":"1"}}},
+  {"data":{"me":{"name":"Ada Lovelace"}}}
+]
+```
+
+### Error Handling
+
+#### Batch Error
+
+If the batch of queries cannot be processed, for example it is not provided in a valid format, the entire batch will fail. For example, this query is invalid since it has two commas to separate the batch of queries.:
+
+```graphql
+[
+query MyFirstQuery {
+  me {
+    id
+  }
+},,
+query MySecondQuery {
+  me {
+    name
+  }
+}
+]
+```
+
+```json
+{"errors":
+  [
+    {"message":"Invalid GraphQL request","extensions":{"details":"failed to deserialize the request body into JSON: expected value at line 1 column 54","code":"INVALID_GRAPHQL_REQUEST"}}
+  ]
+}
+```
+
+#### Individual Query Error
+
+If a single query cannot be processed, this will result in an individual error. 
+
+For example, the first query is trying to access a field which does not exist:
+
+
+```graphql
+[
+query MyFirstQuery {
+  me {
+    thisfielddoesnotexist
+  }
+},
+query MySecondQuery {
+  me {
+    name
+  }
+}
+]
+```
+
+```json
+[
+  {"errors":
+    [
+      {"message":"cannot query field 'thisfielddoesnotexist' on type 'User'",
+       "extensions":{"type":"User","field":"thisfielddoesnotexist","code":"INVALID_FIELD"}
+      }
+    ]
+  },
+  {"data":{"me":{"name":"Ada Lovelace"}}}
+]
+```
