@@ -120,6 +120,7 @@ traces_per_query:
           - name
         is_interface: false
     internal_traces_contributing_to_stats: []
+    query_metadata: ~
 end_time: "[end_time]"
 operation_count: 0
 operation_count_by_type:
