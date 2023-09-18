@@ -83,6 +83,12 @@ expression: "&schema"
                     "urls"
                   ],
                   "properties": {
+                    "timeout": {
+                      "description": "Redis request timeout (default: 2ms)",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
                     "urls": {
                       "description": "List of URLs to the Redis cluster",
                       "type": "array",
@@ -1901,7 +1907,7 @@ expression: "&schema"
             },
             "redis": null
           },
-          "warmed_up_queries": 0
+          "warmed_up_queries": null
         }
       },
       "type": "object",
@@ -1950,7 +1956,7 @@ expression: "&schema"
               },
               "redis": null
             },
-            "warmed_up_queries": 0
+            "warmed_up_queries": null
           },
           "type": "object",
           "properties": {
@@ -1991,6 +1997,12 @@ expression: "&schema"
                     "urls"
                   ],
                   "properties": {
+                    "timeout": {
+                      "description": "Redis request timeout (default: 2ms)",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
                     "urls": {
                       "description": "List of URLs to the Redis cluster",
                       "type": "array",
@@ -2007,11 +2019,12 @@ expression: "&schema"
               "additionalProperties": false
             },
             "warmed_up_queries": {
-              "description": "Warm up the cache on reloads by running the query plan over a list of the most used queries Defaults to 0 (do not warm up the cache)",
-              "default": 0,
+              "description": "Warms up the cache on reloads by running the query plan over a list of the most used queries (from the in memory cache) Configures the number of queries warmed up. Defaults to 1/3 of the in memory cache",
+              "default": null,
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "nullable": true
             }
           },
           "additionalProperties": false
@@ -5592,6 +5605,12 @@ expression: "&schema"
             "urls"
           ],
           "properties": {
+            "timeout": {
+              "description": "Redis request timeout (default: 2ms)",
+              "default": null,
+              "type": "string",
+              "nullable": true
+            },
             "urls": {
               "description": "List of URLs to the Redis cluster",
               "type": "array",
