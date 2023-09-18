@@ -995,6 +995,7 @@ mod tests {
        name: String
        phone: String @authenticated
        activeOrganization: Organization
+       addresses: [Address!]
    }
    type Organization
    @join__owner(graph: ORGA)
@@ -1002,10 +1003,19 @@ mod tests {
    @join__type(graph: USER, key: "id") {
        id: ID
        creatorUser: User
+       members: [User]
        name: String
        nonNullId: ID! @authenticated
        suborga: [Organization]
-   }"#;
+   }
+   type Address
+   @join__owner(graph: USER)
+   @join__type(graph: USER, key: "id")
+   @authenticated {
+    id: ID!
+    city: String
+   }
+   "#;
 
     #[tokio::test]
     async fn authenticated_request() {
@@ -1240,5 +1250,84 @@ mod tests {
         insta::assert_json_snapshot!(first_response);
 
         assert!(response.next_response().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_request_list() {
+        let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{
+                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                    "variables": {
+                        "representations": [
+                            { "__typename": "User", "id":0 },
+                            { "__typename": "User", "id":1 }
+                        ],
+                    }
+                }},
+                serde_json::json! {{
+                    "data": {
+                        "_entities":[
+                            {
+                                "name":"Ada"
+                            },
+                            {
+                                "name":"A"
+                            }
+                        ]
+                    }
+                }},
+            ).build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json!{{"query":"{orga(id:1){id members{__typename id}}}"}},
+            serde_json::json!{{"data": {"orga": { "id": 1, "members": [{ "__typename": "User", "id": 0 }, { "__typename": "User", "id": 1 }] }}}}
+        ).build())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({
+            "include_subgraph_errors": {
+                "all": true
+            },
+            "authorization": {
+                "preview_directives": {
+                    "enabled": true
+                }
+            }}))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let context = Context::new();
+        /*context
+        .insert(
+            "apollo_authentication::JWT::claims",
+            "placeholder".to_string(),
+        )
+        .unwrap();*/
+        let request = supergraph::Request::fake_builder()
+            .query("query { orga(id: 1) { id members { id name phone addresses { city } } } }")
+            .variables(
+                json! {{ "isAuthenticated": false }}
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            )
+            .context(context)
+            // Request building here
+            .build()
+            .unwrap();
+        let response = service
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+
+        insta::assert_json_snapshot!(response);
     }
 }

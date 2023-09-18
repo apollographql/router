@@ -1,0 +1,77 @@
+---
+source: apollo-router/src/plugins/authorization/authenticated.rs
+expression: response
+---
+{
+  "data": {
+    "orga": {
+      "id": 1,
+      "members": [
+        {
+          "id": 0,
+          "name": "Ada",
+          "phone": null,
+          "addresses": null
+        },
+        {
+          "id": 1,
+          "name": "A",
+          "phone": null,
+          "addresses": null
+        }
+      ]
+    }
+  },
+  "errors": [
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "orga",
+        "members",
+        0,
+        "phone"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    },
+     {
+      "message": "Unauthorized field or type",
+      "path": [
+        "orga",
+        "members",
+        1,
+        "phone"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    },
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "orga",
+        "members",
+        "0",
+        "addresses",
+        "@"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    }
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "orga",
+        "members",
+        "1",
+        "addresses",
+        "@"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    }
+  ]
+}
