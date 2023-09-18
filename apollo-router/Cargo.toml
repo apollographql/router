@@ -174,7 +174,7 @@ reqwest = { version = "0.11.19", default-features = false, features = [
     "stream",
 ] }
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.5.5+v2.5.4"
+router-bridge = "=0.5.6+v2.5.5"
 rust-embed = "6.8.1"
 rustls = "0.21.6"
 rustls-pemfile = "1.0.3"
