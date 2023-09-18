@@ -443,7 +443,7 @@ impl IntoResponse for Response<graphql::Response> {
             Bytes::from(serde_json::to_vec(&body).expect("body should be serializable; qed"));
         parts
             .headers
-            .insert(header::CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE);
+            .insert(header::CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
 
         axum::response::Response::from_parts(parts, boxed(http_body::Full::new(json_body_bytes)))
     }

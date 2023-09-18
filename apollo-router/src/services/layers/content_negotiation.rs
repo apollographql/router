@@ -142,15 +142,15 @@ where
                 if !res.has_next.unwrap_or_default() && (accepts_json || accepts_wildcard) {
                     parts
                         .headers
-                        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE);
+                        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
                 } else if accepts_multipart_defer {
                     parts
                         .headers
-                        .insert(CONTENT_TYPE, MULTIPART_DEFER_HEADER_VALUE);
+                        .insert(CONTENT_TYPE, MULTIPART_DEFER_HEADER_VALUE.clone());
                 } else if accepts_multipart_subscription {
                     parts
                         .headers
-                        .insert(CONTENT_TYPE, MULTIPART_SUBSCRIPTION_HEADER_VALUE);
+                        .insert(CONTENT_TYPE, MULTIPART_SUBSCRIPTION_HEADER_VALUE.clone());
                 }
                 (parts, res)
             })

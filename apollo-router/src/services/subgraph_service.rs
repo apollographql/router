@@ -92,10 +92,10 @@ const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5)
 
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
-const ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
-pub(crate) const APPLICATION_JSON_HEADER_VALUE: HeaderValue =
+static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
+pub(crate) static APPLICATION_JSON_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static("application/json");
-const APP_GRAPHQL_JSON: HeaderValue = HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
+static APP_GRAPHQL_JSON: HeaderValue = HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
 
 enum APQError {
     PersistedQueryNotSupported,
@@ -649,14 +649,16 @@ async fn call_http(
 
     request
         .headers_mut()
-        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE);
+        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
     request
         .headers_mut()
-        .insert(ACCEPT, APPLICATION_JSON_HEADER_VALUE);
-    request.headers_mut().append(ACCEPT, APP_GRAPHQL_JSON);
+        .insert(ACCEPT, APPLICATION_JSON_HEADER_VALUE.clone());
     request
         .headers_mut()
-        .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS);
+        .append(ACCEPT, APP_GRAPHQL_JSON.clone());
+    request
+        .headers_mut()
+        .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS.clone());
 
     let schema_uri = request.uri();
     let host = schema_uri.host().unwrap_or_default();

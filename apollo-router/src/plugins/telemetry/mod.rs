@@ -152,11 +152,11 @@ pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::displa
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
-const DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
+static DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
     HeaderName::from_static(DEFAULT_EXPOSE_TRACE_ID_HEADER);
+static FTV1_HEADER_NAME: HeaderName = HeaderName::from_static("apollo-federation-include-trace");
+static FTV1_HEADER_VALUE: HeaderValue = HeaderValue::from_static("ftv1");
 
-const FTV1_HEADER_NAME: HeaderName = HeaderName::from_static("apollo-federation-include-trace");
-const FTV1_HEADER_VALUE: HeaderValue = HeaderValue::from_static("ftv1");
 #[doc(hidden)] // Only public for integration tests
 pub(crate) struct Telemetry {
     config: Arc<config::Conf>,
@@ -416,7 +416,7 @@ impl Plugin for Telemetry {
                         t.response_trace_id
                             .header_name
                             .clone()
-                            .unwrap_or(DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME)
+                            .unwrap_or_else(||DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME.clone())
                     })
                 });
                 if let (Some(header_name), Some(trace_id)) = (
@@ -1898,7 +1898,7 @@ fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
     {
         req.subgraph_request
             .headers_mut()
-            .insert(FTV1_HEADER_NAME, FTV1_HEADER_VALUE);
+            .insert(FTV1_HEADER_NAME.clone(), FTV1_HEADER_VALUE.clone());
     }
     req
 }
