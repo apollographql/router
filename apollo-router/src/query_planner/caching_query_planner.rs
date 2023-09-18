@@ -7,6 +7,8 @@ use apollo_compiler::InputDatabase;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use sha2::Digest;
@@ -126,6 +128,8 @@ where
                     e.query_planner_service(acc)
                 }),
         );
+
+        cache_keys.shuffle(&mut thread_rng());
 
         let persisted_queries_operations = persisted_query_layer.all_operations();
 
