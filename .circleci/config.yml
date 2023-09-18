@@ -761,6 +761,10 @@ jobs:
             docker buildx inspect --bootstrap
             # Note: GH Token owned by apollo-bot2, no expire
             echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
+            # To prevent overwrite, check to see if our images already exists
+            # If the manifest command succeeds, the images already exist
+            docker manifest inspect ${ROUTER_TAG}:${VERSION}  > /dev/null && exit 1
+            docker manifest inspect ${ROUTER_TAG}:${VERSION}-debug  > /dev/null && exit 1
             # Build and push debug image
             docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
             # Build and push release image
@@ -776,6 +780,10 @@ jobs:
             CHART=$(ls -t router*.tgz| head -1)
             # Note: GH Token owned by apollo-bot2, no expire
             echo ${GITHUB_OCI_TOKEN} | helm registry login -u apollo-bot2 --password-stdin ghcr.io
+            # To prevent overwrite, check to see if our chart already exists
+            # If the show all command succeeds, the chart already exists
+            VERSION=$(basename ${CHART} .tgz)
+            helm show all oci://ghcr.io/apollographql/helm-charts/router --version ${VERSION} > /dev/null && exit 1
             # Push chart to repository
             helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
 

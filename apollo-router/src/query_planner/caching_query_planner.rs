@@ -7,6 +7,8 @@ use apollo_compiler::InputDatabase;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use sha2::Digest;
@@ -22,6 +24,7 @@ use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
@@ -90,8 +93,9 @@ where
         }
     }
 
-    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<WarmUpCachingQueryKey> {
+    pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
         let keys = self.cache.in_memory_keys().await;
+        let count = count.unwrap_or(keys.len() / 3);
         keys.into_iter()
             .take(count)
             .map(|key| WarmUpCachingQueryKey {
@@ -105,8 +109,13 @@ where
     pub(crate) async fn warm_up(
         &mut self,
         query_analysis: &QueryAnalysisLayer,
-        cache_keys: Vec<WarmUpCachingQueryKey>,
+        mut cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
+        let _timer = Timer::new(|duration| {
+            ::tracing::info!(
+                histogram.apollo.router.query.planning.warmup.duration = duration.as_secs_f64()
+            );
+        });
         let schema_id = self.schema.schema_id.clone();
 
         let mut service = ServiceBuilder::new().service(
@@ -117,6 +126,8 @@ where
                     e.query_planner_service(acc)
                 }),
         );
+
+        cache_keys.shuffle(&mut thread_rng());
 
         let mut count = 0usize;
         for WarmUpCachingQueryKey {

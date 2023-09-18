@@ -115,14 +115,18 @@ where
 }
 
 impl RedisCacheStorage {
-    pub(crate) async fn new(urls: Vec<Url>, ttl: Option<Duration>) -> Result<Self, RedisError> {
+    pub(crate) async fn new(
+        urls: Vec<Url>,
+        ttl: Option<Duration>,
+        timeout: Option<Duration>,
+    ) -> Result<Self, RedisError> {
         let url = Self::preprocess_urls(urls)?;
         let config = RedisConfig::from_url(url.as_str())?;
 
         let client = RedisClient::new(
             config,
             Some(PerformanceConfig {
-                default_command_timeout_ms: 1,
+                default_command_timeout_ms: timeout.map(|t| t.as_millis() as u64).unwrap_or(2),
                 ..Default::default()
             }),
             Some(ReconnectPolicy::new_exponential(0, 1, 2000, 5)),

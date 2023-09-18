@@ -202,21 +202,19 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
 
         if let Some(previous_router) = previous_router {
-            if configuration.supergraph.query_planning.warmed_up_queries > 0 {
-                let cache_keys = previous_router
-                    .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
+            let cache_keys = previous_router
+                .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
+                .await;
+
+            if !cache_keys.is_empty() {
+                tracing::info!(
+                    "warming up the query plan cache with {} queries, this might take a while",
+                    cache_keys.len()
+                );
+
+                supergraph_creator
+                    .warm_up_query_planner(&query_parsing_layer, cache_keys)
                     .await;
-
-                if !cache_keys.is_empty() {
-                    tracing::info!(
-                        "warming up the query plan cache with {} queries, this might take a while",
-                        cache_keys.len()
-                    );
-
-                    supergraph_creator
-                        .warm_up_query_planner(&query_parsing_layer, cache_keys)
-                        .await;
-                }
             }
         };
 
