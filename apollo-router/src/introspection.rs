@@ -25,7 +25,7 @@ impl Introspection {
         capacity: NonZeroUsize,
     ) -> Self {
         Self {
-            cache: CacheStorage::new(capacity, None, "introspection").await,
+            cache: CacheStorage::new(capacity, None, None, "introspection").await,
             planner,
         }
     }

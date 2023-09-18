@@ -22,6 +22,7 @@ use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
@@ -91,8 +92,9 @@ where
         }
     }
 
-    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<WarmUpCachingQueryKey> {
+    pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
         let keys = self.cache.in_memory_keys().await;
+        let count = count.unwrap_or(keys.len() / 3);
         keys.into_iter()
             .take(count)
             .map(|key| WarmUpCachingQueryKey {
@@ -109,6 +111,11 @@ where
         persisted_query_layer: &PersistedQueryLayer,
         mut cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
+        let _timer = Timer::new(|duration| {
+            ::tracing::info!(
+                histogram.apollo.router.query.planning.warmup.duration = duration.as_secs_f64()
+            );
+        });
         let schema_id = self.schema.schema_id.clone();
 
         let mut service = ServiceBuilder::new().service(
@@ -120,7 +127,18 @@ where
                 }),
         );
 
-        if let Some(queries) = persisted_query_layer.all_operations() {
+        let persisted_queries_operations = persisted_query_layer.all_operations();
+
+        tracing::info!(
+            "warming up the query plan cache with {} queries, this might take a while",
+            cache_keys.len()
+                + persisted_queries_operations
+                    .as_ref()
+                    .map(|ops| ops.len())
+                    .unwrap_or(0)
+        );
+
+        if let Some(queries) = persisted_queries_operations {
             for query in queries {
                 cache_keys.push(WarmUpCachingQueryKey {
                     query,

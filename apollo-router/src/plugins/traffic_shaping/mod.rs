@@ -280,7 +280,17 @@ impl Plugin for TrafficShaping {
                 .as_ref()
                 .map(|cache| cache.urls.clone())
             {
-                Some(RedisCacheStorage::new(urls, None).await?)
+                Some(
+                    RedisCacheStorage::new(
+                        urls,
+                        None,
+                        init.config
+                            .experimental_cache
+                            .as_ref()
+                            .and_then(|c| c.timeout),
+                    )
+                    .await?,
+                )
             } else {
                 None
             };
