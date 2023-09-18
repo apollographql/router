@@ -1690,6 +1690,11 @@ impl Telemetry {
     fn safe_shutdown_meter_provider(meter_provider: &mut Option<FilterMeterProvider>) {
         if Handle::try_current().is_ok() {
             if let Some(meter_provider) = meter_provider.take() {
+                // This is a thread for a reason!
+                // Tokio doesn't finish executing tasks before termination https://github.com/tokio-rs/tokio/issues/1156.
+                // This means that if the runtime is shutdown there is potentially a race where the provider may not be flushed.
+                // By using a thread it doesn't matter if the tokio runtime is shut down.
+                // This is likely to happen in tests due to the tokio runtime being destroyed when the test method exits.
                 thread::spawn(move || {
                     if let Err(e) = meter_provider.shutdown() {
                         ::tracing::error!(error = %e, "failed to shutdown meter provider")
