@@ -20,6 +20,7 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
 use crate::spec::query::transform::get_field_type;
+use crate::spec::query::transform::is_list;
 use crate::spec::query::traverse;
 
 pub(crate) struct ScopeExtractionVisitor<'a> {
@@ -435,7 +436,7 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
             .get(parent_type)
             .is_some_and(|def| {
                 if let Some(field) = def.field(&self.compiler.db, field_name) {
-                    if field.ty().is_list() {
+                    if is_list(field.ty()) {
                         is_field_list = true;
                     }
                     self.is_field_authorized(field)

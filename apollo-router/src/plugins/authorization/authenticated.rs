@@ -12,6 +12,7 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
 use crate::spec::query::transform::get_field_type;
+use crate::spec::query::transform::is_list;
 use crate::spec::query::traverse;
 
 pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: &str = "authenticated";
@@ -297,7 +298,7 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
             .get(parent_type)
             .and_then(|def| def.field(&self.compiler.db, field_name))
             .is_some_and(|field| {
-                if field.ty().is_list() {
+                if is_list(field.ty()) {
                     is_field_list = true;
                 }
                 self.is_field_authenticated(field)
@@ -910,6 +911,49 @@ mod tests {
         "#;
 
         let (doc, paths) = filter(UNION_MEMBERS_SCHEMA, QUERY);
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
+    fn non_null_list() {
+        static NON_NULL_SCHEMA: &str = r#"
+        directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+
+        type Query {
+            test: String
+            me: User
+        }
+
+        type User {
+            id: ID
+            addresses: [Address]!
+        }
+
+        type Address @authenticated {
+            id: ID
+            city: String
+            street: String
+        }
+        "#;
+
+        static QUERY: &str = r#"
+        query {
+            me {
+                id
+                addresses {
+                    city
+                }
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(NON_NULL_SCHEMA, QUERY);
 
         insta::assert_display_snapshot!(TestResult {
             query: QUERY,
