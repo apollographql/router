@@ -138,9 +138,10 @@ where
                     .unwrap_or(0)
         );
 
+        let mut all_cache_keys = Vec::new();
         if let Some(queries) = persisted_queries_operations {
             for query in queries {
-                cache_keys.push(WarmUpCachingQueryKey {
+                all_cache_keys.push(WarmUpCachingQueryKey {
                     query,
                     operation: None,
                     metadata: CacheKeyMetadata::default(),
@@ -148,12 +149,14 @@ where
             }
         }
 
+        all_cache_keys.extend(cache_keys.into_iter());
+
         let mut count = 0usize;
         for WarmUpCachingQueryKey {
             mut query,
             operation,
             metadata,
-        } in cache_keys
+        } in all_cache_keys
         {
             let caching_key = CachingQueryKey {
                 schema_id: schema_id.clone(),
