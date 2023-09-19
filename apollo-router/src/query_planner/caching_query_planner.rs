@@ -133,16 +133,17 @@ where
 
         let persisted_queries_operations = persisted_query_layer.all_operations();
 
+        let capacity = cache_keys.len()
+            + persisted_queries_operations
+                .as_ref()
+                .map(|ops| ops.len())
+                .unwrap_or(0);
         tracing::info!(
             "warming up the query plan cache with {} queries, this might take a while",
-            cache_keys.len()
-                + persisted_queries_operations
-                    .as_ref()
-                    .map(|ops| ops.len())
-                    .unwrap_or(0)
+            capacity
         );
 
-        let mut all_cache_keys = Vec::new();
+        let mut all_cache_keys = Vec::with_capacity(capacity);
         if let Some(queries) = persisted_queries_operations {
             for query in queries {
                 all_cache_keys.push(WarmUpCachingQueryKey {
