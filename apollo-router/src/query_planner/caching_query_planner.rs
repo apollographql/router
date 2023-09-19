@@ -143,6 +143,8 @@ where
             capacity
         );
 
+        // persisted queries are added first because they should get a lower priority in the LRU cache,
+        // since a lot of them may be there to support old clients
         let mut all_cache_keys = Vec::with_capacity(capacity);
         if let Some(queries) = persisted_queries_operations {
             for query in queries {
