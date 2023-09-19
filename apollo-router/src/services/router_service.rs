@@ -290,6 +290,9 @@ impl RouterService {
                     );
                     tracing::trace_span!("serialize_response").in_scope(|| {
                         let body = serde_json::to_string(&response)?;
+                        tokio::task::spawn(async move {
+                            let _ = response;
+                        });
                         Ok(router::Response {
                             response: http::Response::from_parts(parts, Body::from(body)),
                             context,

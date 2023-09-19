@@ -543,6 +543,10 @@ async fn handle_graphql(
         Ok(response) => {
             tracing::info!(counter.apollo_router_session_count_active = -1i64,);
             let (mut parts, body) = response.response.into_parts();
+            tokio::task::spawn(async move {
+                let _ = context;
+                let _ = response.context;
+            });
 
             let opt_compressor = accept_encoding
                 .as_ref()
