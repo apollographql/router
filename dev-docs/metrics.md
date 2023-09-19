@@ -1,0 +1,122 @@
+# Metrics
+
+The Router uses OpenTelemetry metrics to support Prometheus and OTLP exporters.
+
+## Requirements
+* Filtering of metrics to Public and Private exporters. This is to support Apollo only metrics and to exclude sending of legacy metrics to Apollo.
+* Mutliple exporters - Prometheus and OTLP.
+* Prometheus metrics must persist across reloads.
+* Metrics must be testable.
+
+## Entities
+```mermaid
+
+erDiagram
+
+    callsite-tracing ||--|{ metrics-layer : uses
+    callsite-macro ||--|{ aggregate-meter-provider : uses
+    callsite-macro ||--|{ instrument : mutates
+
+    metrics-layer ||--|| aggregate-meter-provider : uses
+    metrics-layer ||--|{ instrument : mutates
+
+    telemetry-plugin ||--|| metrics-layer : clears
+    telemetry-plugin ||--|| aggregate-meter-provider : configures
+
+    aggregate-meter-provider ||--|| public-filtered-meter-provider : creates
+    aggregate-meter-provider ||--|| public-filtered-prometheus-meter-provider : creates
+    aggregate-meter-provider ||--|| private-filtered-meter-provider : creates
+
+    public-filtered-meter-provider ||--|{ public-meter : creates
+    public-filtered-prometheus-meter-provider ||--|{ public-prometheus-meter : creates
+    private-filtered-meter-provider ||--|{ private-meter : creates
+    
+    public-meter-provider ||--|{ public-meter : creates
+    public-prometheus-meter-provider ||--|{ public-prometheus-meter : creates
+    private-meter-provider ||--|{ private-meter : creates
+
+    public-meter ||--|{ instrument : creates
+    public-prometheus-meter ||--|{ instrument : creates
+    private-meter ||--|{ instrument : creates
+
+    instrument
+
+    exporter ||--|{ public-meter : observes
+    prometheus-exporter ||--|{ public-prometheus-meter : observes
+    private-otlp-exporter ||--|{ private-meter : observes
+```
+
+### Instrument
+A histogram or counter that is used to record metrics.
+
+### Meter
+Creates instruments, also contains a reference to exporters so that when instruments are created the 
+
+### Meter provider
+Creates meters
+
+### Filter meter provider
+Depending on a meter name will return no-op or delegate to a meter provider. Used to filter public vs private metrics.
+
+### Aggregate meter provider
+A meter provider that wraps public, public prometheus, and private meter providers. Used to create a single meter provider that can be used by the metrics layer and metrics macros.
+
+### Metrics layer
+The tracing-opentelemetry layer that is used to create instruments and meters. This will cache instruments after they have been created.
+
+### Metrics macros
+New macros that will be used for metrics going forward. Allows unit testing of metrics.
+
+## Design gotchas
+The metrics code is substantial, however there are reasons that it is structured in the way that it is.
+
+1. There is no way to filter instruments at the exporter level. This is the reason that we have aggregate meter providers that wrap the public, public prometheus, and private meter providers. This allows us to filter out private metrics at the meter provider level.
+2. The meter provider and meter layer are both globals. This has made testing hard. The new metrics macros should be used as they have built in support for testing by moving the meter provider to a task or thread local.
+3. Prometheus meters need to be kept around across reloads otherwise metrics are reset. This is why the aggregate meter provider allows internal mutability.
+
+## Using metrics macros
+
+Metrics macros are a replacement for the tracing-opentelemetry metrics-layer.
+They are highly optimised, allow dynamic attributes, are easy to use and support unit testing.
+
+### Usage
+
+When using the macro in a test you will need a different pattern depending on if you are writing a sync or async test.
+
+#### Sync
+```rust
+   #[test]
+    fn test_non_async() {
+        // Each test is run in a separate thread, metrics are stored in a thread local.
+        u64_counter!("test", "test description", 1, "attr" => "val");
+        assert_metric!("test", 1, "attr" => "val");
+    }
+```
+
+#### Async
+
+Make sure to use `.with_metrics()` method on the async block to ensure that the metrics are stored in a task local.
+*Tests will silently fail to record metrics if this is not done.*
+```rust
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_async_multi() {
+        // Multi-threaded runtime needs to use a tokio task local to avoid tests interfering with each other
+        async {
+            u64_counter!("test", "test description", 1, "attr" => "val");
+            assert_metric!("test", 1, "attr" => "val");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_async_single() {
+        async {
+            // It's a single threaded tokio runtime, so we can still use a thread local
+            u64_counter!("test", "test description", 1, "attr" => "val");
+            assert_metric!("test", 1, "attr" => "val");
+        }
+        .with_metrics()
+        .await;
+    }
+```
