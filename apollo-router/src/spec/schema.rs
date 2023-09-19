@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use apollo_compiler::diagnostics::ApolloDiagnostic;
 use apollo_compiler::ApolloCompiler;
@@ -61,6 +62,7 @@ impl Schema {
     }
 
     pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
+        let start = Instant::now();
         let mut compiler = ApolloCompiler::new();
         let id = compiler.add_type_system(sdl, "schema.graphql");
 
@@ -129,6 +131,9 @@ impl Schema {
         let mut hasher = Sha256::new();
         hasher.update(sdl.as_bytes());
         let schema_id = Some(format!("{:x}", hasher.finalize()));
+        tracing::info!(
+            histogram.apollo.router.schema.load.duration = start.elapsed().as_secs_f64()
+        );
 
         Ok(Schema {
             raw_sdl: Arc::new(sdl.to_string()),
