@@ -171,7 +171,7 @@ impl Request {
         let value: serde_json::Value = serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
             .map_err(serde_json::Error::custom)?;
 
-        Request::process_values(&value)
+        Request::process_query_values(&value)
     }
 
     /// Convert Bytes into a GraphQL [`Request`].
@@ -182,13 +182,30 @@ impl Request {
         let value: serde_json::Value =
             serde_json::from_slice(bytes).map_err(serde_json::Error::custom)?;
 
-        Request::process_values(&value)
+        Request::process_batch_values(&value)
     }
 
-    fn process_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
+    fn process_batch_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
         let mut result = vec![];
 
-        // XXX Also need to check if batch encoded is supported in config
+        if value.is_array() {
+            for entry in value
+                .as_array()
+                .expect("We already checked that it was an array")
+            {
+                let bytes = serde_json::to_vec(entry)?;
+                result.push(Request::deserialize_from_bytes(&bytes.into())?);
+            }
+        } else {
+            let bytes = serde_json::to_vec(value)?;
+            result.push(Request::deserialize_from_bytes(&bytes.into())?);
+        }
+        Ok(result)
+    }
+
+    fn process_query_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
+        let mut result = vec![];
+
         if value.is_array() {
             for entry in value
                 .as_array()
@@ -215,8 +232,9 @@ impl Request {
         } else {
             None
         };
-        let variables: Object = get_from_value(value, "variables")?.unwrap_or_default();
-        let extensions: Object = get_from_value(value, "extensions")?.unwrap_or_default();
+        let variables: Object = get_from_urlencoded_value(value, "variables")?.unwrap_or_default();
+        let extensions: Object =
+            get_from_urlencoded_value(value, "extensions")?.unwrap_or_default();
 
         let request_builder = Self::builder()
             .variables(variables)
@@ -246,7 +264,7 @@ impl Request {
     }
 }
 
-fn get_from_value<'a, T: Deserialize<'a>>(
+fn get_from_urlencoded_value<'a, T: Deserialize<'a>>(
     object: &'a serde_json::Value,
     key: &str,
 ) -> Result<Option<T>, serde_json::Error> {

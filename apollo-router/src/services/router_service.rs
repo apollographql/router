@@ -931,4 +931,184 @@ mod tests {
         let response = with_config(CANNED_REQUEST_LEN - 1).await.response;
         assert_eq!(response.status(), http::StatusCode::PAYLOAD_TOO_LARGE);
     }
+
+    //  Test query batching
+
+    #[tokio::test]
+    async fn it_only_accepts_batch_http_link_mode_for_query_batch() {
+        let expected_response: serde_json::Value = serde_json::from_str(include_str!(
+            "query_batching/testdata/batching_not_enabled_response.json"
+        ))
+        .unwrap();
+
+        async fn with_config() -> router::Response {
+            let http_request = supergraph::Request::canned_builder()
+                .build()
+                .unwrap()
+                .supergraph_request
+                .map(|req: crate::request::Request| {
+                    // Modify the request so that it is a valid array of requests.
+                    let mut json_bytes = serde_json::to_vec(&req).unwrap();
+                    let mut result = vec![b'['];
+                    result.append(&mut json_bytes.clone());
+                    result.push(b',');
+                    result.append(&mut json_bytes);
+                    result.push(b']');
+                    hyper::Body::from(result)
+                });
+            let config = serde_json::json!({});
+            crate::TestHarness::builder()
+                .configuration_json(config)
+                .unwrap()
+                .build_router()
+                .await
+                .unwrap()
+                .oneshot(router::Request::from(http_request))
+                .await
+                .unwrap()
+        }
+        // Send a request
+        let response = with_config().await.response;
+        assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
+        let data: serde_json::Value =
+            serde_json::from_slice(&hyper::body::to_bytes(response.into_body()).await.unwrap())
+                .unwrap();
+        assert_eq!(expected_response, data);
+    }
+
+    #[tokio::test]
+    async fn it_processes_a_valid_query_batch() {
+        let expected_response: serde_json::Value = serde_json::from_str(include_str!(
+            "query_batching/testdata/expected_good_response.json"
+        ))
+        .unwrap();
+
+        async fn with_config() -> router::Response {
+            let http_request = supergraph::Request::canned_builder()
+                .build()
+                .unwrap()
+                .supergraph_request
+                .map(|req: crate::request::Request| {
+                    // Modify the request so that it is a valid array of requests.
+                    let mut json_bytes = serde_json::to_vec(&req).unwrap();
+                    let mut result = vec![b'['];
+                    result.append(&mut json_bytes.clone());
+                    result.push(b',');
+                    result.append(&mut json_bytes);
+                    result.push(b']');
+                    hyper::Body::from(result)
+                });
+            let config = serde_json::json!({
+                "experimental_batching": {
+                    "enabled": true,
+                    "mode" : "batch_http_link"
+                }
+            });
+            crate::TestHarness::builder()
+                .configuration_json(config)
+                .unwrap()
+                .build_router()
+                .await
+                .unwrap()
+                .oneshot(router::Request::from(http_request))
+                .await
+                .unwrap()
+        }
+        // Send a request
+        let response = with_config().await.response;
+        assert_eq!(response.status(), http::StatusCode::OK);
+        let data: serde_json::Value =
+            serde_json::from_slice(&hyper::body::to_bytes(response.into_body()).await.unwrap())
+                .unwrap();
+        assert_eq!(expected_response, data);
+    }
+
+    #[tokio::test]
+    async fn it_will_not_process_a_query_batch_without_enablement() {
+        let expected_response: serde_json::Value = serde_json::from_str(include_str!(
+            "query_batching/testdata/batching_not_enabled_response.json"
+        ))
+        .unwrap();
+
+        async fn with_config() -> router::Response {
+            let http_request = supergraph::Request::canned_builder()
+                .build()
+                .unwrap()
+                .supergraph_request
+                .map(|req: crate::request::Request| {
+                    // Modify the request so that it is a valid array of requests.
+                    let mut json_bytes = serde_json::to_vec(&req).unwrap();
+                    let mut result = vec![b'['];
+                    result.append(&mut json_bytes.clone());
+                    result.push(b',');
+                    result.append(&mut json_bytes);
+                    result.push(b']');
+                    hyper::Body::from(result)
+                });
+            let config = serde_json::json!({});
+            crate::TestHarness::builder()
+                .configuration_json(config)
+                .unwrap()
+                .build_router()
+                .await
+                .unwrap()
+                .oneshot(router::Request::from(http_request))
+                .await
+                .unwrap()
+        }
+        // Send a request
+        let response = with_config().await.response;
+        assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
+        let data: serde_json::Value =
+            serde_json::from_slice(&hyper::body::to_bytes(response.into_body()).await.unwrap())
+                .unwrap();
+        assert_eq!(expected_response, data);
+    }
+
+    #[tokio::test]
+    async fn it_will_not_process_a_poorly_formatted_query_batch() {
+        let expected_response: serde_json::Value = serde_json::from_str(include_str!(
+            "query_batching/testdata/badly_formatted_batch_response.json"
+        ))
+        .unwrap();
+
+        async fn with_config() -> router::Response {
+            let http_request = supergraph::Request::canned_builder()
+                .build()
+                .unwrap()
+                .supergraph_request
+                .map(|req: crate::request::Request| {
+                    // Modify the request so that it is a valid array of requests.
+                    let mut json_bytes = serde_json::to_vec(&req).unwrap();
+                    let mut result = vec![b'['];
+                    result.append(&mut json_bytes.clone());
+                    result.push(b',');
+                    result.append(&mut json_bytes);
+                    // Deliberately omit the required trailing ]
+                    hyper::Body::from(result)
+                });
+            let config = serde_json::json!({
+                "experimental_batching": {
+                    "enabled": true,
+                    "mode" : "batch_http_link"
+                }
+            });
+            crate::TestHarness::builder()
+                .configuration_json(config)
+                .unwrap()
+                .build_router()
+                .await
+                .unwrap()
+                .oneshot(router::Request::from(http_request))
+                .await
+                .unwrap()
+        }
+        // Send a request
+        let response = with_config().await.response;
+        assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
+        let data: serde_json::Value =
+            serde_json::from_slice(&hyper::body::to_bytes(response.into_body()).await.unwrap())
+                .unwrap();
+        assert_eq!(expected_response, data);
+    }
 }
