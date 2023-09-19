@@ -34,6 +34,7 @@ use crate::plugins::traffic_shaping::RetryPolicy;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
+use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
@@ -198,28 +199,24 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         let mut supergraph_creator = builder.build().await?;
 
         // Instantiate the parser here so we can use it to warm up the planner below
-        let query_parsing_layer =
+        let query_analysis_layer =
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
+
+        let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
 
         if let Some(previous_router) = previous_router {
             let cache_keys = previous_router
                 .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
                 .await;
 
-            if !cache_keys.is_empty() {
-                tracing::info!(
-                    "warming up the query plan cache with {} queries, this might take a while",
-                    cache_keys.len()
-                );
-
-                supergraph_creator
-                    .warm_up_query_planner(&query_parsing_layer, cache_keys)
-                    .await;
-            }
+            supergraph_creator
+                .warm_up_query_planner(&query_analysis_layer, &persisted_query_layer, cache_keys)
+                .await;
         };
 
         Ok(Self::RouterFactory::new(
-            query_parsing_layer,
+            query_analysis_layer,
+            persisted_query_layer,
             Arc::new(supergraph_creator),
             configuration,
         )
