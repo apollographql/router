@@ -558,9 +558,7 @@ macro_rules! metric {
                     let mut instrument_guard = INSTRUMENT_CACHE
                         .get_or_init(|| {
                             let meter_provider = crate::metrics::meter_provider();
-                            let meter = opentelemetry::metrics::MeterProvider::meter(&meter_provider, "apollo/router");
-                            let instrument = meter.[<$ty _ $instrument>]($name).with_description($description).init();
-                            let instrument_ref = meter_provider.register_instrument(instrument);
+                            let instrument_ref = meter_provider.create_registered_instrument(|p| p.meter("apollo/router").[<$ty _ $instrument>]($name).with_description($description).init());
                             std::sync::Mutex::new(std::sync::Arc::downgrade(&instrument_ref))
                         })
                         .lock()
@@ -572,9 +570,7 @@ macro_rules! metric {
                     } else {
                         // Slow path, we need to obtain the instrument again.
                         let meter_provider = crate::metrics::meter_provider();
-                        let meter = opentelemetry::metrics::MeterProvider::meter(&meter_provider, "apollo/router");
-                        let instrument = meter.[<$ty _ $instrument>]($name).with_description($description).init();
-                        let instrument_ref = meter_provider.register_instrument(instrument);
+                        let instrument_ref = meter_provider.create_registered_instrument(|p| p.meter("apollo/router").[<$ty _ $instrument>]($name).with_description($description).init());
                         *instrument_guard = std::sync::Arc::downgrade(&instrument_ref);
                         // We've updated the instrument and got a strong reference to it. We can drop the mutex guard now.
                         drop(instrument_guard);

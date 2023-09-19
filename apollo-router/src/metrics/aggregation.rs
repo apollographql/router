@@ -2,6 +2,7 @@ use std::any::Any;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::mem;
+use std::ops::DerefMut;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -50,7 +51,7 @@ pub(crate) struct AggregateMeterProvider {
 }
 
 #[derive(Default)]
-struct Inner {
+pub(crate) struct Inner {
     providers: HashMap<MeterProviderType, (FilterMeterProvider, HashMap<MeterId, Meter>)>,
     registered_instruments: Vec<InstrumentWrapper>,
 }
@@ -113,18 +114,18 @@ impl AggregateMeterProvider {
         }
     }
 
-    /// Register an instrument. This enables caching at callsites and invalidation at the meter provider via weak reference.
+    /// Create a registered instrument. This enables caching at callsites and invalidation at the meter provider via weak reference.
     #[allow(dead_code)]
-    pub(crate) fn register_instrument<T>(&self, instrument: T) -> Arc<T>
+    pub(crate) fn create_registered_instrument<T>(
+        &self,
+        create_fn: impl Fn(&mut Inner) -> T,
+    ) -> Arc<T>
     where
         Arc<T>: Into<InstrumentWrapper>,
     {
-        let instrument = Arc::new(instrument);
-        self.inner
-            .lock()
-            .expect("lock poisoned")
-            .registered_instruments
-            .push(instrument.clone().into());
+        let mut guard = self.inner.lock().expect("lock poisoned");
+        let instrument = Arc::new((create_fn)(guard.deref_mut()));
+        guard.registered_instruments.push(instrument.clone().into());
         instrument
     }
 
@@ -138,9 +139,17 @@ impl AggregateMeterProvider {
     }
 }
 
-impl MeterProvider for AggregateMeterProvider {
-    fn versioned_meter(
-        &self,
+impl Inner {
+    pub(crate) fn meter(&mut self, name: impl Into<Cow<'static, str>>) -> Meter {
+        self.versioned_meter(
+            name,
+            None::<Cow<'static, str>>,
+            None::<Cow<'static, str>>,
+            None,
+        )
+    }
+    pub(crate) fn versioned_meter(
+        &mut self,
         name: impl Into<Cow<'static, str>>,
         version: Option<impl Into<Cow<'static, str>>>,
         schema_url: Option<impl Into<Cow<'static, str>>>,
@@ -149,10 +158,9 @@ impl MeterProvider for AggregateMeterProvider {
         let name = name.into();
         let version = version.map(|v| v.into());
         let schema_url = schema_url.map(|v| v.into());
-
         let mut meters = Vec::new();
-        let mut inner = self.inner.lock().expect("lock poisoned");
-        for (provider, existing_meters) in inner.providers.values_mut() {
+
+        for (provider, existing_meters) in self.providers.values_mut() {
             meters.push(
                 existing_meters
                     .entry(MeterId {
@@ -173,6 +181,19 @@ impl MeterProvider for AggregateMeterProvider {
         }
 
         Meter::new(Arc::new(AggregateInstrumentProvider { meters }))
+    }
+}
+
+impl MeterProvider for AggregateMeterProvider {
+    fn versioned_meter(
+        &self,
+        name: impl Into<Cow<'static, str>>,
+        version: Option<impl Into<Cow<'static, str>>>,
+        schema_url: Option<impl Into<Cow<'static, str>>>,
+        attributes: Option<Vec<KeyValue>>,
+    ) -> Meter {
+        let mut inner = self.inner.lock().expect("lock poisoned");
+        inner.versioned_meter(name, version, schema_url, attributes)
     }
 }
 
