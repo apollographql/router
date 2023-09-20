@@ -76,8 +76,10 @@ struct Shaping {
     experimental_http2: Option<Http2Config>,
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[derive(PartialEq, Default, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum Http2Config {
+    #[default]
     /// Enable HTTP2 for subgraphs
     Enable,
     /// Disable HTTP2 for subgraphs
@@ -724,12 +726,12 @@ mod test {
         let config = serde_yaml::from_str::<Config>(
             r#"
         all:
-          experimental_enable_http2: disable
+          experimental_http2: disable
         subgraphs: 
           products:
             experimental_http2: enable
           reviews:
-            experimental_enable_http2: disable
+            experimental_http2: disable
         router:
           timeout: 65s
         "#,
@@ -767,12 +769,12 @@ mod test {
         let config = serde_yaml::from_str::<Config>(
             r#"
         all:
-          experimental_enable_http2: false
+          experimental_http2: false
         subgraphs: 
           products:
-            experimental_enable_http2: true
+            experimental_http2: true
           reviews:
-            experimental_enable_http2: false
+            experimental_http2: false
         router:
           timeout: 65s
         "#,

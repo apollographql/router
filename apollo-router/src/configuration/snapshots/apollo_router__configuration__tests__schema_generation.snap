@@ -5509,11 +5509,6 @@ expression: "&schema"
               "type": "boolean",
               "nullable": true
             },
-            "experimental_enable_http2": {
-              "description": "Enable HTTP2 for subgraphs",
-              "type": "boolean",
-              "nullable": true
-            },
             "experimental_entity_caching": {
               "description": "Enable entity caching",
               "type": "object",
@@ -5527,6 +5522,33 @@ expression: "&schema"
                 }
               },
               "additionalProperties": false,
+              "nullable": true
+            },
+            "experimental_http2": {
+              "description": "Enable HTTP2 for subgraphs",
+              "oneOf": [
+                {
+                  "description": "Enable HTTP2 for subgraphs",
+                  "type": "string",
+                  "enum": [
+                    "enable"
+                  ]
+                },
+                {
+                  "description": "Disable HTTP2 for subgraphs",
+                  "type": "string",
+                  "enum": [
+                    "disable"
+                  ]
+                },
+                {
+                  "description": "Only HTTP2 is active",
+                  "type": "string",
+                  "enum": [
+                    "http2only"
+                  ]
+                }
+              ],
               "nullable": true
             },
             "experimental_retry": {
@@ -5697,11 +5719,6 @@ expression: "&schema"
                 "type": "boolean",
                 "nullable": true
               },
-              "experimental_enable_http2": {
-                "description": "Enable HTTP2 for subgraphs",
-                "type": "boolean",
-                "nullable": true
-              },
               "experimental_entity_caching": {
                 "description": "Enable entity caching",
                 "type": "object",
@@ -5715,6 +5732,33 @@ expression: "&schema"
                   }
                 },
                 "additionalProperties": false,
+                "nullable": true
+              },
+              "experimental_http2": {
+                "description": "Enable HTTP2 for subgraphs",
+                "oneOf": [
+                  {
+                    "description": "Enable HTTP2 for subgraphs",
+                    "type": "string",
+                    "enum": [
+                      "enable"
+                    ]
+                  },
+                  {
+                    "description": "Disable HTTP2 for subgraphs",
+                    "type": "string",
+                    "enum": [
+                      "disable"
+                    ]
+                  },
+                  {
+                    "description": "Only HTTP2 is active",
+                    "type": "string",
+                    "enum": [
+                      "http2only"
+                    ]
+                  }
+                ],
                 "nullable": true
               },
               "experimental_retry": {
