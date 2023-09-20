@@ -41,19 +41,28 @@ erDiagram
 
     instrument
 
-    exporter ||--|{ public-meter : observes
+    "exporter(s)" ||--|{ public-meter : observes
     prometheus-exporter ||--|{ public-prometheus-meter : observes
+    prometheus-registry ||--|| prometheus-exporter : observes
     private-otlp-exporter ||--|{ private-meter : observes
+
 ```
 
 ### Instrument
 A histogram or counter that is used to record metrics.
 
 ### Meter
-Creates instruments, also contains a reference to exporters so that when instruments are created the 
+Creates instruments, also contains a reference to exporters so that when instruments are created the
+* __Public meter__ - Exports to all public metrics to configured exporters except for Prometheus.
+* __Public prometheus meter__ - Exports to all public metrics to Prometheus.
+* __Private meter__ - Exports to all public metrics to Apollo.
+
 
 ### Meter provider
 Creates meters
+* __Public meter provider__ - Creates public meters (see above).
+* __Public prometheus meter provider__ - Creates public prometheus meters (see above).
+* __Private meter provider__ - Creates private meters (see above).
 
 ### Filter meter provider
 Depending on a meter name will return no-op or delegate to a meter provider. Used to filter public vs private metrics.
@@ -67,6 +76,9 @@ The tracing-opentelemetry layer that is used to create instruments and meters. T
 
 ### Metrics macros
 New macros that will be used for metrics going forward. Allows unit testing of metrics.
+
+### Prometheus registry
+Used to render prometheus metrics. Contains no state.
 
 ## Design gotchas
 The metrics code is substantial, however there are reasons that it is structured in the way that it is.
