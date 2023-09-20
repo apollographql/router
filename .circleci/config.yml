@@ -869,6 +869,11 @@ workflows:
           matrix:
             parameters:
               platform: [ amd_linux_build ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
       - build_release:
           matrix:
             parameters:
