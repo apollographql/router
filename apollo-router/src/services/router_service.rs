@@ -123,6 +123,7 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
 
     RouterCreator::new(
         QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
+        Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
         Arc::new(supergraph_creator),
         configuration,
     )
@@ -172,6 +173,7 @@ pub(crate) async fn empty() -> impl Service<
 
     RouterCreator::new(
         QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
+        Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
         Arc::new(supergraph_creator),
         Arc::new(Configuration::default()),
     )
@@ -496,6 +498,7 @@ impl RouterFactory for RouterCreator {
 impl RouterCreator {
     pub(crate) async fn new(
         query_analysis_layer: QueryAnalysisLayer,
+        persisted_query_layer: Arc<PersistedQueryLayer>,
         supergraph_creator: Arc<SupergraphCreator>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, BoxError> {
@@ -508,8 +511,6 @@ impl RouterCreator {
         } else {
             APQLayer::disabled()
         };
-
-        let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
 
         Ok(Self {
             supergraph_creator,
@@ -552,7 +553,7 @@ impl RouterCreator {
 }
 
 impl RouterCreator {
-    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<WarmUpCachingQueryKey> {
+    pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
         self.supergraph_creator.cache_keys(count).await
     }
 

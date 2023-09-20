@@ -28,6 +28,7 @@ use tracing_futures::Instrument;
 use super::execution::QueryPlan;
 use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use super::layers::content_negotiation;
+use super::layers::persisted_queries::PersistedQueryLayer;
 use super::layers::query_analysis::Compiler;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
@@ -752,7 +753,7 @@ impl SupergraphCreator {
             )
     }
 
-    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<WarmUpCachingQueryKey> {
+    pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
         self.query_planner_service.cache_keys(count).await
     }
 
@@ -763,10 +764,11 @@ impl SupergraphCreator {
     pub(crate) async fn warm_up_query_planner(
         &mut self,
         query_parser: &QueryAnalysisLayer,
+        persisted_query_layer: &PersistedQueryLayer,
         cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
         self.query_planner_service
-            .warm_up(query_parser, cache_keys)
+            .warm_up(query_parser, persisted_query_layer, cache_keys)
             .await
     }
 }
