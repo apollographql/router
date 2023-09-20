@@ -5423,7 +5423,7 @@ expression: "&schema"
                   "type": "object",
                   "required": [
                     "certificate_chain",
-                    "private_key"
+                    "key"
                   ],
                   "properties": {
                     "certificate_chain": {
@@ -5431,7 +5431,7 @@ expression: "&schema"
                       "writeOnly": true,
                       "type": "string"
                     },
-                    "private_key": {
+                    "key": {
                       "description": "key in PEM format",
                       "writeOnly": true,
                       "type": "string"
@@ -5463,7 +5463,7 @@ expression: "&schema"
                     "type": "object",
                     "required": [
                       "certificate_chain",
-                      "private_key"
+                      "key"
                     ],
                     "properties": {
                       "certificate_chain": {
@@ -5471,7 +5471,7 @@ expression: "&schema"
                         "writeOnly": true,
                         "type": "string"
                       },
-                      "private_key": {
+                      "key": {
                         "description": "key in PEM format",
                         "writeOnly": true,
                         "type": "string"

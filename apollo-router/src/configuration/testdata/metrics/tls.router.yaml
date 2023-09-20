@@ -95,7 +95,7 @@ tls:
     all:
       client_authentication:
         certificate_chain: *cert
-        private_key: *key
+        key: *key
     # if configuring for a specific subgraph:
     subgraphs:
       # subgraph name
@@ -103,4 +103,4 @@ tls:
         certificate_authorities: *cert
         client_authentication:
           certificate_chain: *cert
-          private_key: *key
+          key: *key

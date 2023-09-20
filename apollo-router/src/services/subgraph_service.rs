@@ -200,14 +200,14 @@ impl SubgraphService {
             (None, Some(client_auth_config)) => {
                 tls_builder.with_native_roots().with_client_auth_cert(
                     client_auth_config.certificate_chain.clone(),
-                    client_auth_config.private_key.clone(),
+                    client_auth_config.key.clone(),
                 )?
             }
             (Some(store), Some(client_auth_config)) => tls_builder
                 .with_root_certificates(store)
                 .with_client_auth_cert(
                     client_auth_config.certificate_chain.clone(),
-                    client_auth_config.private_key.clone(),
+                    client_auth_config.key.clone(),
                 )?,
         };
 
@@ -2953,7 +2953,7 @@ mod tests {
                 certificate_authorities: Some(ca_pem.into()),
                 client_authentication: Some(TlsClientAuth {
                     certificate_chain: client_certificates,
-                    private_key: client_key,
+                    key: client_key,
                 }),
             },
         );

@@ -1041,7 +1041,7 @@ pub(crate) struct TlsClientAuth {
     /// key in PEM format
     #[serde(deserialize_with = "deserialize_key", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) private_key: PrivateKey,
+    pub(crate) key: PrivateKey,
 }
 
 /// Configuration options pertaining to the sandbox page.
