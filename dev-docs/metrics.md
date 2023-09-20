@@ -23,13 +23,13 @@ erDiagram
     telemetry-plugin ||--|| metrics-layer : clears
     telemetry-plugin ||--|| aggregate-meter-provider : configures
 
-    aggregate-meter-provider ||--|| public-filtered-meter-provider : creates
-    aggregate-meter-provider ||--|| public-filtered-prometheus-meter-provider : creates
-    aggregate-meter-provider ||--|| private-filtered-meter-provider : creates
+    aggregate-meter-provider ||--|| public-filtered-meter-provider : uses
+    aggregate-meter-provider ||--|| public-filtered-prometheus-meter-provider : uses
+    aggregate-meter-provider ||--|| private-filtered-meter-provider : uses
 
-    public-filtered-meter-provider ||--|{ public-meter : creates
-    public-filtered-prometheus-meter-provider ||--|{ public-prometheus-meter : creates
-    private-filtered-meter-provider ||--|{ private-meter : creates
+    public-filtered-meter-provider ||--|{ public-meter : uses
+    public-filtered-prometheus-meter-provider ||--|{ public-prometheus-meter : uses
+    private-filtered-meter-provider ||--|{ private-meter : uses
     
     public-meter-provider ||--|{ public-meter : creates
     public-prometheus-meter-provider ||--|{ public-prometheus-meter : creates
@@ -60,6 +60,7 @@ Depending on a meter name will return no-op or delegate to a meter provider. Use
 
 ### Aggregate meter provider
 A meter provider that wraps public, public prometheus, and private meter providers. Used to create a single meter provider that can be used by the metrics layer and metrics macros.
+This meter provider is also responsible for maintaining a strong reference to all instruments that are currently valid. This enables [callsite instrument caching](#callsite-instrument-caching).
 
 ### Metrics layer
 The tracing-opentelemetry layer that is used to create instruments and meters. This will cache instruments after they have been created.
@@ -120,3 +121,29 @@ Make sure to use `.with_metrics()` method on the async block to ensure that the 
         .await;
     }
 ```
+
+## Callsite instrument caching
+
+When using the new metrics macros a reference to an instrument is cached to ensure that the meter provider does not have to be queried over and over.
+
+```mermaid
+
+flowchart TD
+    Callsite --> RefCheck
+    RefCheck -->|not upgradable| Create
+    RefCheck -->|upgradable| Use
+    Create --> Store
+    Store --> Use
+    RefCheck{"Static\nMutex < Weak < Instrument > >"}
+    Create("Create instrument Arc < Instrument >")
+    Store("Store downgraded clone in Mutex")
+    Use("Use strong reference to instrument")
+```
+
+Aggregate meter provider is responsible for maintaining a strong reference to all instruments that are valid. 
+
+Strong references to instruments will be discarded when changes to the aggregate meter provider take place. This will cause every callsite to refresh its reference to the instrument.
+
+On the fast path the mutex is locked for the period that it takes to upgrade the weak reference. This is a fast operation, and should not block the thread for any meaningful period of time.
+
+If there is shown to be contention in future profiling we can revisit.
