@@ -303,6 +303,10 @@ impl Metrics {
             opt.tracing.zipkin,
             "$.tracing.zipkin[?(@.endpoint)]"
         );
+        log_usage_metrics!(
+            value.apollo.router.config.batching,
+            "$.experimental_batching[?(@.enabled == true)]"
+        );
     }
 }
 

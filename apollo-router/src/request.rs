@@ -189,6 +189,10 @@ impl Request {
         let mut result = vec![];
 
         if value.is_array() {
+            tracing::info!(
+                monotonic_counter.apollo_router.operations.batching = 1u64,
+                mode = "batch_http_link" // Only supported mode right now
+            );
             for entry in value
                 .as_array()
                 .expect("We already checked that it was an array")
@@ -207,6 +211,10 @@ impl Request {
         let mut result = vec![];
 
         if value.is_array() {
+            tracing::info!(
+                monotonic_counter.apollo_router.operations.batching = 1u64,
+                mode = "batch_http_link" // Only supported mode right now
+            );
             for entry in value
                 .as_array()
                 .expect("We already checked that it was an array")
