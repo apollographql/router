@@ -2412,6 +2412,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_test_prometheus_wrong_endpoint() {
+        let _lock = lock_prometheus().await;
         async {
             let plugin =
                 create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
