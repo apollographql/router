@@ -27,9 +27,9 @@ erDiagram
     aggregate-meter-provider ||--|| public-filtered-prometheus-meter-provider : uses
     aggregate-meter-provider ||--|| private-filtered-meter-provider : uses
 
-    public-filtered-meter-provider ||--|{ public-meter : uses
-    public-filtered-prometheus-meter-provider ||--|{ public-prometheus-meter : uses
-    private-filtered-meter-provider ||--|{ private-meter : uses
+    public-filtered-meter-provider ||--|{ public-meter-provider : uses
+    public-filtered-prometheus-meter-provider ||--|{ public-prometheus-meter-provider : uses
+    private-filtered-meter-provider ||--|{ private-meter-provider : uses
     
     public-meter-provider ||--|{ public-meter : creates
     public-prometheus-meter-provider ||--|{ public-prometheus-meter : creates
@@ -49,7 +49,7 @@ erDiagram
 ```
 
 ### Instrument
-A histogram or counter that is used to record metrics.
+A histogram, counter or gauge that is used to record metrics.
 
 ### Meter
 Creates instruments, also contains a reference to exporters so that when instruments are created the
@@ -94,9 +94,19 @@ They are highly optimised, allow dynamic attributes, are easy to use and support
 
 ### Usage
 
+
+
+```rust
+    u64_counter!("test", "test description", 1, "attr" => "val");
+    u64_counter!("test", "test description", 1, &attributes);
+    u64_counter!("test", "test description", 1);
+
+```
+
+### Testing
 When using the macro in a test you will need a different pattern depending on if you are writing a sync or async test.
 
-#### Sync
+#### Testing Sync
 ```rust
    #[test]
     fn test_non_async() {
@@ -106,7 +116,7 @@ When using the macro in a test you will need a different pattern depending on if
     }
 ```
 
-#### Async
+#### Testing Async
 
 Make sure to use `.with_metrics()` method on the async block to ensure that the metrics are stored in a task local.
 *Tests will silently fail to record metrics if this is not done.*
