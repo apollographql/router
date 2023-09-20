@@ -1,0 +1,18 @@
+tls:
+  supergraph:
+      certificate: ${file../server.crt}
+      certificate_chain: ${file../server.crt}
+      key: ${file../server.key}
+  subgraph:
+    all:
+      client_authentication:
+        certificate_chain: ${file../server.crt}
+        private_key: ${file../server.key}
+    # if configuring for a specific subgraph:
+    subgraphs:
+      # subgraph name
+      products:
+        certificate_authorities: ${file../server.crt}
+        client_authentication:
+          certificate_chain: ${file../server.crt}
+          private_key: ${file../server.key}
