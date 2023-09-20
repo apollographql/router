@@ -4,7 +4,7 @@ The Router uses OpenTelemetry metrics to support Prometheus and OTLP exporters.
 
 ## Requirements
 * Filtering of metrics to Public and Private exporters. This is to support Apollo only metrics and to exclude sending of legacy metrics to Apollo.
-* Mutliple exporters - Prometheus and OTLP.
+* Multiple exporters - Prometheus and OTLP.
 * Prometheus metrics must persist across reloads.
 * Metrics must be testable.
 
