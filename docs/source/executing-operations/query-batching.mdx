@@ -22,7 +22,7 @@ The Apollo Router must be configured to receive batch requests, otherwise it rej
 
 Both a client and the Apollo Router need to be configured to support query batching.
 
-### Configure router for batching
+### Configure router
 
 By default, receiving client request batches is disabled in Apollo Router. 
 
@@ -39,15 +39,15 @@ experimental_batching:
 | `enabled` | Flag to enable reception of client batches | boolean | `false` |
 | `mode` | Supported client batching mode | `batch_http_link`:  the client uses Apollo Link and its [`BatchHttpLink`](/react/api/link/apollo-link-batch-http) link. | `batch_http_link` |
 
-### Configure client batching
+### Configure client
 
 To enable batching in a client, configure `BatchHttpLink`. For details on implementing `BatchHttpLink`, see [batching operations](https://www.apollographql.com/docs/react/api/link/apollo-link-batch-http/).
 
-### Configuration compatiblity for batching
+### Configuration compatibility
 
 If the router receives a query batch from a client, and batching is *not* enabled, the router sends a `BATCHING_NOT_ENABLED` error to the client, which clearly identifies why the query batch failed.
 
-## Metrics for batching
+## Metrics for query batching
 
 Metrics in the Apollo Router for query batching:
 
@@ -113,7 +113,7 @@ Responses are provided in JSON array, with ordering of responses matching the su
 ]
 ```
 
-## Query batch error handling
+## Error handling for query batching
 
 ### Batch error
 
