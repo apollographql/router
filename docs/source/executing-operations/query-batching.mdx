@@ -1,12 +1,32 @@
 ---
 title: Query batching
+description: Receive query batches with the Apollo Router  
 ---
 
-The Apollo Router provides experimental support for Query Batching.
+> **Experimental Feature**  
+> The Apollo Router provides *experimental* support for client query batching.
 
-## Configuration
+Learn about query batching and how to configure the Apollo Router to receive query batches.
 
-By default this feature is disabled. If enabled, a single mode of operation is supported, `batch_http_link`.
+## About query batching
+
+Modern applications use several operations to render a single page. This is usually the result of a component-based architecture where individual micro-frontends (MFE) make requests separately to fetch data relevant to them. Not only does this cause a performance overhead (i.e. different components may be requesting the same data), it can also cause a consistency issue. To combat this, MFE-based UIs batch multiple client queries and operations, issued close together, into one HTTP request. This is supported in Apollo Client and Apollo Server.
+
+The Apollo Router now supports client request batching. If you’re using Apollo Client, you can leverage the built-in support for batching to reduce the number of individual requests sent to the router.
+
+Once configured, Apollo Client will automatically combine multiple operations into a single HTTP request. The number of operations within a batch is client configurable, including the maximum number of operations in a batch and the maximum duration to wait for operations to accumulate before sending the batch request. 
+
+The Apollo Router must be configured to receive batch requests, otherwise it rejects them. When processing a batch request, the router deserializes and processes each operation of a batch independently, and it responds to the client only after all operations of the batch have been completed.
+
+## Configure query batching
+
+Both a client and the Apollo Router need to be configured to support query batching.
+
+### Configure router for batching
+
+By default, receiving client request batches is disabled in Apollo Router. 
+
+To enable query batching, set the following fields in your `router.yaml` configuration file:
 
 ```yaml title="router.yaml"
 experimental_batching:
@@ -14,9 +34,22 @@ experimental_batching:
   mode: batch_http_link
 ```
 
-If a router receives a query batch from a client and batching is *not* enabled, the client will receive an error which clearly identifies this as `BATCHING_NOT_ENABLED`.
+| Attribute | Description | Valid Values | Default Value |
+| :-- | :-- | :-- | :-- |
+| `enabled` | Flag to enable reception of client batches | boolean | `false` |
+| `mode` | Supported client batching mode | `batch_http_link`:  the client uses Apollo Link and its [`BatchHttpLink`](/react/api/link/apollo-link-batch-http) link. | `batch_http_link` |
 
-## Metrics
+### Configure client batching
+
+To enable batching in a client, configure `BatchHttpLink`. For details on implementing `BatchHttpLink`, see [batching operations](https://www.apollographql.com/docs/react/api/link/apollo-link-batch-http/).
+
+### Configuration compatiblity for batching
+
+If the router receives a query batch from a client, and batching is *not* enabled, the router sends a `BATCHING_NOT_ENABLED` error to the client, which clearly identifies why the query batch failed.
+
+## Metrics for batching
+
+Metrics in the Apollo Router for query batching:
 
 <table class="field-table metrics">
   <thead>
@@ -41,7 +74,7 @@ mode
 </td>
 <td>
 
-counter for the number of batched requests received
+Counter for the number received batch requests.
 
 </td>
 </tr>
@@ -49,15 +82,10 @@ counter for the number of batched requests received
 </tbody>
 </table>
 
-## mode: batch_http_link
 
-Query batching is only supported in `batch_http_link` mode.
+## Query batch formats
 
-### Client
-
-To enable batching in a client, configure `BatchHttpLink`. For details on implementing `BatchHttpLink`, see [batching operations](https://www.apollographql.com/docs/react/api/link/apollo-link-batch-http/).
-
-### Request Format
+### Request format
 
 ```graphql
 [
@@ -74,9 +102,7 @@ query MySecondQuery {
 ]
 ```
 
-> **Note** this mode of query batching does *not* support `@defer`, `subscriptions` or, more generally, any mode of querying that will result in a stream of responses.
-
-### Response Format
+### Response format
 
 Responses are provided in JSON array, with ordering of responses matching the supplied request.
 
@@ -87,11 +113,13 @@ Responses are provided in JSON array, with ordering of responses matching the su
 ]
 ```
 
-### Error Handling
+## Query batch error handling
 
-#### Batch Error
+### Batch error
 
-If the batch of queries cannot be processed, for example it is not provided in a valid format, the entire batch will fail. For example, this query is invalid since it has two commas to separate the batch of queries.:
+If a batch of queries cannot be processed, the entire batch will fail. 
+
+For example, this query is invalid because it has two commas to separate the batch of queries:
 
 ```graphql
 [
@@ -108,6 +136,8 @@ query MySecondQuery {
 ]
 ```
 
+As a result, an error is returned for the invalid batch:
+
 ```json
 {"errors":
   [
@@ -116,12 +146,11 @@ query MySecondQuery {
 }
 ```
 
-#### Individual Query Error
+### Individual query error
 
-If a single query cannot be processed, this will result in an individual error. 
+If a single query in a batch cannot be processed, this will result in an individual error. 
 
-For example, the first query is trying to access a field which does not exist:
-
+For example, the query `MyFirstQuery` is accessing a field that doesn't exist, while the rest of the batch query is valid.
 
 ```graphql
 [
@@ -138,6 +167,8 @@ query MySecondQuery {
 ]
 ```
 
+As a result, an error is returned for the individual query:
+
 ```json
 [
   {"errors":
@@ -150,3 +181,11 @@ query MySecondQuery {
   {"data":{"me":{"name":"Ada Lovelace"}}}
 ]
 ```
+
+## Known limitations
+
+### Unsupported query modes
+ 
+When batching is enabled, any mode of querying that results in a stream of responses is unsupported, including:
+- `@defer`
+- subscriptions
