@@ -23,7 +23,6 @@ use opentelemetry::metrics::SyncUpDownCounter;
 use opentelemetry::metrics::Unit;
 use opentelemetry::metrics::UpDownCounter;
 use opentelemetry::KeyValue;
-use opentelemetry_api::global::ObjectSafeMeterProvider;
 use opentelemetry_api::metrics::AsyncInstrument;
 use opentelemetry_api::metrics::CallbackRegistration;
 use opentelemetry_api::metrics::MetricsError;
@@ -169,7 +168,7 @@ impl Inner {
                         schema_url: schema_url.clone(),
                     })
                     .or_insert_with(|| {
-                        provider.versioned_meter_cow(
+                        provider.versioned_meter(
                             name.clone(),
                             version.clone(),
                             schema_url.clone(),
