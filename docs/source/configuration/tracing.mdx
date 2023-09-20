@@ -134,6 +134,7 @@ telemetry:
   tracing:
     # Datadog
     datadog:
+      enabled: true
       batch_processor:
         scheduled_delay: 100ms
         max_concurrent_exports: 1000
@@ -156,6 +157,7 @@ The Apollo Router can be configured to connect to either the default agent addre
 telemetry:
   tracing:
     datadog:
+      enabled: true
       # Either 'default' or a URL (example: 'http://127.0.0.1:8126')
       endpoint: default
 ```
@@ -168,6 +170,7 @@ To fix this, you can configure the Apollo Router to perform a mapping for the sp
 telemetry:
   tracing:
     datadog:
+      enabled: true
       endpoint: default
       enable_span_mapping: true
 ```
@@ -218,6 +221,7 @@ The Apollo Router can be configured to export tracing data to Jaeger either via 
 telemetry:
   tracing:
     jaeger:
+      enabled: true
       agent:
         # Either 'default' or a URL
         endpoint: docker_jaeger:14268
@@ -231,6 +235,7 @@ If you're using Kubernetes, you can inject your secrets into configuration via e
 telemetry:
   tracing:
     jaeger:
+      enabled: true
       collector:
         endpoint: "http://my-jaeger-collector"
         username: "${env.JAEGER_USERNAME}"
@@ -247,6 +252,8 @@ If you find that the built-in telemetry features of the Apollo Router are missin
 telemetry:
   tracing:
     otlp:
+      enabled: true
+      
       # Either 'default' or a URL
       endpoint: default
 
@@ -278,6 +285,8 @@ The Apollo Router can be configured to export tracing data to either the default
 telemetry:
   tracing:
     zipkin:
+      enabled: true
+      
       # Either 'default' or a URL
       endpoint: http://my_zipkin_collector.dev
 ```

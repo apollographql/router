@@ -141,6 +141,9 @@ You can send metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/
 telemetry:
   metrics:
     otlp:
+      # Enable the OpenTelemetry exporter
+      enabled: true
+      
       # Either 'default' or a URL
       endpoint: default
 

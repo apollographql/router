@@ -2073,19 +2073,6 @@ expression: "&schema"
           "properties": {
             "batch_processor": {
               "description": "Configuration for batch processing.",
-              "default": {
-                "scheduled_delay": {
-                  "secs": 5,
-                  "nanos": 0
-                },
-                "max_queue_size": 2048,
-                "max_export_batch_size": 512,
-                "max_export_timeout": {
-                  "secs": 30,
-                  "nanos": 0
-                },
-                "max_concurrent_exports": 1
-              },
               "type": "object",
               "properties": {
                 "max_concurrent_exports": {
@@ -4501,24 +4488,11 @@ expression: "&schema"
               "description": "Open Telemetry native exporter configuration",
               "type": "object",
               "required": [
-                "endpoint"
+                "enabled"
               ],
               "properties": {
                 "batch_processor": {
                   "description": "Batch processor settings",
-                  "default": {
-                    "scheduled_delay": {
-                      "secs": 5,
-                      "nanos": 0
-                    },
-                    "max_queue_size": 2048,
-                    "max_export_batch_size": 512,
-                    "max_export_timeout": {
-                      "secs": 30,
-                      "nanos": 0
-                    },
-                    "max_concurrent_exports": 1
-                  },
                   "type": "object",
                   "properties": {
                     "max_concurrent_exports": {
@@ -4559,6 +4533,10 @@ expression: "&schema"
                       "type": "string"
                     }
                   }
+                },
+                "enabled": {
+                  "description": "Enable otlp",
+                  "type": "boolean"
                 },
                 "endpoint": {
                   "description": "The endpoint to send data to",
@@ -4705,24 +4683,11 @@ expression: "&schema"
               "description": "Datadog exporter configuration",
               "type": "object",
               "required": [
-                "endpoint"
+                "enabled"
               ],
               "properties": {
                 "batch_processor": {
                   "description": "batch processor configuration",
-                  "default": {
-                    "scheduled_delay": {
-                      "secs": 5,
-                      "nanos": 0
-                    },
-                    "max_queue_size": 2048,
-                    "max_export_batch_size": 512,
-                    "max_export_timeout": {
-                      "secs": 30,
-                      "nanos": 0
-                    },
-                    "max_concurrent_exports": 1
-                  },
                   "type": "object",
                   "properties": {
                     "max_concurrent_exports": {
@@ -4769,6 +4734,10 @@ expression: "&schema"
                   "default": false,
                   "type": "boolean"
                 },
+                "enabled": {
+                  "description": "Enable datadog",
+                  "type": "boolean"
+                },
                 "endpoint": {
                   "description": "The endpoint to send to",
                   "type": "string"
@@ -4800,103 +4769,11 @@ expression: "&schema"
                 {
                   "type": "object",
                   "required": [
-                    "agent"
-                  ],
-                  "properties": {
-                    "agent": {
-                      "description": "Agent configuration",
-                      "type": "object",
-                      "required": [
-                        "endpoint"
-                      ],
-                      "properties": {
-                        "endpoint": {
-                          "description": "The endpoint to send to",
-                          "type": "string"
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    "batch_processor": {
-                      "description": "Batch processor configuration",
-                      "default": {
-                        "scheduled_delay": {
-                          "secs": 5,
-                          "nanos": 0
-                        },
-                        "max_queue_size": 2048,
-                        "max_export_batch_size": 512,
-                        "max_export_timeout": {
-                          "secs": 30,
-                          "nanos": 0
-                        },
-                        "max_concurrent_exports": 1
-                      },
-                      "type": "object",
-                      "properties": {
-                        "max_concurrent_exports": {
-                          "description": "Maximum number of concurrent exports\n\nLimits the number of spawned tasks for exports and thus memory consumed by an exporter. A value of 1 will cause exports to be performed synchronously on the BatchSpanProcessor task. The default is 1.",
-                          "default": 1,
-                          "type": "integer",
-                          "format": "uint",
-                          "minimum": 0.0
-                        },
-                        "max_export_batch_size": {
-                          "description": "The maximum number of spans to process in a single batch. If there are more than one batch worth of spans then it processes multiple batches of spans one batch after the other without any delay. The default value is 512.",
-                          "default": 512,
-                          "type": "integer",
-                          "format": "uint",
-                          "minimum": 0.0
-                        },
-                        "max_export_timeout": {
-                          "description": "The maximum duration to export a batch of data. The default value is 30 seconds.",
-                          "default": {
-                            "secs": 30,
-                            "nanos": 0
-                          },
-                          "type": "string"
-                        },
-                        "max_queue_size": {
-                          "description": "The maximum queue size to buffer spans for delayed processing. If the queue gets full it drops the spans. The default value of is 2048.",
-                          "default": 2048,
-                          "type": "integer",
-                          "format": "uint",
-                          "minimum": 0.0
-                        },
-                        "scheduled_delay": {
-                          "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
-                          "default": {
-                            "secs": 5,
-                            "nanos": 0
-                          },
-                          "type": "string"
-                        }
-                      }
-                    }
-                  },
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "required": [
-                    "collector"
+                    "enabled"
                   ],
                   "properties": {
                     "batch_processor": {
                       "description": "Batch processor configuration",
-                      "default": {
-                        "scheduled_delay": {
-                          "secs": 5,
-                          "nanos": 0
-                        },
-                        "max_queue_size": 2048,
-                        "max_export_batch_size": 512,
-                        "max_export_timeout": {
-                          "secs": 30,
-                          "nanos": 0
-                        },
-                        "max_concurrent_exports": 1
-                      },
                       "type": "object",
                       "properties": {
                         "max_concurrent_exports": {
@@ -4941,9 +4818,6 @@ expression: "&schema"
                     "collector": {
                       "description": "Collector configuration",
                       "type": "object",
-                      "required": [
-                        "endpoint"
-                      ],
                       "properties": {
                         "endpoint": {
                           "description": "The endpoint to send reports to",
@@ -4951,16 +4825,89 @@ expression: "&schema"
                         },
                         "password": {
                           "description": "The optional password",
+                          "default": null,
                           "type": "string",
                           "nullable": true
                         },
                         "username": {
                           "description": "The optional username",
+                          "default": null,
                           "type": "string",
                           "nullable": true
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "enabled": {
+                      "description": "Enable Jaeger",
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "enabled"
+                  ],
+                  "properties": {
+                    "agent": {
+                      "description": "Agent configuration",
+                      "type": "object",
+                      "properties": {
+                        "endpoint": {
+                          "description": "The endpoint to send to",
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "batch_processor": {
+                      "description": "Batch processor configuration",
+                      "type": "object",
+                      "properties": {
+                        "max_concurrent_exports": {
+                          "description": "Maximum number of concurrent exports\n\nLimits the number of spawned tasks for exports and thus memory consumed by an exporter. A value of 1 will cause exports to be performed synchronously on the BatchSpanProcessor task. The default is 1.",
+                          "default": 1,
+                          "type": "integer",
+                          "format": "uint",
+                          "minimum": 0.0
+                        },
+                        "max_export_batch_size": {
+                          "description": "The maximum number of spans to process in a single batch. If there are more than one batch worth of spans then it processes multiple batches of spans one batch after the other without any delay. The default value is 512.",
+                          "default": 512,
+                          "type": "integer",
+                          "format": "uint",
+                          "minimum": 0.0
+                        },
+                        "max_export_timeout": {
+                          "description": "The maximum duration to export a batch of data. The default value is 30 seconds.",
+                          "default": {
+                            "secs": 30,
+                            "nanos": 0
+                          },
+                          "type": "string"
+                        },
+                        "max_queue_size": {
+                          "description": "The maximum queue size to buffer spans for delayed processing. If the queue gets full it drops the spans. The default value of is 2048.",
+                          "default": 2048,
+                          "type": "integer",
+                          "format": "uint",
+                          "minimum": 0.0
+                        },
+                        "scheduled_delay": {
+                          "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
+                          "default": {
+                            "secs": 5,
+                            "nanos": 0
+                          },
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "enabled": {
+                      "description": "Enable Jaeger",
+                      "type": "boolean"
                     }
                   },
                   "additionalProperties": false
@@ -4972,24 +4919,11 @@ expression: "&schema"
               "description": "OpenTelemetry native exporter configuration",
               "type": "object",
               "required": [
-                "endpoint"
+                "enabled"
               ],
               "properties": {
                 "batch_processor": {
                   "description": "Batch processor settings",
-                  "default": {
-                    "scheduled_delay": {
-                      "secs": 5,
-                      "nanos": 0
-                    },
-                    "max_queue_size": 2048,
-                    "max_export_batch_size": 512,
-                    "max_export_timeout": {
-                      "secs": 30,
-                      "nanos": 0
-                    },
-                    "max_concurrent_exports": 1
-                  },
                   "type": "object",
                   "properties": {
                     "max_concurrent_exports": {
@@ -5030,6 +4964,10 @@ expression: "&schema"
                       "type": "string"
                     }
                   }
+                },
+                "enabled": {
+                  "description": "Enable otlp",
+                  "type": "boolean"
                 },
                 "endpoint": {
                   "description": "The endpoint to send data to",
@@ -5334,24 +5272,11 @@ expression: "&schema"
               "description": "Zipkin exporter configuration",
               "type": "object",
               "required": [
-                "endpoint"
+                "enabled"
               ],
               "properties": {
                 "batch_processor": {
                   "description": "Batch processor configuration",
-                  "default": {
-                    "scheduled_delay": {
-                      "secs": 5,
-                      "nanos": 0
-                    },
-                    "max_queue_size": 2048,
-                    "max_export_batch_size": 512,
-                    "max_export_timeout": {
-                      "secs": 30,
-                      "nanos": 0
-                    },
-                    "max_concurrent_exports": 1
-                  },
                   "type": "object",
                   "properties": {
                     "max_concurrent_exports": {
@@ -5392,6 +5317,10 @@ expression: "&schema"
                       "type": "string"
                     }
                   }
+                },
+                "enabled": {
+                  "description": "Enable zipkin",
+                  "type": "boolean"
                 },
                 "endpoint": {
                   "description": "The endpoint to send to",

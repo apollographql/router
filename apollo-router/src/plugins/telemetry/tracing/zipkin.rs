@@ -18,10 +18,14 @@ lazy_static! {
     static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://localhost:9411/api/v2/spans");
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// Enable zipkin
+    pub(crate) enabled: bool,
+
     /// The endpoint to send to
+    #[serde(default)]
     pub(crate) endpoint: UriEndpoint,
 
     /// Batch processor configuration
@@ -31,6 +35,9 @@ pub(crate) struct Config {
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
+        if !self.enabled {
+            return Ok(builder);
+        }
         tracing::info!("configuring Zipkin tracing: {}", self.batch_processor);
 
         let exporter = opentelemetry_zipkin::new_pipeline()
