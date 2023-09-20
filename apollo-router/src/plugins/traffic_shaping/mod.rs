@@ -769,12 +769,12 @@ mod test {
         let config = serde_yaml::from_str::<Config>(
             r#"
         all:
-          experimental_http2: false
+          experimental_http2: disable
         subgraphs: 
           products:
-            experimental_http2: true
+            experimental_http2: enable
           reviews:
-            experimental_http2: false
+            experimental_http2: disable
         router:
           timeout: 65s
         "#,
