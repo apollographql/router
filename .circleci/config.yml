@@ -378,6 +378,20 @@ commands:
                 key: "<< pipeline.parameters.merge_version >>-lint"
                 paths:
                   - target
+  xtask_release_preverify:
+    steps:
+      - restore_cache:
+          keys:
+            - "<< pipeline.parameters.merge_version >>-preverify"
+      - run: xtask release pre-verify
+      - when:
+          condition:
+            equal: [ "dev", "<< pipeline.git.branch >>" ]
+          steps:
+            - save_cache:
+                key: "<< pipeline.parameters.merge_version >>-preverify"
+                paths:
+                  - target
 
   xtask_check_helm:
     steps:
@@ -525,6 +539,18 @@ jobs:
             cargo fetch
       - xtask_test:
           variant: "updated"
+  pre_verify_release:
+    environment:
+      <<: *common_job_environment
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - setup_environment:
+          platform: << parameters.platform >>
+      - xtask_release_preverify
 
   build_release:
     parameters:
@@ -839,6 +865,10 @@ workflows:
     when:
       not: << pipeline.parameters.nightly >>
     jobs:
+      - pre_verify_release:
+          matrix:
+            parameters:
+              platform: [ amd_linux_build ]
       - build_release:
           matrix:
             parameters:
