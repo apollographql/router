@@ -305,7 +305,9 @@ impl Metrics {
         );
         log_usage_metrics!(
             value.apollo.router.config.batching,
-            "$.experimental_batching[?(@.enabled == true)]"
+            "$.experimental_batching[?(@.enabled == true)]",
+            opt.mode,
+            "$.mode"
         );
     }
 }
