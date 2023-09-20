@@ -157,7 +157,7 @@ impl Inner {
         let name = name.into();
         let version = version.map(|v| v.into());
         let schema_url = schema_url.map(|v| v.into());
-        let mut meters = Vec::new();
+        let mut meters = Vec::with_capacity(self.providers.len());
 
         for (provider, existing_meters) in self.providers.values_mut() {
             meters.push(
@@ -420,7 +420,7 @@ impl InstrumentProvider for AggregateInstrumentProvider {
         // So the callback is called, an observable is updated, but only the observable associated with the correct meter will take effect
 
         let callback = Arc::new(callbacks);
-        let mut callback_registrations = Vec::new();
+        let mut callback_registrations = Vec::with_capacity(self.meters.len());
         for meter in &self.meters {
             let callback = callback.clone();
             // If this fails there is no recovery as some callbacks may be registered
