@@ -929,13 +929,11 @@ where
         .map_err(serde::de::Error::custom)
         .and_then(|mut certs| {
             if certs.len() > 1 {
-                Err(serde::de::Error::custom(
-                    "expected exactly one server certificate",
-                ))
+                Err(serde::de::Error::custom("expected exactly one certificate"))
             } else {
-                certs.pop().ok_or(serde::de::Error::custom(
-                    "expected exactly one server certificate",
-                ))
+                certs
+                    .pop()
+                    .ok_or(serde::de::Error::custom("expected exactly one certificate"))
             }
         })
 }
