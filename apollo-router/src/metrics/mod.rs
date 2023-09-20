@@ -640,6 +640,20 @@ mod test {
     use crate::metrics::FutureMetricsExt;
 
     #[test]
+    fn test_multiple_calls() {
+        // Each test is run in a separate thread, metrics are stored in a thread local.
+        fn my_method(val: &'static str) {
+            u64_counter!("test", "test description", 1, "attr" => val);
+        }
+
+        my_method("jill");
+        my_method("jill");
+        my_method("bob");
+        assert_metric!("test", 2, "attr" => "jill");
+        assert_metric!("test", 1, "attr" => "bob");
+    }
+
+    #[test]
     fn test_non_async() {
         // Each test is run in a separate thread, metrics are stored in a thread local.
         u64_counter!("test", "test description", 1, "attr" => "val");
