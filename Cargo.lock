@@ -216,11 +216,11 @@ dependencies = [
 
 [[package]]
 name = "apollo-compiler"
-version = "0.11.1"
+version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7170c0c3761b0f11b9b0bd51b9720176776e1004df9f3b190d53a4f455873bcc"
+checksum = "d9c5a0aa9cc4b5f9fc4aec3ecd76f4acc4407922c3c0e862b87f1c761c96a9bf"
 dependencies = [
- "apollo-parser 0.6.1",
+ "apollo-parser 0.6.2",
  "ariadne",
  "indexmap 2.0.0",
  "ordered-float 3.9.0",
@@ -236,8 +236,8 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b323dfc43b95a8806a401aed913e84db297162c6295bca620c0f57956cdb52cf"
 dependencies = [
- "apollo-compiler 0.11.1",
- "apollo-parser 0.6.1",
+ "apollo-compiler 0.11.2",
+ "apollo-parser 0.6.2",
  "thiserror",
 ]
 
@@ -253,10 +253,11 @@ dependencies = [
 
 [[package]]
 name = "apollo-parser"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72d7e4a7f8862c19d5154b4a146f59d26a5f86678acd4fec1d5d87bd4c9284ab"
+checksum = "e565c10133fbefa3cc9ac6c940bbfc2ed6086def9ec39b0f87a86cf9499aadd2"
 dependencies = [
+ "memchr",
  "rowan",
  "thiserror",
 ]
@@ -267,9 +268,9 @@ version = "1.30.0"
 dependencies = [
  "access-json",
  "anyhow",
- "apollo-compiler 0.11.1",
+ "apollo-compiler 0.11.2",
  "apollo-encoder",
- "apollo-parser 0.6.1",
+ "apollo-parser 0.6.2",
  "arc-swap",
  "askama",
  "async-compression",
@@ -412,7 +413,7 @@ dependencies = [
 name = "apollo-router-benchmarks"
 version = "1.30.0"
 dependencies = [
- "apollo-parser 0.6.1",
+ "apollo-parser 0.6.2",
  "apollo-router",
  "apollo-smith",
  "arbitrary",
@@ -445,7 +446,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13ed94bb9de9f24da12ca2122b8eeaa7484d17b090dc84daaaba6b6ac2bee89b"
 dependencies = [
  "apollo-encoder",
- "apollo-parser 0.6.1",
+ "apollo-parser 0.6.2",
  "arbitrary",
  "once_cell",
  "thiserror",
@@ -2546,9 +2547,9 @@ checksum = "6c2141d6d6c8512188a7891b4b01590a45f6dac67afb4f255c4124dbb86d4eaa"
 
 [[package]]
 name = "fred"
-version = "6.3.1"
+version = "6.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dca2a979eaeb5d8a819edc193860ce54797730559464bc253cd3a2f765e58bd5"
+checksum = "a15cc18b56395b8b15ffcdcea7fe8586e3a3ccb3d9dc3b9408800d9814efb08e"
 dependencies = [
  "arc-swap",
  "arcstr",
@@ -5203,7 +5204,7 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
- "apollo-parser 0.6.1",
+ "apollo-parser 0.6.2",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",

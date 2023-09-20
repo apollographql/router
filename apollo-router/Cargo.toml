@@ -53,9 +53,9 @@ features = ["docs_rs"]
 askama = "0.12.0"
 access-json = "0.1.0"
 anyhow = "1.0.75"
-apollo-compiler = "0.11.1"
+apollo-compiler = "0.11.2"
 apollo-encoder = "0.7.0"
-apollo-parser = "0.6.1"
+apollo-parser = "0.6.2"
 arc-swap = "1.6.0"
 async-compression = { version = "0.4.1", features = [
     "tokio",
@@ -88,7 +88,7 @@ diff = "0.1.13"
 directories = "5.0.1"
 displaydoc = "0.2"
 flate2 = "1.0.27"
-fred = { version = "6.3.1", features = ["enable-rustls", "no-client-setname"] }
+fred = { version = "6.3.2", features = ["enable-rustls", "no-client-setname"] }
 futures = { version = "0.3.28", features = ["thread-pool"] }
 graphql_client = "0.13.0"
 hex = "0.4.3"
@@ -260,7 +260,7 @@ axum = { version = "0.6.20", features = [
     "ws",
 ] }
 ecdsa = { version = "0.15.1", features = ["signing", "pem", "pkcs8"] }
-fred = { version = "6.3.1", features = ["enable-rustls", "no-client-setname"] }
+fred = { version = "6.3.2", features = ["enable-rustls", "no-client-setname"] }
 futures-test = "0.3.28"
 insta = { version = "1.31.0", features = ["json", "redactions", "yaml"] }
 maplit = "1.0.2"
