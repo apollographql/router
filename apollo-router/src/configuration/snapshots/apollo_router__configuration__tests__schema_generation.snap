@@ -5405,7 +5405,8 @@ expression: "&schema"
         "supergraph": null,
         "subgraph": {
           "all": {
-            "certificate_authorities": null
+            "certificate_authorities": null,
+            "client_authentication": null
           },
           "subgraphs": {}
         }
@@ -5416,7 +5417,8 @@ expression: "&schema"
           "description": "Configuration options pertaining to the subgraph server component.",
           "default": {
             "all": {
-              "certificate_authorities": null
+              "certificate_authorities": null,
+              "client_authentication": null
             },
             "subgraphs": {}
           },
@@ -5425,7 +5427,8 @@ expression: "&schema"
             "all": {
               "description": "options applying to all subgraphs",
               "default": {
-                "certificate_authorities": null
+                "certificate_authorities": null,
+                "client_authentication": null
               },
               "type": "object",
               "properties": {
@@ -5433,6 +5436,29 @@ expression: "&schema"
                   "description": "list of certificate authorities in PEM format",
                   "default": null,
                   "type": "string",
+                  "nullable": true
+                },
+                "client_authentication": {
+                  "description": "client certificate authentication",
+                  "default": null,
+                  "type": "object",
+                  "required": [
+                    "certificate_chain",
+                    "key"
+                  ],
+                  "properties": {
+                    "certificate_chain": {
+                      "description": "list of certificates in PEM format",
+                      "writeOnly": true,
+                      "type": "string"
+                    },
+                    "key": {
+                      "description": "key in PEM format",
+                      "writeOnly": true,
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false,
                   "nullable": true
                 }
               },
@@ -5450,6 +5476,29 @@ expression: "&schema"
                     "description": "list of certificate authorities in PEM format",
                     "default": null,
                     "type": "string",
+                    "nullable": true
+                  },
+                  "client_authentication": {
+                    "description": "client certificate authentication",
+                    "default": null,
+                    "type": "object",
+                    "required": [
+                      "certificate_chain",
+                      "key"
+                    ],
+                    "properties": {
+                      "certificate_chain": {
+                        "description": "list of certificates in PEM format",
+                        "writeOnly": true,
+                        "type": "string"
+                      },
+                      "key": {
+                        "description": "key in PEM format",
+                        "writeOnly": true,
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false,
                     "nullable": true
                   }
                 },
