@@ -380,6 +380,28 @@ fn typename_with_alias() {
 }
 
 #[test]
+fn large_int_args_for_ids() {
+    let schema = "type Query {
+        echoId(id: ID!): ID!
+      }";
+    let query = "query LargeID($id: ID!) { echoID(id: $id) }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .variables(json!{{
+            "id": 3000000000
+        }})
+        .response(json! {
+            {"echoID": "3000000000"}
+        })
+        .expected(json! {{
+            "echoID": "3000000000"
+        }})
+        .test();
+}
+
+#[test]
 fn inline_fragment_on_top_level_operation() {
     let schema = "type Query {
         get: Test
@@ -416,7 +438,7 @@ fn inline_fragment_on_top_level_operation() {
 #[test]
 fn reformat_response_data_fragment_spread() {
     let schema = "type Query {
-      thing: Thing    
+      thing: Thing
     }
 
     type Foo {
@@ -758,7 +780,7 @@ fn reformat_response_array_of_type_alias() {
             type Element {
                 stuff: String
             }
-            
+
         ",
         )
         .query("{get { aliased: array {stuff}}}")
@@ -815,7 +837,7 @@ fn reformat_response_array_of_type_duplicate_alias() {
         type Thing {
             array: [Element]
         }
-        
+
         type Element {
             stuff: String
         }",
@@ -2050,7 +2072,7 @@ fn filter_nested_object_errors() {
         reviews2: [Review!]
         reviews3: [Review!]!
     }
-    
+
     type Review {
         text1: String
         text2: String!
@@ -2583,7 +2605,7 @@ fn filter_scalar_errors() {
         a: A
         b: A!
     }
-    
+
     scalar A
     ";
 
@@ -3081,7 +3103,7 @@ fn filter_extended_interface_errors() {
 #[test]
 fn filter_errors_top_level_fragment() {
     let schema = "type Query {
-        get: Thing   
+        get: Thing
       }
 
       type Thing {
@@ -3226,7 +3248,7 @@ fn merge_selections() {
         name: String
         review: Review
     }
-    
+
     type Review {
         id: String!
         body: String
@@ -3672,7 +3694,7 @@ fn skip() {
                     name @skip(if: true)
                 }
                 get @skip(if: false) {
-                    id 
+                    id
                     review {
                         id
                     }
@@ -4757,7 +4779,7 @@ fn inaccessible_on_interface() {
         test_union: U
         test_enum: E
     }
-    
+
     type Object implements Interface @inaccessible {
         foo: String
         other: String
@@ -4767,7 +4789,7 @@ fn inaccessible_on_interface() {
         foo: String
         other: String @inaccessible
     }
-      
+
     interface Interface {
         foo: String
     }
@@ -4781,7 +4803,7 @@ fn inaccessible_on_interface() {
         common: String
         b: String
     }
-    
+
     union U = A | B
 
     enum E {
@@ -5371,7 +5393,7 @@ fn query_operation_nullification() {
             "query {
                 ...F
              }
-             
+
              fragment F on Query {
                  get {
                      name
