@@ -902,7 +902,7 @@ impl Telemetry {
         );
 
         f64_histogram!(
-            "apollo_router_http_requests_duration",
+            "apollo_router_http_request_duration_seconds",
             "Duration of HTTP requests.",
             request_duration.as_secs_f64(),
             metric_attrs
