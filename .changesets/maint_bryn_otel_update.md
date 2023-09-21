@@ -13,4 +13,10 @@ In particular metrics have some significant changes:
 
   We will be following bring tracing into alignment in future. 
 
+* The order of priority for setting service name has been brought into line with the rest of the router configuration. The order of priority is now:
+  1. `OTEL_RESOURCE_ATTRIBUTES` environment variable
+  2. `OTEL_SERVICE_NAME` environment variable
+  3. `resource_attributes` in router.yaml
+  4. `service_name` in router.yaml
+
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3649
