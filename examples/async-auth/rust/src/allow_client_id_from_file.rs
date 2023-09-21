@@ -48,12 +48,12 @@ impl Plugin for AllowClientIdFromFile {
     // switching the async file read with an async http request
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let header_key = self.header.clone();
-        // async_checkpoint is an async function.
+        // oneshot_async_checkpoint is an async function.
         // this means it will run whenever the service `await`s it
         // given we're getting a mutable reference to self,
         // self won't be present anymore when we `await` the checkpoint.
         //
-        // this is solved by cloning the path and moving it into the async_checkpoint callback.
+        // this is solved by cloning the path and moving it into the oneshot_async_checkpoint callback.
         //
         // see https://rust-lang.github.io/async-book/03_async_await/01_chapter.html#async-lifetimes for more information
         let allowed_ids_path = self.allowed_ids_path.clone();
@@ -141,20 +141,12 @@ impl Plugin for AllowClientIdFromFile {
                 }
             }
         };
-        // `ServiceBuilder` provides us with an `async_checkpoint` method.
+        // `ServiceBuilder` provides us with an `oneshot_async_checkpoint` method.
         //
         // This method allows us to return ControlFlow::Continue(request) if we want to let the request through,
         // or ControlFlow::Break(response) with a crafted response if we don't want the request to go through.
         ServiceBuilder::new()
-            .checkpoint_async(handler)
-            // Given the async nature of our checkpoint, we need to make sure
-            // the underlying service will be available whenever the checkpoint
-            // returns ControlFlow::Continue.
-            // This is achieved by adding a buffer in front of the service,
-            // and (automatically) giving one `slot` to our async_checkpoint
-            //
-            // forgetting to add .buffer() here will trigger a compilation error.
-            .buffer(20_000)
+            .oneshot_checkpoint_async(handler)
             .service(service)
             .boxed()
     }
