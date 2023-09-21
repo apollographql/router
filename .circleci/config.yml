@@ -399,6 +399,10 @@ commands:
             # Use helm to template our chart against all kube versions
             TEMPLATE_DIR=$(mktemp -d)
             for kube_version in ${CURRENT_KUBE_VERSIONS}; do
+              # Skip 1.25.14, 1.26.9, 1.27.6 and 1.28.2 until supported by kubeconform
+              if [[ "${kube_version}" == "1.25.14" ]] || [[ "${kube_version}" == "1.26.9" ]] || [[ "${kube_version}" == "1.27.6" ]] || [[ "${kube_version}" == "1.28.2" ]]; then
+                continue
+              fi
               # Use helm to template our chart against kube_version
               helm template --kube-version "${kube_version}" router helm/chart/router --set autoscaling.enabled=true > "${TEMPLATE_DIR}/router-${kube_version}.yaml"
 
