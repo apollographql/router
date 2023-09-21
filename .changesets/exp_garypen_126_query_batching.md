@@ -14,6 +14,6 @@ experimental_batching:
   mode: batch_http_link
 ```
 
-Do not attempt to use subscriptions or `@delay` queries within a batch as they are not supported.
+Do not attempt to use subscriptions or `@defer` queries within a batch as they are not supported.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3837
