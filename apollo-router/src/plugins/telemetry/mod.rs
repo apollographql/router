@@ -30,7 +30,6 @@ use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::propagation::TextMapCompositePropagator;
 use opentelemetry::sdk::trace::Builder;
-use opentelemetry::sdk::Resource;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
@@ -148,7 +147,6 @@ pub(crate) const OPERATION_KIND: &str = "apollo_telemetry::operation_kind";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
-const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 
@@ -672,49 +670,12 @@ impl Telemetry {
 
     fn create_metrics_builder(config: &config::Conf) -> Result<MetricsBuilder, BoxError> {
         let metrics_config = config.metrics.clone().unwrap_or_default();
-        let metrics_common_config = &mut metrics_config.common.unwrap_or_default();
-        // Set default service name for metrics
-        if metrics_common_config
-            .resources
-            .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.as_str())
-            .is_none()
-        {
-            metrics_common_config.resources.insert(
-                String::from(opentelemetry_semantic_conventions::resource::SERVICE_NAME.as_str()),
-                String::from(
-                    metrics_common_config
-                        .service_name
-                        .as_deref()
-                        .unwrap_or(DEFAULT_SERVICE_NAME),
-                ),
-            );
-        }
-        if let Some(service_namespace) = &metrics_common_config.service_namespace {
-            metrics_common_config.resources.insert(
-                String::from(
-                    opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE.as_str(),
-                ),
-                service_namespace.clone(),
-            );
-        }
-
-        let mut builder = MetricsBuilder::default();
-        builder.public_meter_provider_builder = builder
-            .public_meter_provider_builder
-            .with_resource(Resource::new(
-                config
-                    .metrics
-                    .as_ref()
-                    .and_then(|m| m.common.as_ref())
-                    .map(|c| c.resources.clone())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|(k, v)| KeyValue::new(k, v)),
-            ));
-        builder = setup_metrics_exporter(builder, &config.apollo, metrics_common_config)?;
+        let metrics_common_config = metrics_config.common.unwrap_or_default().clone();
+        let mut builder = MetricsBuilder::new(config);
+        builder = setup_metrics_exporter(builder, &config.apollo, &metrics_common_config)?;
         builder =
-            setup_metrics_exporter(builder, &metrics_config.prometheus, metrics_common_config)?;
-        builder = setup_metrics_exporter(builder, &metrics_config.otlp, metrics_common_config)?;
+            setup_metrics_exporter(builder, &metrics_config.prometheus, &metrics_common_config)?;
+        builder = setup_metrics_exporter(builder, &metrics_config.otlp, &metrics_common_config)?;
         Ok(builder)
     }
 

@@ -8,7 +8,6 @@ use once_cell::sync::Lazy;
 use opentelemetry::sdk::metrics::MeterProvider;
 use opentelemetry::sdk::metrics::MeterProviderBuilder;
 use opentelemetry::sdk::Resource;
-use opentelemetry_api::KeyValue;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -91,16 +90,8 @@ impl MetricsConfigurator for Config {
         // Prometheus metrics are special, they must persist between reloads. This means that we only want to create something new if the resources have changed.
         // The prometheus exporter, and the associated registry are linked, so replacing one means replacing the other.
 
-        let resource = Resource::new(
-            metrics_config
-                .resources
-                .clone()
-                .into_iter()
-                .map(|(k, v)| KeyValue::new(k, v)),
-        );
-
         let prometheus_config = PrometheusConfig {
-            resource: resource.clone(),
+            resource: builder.resource.clone(),
             buckets: metrics_config.buckets.clone(),
         };
 
@@ -142,7 +133,7 @@ impl MetricsConfigurator for Config {
 
             let meter_provider = MeterProvider::builder()
                 .with_reader(exporter)
-                .with_resource(resource)
+                .with_resource(builder.resource.clone())
                 .build();
             builder.custom_endpoints.insert(
                 self.listen.clone(),

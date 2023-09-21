@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use ::serde::Deserialize;
 use access_json::JSONQuery;
@@ -9,6 +10,10 @@ use multimap::MultiMap;
 use opentelemetry::sdk::metrics::reader::AggregationSelector;
 use opentelemetry::sdk::metrics::Aggregation;
 use opentelemetry::sdk::metrics::InstrumentKind;
+use opentelemetry::sdk::resource::ResourceDetector;
+use opentelemetry::sdk::resource::SdkProvidedResourceDetector;
+use opentelemetry::sdk::Resource;
+use opentelemetry_api::KeyValue;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -22,6 +27,7 @@ use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_regex;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::router_factory::Endpoint;
 use crate::Context;
@@ -474,13 +480,97 @@ impl AttributesForwardConf {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct MetricsBuilder {
     pub(crate) public_meter_provider_builder: opentelemetry::sdk::metrics::MeterProviderBuilder,
     pub(crate) apollo_meter_provider_builder: opentelemetry::sdk::metrics::MeterProviderBuilder,
     pub(crate) prometheus_meter_provider: Option<opentelemetry::sdk::metrics::MeterProvider>,
     pub(crate) custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     pub(crate) apollo_metrics_sender: Sender,
+    pub(crate) resource: Resource,
+}
+
+struct ConfigResourceDetector(MetricsCommon);
+
+impl ResourceDetector for ConfigResourceDetector {
+    fn detect(&self, _timeout: Duration) -> Resource {
+        let mut resource = Resource::new(
+            vec![
+                self.0.service_name.clone().map(|service_name| {
+                    KeyValue::new(
+                        opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                        service_name,
+                    )
+                }),
+                self.0.service_namespace.clone().map(|service_namespace| {
+                    KeyValue::new(
+                        opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE,
+                        service_namespace,
+                    )
+                }),
+            ]
+            .into_iter()
+            .filter_map(|x| x)
+            .collect::<Vec<_>>(),
+        );
+        resource = resource.merge(&mut Resource::new(
+            self.0
+                .resources
+                .clone()
+                .into_iter()
+                .map(|(k, v)| KeyValue::new(k, v)),
+        ));
+        resource
+    }
+}
+
+impl MetricsBuilder {
+    pub(crate) fn new(config: &Conf) -> Self {
+        let metrics_common_config = config
+            .metrics
+            .clone()
+            .map(|m| m.common)
+            .flatten()
+            .unwrap_or_default();
+
+        let mut resource = Resource::from_detectors(
+            Duration::from_secs(0),
+            vec![
+                Box::new(ConfigResourceDetector(metrics_common_config.clone())),
+                Box::new(SdkProvidedResourceDetector),
+                Box::new(opentelemetry::sdk::resource::EnvResourceDetector::new()),
+            ],
+        );
+
+        // Otel resources can be initialized from env variables, there is an override mechanism, but it's broken for service name as it will always override service.name
+        // If the service name is set to unknown service then override it from the config
+        if resource.get(opentelemetry_semantic_conventions::resource::SERVICE_NAME)
+            == Some("unknown_service".into())
+        {
+            if let Some(service_name) = Resource::from_detectors(
+                Duration::from_secs(0),
+                vec![Box::new(ConfigResourceDetector(
+                    metrics_common_config.clone(),
+                ))],
+            )
+            .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME)
+            {
+                resource = resource.merge(&mut Resource::new(vec![KeyValue::new(
+                    opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+                    service_name,
+                )]));
+            }
+        }
+
+        Self {
+            resource: resource.clone(),
+            public_meter_provider_builder: opentelemetry::sdk::metrics::MeterProvider::builder()
+                .with_resource(resource.clone()),
+            apollo_meter_provider_builder: opentelemetry::sdk::metrics::MeterProvider::builder(),
+            prometheus_meter_provider: None,
+            custom_endpoints: MultiMap::new(),
+            apollo_metrics_sender: Sender::default(),
+        }
+    }
 }
 
 pub(crate) trait MetricsConfigurator {
