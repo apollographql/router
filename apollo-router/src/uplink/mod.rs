@@ -183,19 +183,22 @@ where
 /// endpoint's response includes another URL located close to the Uplink
 /// endpoint; if that second URL is down, we want to try the next Uplink
 /// endpoint rather than fully giving up.
-pub(crate) fn stream_from_uplink_transforming_new_response<Query, Response, SomethingElse>(
+pub(crate) fn stream_from_uplink_transforming_new_response<Query, Response, TransformedResponse>(
     mut uplink_config: UplinkConfig,
-    transform_new_response: impl Fn(Response) -> Box<dyn Future<Output = Result<SomethingElse, BoxError>> + Send + Unpin>
+    transform_new_response: impl Fn(
+            Response,
+        )
+            -> Box<dyn Future<Output = Result<TransformedResponse, BoxError>> + Send + Unpin>
         + Send
         + Sync
         + 'static,
-) -> impl Stream<Item = Result<SomethingElse, Error>>
+) -> impl Stream<Item = Result<TransformedResponse, Error>>
 where
     Query: graphql_client::GraphQLQuery,
     <Query as graphql_client::GraphQLQuery>::ResponseData: Into<UplinkResponse<Response>> + Send,
     <Query as graphql_client::GraphQLQuery>::Variables: From<UplinkRequest> + Send + Sync,
     Response: Send + 'static + Debug,
-    SomethingElse: Send + 'static + Debug,
+    TransformedResponse: Send + 'static + Debug,
 {
     let query = query_name::<Query>();
     let (sender, receiver) = channel(2);
@@ -222,7 +225,7 @@ where
 
             let query_body = Query::build_query(variables.into());
 
-            match fetch::<Query, Response, SomethingElse>(
+            match fetch::<Query, Response, TransformedResponse>(
                 &client,
                 &query_body,
                 &mut endpoints.iter(),
@@ -300,23 +303,25 @@ where
     ReceiverStream::new(receiver).boxed()
 }
 
-pub(crate) async fn fetch<Query, Response, SomethingElse>(
+pub(crate) async fn fetch<Query, Response, TransformedResponse>(
     client: &reqwest::Client,
     request_body: &QueryBody<Query::Variables>,
     urls: &mut impl Iterator<Item = &Url>,
     // See stream_from_uplink_transforming_new_response for an explanation of
     // this argument.
-    transform_new_response: &(impl Fn(Response) -> Box<dyn Future<Output = Result<SomethingElse, BoxError>> + Send + Unpin>
+    transform_new_response: &(impl Fn(
+        Response,
+    ) -> Box<dyn Future<Output = Result<TransformedResponse, BoxError>> + Send + Unpin>
           + Send
           + Sync
           + 'static),
-) -> Result<UplinkResponse<SomethingElse>, Error>
+) -> Result<UplinkResponse<TransformedResponse>, Error>
 where
     Query: graphql_client::GraphQLQuery,
     <Query as graphql_client::GraphQLQuery>::ResponseData: Into<UplinkResponse<Response>> + Send,
     <Query as graphql_client::GraphQLQuery>::Variables: From<UplinkRequest> + Send + Sync,
     Response: Send + Debug + 'static,
-    SomethingElse: Send + Debug + 'static,
+    TransformedResponse: Send + Debug + 'static,
 {
     let query = query_name::<Query>();
     for url in urls {
