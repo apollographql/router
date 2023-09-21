@@ -377,7 +377,7 @@ macro_rules! u64_counter {
     };
 
     ($name:literal, $description:literal, $value: expr) => {
-        metric!(u64, counter, add, $name, $description, $value, &[]);
+        metric!(u64, counter, add, $name, $description, $value, []);
     }
 }
 
@@ -635,13 +635,38 @@ impl<T> FutureMetricsExt<T> for T where T: Future {}
 
 #[cfg(test)]
 mod test {
+    use opentelemetry_api::metrics::MeterProvider;
+    use opentelemetry_api::KeyValue;
+
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::meter_provider;
     use crate::metrics::FutureMetricsExt;
 
     #[test]
+    fn test_gauge() {
+        meter_provider()
+            .meter("test")
+            .u64_observable_gauge("test")
+            .with_callback(|m| m.observe(5, &[]))
+            .init();
+        assert_metric!("test", 5);
+    }
+
+    #[test]
+    fn test_no_attributes() {
+        u64_counter!("test", "test description", 1);
+        assert_metric!("test", 1);
+    }
+
+    #[test]
+    fn test_dynamic_attributes() {
+        let attributes = vec![KeyValue::new("attr", "val")];
+        u64_counter!("test", "test description", 1, attributes);
+        assert_metric!("test", 1, "attr" => "val");
+    }
+
+    #[test]
     fn test_multiple_calls() {
-        // Each test is run in a separate thread, metrics are stored in a thread local.
         fn my_method(val: &'static str) {
             u64_counter!("test", "test description", 1, "attr" => val);
         }

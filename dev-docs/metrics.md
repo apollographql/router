@@ -94,13 +94,23 @@ They are highly optimised, allow dynamic attributes, are easy to use and support
 
 ### Usage
 
+There are two classes of instrument, observable and non-observable. Observable instruments will ask for their value when they are exported, non-observable will update at the point of mutation.
 
+Observable gauges are attached to a particular meter, so they MUST be created after the telemetry plugin `activate()` has been called as this is the point where meters will updated.
+We're going to have to think about how to make this less brittle.
 
 ```rust
-    u64_counter!("test", "test description", 1, "attr" => "val");
-    u64_counter!("test", "test description", 1, &attributes);
-    u64_counter!("test", "test description", 1);
+// non-observable instruments - good for histograms and counters
+u64_counter!("test", "test description", 1, vec![KeyValue::new("attr", "val")]);    
+u64_counter!("test", "test description", 1, "attr" => "val");
+u64_counter!("test", "test description", 1);
 
+// observable instruments - good for gauges
+meter_provider()
+  .meter("test")
+  .u64_observable_gauge("test")
+  .with_callback(|m| m.observe(5, &[]))
+  .init();
 ```
 
 ### Testing
