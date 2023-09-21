@@ -252,6 +252,12 @@ impl PersistedQueryLayer {
             }
         }
     }
+
+    pub(crate) fn all_operations(&self) -> Option<Vec<String>> {
+        self.manifest_poller
+            .as_ref()
+            .map(|poller| poller.get_all_operations())
+    }
 }
 
 fn log_unknown_operation(operation_body: &str) {
