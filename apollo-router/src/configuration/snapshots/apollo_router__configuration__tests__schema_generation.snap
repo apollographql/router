@@ -1016,6 +1016,9 @@ expression: "&schema"
         "mode": ""
       },
       "type": "object",
+      "required": [
+        "mode"
+      ],
       "properties": {
         "enabled": {
           "description": "Activates Batching (disabled by default)",
@@ -1024,7 +1027,6 @@ expression: "&schema"
         },
         "mode": {
           "description": "Batching mode (batch_http_link is supported)",
-          "default": "",
           "type": "string"
         }
       },

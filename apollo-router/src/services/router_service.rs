@@ -437,11 +437,16 @@ impl RouterService {
                                 ),
                             })?;
                     } else if !q.is_empty() && q.as_bytes()[0] == b'[' {
+                        let extension_details = if self.experimental_batching.enabled && self.experimental_batching.mode != "batch_http_link" {
+                            format!("batching not supported for mode `{}`", self.experimental_batching.mode)
+                        } else {
+                            "batching not enabled".to_string()
+                        };
                         return Err(TranslateError {
                             status: StatusCode::BAD_REQUEST,
                             error: "batching not enabled",
                             extension_code: "BATCHING_NOT_ENABLED",
-                            extension_details: "batching not enabled".to_string(),
+                            extension_details,
                         });
                     } else {
                         return Err(TranslateError {
@@ -490,11 +495,21 @@ impl RouterService {
                             ),
                         })?;
                 } else if !bytes.is_empty() && bytes[0] == b'[' {
+                    let extension_details = if self.experimental_batching.enabled
+                        && self.experimental_batching.mode != "batch_http_link"
+                    {
+                        format!(
+                            "batching not supported for mode `{}`",
+                            self.experimental_batching.mode
+                        )
+                    } else {
+                        "batching not enabled".to_string()
+                    };
                     return Err(TranslateError {
                         status: StatusCode::BAD_REQUEST,
                         error: "batching not enabled",
                         extension_code: "BATCHING_NOT_ENABLED",
-                        extension_details: "batching not enabled".to_string(),
+                        extension_details,
                     });
                 } else {
                     return Err(TranslateError {

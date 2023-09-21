@@ -1287,12 +1287,11 @@ fn default_graphql_introspection() -> bool {
 /// Configuration for Batching
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-#[serde(default)]
 pub(crate) struct Batching {
     /// Activates Batching (disabled by default)
+    #[serde(default)]
     pub(crate) enabled: bool,
 
     /// Batching mode (batch_http_link is supported)
-    #[serde(default)]
     pub(crate) mode: String,
 }
