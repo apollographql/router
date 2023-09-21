@@ -509,7 +509,7 @@ impl ResourceDetector for ConfigResourceDetector {
                 }),
             ]
             .into_iter()
-            .filter_map(|x| x)
+            .flatten()
             .collect::<Vec<_>>(),
         );
         resource = resource.merge(&mut Resource::new(
@@ -528,8 +528,7 @@ impl MetricsBuilder {
         let metrics_common_config = config
             .metrics
             .clone()
-            .map(|m| m.common)
-            .flatten()
+            .and_then(|m| m.common)
             .unwrap_or_default();
 
         let mut resource = Resource::from_detectors(
