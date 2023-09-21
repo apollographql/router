@@ -2184,6 +2184,7 @@ mod tests {
             make_supergraph_request(plugin.as_ref()).await;
 
             assert_metric!("apollo_router_http_requests_total", 1, "another_test" => "my_default_value", "my_value" => 2, "myname" => "label_value", "renamed_value" => "my_value_set", "status" => "200", "x-custom" => "coming_from_header");
+            assert_metric!("apollo_router_http_request_duration_seconds", 1, "another_test" => "my_default_value", "my_value" => 2, "myname" => "label_value", "renamed_value" => "my_value_set", "status" => "200", "x-custom" => "coming_from_header");
         }.with_metrics().await;
     }
 
@@ -2368,6 +2369,8 @@ mod tests {
                 .unwrap();
 
             assert_metric!("apollo_router_http_requests_total", 1, "another_test" => "my_default_value", "error" => "400 Bad Request", "myname" => "label_value", "renamed_value" => "my_value_set", "status" => "400");
+            assert_metric!("apollo_router_http_request_duration_seconds", 1, "another_test" => "my_default_value", "error" => "400 Bad Request", "myname" => "label_value", "renamed_value" => "my_value_set", "status" => "400");
+
         }.with_metrics().await;
     }
 
