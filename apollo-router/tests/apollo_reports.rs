@@ -191,7 +191,7 @@ async fn report(
     Ok(Json(()))
 }
 
-async fn get_trace_report(request: supergraph::Request) -> Report {
+async fn get_trace_report(request: router::Request) -> Report {
     get_report(false, request, |r| {
         let r = !r
             .traces_per_query
@@ -214,17 +214,17 @@ fn has_metrics(r: &&Report) -> bool {
         .is_empty()
 }
 
-async fn get_metrics_report(request: supergraph::Request) -> Report {
+async fn get_metrics_report(request: router::Request) -> Report {
     get_report(false, request, has_metrics).await
 }
 
-async fn get_metrics_report_mocked(request: supergraph::Request) -> Report {
+async fn get_metrics_report_mocked(request: router::Request) -> Report {
     get_report(true, request, has_metrics).await
 }
 
 async fn get_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
     mocked: bool,
-    request: supergraph::Request,
+    request: router::Request,
     filter: T,
 ) -> Report {
     ROUTER_SERVICE_RUNTIME
@@ -235,14 +235,13 @@ async fn get_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
                 {
                     REPORTS.clone().lock().await.clear();
                 }
-                let req: router::Request = request.try_into().expect("could not convert request");
 
                 let response = get_router_service(mocked)
                     .await
                     .ready()
                     .await
                     .expect("router service was never ready")
-                    .call(req)
+                    .call(request)
                     .await
                     .expect("router service call failed");
 
@@ -288,7 +287,8 @@ async fn non_defer() {
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let report = get_trace_report(req).await;
     assert_report!(report);
 }
 
@@ -300,7 +300,8 @@ async fn test_condition_if() {
         .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let report = get_trace_report(req).await;
     assert_report!(report);
 }
 
@@ -312,7 +313,8 @@ async fn test_condition_else() {
         .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let report = get_trace_report(req).await;
     assert_report!(report);
 }
 
@@ -322,7 +324,29 @@ async fn test_trace_id() {
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let report = get_trace_report(req).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_batch_trace_id() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap()
+        .supergraph_request
+        .map(|req| {
+            // Modify the request so that it is a valid array of requests.
+            let mut json_bytes = serde_json::to_vec(&req).unwrap();
+            let mut result = vec![b'['];
+            result.append(&mut json_bytes.clone());
+            result.push(b',');
+            result.append(&mut json_bytes);
+            result.push(b']');
+            hyper::Body::from(result)
+        });
+    let report = get_trace_report(request.into()).await;
     assert_report!(report);
 }
 
@@ -333,7 +357,8 @@ async fn test_client_name() {
         .header("apollographql-client-name", "my client")
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let report = get_trace_report(req).await;
     assert_report!(report);
 }
 
@@ -344,7 +369,8 @@ async fn test_client_version() {
         .header("apollographql-client-version", "my client version")
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let report = get_trace_report(req).await;
     assert_report!(report);
 }
 
@@ -356,7 +382,31 @@ async fn test_send_header() {
         .header("dont-send-header", "Header value")
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let report = get_trace_report(req).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_batch_send_header() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .header("send-header", "Header value")
+        .header("dont-send-header", "Header value")
+        .build()
+        .unwrap()
+        .supergraph_request
+        .map(|req| {
+            // Modify the request so that it is a valid array of requests.
+            let mut json_bytes = serde_json::to_vec(&req).unwrap();
+            let mut result = vec![b'['];
+            result.append(&mut json_bytes.clone());
+            result.push(b',');
+            result.append(&mut json_bytes);
+            result.push(b']');
+            hyper::Body::from(result)
+        });
+    let report = get_trace_report(request.into()).await;
     assert_report!(report);
 }
 
@@ -368,7 +418,8 @@ async fn test_send_variable_value() {
         .variable("dontSendValue", true)
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let report = get_trace_report(req).await;
     assert_report!(report);
 }
 
@@ -378,7 +429,29 @@ async fn test_stats() {
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .build()
         .unwrap();
-    let report = get_metrics_report(request).await;
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let report = get_metrics_report(req).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_batch_stats() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap()
+        .supergraph_request
+        .map(|req| {
+            // Modify the request so that it is a valid array of requests.
+            let mut json_bytes = serde_json::to_vec(&req).unwrap();
+            let mut result = vec![b'['];
+            result.append(&mut json_bytes.clone());
+            result.push(b',');
+            result.append(&mut json_bytes);
+            result.push(b']');
+            hyper::Body::from(result)
+        });
+    let report = get_metrics_report(request.into()).await;
     assert_report!(report);
 }
 
@@ -388,7 +461,8 @@ async fn test_stats_mocked() {
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .build()
         .unwrap();
-    let report = get_metrics_report_mocked(request).await;
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let report = get_metrics_report_mocked(req).await;
     let per_query = report.traces_per_query.values().next().unwrap();
     let stats = per_query.stats_with_context.first().unwrap();
     insta::with_settings!({sort_maps => true}, {
