@@ -140,7 +140,7 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                     .is_empty()
                 {
                     transformer_builder = transformer_builder.add_action(
-                        Parser::parse(&format!(r#"const({to})"#), &format!("{path}"))
+                        Parser::parse(&format!(r#"const({to})"#), &format!("$.{path} == {from}"))
                             .expect("migration must be valid"),
                     );
                 }
