@@ -263,10 +263,8 @@ async fn get_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
                 for _ in 0..5 {
                     let reports = REPORTS.lock().await;
                     let report = reports.iter().find(filter);
-                    if report.is_some() {
-                        if matches!(found_report, Ok(None)) {
-                            found_report = Ok(report.cloned());
-                        }
+                    if report.is_some() && matches!(found_report, Ok(None)) {
+                        found_report = Ok(report.cloned());
                         // We can't break, even when we find a report, because of batching. We have
                         // to check the whole loop
                     }
