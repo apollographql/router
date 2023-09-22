@@ -68,6 +68,7 @@ use crate::query_planner::BridgeQueryPlanner;
 use crate::router_factory::create_plugins;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
@@ -2318,6 +2319,7 @@ async fn test_supergraph_timeout() {
 
     let service = RouterCreator::new(
         QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&conf)).await,
+        Arc::new(PersistedQueryLayer::new(&conf).await.unwrap()),
         Arc::new(supergraph_creator),
         conf.clone(),
     )
