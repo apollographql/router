@@ -837,7 +837,12 @@ impl Telemetry {
                 if !parts.status.is_success() {
                     metric_attrs.push(KeyValue::new("error", parts.status.to_string()));
                 }
-                u64_counter!("apollo.router.operations", "The number of graphql operations performed by the Router", 1, "http.response.status_code" => parts.status.as_u16() as i64);
+                u64_counter!(
+                    "apollo.router.operations",
+                    "The number of graphql operations performed by the Router",
+                    1,
+                    "http.response.status_code" = parts.status.as_u16() as i64
+                );
                 let response = http::Response::from_parts(
                     parts,
                     once(ready(first_response.unwrap_or_default()))
@@ -849,7 +854,12 @@ impl Telemetry {
             }
             Err(err) => {
                 metric_attrs.push(KeyValue::new("status", "500"));
-                u64_counter!("apollo.router.operations", "The number of graphql operations performed by the Router", 1, "http.response.status_code" => 500);
+                u64_counter!(
+                    "apollo.router.operations",
+                    "The number of graphql operations performed by the Router",
+                    1,
+                    "http.response.status_code" = 500
+                );
                 Err(err)
             }
         };
@@ -2180,32 +2190,53 @@ mod tests {
     async fn test_supergraph_metrics_ok() {
         async {
             let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml")).await;
+                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
+                    .await;
             make_supergraph_request(plugin.as_ref()).await;
 
-            assert_metric!("apollo_router_http_requests_total", 1, "another_test" => "my_default_value", "my_value" => 2, "myname" => "label_value", "renamed_value" => "my_value_set", "status" => "200", "x-custom" => "coming_from_header");
-            assert_metric!("apollo_router_http_request_duration_seconds", 1, "another_test" => "my_default_value", "my_value" => 2, "myname" => "label_value", "renamed_value" => "my_value_set", "status" => "200", "x-custom" => "coming_from_header");
-        }.with_metrics().await;
+            assert_metric!(
+                "apollo_router_http_requests_total",
+                1,
+                "another_test" = "my_default_value",
+                "my_value" = 2,
+                "myname" = "label_value",
+                "renamed_value" = "my_value_set",
+                "status" = "200",
+                "x-custom" = "coming_from_header"
+            );
+            assert_metric!(
+                "apollo_router_http_request_duration_seconds",
+                1,
+                "another_test" = "my_default_value",
+                "my_value" = 2,
+                "myname" = "label_value",
+                "renamed_value" = "my_value_set",
+                "status" = "200",
+                "x-custom" = "coming_from_header"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
     async fn test_supergraph_metrics_bad_request() {
         async {
             let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml")).await;
+                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
+                    .await;
 
             let mut mock_bad_request_service = MockSupergraphService::new();
-            mock_bad_request_service
-                .expect_call()
-                .times(1)
-                .returning(move |req: SupergraphRequest| {
+            mock_bad_request_service.expect_call().times(1).returning(
+                move |req: SupergraphRequest| {
                     Ok(SupergraphResponse::fake_builder()
                         .context(req.context)
                         .status_code(StatusCode::BAD_REQUEST)
                         .data(json!({"errors": [{"message": "nope"}]}))
                         .build()
                         .unwrap())
-                });
+                },
+            );
             let mut bad_request_supergraph_service =
                 plugin.supergraph_service(BoxService::new(mock_bad_request_service));
             let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
@@ -2220,15 +2251,26 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_metric!("apollo_router_http_requests_total", 1, "another_test" => "my_default_value", "error" => "400 Bad Request", "myname" => "label_value", "renamed_value" => "my_value_set", "status" => "400");
-        }.with_metrics().await;
+            assert_metric!(
+                "apollo_router_http_requests_total",
+                1,
+                "another_test" = "my_default_value",
+                "error" = "400 Bad Request",
+                "myname" = "label_value",
+                "renamed_value" = "my_value_set",
+                "status" = "400"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
     async fn test_subgraph_metrics_ok() {
         async {
             let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml")).await;
+                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
+                    .await;
 
             let mut mock_subgraph_service = MockSubgraphService::new();
             mock_subgraph_service
@@ -2281,15 +2323,27 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_metric!("apollo_router_http_requests_total", 1, "error" => "custom_error_for_propagation", "my_key" => "my_custom_attribute_from_context", "query_from_request" => "query { test }", "status" => "200", "subgraph" => "my_subgraph_name", "unknown_data" => "default_value");
-        }.with_metrics().await;
+            assert_metric!(
+                "apollo_router_http_requests_total",
+                1,
+                "error" = "custom_error_for_propagation",
+                "my_key" = "my_custom_attribute_from_context",
+                "query_from_request" = "query { test }",
+                "status" = "200",
+                "subgraph" = "my_subgraph_name",
+                "unknown_data" = "default_value"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
     async fn test_subgraph_metrics_http_error() {
         async {
             let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml")).await;
+                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
+                    .await;
 
             let mut mock_subgraph_service_in_error = MockSubgraphService::new();
             mock_subgraph_service_in_error
@@ -2329,28 +2383,37 @@ mod tests {
                 .await
                 .expect_err("should be an error");
 
-            assert_metric!("apollo_router_http_requests_total", 1, "message" => "cannot contact the subgraph", "status" => "500", "subgraph" => "my_subgraph_name_error", "subgraph_error_extended_code" => "SUBREQUEST_HTTP_ERROR");
-        }.with_metrics().await;
+            assert_metric!(
+                "apollo_router_http_requests_total",
+                1,
+                "message" = "cannot contact the subgraph",
+                "status" = "500",
+                "subgraph" = "my_subgraph_name_error",
+                "subgraph_error_extended_code" = "SUBREQUEST_HTTP_ERROR"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
     async fn test_subgraph_metrics_bad_request() {
         async {
             let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml")).await;
+                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
+                    .await;
 
             let mut mock_bad_request_service = MockSupergraphService::new();
-            mock_bad_request_service
-                .expect_call()
-                .times(1)
-                .returning(move |req: SupergraphRequest| {
+            mock_bad_request_service.expect_call().times(1).returning(
+                move |req: SupergraphRequest| {
                     Ok(SupergraphResponse::fake_builder()
                         .context(req.context)
                         .status_code(StatusCode::BAD_REQUEST)
                         .data(json!({"errors": [{"message": "nope"}]}))
                         .build()
                         .unwrap())
-                });
+                },
+            );
 
             let mut bad_request_supergraph_service =
                 plugin.supergraph_service(BoxService::new(mock_bad_request_service));
@@ -2368,10 +2431,27 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_metric!("apollo_router_http_requests_total", 1, "another_test" => "my_default_value", "error" => "400 Bad Request", "myname" => "label_value", "renamed_value" => "my_value_set", "status" => "400");
-            assert_metric!("apollo_router_http_request_duration_seconds", 1, "another_test" => "my_default_value", "error" => "400 Bad Request", "myname" => "label_value", "renamed_value" => "my_value_set", "status" => "400");
-
-        }.with_metrics().await;
+            assert_metric!(
+                "apollo_router_http_requests_total",
+                1,
+                "another_test" = "my_default_value",
+                "error" = "400 Bad Request",
+                "myname" = "label_value",
+                "renamed_value" = "my_value_set",
+                "status" = "400"
+            );
+            assert_metric!(
+                "apollo_router_http_request_duration_seconds",
+                1,
+                "another_test" = "my_default_value",
+                "error" = "400 Bad Request",
+                "myname" = "label_value",
+                "renamed_value" = "my_value_set",
+                "status" = "400"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
