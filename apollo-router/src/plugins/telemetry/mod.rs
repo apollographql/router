@@ -110,7 +110,6 @@ use crate::plugins::telemetry::utils::TracingUtils;
 use crate::query_planner::OperationKind;
 use crate::register_plugin;
 use crate::router_factory::Endpoint;
-use crate::services::apollo_key;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
@@ -666,13 +665,6 @@ impl Telemetry {
         // should be accepted
         trace_config.sampler = SamplerOption::Always(Sampler::AlwaysOn);
 
-        // if APOLLO_KEY was set, the Studio exporter must be active
-        let apollo_config = if config.apollo.is_none() && apollo_key().is_some() {
-            Some(Default::default())
-        } else {
-            config.apollo.clone()
-        };
-
         let mut builder = opentelemetry::sdk::trace::TracerProvider::builder()
             .with_config((&trace_config).into());
 
@@ -680,13 +672,13 @@ impl Telemetry {
         builder = setup_tracing(builder, &tracing_config.zipkin, &trace_config)?;
         builder = setup_tracing(builder, &tracing_config.datadog, &trace_config)?;
         builder = setup_tracing(builder, &tracing_config.otlp, &trace_config)?;
-        builder = setup_tracing(builder, &apollo_config, &trace_config)?;
+        builder = setup_tracing(builder, &config.apollo, &trace_config)?;
 
         if tracing_config.jaeger.is_none()
             && tracing_config.zipkin.is_none()
             && tracing_config.datadog.is_none()
             && tracing_config.otlp.is_none()
-            && apollo_config.is_none()
+            && config.apollo.is_none()
         {
             sampler = SamplerOption::Always(Sampler::AlwaysOff);
         }
