@@ -307,13 +307,13 @@ impl FetchNode {
         schema: &Schema,
         current_dir: &'a Path,
         inverted_paths: Vec<Vec<Path>>,
-        response: graphql::Response,
+        mut response: graphql::Response,
     ) -> (Value, Vec<Error>) {
         if !self.requires.is_empty() {
             let entities_path = Path(vec![json_ext::PathElement::Key("_entities".to_string())]);
 
             let mut errors: Vec<Error> = vec![];
-            for mut error in response.errors {
+            for mut error in std::mem::replace(&mut response.errors, vec![]) {
                 // the locations correspond to the subgraph query and cannot be linked to locations
                 // in the client query, so we remove them
                 error.locations = Vec::new();
@@ -356,7 +356,7 @@ impl FetchNode {
 
             // we have to nest conditions and do early returns here
             // because we need to take ownership of the inner value
-            if let Some(Value::Object(mut map)) = response.data {
+            if let Some(Value::Object(mut map)) = response.data.take() {
                 if let Some(entities) = map.remove("_entities") {
                     tracing::trace!("received entities: {:?}", &entities);
 
@@ -378,11 +378,17 @@ impl FetchNode {
                                 }
                             }
                         }
+                        tokio::task::spawn(async move {
+                            let _ = map;
+                        });
                         return (value, errors);
                     }
                 }
             }
 
+            tokio::task::spawn(async move {
+                let _ = response;
+            });
             // if we get here, it means that the response was missing the `_entities` key
             // This can happen if the subgraph failed during query execution e.g. for permissions checks.
             // In this case we should add an additional error because the subgraph should have returned an error that will be bubbled up to the client.
@@ -402,8 +408,7 @@ impl FetchNode {
                 &current_dir.0[..]
             };
 
-            let errors: Vec<Error> = response
-                .errors
+            let errors: Vec<Error> = std::mem::replace(&mut response.errors, vec![])
                 .into_iter()
                 .map(|error| {
                     let path = error.path.as_ref().map(|path| {
@@ -418,8 +423,11 @@ impl FetchNode {
                     }
                 })
                 .collect();
-            let mut data = response.data.unwrap_or_default();
+            let mut data = response.data.take().unwrap_or_default();
             rewrites::apply_rewrites(schema, &mut data, &self.output_rewrites);
+            tokio::task::spawn(async move {
+                let _ = response;
+            });
             (Value::from_path(current_dir, data), errors)
         }
     }
