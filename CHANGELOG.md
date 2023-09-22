@@ -4,6 +4,25 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.30.1] - 2023-09-22
+
+## 🐛 Fixes
+
+### Fix Studio reporting when it is not configured ([Issue #3871](https://github.com/apollographql/router/issues/3871))
+
+Apollo Studio reporting was broken in 1.30.0 if the Apollo exporter was not configured. If the configuration file contained anything under:
+
+```yaml
+telemetry:
+  apollo:
+```
+
+then it would have been working properly. It is now working in all cases by properly detecting the presence of the Apollo key and graph reference
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3881
+
+
+
 # [1.30.0] - 2023-09-14
 
 ## 🚀 Features
