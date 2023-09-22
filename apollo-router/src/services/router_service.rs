@@ -5,7 +5,9 @@ use std::task::Poll;
 
 use axum::body::StreamBody;
 use axum::response::*;
+use bytes::BufMut;
 use bytes::Bytes;
+use bytes::BytesMut;
 use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream;
@@ -376,7 +378,7 @@ impl RouterService {
             }
         };
 
-        let mut results = vec![];
+        let mut results = Vec::with_capacity(supergraph_requests.len());
 
         for supergraph_request in supergraph_requests {
             self.process_supergraph_request(&mut results, supergraph_request)
@@ -385,26 +387,22 @@ impl RouterService {
         // If we only have one result, go ahead and return it. Otherwise, create a new result
         // which is an array of all results.
         if results.len() == 1 {
-            Ok(results.pop().expect("should be at least one response"))
+            Ok(results.pop().expect("we should have at least one response"))
         } else {
             let first = results.pop().expect("we should have at least one response");
             let (parts, body) = first.response.into_parts();
             let context = first.context;
-            let mut array_result = "[".to_string();
-            array_result +=
-                &String::from_utf8(hyper::body::to_bytes(body).await?.to_vec()).unwrap();
+            let mut bytes = BytesMut::new();
+            bytes.put_u8(b'[');
+            bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
             for result in results {
-                array_result += ", ";
-                array_result += &String::from_utf8(
-                    hyper::body::to_bytes(result.response.into_body())
-                        .await?
-                        .to_vec(),
-                )
-                .unwrap();
+                bytes.put(&b", "[..]);
+                bytes.extend_from_slice(&hyper::body::to_bytes(result.response.into_body()).await?);
             }
-            array_result += "]";
+            bytes.put_u8(b']');
+
             Ok(RouterResponse {
-                response: http::Response::from_parts(parts, Body::from(array_result)),
+                response: http::Response::from_parts(parts, Body::from(bytes.freeze())),
                 context,
             })
         }
