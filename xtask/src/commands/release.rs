@@ -419,18 +419,7 @@ struct PreVerify();
 
 impl PreVerify {
     fn run() -> Result<()> {
-        // Get the version out of Cargo.toml
-        let metadata = MetadataCommand::new()
-            .manifest_path("./apollo-router/Cargo.toml")
-            .exec()?;
-        let version = format!(
-            "v{}",
-            metadata
-                .root_package()
-                .expect("expected root")
-                .version
-                .to_string()
-        );
+        let version = format!("v{}", *PKG_VERSION);
 
         // Get the git tag name as a string
         let tags_output = std::process::Command::new("git")
