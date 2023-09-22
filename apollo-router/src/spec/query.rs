@@ -230,6 +230,10 @@ impl Query {
                 } else {
                     failfast_debug!("can't find operation for {:?}", operation_name);
                 }
+
+                tokio::task::spawn(async move {
+                    let _ = input;
+                });
             }
             Some(Value::Null) => {
                 // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
