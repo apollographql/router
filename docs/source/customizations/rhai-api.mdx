@@ -195,16 +195,16 @@ fn supergraph_service(service) {
 
 ## json encode/decode strings
 
-Your Rhai customization can use the functions `json_encode()` and `json_decode()` to convert Rhai objects to/from valid JSON encoded strings. Both functions can fail, so always handle exceptions when using them.
+Your Rhai customization can use the functions `json::encode()` and `json::decode()` to convert Rhai objects to/from valid JSON encoded strings. Both functions can fail, so always handle exceptions when using them.
 
 ```rhai
 fn router_service(service) {
     let original = `{"valid":"object"}`;
     try {
-        let encoded = json_decode(original);
+        let encoded = json::decode(original);
         // encoded is a Rhai object, with a property (or key) named valid with a String value of "object"
         print(`encoded.valid: ${encoded.valid}`);
-        let and_back = json_encode(encoded);
+        let and_back = json::encode(encoded);
         // and_back will be a string == original.
         if and_back != original {
             throw "something has gone wrong";

@@ -35,6 +35,8 @@ use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
+use crate::services::apollo_graph_reference;
+use crate::services::apollo_key;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
@@ -290,32 +292,15 @@ pub(crate) async fn create_subgraph_services(
 
     let mut subgraph_services = IndexMap::new();
     for (name, _) in schema.subgraphs() {
-        let subgraph_root_store = configuration
-            .tls
-            .subgraph
-            .subgraphs
-            .get(name)
-            .as_ref()
-            .and_then(|subgraph| subgraph.create_certificate_store())
-            .transpose()?
-            .or_else(|| tls_root_store.clone());
-
         let subgraph_service = shaping.subgraph_service_internal(
             name,
-            SubgraphService::new(
+            SubgraphService::from_config(
                 name,
-                configuration
-                    .apq
-                    .subgraph
-                    .subgraphs
-                    .get(name)
-                    .map(|apq| apq.enabled)
-                    .unwrap_or(configuration.apq.subgraph.all.enabled),
-                subgraph_root_store,
+                configuration,
+                &tls_root_store,
                 shaping.enable_subgraph_http2(name),
                 subscription_plugin_conf.clone(),
-                configuration.notify.clone(),
-            ),
+            )?,
         );
         subgraph_services.insert(name.clone(), subgraph_service);
     }
@@ -360,14 +345,16 @@ impl YamlRouterFactory {
 }
 
 impl TlsSubgraph {
-    fn create_certificate_store(&self) -> Option<Result<RootCertStore, ConfigurationError>> {
+    pub(crate) fn create_certificate_store(
+        &self,
+    ) -> Option<Result<RootCertStore, ConfigurationError>> {
         self.certificate_authorities
             .as_deref()
             .map(create_certificate_store)
     }
 }
 
-fn create_certificate_store(
+pub(crate) fn create_certificate_store(
     certificate_authorities: &str,
 ) -> Result<RootCertStore, ConfigurationError> {
     let mut store = RootCertStore::empty();
@@ -568,11 +555,14 @@ pub(crate) async fn create_plugins(
 
 fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
     if configuration.get("apollo").is_none() {
-        /*FIXME: do we really need to set a default configuration for telemetry.apollo ?
-        if let Some(telemetry) = configuration.as_object_mut() {
-            telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
-        }*/
-        return;
+        // Warning: this must be done here, otherwise studio reporting will not work
+        if apollo_key().is_some() && apollo_graph_reference().is_some() {
+            if let Some(telemetry) = configuration.as_object_mut() {
+                telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
+            }
+        } else {
+            return;
+        }
     }
     if let (Some(schema_id), Some(apollo)) = (
         &schema.api_schema().schema_id,

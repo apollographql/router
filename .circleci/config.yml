@@ -378,6 +378,9 @@ commands:
                 key: "<< pipeline.parameters.merge_version >>-lint"
                 paths:
                   - target
+  xtask_release_preverify:
+    steps:
+      - run: xtask release pre-verify
 
   xtask_check_helm:
     steps:
@@ -399,6 +402,10 @@ commands:
             # Use helm to template our chart against all kube versions
             TEMPLATE_DIR=$(mktemp -d)
             for kube_version in ${CURRENT_KUBE_VERSIONS}; do
+              # Skip 1.25.14, 1.26.9, 1.27.6 and 1.28.2 until supported by kubeconform
+              if [[ "${kube_version}" == "1.25.14" ]] || [[ "${kube_version}" == "1.26.9" ]] || [[ "${kube_version}" == "1.27.6" ]] || [[ "${kube_version}" == "1.28.2" ]]; then
+                continue
+              fi
               # Use helm to template our chart against kube_version
               helm template --kube-version "${kube_version}" router helm/chart/router --set autoscaling.enabled=true > "${TEMPLATE_DIR}/router-${kube_version}.yaml"
 
@@ -525,6 +532,18 @@ jobs:
             cargo fetch
       - xtask_test:
           variant: "updated"
+  pre_verify_release:
+    environment:
+      <<: *common_job_environment
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - setup_environment:
+          platform: << parameters.platform >>
+      - xtask_release_preverify
 
   build_release:
     parameters:
@@ -839,6 +858,15 @@ workflows:
     when:
       not: << pipeline.parameters.nightly >>
     jobs:
+      - pre_verify_release:
+          matrix:
+            parameters:
+              platform: [ amd_linux_build ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
       - build_release:
           matrix:
             parameters:
