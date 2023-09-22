@@ -380,18 +380,7 @@ commands:
                   - target
   xtask_release_preverify:
     steps:
-      - restore_cache:
-          keys:
-            - "<< pipeline.parameters.merge_version >>-preverify"
       - run: xtask release pre-verify
-      - when:
-          condition:
-            equal: [ "dev", "<< pipeline.git.branch >>" ]
-          steps:
-            - save_cache:
-                key: "<< pipeline.parameters.merge_version >>-preverify"
-                paths:
-                  - target
 
   xtask_check_helm:
     steps:
