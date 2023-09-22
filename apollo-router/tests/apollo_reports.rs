@@ -193,14 +193,12 @@ async fn report(
 
 async fn get_trace_report(request: router::Request) -> Report {
     get_report(false, request, |r| {
-        let r = !r
-            .traces_per_query
+        !r.traces_per_query
             .values()
             .next()
             .expect("traces and stats required")
             .trace
-            .is_empty();
-        r
+            .is_empty()
     })
     .await
 }
@@ -233,7 +231,7 @@ async fn get_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
             {
                 let _test_guard = TEST.lock().await;
                 {
-                    REPORTS.clone().lock().await.clear();
+                    REPORTS.lock().await.clear();
                 }
 
                 let response = get_router_service(mocked)
@@ -260,14 +258,17 @@ async fn get_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
                 };
 
                 // We must always try to find the report regardless of if the response had failures
-                for _ in 0..10 {
+                // This loop counter must be high than the size of REPORTS. I haven't seen that get
+                // higher than 3 in development testing, so 5 should be safe.
+                for _ in 0..5 {
                     let reports = REPORTS.lock().await;
                     let report = reports.iter().find(filter);
                     if report.is_some() {
                         if matches!(found_report, Ok(None)) {
                             found_report = Ok(report.cloned());
                         }
-                        break;
+                        // We can't break, even when we find a report, because of batching. We have
+                        // to check the whole loop
                     }
                     drop(reports);
                     tokio::time::sleep(Duration::from_millis(100)).await;

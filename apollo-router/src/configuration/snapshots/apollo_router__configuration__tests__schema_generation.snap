@@ -1013,7 +1013,7 @@ expression: "&schema"
       "description": "Batching configuration.",
       "default": {
         "enabled": false,
-        "mode": ""
+        "mode": "batch_http_link"
       },
       "type": "object",
       "required": [
@@ -1026,8 +1026,16 @@ expression: "&schema"
           "type": "boolean"
         },
         "mode": {
-          "description": "Batching mode (batch_http_link is supported)",
-          "type": "string"
+          "description": "Batching mode",
+          "oneOf": [
+            {
+              "description": "batch_http_link mode",
+              "type": "string",
+              "enum": [
+                "batch_http_link"
+              ]
+            }
+          ]
         }
       },
       "additionalProperties": false

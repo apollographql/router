@@ -50,6 +50,7 @@ use super::MULTIPART_DEFER_CONTENT_TYPE;
 use super::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
+use crate::configuration::BatchingMode;
 use crate::graphql;
 use crate::http_ext;
 #[cfg(test)]
@@ -423,7 +424,7 @@ impl RouterService {
                     // It may be a batch of requests, so try that (if config allows) before
                     // erroring out
                     if self.experimental_batching.enabled
-                        && self.experimental_batching.mode == "batch_http_link"
+                        && matches!(self.experimental_batching.mode, BatchingMode::BatchHttpLink)
                     {
                         result = graphql::Request::batch_from_urlencoded_query(q.to_string())
                             .map_err(|e| TranslateError {
@@ -435,7 +436,8 @@ impl RouterService {
                                 ),
                             })?;
                     } else if !q.is_empty() && q.as_bytes()[0] == b'[' {
-                        let extension_details = if self.experimental_batching.enabled && self.experimental_batching.mode != "batch_http_link" {
+                        let extension_details = if self.experimental_batching.enabled
+                            && !matches!(self.experimental_batching.mode, BatchingMode::BatchHttpLink) {
                             format!("batching not supported for mode `{}`", self.experimental_batching.mode)
                         } else {
                             "batching not enabled".to_string()
@@ -481,7 +483,7 @@ impl RouterService {
             }
             Err(err) => {
                 if self.experimental_batching.enabled
-                    && self.experimental_batching.mode == "batch_http_link"
+                    && matches!(self.experimental_batching.mode, BatchingMode::BatchHttpLink)
                 {
                     result =
                         graphql::Request::batch_from_bytes(bytes).map_err(|e| TranslateError {
@@ -494,7 +496,7 @@ impl RouterService {
                         })?;
                 } else if !bytes.is_empty() && bytes[0] == b'[' {
                     let extension_details = if self.experimental_batching.enabled
-                        && self.experimental_batching.mode != "batch_http_link"
+                        && !matches!(self.experimental_batching.mode, BatchingMode::BatchHttpLink)
                     {
                         format!(
                             "batching not supported for mode `{}`",

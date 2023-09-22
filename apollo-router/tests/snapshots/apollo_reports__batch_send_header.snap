@@ -34,7 +34,10 @@ traces_per_query:
         operation_subtype: ""
         http:
           method: 4
-          request_headers: {}
+          request_headers:
+            send-header:
+              value:
+                - Header value
           response_headers:
             my_trace_id: "[my_trace_id]"
           status_code: 0
@@ -567,7 +570,10 @@ traces_per_query:
         operation_subtype: ""
         http:
           method: 4
-          request_headers: {}
+          request_headers:
+            send-header:
+              value:
+                - Header value
           response_headers:
             my_trace_id: "[my_trace_id]"
           status_code: 0
