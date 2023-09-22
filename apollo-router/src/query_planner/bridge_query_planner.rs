@@ -476,7 +476,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 )
                 .await;
             let duration = start.elapsed().as_secs_f64();
-            tracing::info!(histogram.apollo_router_query_planning_time = duration,);
+            tracing::info!(histogram.apollo_router_query_planning_time = duration);
 
             match res {
                 Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
