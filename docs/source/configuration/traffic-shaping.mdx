@@ -154,7 +154,11 @@ traffic_shaping:
 
 ### HTTP/2
 
-The router supports subgraph connections over HTTP/2 with TLS. It is enabled by default, but can be disabled through the `experimental_http2` option. To use the HTTP/2 Cleartext protocol (h2c), which uses HTTP/2 over plaintext connections, the subgraph URL must have the `http` scheme and the `experimental_http2` option must be set to `http2only`.
+The router supports subgraph connections over
+- HTTP/2 with TLS. This is the default configuration.
+- HTTP/2 Cleartext protocol (h2c). This uses HTTP/2 over plaintext connections.
+
+To use h2c, the subgraph URL must have the `http` scheme, and the `experimental_http2` option must be set to `http2only`.
 
 ### Ordering
 
