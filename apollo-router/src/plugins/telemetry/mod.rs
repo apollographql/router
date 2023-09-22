@@ -151,6 +151,10 @@ pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::displa
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
+static DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
+    HeaderName::from_static(DEFAULT_EXPOSE_TRACE_ID_HEADER);
+static FTV1_HEADER_NAME: HeaderName = HeaderName::from_static("apollo-federation-include-trace");
+static FTV1_HEADER_VALUE: HeaderValue = HeaderValue::from_static("ftv1");
 
 #[doc(hidden)] // Only public for integration tests
 pub(crate) struct Telemetry {
@@ -315,21 +319,21 @@ impl Plugin for Telemetry {
                     .unwrap_or_default();
                 let router_request = &request.router_request;
                 let headers = router_request.headers();
-                let client_name = headers
+                let client_name: &str = headers
                     .get(&apollo.client_name_header)
-                    .cloned()
-                    .unwrap_or_else(|| HeaderValue::from_static(""));
+                    .and_then(|h| h.to_str().ok())
+                    .unwrap_or("");
                 let client_version = headers
                     .get(&apollo.client_version_header)
-                    .cloned()
-                    .unwrap_or_else(|| HeaderValue::from_static(""));
+                    .and_then(|h| h.to_str().ok())
+                    .unwrap_or("");
                 let span = ::tracing::info_span!(ROUTER_SPAN_NAME,
                     "http.method" = %router_request.method(),
                     "http.route" = %router_request.uri(),
                     "http.flavor" = ?router_request.version(),
                     "trace_id" = %trace_id,
-                    "client.name" = client_name.to_str().unwrap_or_default(),
-                    "client.version" = client_version.to_str().unwrap_or_default(),
+                    "client.name" = client_name,
+                    "client.version" = client_version,
                     "otel.kind" = "INTERNAL",
                     "otel.status_code" = ::tracing::field::Empty,
                     "apollo_private.duration_ns" = ::tracing::field::Empty,
@@ -411,7 +415,7 @@ impl Plugin for Telemetry {
                         t.response_trace_id
                             .header_name
                             .clone()
-                            .unwrap_or(HeaderName::from_static(DEFAULT_EXPOSE_TRACE_ID_HEADER))
+                            .unwrap_or_else(||DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME.clone())
                     })
                 });
                 if let (Some(header_name), Some(trace_id)) = (
@@ -934,26 +938,22 @@ impl Telemetry {
         let headers = http_request.headers();
         let client_name_header = &apollo_config.client_name_header;
         let client_version_header = &apollo_config.client_version_header;
-        let _ = context.insert(
-            CLIENT_NAME,
-            headers
-                .get(client_name_header)
-                .cloned()
-                .unwrap_or_else(|| HeaderValue::from_static(""))
-                .to_str()
-                .unwrap_or_default()
-                .to_string(),
-        );
-        let _ = context.insert(
-            CLIENT_VERSION,
-            headers
-                .get(client_version_header)
-                .cloned()
-                .unwrap_or_else(|| HeaderValue::from_static(""))
-                .to_str()
-                .unwrap_or_default()
-                .to_string(),
-        );
+        if let Some(name) = headers
+            .get(client_name_header)
+            .and_then(|h| h.to_str().ok())
+            .map(|s| s.to_owned())
+        {
+            let _ = context.insert(CLIENT_NAME, name);
+        }
+
+        if let Some(version) = headers
+            .get(client_version_header)
+            .and_then(|h| h.to_str().ok())
+            .map(|s| s.to_owned())
+        {
+            let _ = context.insert(CLIENT_VERSION, version);
+        }
+
         let (should_log_headers, should_log_body) = config.logging.should_log(req);
         if should_log_headers {
             ::tracing::info!(http.request.headers = ?req.supergraph_request.headers(), "Supergraph request headers");
@@ -1888,10 +1888,9 @@ fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
         .contains_key::<EnableSubgraphFtv1>()
         && Span::current().context().span().span_context().is_sampled()
     {
-        req.subgraph_request.headers_mut().insert(
-            "apollo-federation-include-trace",
-            HeaderValue::from_static("ftv1"),
-        );
+        req.subgraph_request
+            .headers_mut()
+            .insert(FTV1_HEADER_NAME.clone(), FTV1_HEADER_VALUE.clone());
     }
     req
 }
