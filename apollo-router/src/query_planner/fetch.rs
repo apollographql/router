@@ -240,7 +240,7 @@ impl FetchNode {
                         Request::builder()
                             .query(operation)
                             .and_operation_name(operation_name.clone())
-                            .variables(variables.clone())
+                            .variables(variables)
                             .build(),
                     )
                     .build()
@@ -281,8 +281,6 @@ impl FetchNode {
             })?
             .response
             .into_parts();
-
-        super::log::trace_subfetch(service_name, operation, &variables, &response);
 
         if !response.is_primary() {
             return Err(FetchError::SubrequestUnexpectedPatchResponse {

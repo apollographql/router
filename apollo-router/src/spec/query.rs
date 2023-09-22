@@ -233,6 +233,7 @@ impl Query {
 
                 tokio::task::spawn(async move {
                     let _ = input;
+                    let _ = variables;
                 });
             }
             Some(Value::Null) => {
