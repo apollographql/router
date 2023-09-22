@@ -367,8 +367,23 @@ pub(crate) fn meter_provider() -> AggregateMeterProvider {
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! u64_counter {
-    ($name:literal, $description:literal, $value: expr, $($attr_key:expr => $attr_value:expr),+) => {
+    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(u64, counter, add, stringify!($($name).+), $description, $value, &attributes);
+    };
+
+    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(u64, counter, add, stringify!($($name).+), $description, $value, &attributes);
+    };
+
+    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(u64, counter, add, $name, $description, $value, &attributes);
+    };
+
+    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
         metric!(u64, counter, add, $name, $description, $value, &attributes);
     };
 
@@ -391,11 +406,25 @@ macro_rules! u64_counter {
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! f64_counter {
-    ($name:literal, $description:literal, $value: expr, $($attr_key:expr => $attr_value:expr),+) => {
+    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(f64, counter, add, stringify!($($name).+), $description, $value, &attributes);
+    };
+
+    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(f64, counter, add, stringify!($($name).+), $description, $value, &attributes);
+    };
+
+    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
         metric!(f64, counter, add, $name, $description, $value, &attributes);
     };
 
+    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(f64, counter, add, $name, $description, $value, &attributes);
+    };
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
         metric!(f64, counter, add, $name, $description, $value, $attrs);
     };
@@ -416,17 +445,32 @@ macro_rules! f64_counter {
 
 #[allow(unused_macros)]
 macro_rules! i64_up_down_counter {
-    ($name:literal, $description:literal, $value: expr, $($attr_key:expr => $attr_value:expr),+) => {
+    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(i64, histogram, record, $name, $description, $value, &attributes);
+        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $value, &attributes);
+    };
+
+    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $value, &attributes);
+    };
+
+    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(i64, up_down_counter, add, $name, $description, $value, &attributes);
+    };
+
+    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(i64, up_down_counter, add, $name, $description, $value, &attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(i64, histogram, record, $name, $description, $value, $attrs);
+        metric!(i64, up_down_counter, add, $name, $description, $value, $attrs);
     };
 
     ($name:literal, $description:literal, $value: expr) => {
-        metric!(i64, histogram, record, $name, $description, $value, &[]);
+        metric!(i64, up_down_counter, add, $name, $description, $value, &[]);
     };
 }
 
@@ -440,17 +484,32 @@ macro_rules! i64_up_down_counter {
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! f64_up_down_counter {
-    ($name:literal, $description:literal, $value: expr, $($attr_key:expr => $attr_value:expr),+) => {
+    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, histogram, record, $name, $description, $value, &attributes);
+        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $value, &attributes);
+    };
+
+    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $value, &attributes);
+    };
+
+    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(f64, up_down_counter, add, $name, $description, $value, &attributes);
+    };
+
+    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(f64, up_down_counter, add, $name, $description, $value, &attributes);
     };
 
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(f64, histogram, record, $name, $description, $value, $attrs);
+        metric!(f64, up_down_counter, add, $name, $description, $value, $attrs);
     };
 
     ($name:literal, $description:literal, $value: expr) => {
-        metric!(f64, histogram, record, $name, $description, $value, &[]);
+        metric!(f64, up_down_counter, add, $name, $description, $value, &[]);
     };
 }
 
@@ -464,8 +523,23 @@ macro_rules! f64_up_down_counter {
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! f64_histogram {
-    ($name:literal, $description:literal, $value: expr, $($attr_key:expr => $attr_value:expr),+) => {
+    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(f64, histogram, record, stringify!($($name).+), $description, $value, &attributes);
+    };
+
+    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(f64, histogram, record, stringify!($($name).+), $description, $value, &attributes);
+    };
+
+    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(f64, histogram, record, $name, $description, $value, &attributes);
+    };
+
+    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
         metric!(f64, histogram, record, $name, $description, $value, &attributes);
     };
 
@@ -488,8 +562,23 @@ macro_rules! f64_histogram {
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! u64_histogram {
-    ($name:literal, $description:literal, $value: expr, $($attr_key:expr => $attr_value:expr),+) => {
+    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(u64, histogram, record, stringify!($($name).+), $description, $value, &attributes);
+    };
+
+    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(u64, histogram, record, stringify!($($name).+), $description, $value, &attributes);
+    };
+
+    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(u64, histogram, record, $name, $description, $value, &attributes);
+    };
+
+    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
         metric!(u64, histogram, record, $name, $description, $value, &attributes);
     };
 
@@ -512,8 +601,23 @@ macro_rules! u64_histogram {
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! i64_histogram {
-    ($name:literal, $description:literal, $value: expr, $($attr_key:expr => $attr_value:expr),+) => {
+    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(i64, histogram, record, stringify!($($name).+), $description, $value, &attributes);
+    };
+
+    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        metric!(i64, histogram, record, stringify!($($name).+), $description, $value, &attributes);
+    };
+
+    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        metric!(i64, histogram, record, $name, $description, $value, &attributes);
+    };
+
+    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
         metric!(i64, histogram, record, $name, $description, $value, &attributes);
     };
 
@@ -532,7 +636,7 @@ thread_local! {
     pub(crate) static CACHE_CALLSITE: std::sync::atomic::AtomicBool = const {std::sync::atomic::AtomicBool::new(false)};
 }
 macro_rules! metric {
-    ($ty:ident, $instrument:ident, $mutation:ident, $name:literal, $description:literal, $value: expr, $attrs: expr) => {
+    ($ty:ident, $instrument:ident, $mutation:ident, $name:expr, $description:literal, $value: expr, $attrs: expr) => {
 
         // The way this works is that we have a static at each call site that holds a weak reference to the instrument.
         // We make a call we try to upgrade the weak reference. If it succeeds we use the instrument.
@@ -591,10 +695,26 @@ macro_rules! metric {
 
 #[cfg(test)]
 macro_rules! assert_metric {
-    ($name:literal, $value: expr, $($attr_key:expr => $attr_value:expr),+) => {
+    ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        crate::metrics::collect_metrics().assert(stringify!($($name).+), $value, &attributes);
+    };
+
+    ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        crate::metrics::collect_metrics().assert(stringify!($($name).+), $value, &attributes);
+    };
+
+    ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
         crate::metrics::collect_metrics().assert($name, $value, &attributes);
     };
+
+    ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        crate::metrics::collect_metrics().assert($name, $value, &attributes);
+    };
+
     ($name:literal, $value: expr) => {
         crate::metrics::collect_metrics().assert($name, $value, &[]);
     };
@@ -662,35 +782,35 @@ mod test {
     fn test_dynamic_attributes() {
         let attributes = vec![KeyValue::new("attr", "val")];
         u64_counter!("test", "test description", 1, attributes);
-        assert_metric!("test", 1, "attr" => "val");
+        assert_metric!("test", 1, "attr" = "val");
     }
 
     #[test]
     fn test_multiple_calls() {
         fn my_method(val: &'static str) {
-            u64_counter!("test", "test description", 1, "attr" => val);
+            u64_counter!("test", "test description", 1, "attr" = val);
         }
 
         my_method("jill");
         my_method("jill");
         my_method("bob");
-        assert_metric!("test", 2, "attr" => "jill");
-        assert_metric!("test", 1, "attr" => "bob");
+        assert_metric!("test", 2, "attr" = "jill");
+        assert_metric!("test", 1, "attr" = "bob");
     }
 
     #[test]
     fn test_non_async() {
         // Each test is run in a separate thread, metrics are stored in a thread local.
-        u64_counter!("test", "test description", 1, "attr" => "val");
-        assert_metric!("test", 1, "attr" => "val");
+        u64_counter!("test", "test description", 1, "attr" = "val");
+        assert_metric!("test", 1, "attr" = "val");
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_async_multi() {
         // Multi-threaded runtime needs to use a tokio task local to avoid tests interfering with each other
         async {
-            u64_counter!("test", "test description", 1, "attr" => "val");
-            assert_metric!("test", 1, "attr" => "val");
+            u64_counter!("test", "test description", 1, "attr" = "val");
+            assert_metric!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -700,8 +820,8 @@ mod test {
     async fn test_async_single() {
         async {
             // It's a single threaded tokio runtime, so we can still use a thread local
-            u64_counter!("test", "test description", 1, "attr" => "val");
-            assert_metric!("test", 1, "attr" => "val");
+            u64_counter!("test", "test description", 1, "attr" = "val");
+            assert_metric!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -710,8 +830,26 @@ mod test {
     #[tokio::test]
     async fn test_u64_counter() {
         async {
-            u64_counter!("test", "test description", 1, "attr" => "val");
-            assert_metric!("test", 1, "attr" => "val");
+            u64_counter!("test", "test description", 1, attr = "val");
+            u64_counter!("test", "test description", 1, attr.test = "val");
+            u64_counter!("test", "test description", 1, attr.test_underscore = "val");
+            u64_counter!(
+                test.dot,
+                "test description",
+                1,
+                "attr.test_underscore" = "val"
+            );
+            u64_counter!(
+                test.dot,
+                "test description",
+                1,
+                attr.test_underscore = "val"
+            );
+            assert_metric!("test", 1, "attr" = "val");
+            assert_metric!("test", 1, "attr.test" = "val");
+            assert_metric!("test", 1, attr.test_underscore = "val");
+            assert_metric!(test.dot, 2, attr.test_underscore = "val");
+            assert_metric!(test.dot, 2, "attr.test_underscore" = "val");
         }
         .with_metrics()
         .await;
@@ -720,8 +858,8 @@ mod test {
     #[tokio::test]
     async fn test_f64_counter() {
         async {
-            f64_counter!("test", "test description", 1.5, "attr" => "val");
-            assert_metric!("test", 1.5, "attr" => "val");
+            f64_counter!("test", "test description", 1.5, "attr" = "val");
+            assert_metric!("test", 1.5, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -730,8 +868,8 @@ mod test {
     #[tokio::test]
     async fn test_i64_up_down_counter() {
         async {
-            i64_up_down_counter!("test", "test description", 1, "attr" => "val");
-            assert_metric!("test", 1, "attr" => "val");
+            i64_up_down_counter!("test", "test description", 1, "attr" = "val");
+            assert_metric!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -740,8 +878,8 @@ mod test {
     #[tokio::test]
     async fn test_f64_up_down_counter() {
         async {
-            f64_up_down_counter!("test", "test description", 1.5, "attr" => "val");
-            assert_metric!("test", 1.5, "attr" => "val");
+            f64_up_down_counter!("test", "test description", 1.5, "attr" = "val");
+            assert_metric!("test", 1.5, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -750,8 +888,8 @@ mod test {
     #[tokio::test]
     async fn test_u64_histogram() {
         async {
-            u64_histogram!("test", "test description", 1, "attr" => "val");
-            assert_metric!("test", 1, "attr" => "val");
+            u64_histogram!("test", "test description", 1, "attr" = "val");
+            assert_metric!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -760,8 +898,8 @@ mod test {
     #[tokio::test]
     async fn test_i64_histogram() {
         async {
-            i64_histogram!("test", "test description", 1, "attr" => "val");
-            assert_metric!("test", 1, "attr" => "val");
+            i64_histogram!("test", "test description", 1, "attr" = "val");
+            assert_metric!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -770,8 +908,8 @@ mod test {
     #[tokio::test]
     async fn test_f64_histogram() {
         async {
-            f64_histogram!("test", "test description", 1.0, "attr" => "val");
-            assert_metric!("test", 1, "attr" => "val");
+            f64_histogram!("test", "test description", 1.0, "attr" = "val");
+            assert_metric!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -785,7 +923,7 @@ mod test {
         super::CACHE_CALLSITE.with(|cell| cell.store(true, std::sync::atomic::Ordering::SeqCst));
         fn test() {
             // This is a single callsite so should only have one metric
-            u64_counter!("test", "test description", 1, "attr" => "val");
+            u64_counter!("test", "test description", 1, "attr" = "val");
         }
 
         // Callsite hasn't been used yet, so there should be no metrics
@@ -793,12 +931,12 @@ mod test {
 
         // Call the metrics, it will be registered
         test();
-        assert_metric!("test", 1, "attr" => "val");
+        assert_metric!("test", 1, "attr" = "val");
         assert_eq!(meter_provider().registered_instruments(), 1);
 
         // Call the metrics again, but the second call will not register a new metric because it will have be retrieved from the static
         test();
-        assert_metric!("test", 2, "attr" => "val");
+        assert_metric!("test", 2, "attr" = "val");
         assert_eq!(meter_provider().registered_instruments(), 1);
 
         // Force invalidation of instruments
