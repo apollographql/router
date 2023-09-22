@@ -82,6 +82,8 @@ use crate::context::OPERATION_NAME;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::telemetry::apollo::client_name_header_default;
+use crate::plugins::telemetry::apollo::client_version_header_default;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
@@ -316,17 +318,29 @@ impl Plugin for Telemetry {
                 let router_request = &request.router_request;
                 let headers = router_request.headers();
                 let default_forward = ForwardHeaders::default();
-                let (client_name, client_version, send_headers ) = config.apollo.as_ref().map(|apollo| {
-                    (
-                        headers
-                            .get(&apollo.client_name_header).and_then(|h| h.to_str().ok()).unwrap_or(""),
-                        headers
-                            .get(&apollo.client_version_header)
-                            .and_then(|h| h.to_str().ok())
-                            .unwrap_or(""),
-                        &apollo.send_headers)
 
-                }).unwrap_or_else(||("", "", &default_forward));
+                static DEFAULT_CLIENT_NAME_HEADER: HeaderName = client_name_header_default();
+                let client_name_header = config
+                    .apollo
+                    .as_ref()
+                    .map(|apollo| &apollo.client_name_header)
+                    .unwrap_or(&DEFAULT_CLIENT_NAME_HEADER);
+                let client_name = headers
+                    .get(client_name_header)
+                    .and_then(|h| h.to_str().ok())
+                    .map(|s| s.to_owned());
+                static DEFAULT_CLIENT_VERSION_HEADER: HeaderName = client_version_header_default();
+                let client_version_header = config
+                    .apollo
+                    .as_ref()
+                    .map(|apollo| &apollo.client_version_header)
+                    .unwrap_or(&DEFAULT_CLIENT_VERSION_HEADER);
+                let client_version = headers
+                    .get(client_version_header)
+                    .and_then(|h| h.to_str().ok())
+                    .map(|s| s.to_owned());
+
+                let send_headers = config.apollo.as_ref().map(|apollo| &apollo.send_headers).unwrap_or(&default_forward);
 
                 let trace_id = TraceId::maybe_new()
                     .map(|t| t.to_string())
@@ -947,18 +961,26 @@ impl Telemetry {
         let http_request = &req.supergraph_request;
         let headers = http_request.headers();
 
-        let client_name = config.apollo.as_ref().and_then(|apollo| {
-            headers
-                .get(&apollo.client_name_header)
-                .and_then(|h| h.to_str().ok())
-                .map(|s| s.to_owned())
-        });
-        let client_version = config.apollo.as_ref().and_then(|apollo| {
-            headers
-                .get(&apollo.client_version_header)
-                .and_then(|h| h.to_str().ok())
-                .map(|s| s.to_owned())
-        });
+        static DEFAULT_CLIENT_NAME_HEADER: HeaderName = client_name_header_default();
+        let client_name_header = config
+            .apollo
+            .as_ref()
+            .map(|apollo| &apollo.client_name_header)
+            .unwrap_or(&DEFAULT_CLIENT_NAME_HEADER);
+        let client_name = headers
+            .get(client_name_header)
+            .and_then(|h| h.to_str().ok())
+            .map(|s| s.to_owned());
+        static DEFAULT_CLIENT_VERSION_HEADER: HeaderName = client_version_header_default();
+        let client_version_header = config
+            .apollo
+            .as_ref()
+            .map(|apollo| &apollo.client_version_header)
+            .unwrap_or(&DEFAULT_CLIENT_VERSION_HEADER);
+        let client_version = headers
+            .get(client_version_header)
+            .and_then(|h| h.to_str().ok())
+            .map(|s| s.to_owned());
 
         if let Some(name) = client_name {
             let _ = context.insert(CLIENT_NAME, name);

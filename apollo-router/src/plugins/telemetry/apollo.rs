@@ -160,7 +160,7 @@ const fn client_name_header_default_str() -> &'static str {
     "apollographql-client-name"
 }
 
-const fn client_name_header_default() -> HeaderName {
+pub(super) const fn client_name_header_default() -> HeaderName {
     HeaderName::from_static(client_name_header_default_str())
 }
 
@@ -168,7 +168,7 @@ const fn client_version_header_default_str() -> &'static str {
     "apollographql-client-version"
 }
 
-const fn client_version_header_default() -> HeaderName {
+pub(super) const fn client_version_header_default() -> HeaderName {
     HeaderName::from_static(client_version_header_default_str())
 }
 
