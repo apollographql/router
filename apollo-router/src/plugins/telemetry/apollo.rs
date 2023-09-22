@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::num::NonZeroUsize;
 use std::ops::AddAssign;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use derivative::Derivative;
@@ -255,10 +256,10 @@ pub(crate) enum ForwardValues {
     All,
     /// Send only the variables specified
     #[schemars(schema_with = "forward_variables_only")]
-    Only(Vec<String>),
+    Only(Arc<Vec<String>>),
     /// Send all variables except those specified
     #[schemars(schema_with = "forward_variables_except")]
-    Except(Vec<String>),
+    Except(Arc<Vec<String>>),
 }
 
 impl Default for ForwardValues {

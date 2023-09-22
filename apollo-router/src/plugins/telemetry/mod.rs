@@ -313,20 +313,25 @@ impl Plugin for Telemetry {
                 response
             })
             .instrument(move |request: &router::Request| {
-                let apollo = config.apollo.as_ref().cloned().unwrap_or_default();
+                let router_request = &request.router_request;
+                let headers = router_request.headers();
+                let default_forward = ForwardHeaders::default();
+                let (client_name, client_version, send_headers ) = config.apollo.as_ref().map(|apollo| {
+                    (
+                        headers
+                            .get(&apollo.client_name_header).and_then(|h| h.to_str().ok()).unwrap_or(""),
+                        headers
+                            .get(&apollo.client_version_header)
+                            .and_then(|h| h.to_str().ok())
+                            .unwrap_or(""),
+                        &apollo.send_headers)
+
+                }).unwrap_or_else(||("", "", &default_forward));
+
                 let trace_id = TraceId::maybe_new()
                     .map(|t| t.to_string())
                     .unwrap_or_default();
-                let router_request = &request.router_request;
-                let headers = router_request.headers();
-                let client_name: &str = headers
-                    .get(&apollo.client_name_header)
-                    .and_then(|h| h.to_str().ok())
-                    .unwrap_or("");
-                let client_version = headers
-                    .get(&apollo.client_version_header)
-                    .and_then(|h| h.to_str().ok())
-                    .unwrap_or("");
+
                 let span = ::tracing::info_span!(ROUTER_SPAN_NAME,
                     "http.method" = %router_request.method(),
                     "http.route" = %router_request.uri(),
@@ -337,7 +342,7 @@ impl Plugin for Telemetry {
                     "otel.kind" = "INTERNAL",
                     "otel.status_code" = ::tracing::field::Empty,
                     "apollo_private.duration_ns" = ::tracing::field::Empty,
-                    "apollo_private.http.request_headers" = filter_headers(request.router_request.headers(), &apollo.send_headers).as_str(),
+                    "apollo_private.http.request_headers" = filter_headers(request.router_request.headers(), send_headers).as_str(),
                     "apollo_private.http.response_headers" = field::Empty
                 );
                 span
@@ -393,10 +398,15 @@ impl Plugin for Telemetry {
         let config_map_res_first = config.clone();
         let config_map_res = config.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
+        let send_variable_values = config
+            .apollo
+            .as_ref()
+            .map(|apollo| apollo.send_variable_values.clone())
+            .unwrap_or_default();
         ServiceBuilder::new()
             .instrument(Self::supergraph_service_span(
                 self.field_level_instrumentation_ratio,
-                config.apollo.clone().unwrap_or_default(),
+                send_variable_values
             ))
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
@@ -766,11 +776,12 @@ impl Telemetry {
 
     fn supergraph_service_span(
         field_level_instrumentation_ratio: f64,
-        config: apollo::Config,
+        send_variable_values: ForwardValues,
     ) -> impl Fn(&SupergraphRequest) -> Span + Clone {
         move |request: &SupergraphRequest| {
             let http_request = &request.supergraph_request;
             let query = http_request.body().query.as_deref().unwrap_or_default();
+
             let span = info_span!(
                 SUPERGRAPH_SPAN_NAME,
                 graphql.document = query,
@@ -782,7 +793,7 @@ impl Telemetry {
                 apollo_private.operation_signature = field::Empty,
                 apollo_private.graphql.variables = Self::filter_variables_values(
                     &request.supergraph_request.body().variables,
-                    &config.send_variable_values,
+                    &send_variable_values,
                 ),
             );
             if let Some(operation_name) = request
@@ -932,25 +943,28 @@ impl Telemetry {
         field_level_instrumentation_ratio: f64,
         req: &SupergraphRequest,
     ) {
-        let apollo_config = config.apollo.clone().unwrap_or_default();
         let context = &req.context;
         let http_request = &req.supergraph_request;
         let headers = http_request.headers();
-        let client_name_header = &apollo_config.client_name_header;
-        let client_version_header = &apollo_config.client_version_header;
-        if let Some(name) = headers
-            .get(client_name_header)
-            .and_then(|h| h.to_str().ok())
-            .map(|s| s.to_owned())
-        {
+
+        let client_name = config.apollo.as_ref().and_then(|apollo| {
+            headers
+                .get(&apollo.client_name_header)
+                .and_then(|h| h.to_str().ok())
+                .map(|s| s.to_owned())
+        });
+        let client_version = config.apollo.as_ref().and_then(|apollo| {
+            headers
+                .get(&apollo.client_version_header)
+                .and_then(|h| h.to_str().ok())
+                .map(|s| s.to_owned())
+        });
+
+        if let Some(name) = client_name {
             let _ = context.insert(CLIENT_NAME, name);
         }
 
-        if let Some(version) = headers
-            .get(client_version_header)
-            .and_then(|h| h.to_str().ok())
-            .map(|s| s.to_owned())
-        {
+        if let Some(version) = client_version {
             let _ = context.insert(CLIENT_VERSION, version);
         }
 
