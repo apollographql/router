@@ -4,6 +4,16 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.30.1] - 2023-09-22
+
+## 🐛 Fixes
+
+### Fix Studio reporting when it is not configured ([Issue #3871](https://github.com/apollographql/router/issues/3871))
+
+We have fixed a bug that crept into v1.30.0 where reporting traces and metrics to Apollo Studio did not occur _unless_ the `apollo` section was defined in `telemetry` within configuration.  This means that a relatively simple setup where _only_ the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables were set, reporting was not working.  This is now corrected.  Upgrading to v1.30.1 is straightforward, however, in the event that an upgrade from v1.30.0 to v1.30.1 is _not_ possible (for example, don't want to deploy on a Friday!), then the configuration can be set to an empty object and reporting will resume.  An example of this is available on the referenced issue.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3881
+
 # [1.30.0] - 2023-09-14
 
 ## 🚀 Features
