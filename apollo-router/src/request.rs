@@ -185,8 +185,15 @@ impl Request {
         Request::process_batch_values(&value)
     }
 
+    fn allocate_result_array(value: &serde_json::Value) -> Vec<Request> {
+        match value.as_array() {
+            Some(array) => Vec::with_capacity(array.len()),
+            None => Vec::with_capacity(1),
+        }
+    }
+
     fn process_batch_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
-        let mut result = vec![];
+        let mut result = Request::allocate_result_array(value);
 
         if value.is_array() {
             tracing::info!(
@@ -208,7 +215,7 @@ impl Request {
     }
 
     fn process_query_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
-        let mut result = vec![];
+        let mut result = Request::allocate_result_array(value);
 
         if value.is_array() {
             tracing::info!(

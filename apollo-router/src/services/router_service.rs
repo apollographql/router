@@ -587,8 +587,8 @@ impl RouterService {
             }
         };
 
-        let mut results = vec![];
         let mut ok_results = graphql_requests?;
+        let mut results = Vec::with_capacity(ok_results.len());
         let first = ok_results
             .pop()
             .expect("We must have at least one response");
