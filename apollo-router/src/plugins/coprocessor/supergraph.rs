@@ -13,7 +13,7 @@ use tower_service::Service;
 use super::externalize_header_map;
 use super::*;
 use crate::graphql;
-use crate::layers::async_checkpoint::AsyncCheckpointLayer;
+use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::response;
@@ -82,7 +82,7 @@ impl SupergraphStage {
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
-            AsyncCheckpointLayer::new(move |request: supergraph::Request| {
+            OneShotAsyncCheckpointLayer::new(move |request: supergraph::Request| {
                 let request_config = request_config.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
@@ -169,7 +169,6 @@ impl SupergraphStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered()
             .service(service)
             .boxed()
     }

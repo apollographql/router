@@ -20,7 +20,7 @@ use tower::ServiceBuilder;
 use super::query_analysis::Compiler;
 use crate::graphql::Error;
 use crate::json_ext::Object;
-use crate::layers::async_checkpoint::AsyncCheckpointService;
+use crate::layers::async_checkpoint::OneShotAsyncCheckpointService;
 use crate::layers::ServiceBuilderExt;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
@@ -37,7 +37,7 @@ where
         + 'static,
     <S as Service<SupergraphRequest>>::Future: Send + 'static,
 {
-    type Service = AsyncCheckpointService<
+    type Service = OneShotAsyncCheckpointService<
         S,
         BoxFuture<'static, Result<ControlFlow<SupergraphResponse, SupergraphRequest>, BoxError>>,
         SupergraphRequest,
@@ -45,7 +45,7 @@ where
 
     fn layer(&self, service: S) -> Self::Service {
         ServiceBuilder::new()
-            .checkpoint_async(|req: SupergraphRequest| {
+            .oneshot_checkpoint_async(|req: SupergraphRequest| {
                 Box::pin(async {
                     if req.supergraph_request.method() == Method::POST {
                         return Ok(ControlFlow::Continue(req));
@@ -148,15 +148,10 @@ mod forbid_http_get_mutations_tests {
     async fn it_lets_http_post_queries_pass_through() {
         let mut mock_service = MockSupergraphService::new();
 
-        mock_service.expect_clone().returning(move || {
-            let mut service = MockSupergraphService::new();
-
-            service
-                .expect_call()
-                .times(1)
-                .returning(move |_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
-            service
-        });
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
 
         let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
 
@@ -176,15 +171,10 @@ mod forbid_http_get_mutations_tests {
     async fn it_lets_http_post_mutations_pass_through() {
         let mut mock_service = MockSupergraphService::new();
 
-        mock_service.expect_clone().returning(move || {
-            let mut service = MockSupergraphService::new();
-
-            service
-                .expect_call()
-                .times(1)
-                .returning(move |_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
-            service
-        });
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
 
         let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
 
@@ -204,15 +194,10 @@ mod forbid_http_get_mutations_tests {
     async fn it_lets_http_get_queries_pass_through() {
         let mut mock_service = MockSupergraphService::new();
 
-        mock_service.expect_clone().returning(move || {
-            let mut service = MockSupergraphService::new();
-
-            service
-                .expect_call()
-                .times(1)
-                .returning(move |_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
-            service
-        });
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
 
         let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
 
@@ -244,12 +229,6 @@ mod forbid_http_get_mutations_tests {
         let expected_status = StatusCode::METHOD_NOT_ALLOWED;
         let expected_allow_header = "POST";
 
-        let mut mock_service = MockSupergraphService::new();
-        mock_service
-            .expect_clone()
-            .returning(MockSupergraphService::new);
-        let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
-
         let forbidden_requests = [
             Method::GET,
             Method::HEAD,
@@ -263,9 +242,11 @@ mod forbid_http_get_mutations_tests {
         .into_iter()
         .map(|method| create_request(method, OperationKind::Mutation));
 
-        let services = service_stack.ready().await.unwrap();
-
         for request in forbidden_requests {
+            let mock_service = MockSupergraphService::new();
+            let mut service_stack = AllowOnlyHttpPostMutationsLayer::default().layer(mock_service);
+            let services = service_stack.ready().await.unwrap();
+
             let mut actual_error = services.call(request).await.unwrap();
 
             assert_eq!(expected_status, actual_error.response.status());
