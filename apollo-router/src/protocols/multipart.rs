@@ -127,9 +127,15 @@ impl Stream for Multipart {
                             };
 
                             serde_json::to_writer(&mut buf, &resp)?;
+                            tokio::task::spawn(async move {
+                                let _ = resp;
+                            });
                         }
                         ProtocolMode::Defer => {
                             serde_json::to_writer(&mut buf, &response)?;
+                            tokio::task::spawn(async move {
+                                let _ = response;
+                            });
                         }
                     }
 
