@@ -53,7 +53,6 @@ mod supergraph;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
-// TODO: are there better extension codes we could use here?
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
@@ -951,7 +950,6 @@ where
                     serde_json::Value::String(s) => crate::graphql::Response::builder()
                         .errors(vec![Error::builder()
                             .message(s)
-                            // TODO: is there a better extension code we could use here?
                             .extension_code(COPROCESSOR_ERROR_EXTENSION)
                             .build()])
                         .build(),
