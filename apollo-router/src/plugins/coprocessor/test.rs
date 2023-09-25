@@ -17,7 +17,7 @@ mod tests {
     use tower::BoxError;
     use tower::ServiceExt;
 
-    use super::super::coprocessor::*;
+    use super::super::*;
     use crate::plugin::test::MockHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
@@ -1158,6 +1158,9 @@ mod tests {
                 TEXT_HTML.essence_str().to_string(),
             ],
         );
+
+        // This header should be stripped
+        external_form.insert("content-length".to_string(), vec!["1024".to_string()]);
 
         let actual = internalize_header_map(external_form).expect("internalized header map");
 

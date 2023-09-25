@@ -21,6 +21,7 @@ use tracing_subscriber::layer::Layer;
 use tracing_subscriber::layer::Layered;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::registry::SpanRef;
 use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
@@ -220,10 +221,7 @@ where
             .id()
             .and_then(|id| cx.span(id))
         {
-            // if this extension is set, that means the parent span was accepted, and so the
-            // entire trace is accepted
-            let extensions = spanref.extensions();
-            return extensions.get::<SampledSpan>().is_some();
+            return spanref.is_sampled();
         }
 
         // we only make the sampling decision on the root span. If we reach here for any other span,
@@ -257,6 +255,22 @@ where
 }
 
 struct SampledSpan;
+
+pub(crate) trait IsSampled {
+    fn is_sampled(&self) -> bool;
+}
+
+impl<'a, T> IsSampled for SpanRef<'a, T>
+where
+    T: tracing_subscriber::registry::LookupSpan<'a>,
+{
+    fn is_sampled(&self) -> bool {
+        // if this extension is set, that means the parent span was accepted, and so the
+        // entire trace is accepted
+        let extensions = self.extensions();
+        extensions.get::<SampledSpan>().is_some()
+    }
+}
 /// prevents span fields from being formatted to a string when writing logs
 pub(crate) struct NullFieldFormatter;
 

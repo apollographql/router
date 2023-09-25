@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.29.1"
+version = "1.30.1"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -53,9 +53,9 @@ features = ["docs_rs"]
 askama = "0.12.0"
 access-json = "0.1.0"
 anyhow = "1.0.75"
-apollo-compiler = "0.11.1"
+apollo-compiler = "0.11.2"
 apollo-encoder = "0.7.0"
-apollo-parser = "0.6.1"
+apollo-parser = "0.6.2"
 arc-swap = "1.6.0"
 async-compression = { version = "0.4.1", features = [
     "tokio",
@@ -69,7 +69,7 @@ base64 = "0.21.2"
 bloomfilter = "1.0.12"
 buildstructor = "0.5.3"
 bytes = "1.5.0"
-clap = { version = "4.4.2", default-features = false, features = [
+clap = { version = "4.4.4", default-features = false, features = [
     "env",
     "derive",
     "std",
@@ -88,7 +88,7 @@ diff = "0.1.13"
 directories = "5.0.1"
 displaydoc = "0.2"
 flate2 = "1.0.27"
-fred = { version = "6.3.1", features = ["enable-rustls", "no-client-setname"] }
+fred = { version = "6.3.2", features = ["enable-rustls", "no-client-setname"] }
 futures = { version = "0.3.28", features = ["thread-pool"] }
 graphql_client = "0.13.0"
 hex = "0.4.3"
@@ -135,6 +135,7 @@ once_cell = "1.18.0"
 # there (and on `tracing` packages below) should be updated should this change.
 opentelemetry = { version = "0.19.0", features = ["rt-tokio", "metrics"] }
 opentelemetry_api = "0.19.0"
+opentelemetry-aws = "0.7.0"
 opentelemetry-datadog = { version = "0.7.0", features = ["reqwest-client"] }
 opentelemetry-http = "0.8.0"
 opentelemetry-jaeger = { version = "0.18.0", features = [
@@ -164,7 +165,7 @@ prost-types = "0.11.9"
 proteus = "0.5.0"
 rand = "0.8.5"
 rand_core = "0.6.4"
-rhai = { version = "1.15.1", features = ["sync", "serde", "internals"] }
+rhai = { version = "1.16.2", features = ["sync", "serde", "internals"] }
 regex = "1.9.5"
 reqwest = { version = "0.11.19", default-features = false, features = [
     "rustls-tls",
@@ -182,7 +183,7 @@ shellexpand = "3.1.0"
 sha2 = "0.10.7"
 serde = { version = "1.0.188", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.1", features = ["preserve_order"] }
-serde_json = { version = "1.0.105", features = [
+serde_json = { version = "1.0.107", features = [
     "preserve_order",
     "float_roundtrip",
 ] }
@@ -226,9 +227,7 @@ uuid = { version = "1.4.1", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
 wiremock = "0.5.19"
 wsl = "0.1.0"
-tokio-tungstenite = { version = "0.18.0", features = [
-    "rustls-tls-native-roots",
-] }
+tokio-tungstenite = { version = "0.20.0", features = ["rustls-tls-native-roots"] }
 tokio-rustls = "0.24.1"
 http-serde = "1.1.3"
 hmac = "0.12.1"
@@ -261,9 +260,9 @@ axum = { version = "0.6.20", features = [
     "ws",
 ] }
 ecdsa = { version = "0.15.1", features = ["signing", "pem", "pkcs8"] }
-fred = { version = "6.3.1", features = ["enable-rustls", "no-client-setname"] }
+fred = { version = "6.3.2", features = ["enable-rustls", "no-client-setname"] }
 futures-test = "0.3.28"
-insta = { version = "1.31.0", features = ["json", "redactions", "yaml"] }
+insta = { version = "1.32.0", features = ["json", "redactions", "yaml"] }
 maplit = "1.0.2"
 memchr = { version = "2.6.3", default-features = false }
 mockall = "0.11.4"
@@ -275,7 +274,7 @@ reqwest = { version = "0.11.19", default-features = false, features = [
     "json",
     "stream",
 ] }
-rhai = { version = "1.15.1", features = [
+rhai = { version = "1.16.2", features = [
     "sync",
     "serde",
     "internals",

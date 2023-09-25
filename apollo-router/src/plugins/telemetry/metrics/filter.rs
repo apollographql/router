@@ -37,8 +37,10 @@ impl<T: MeterProvider> FilterMeterProvider<T> {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .allow(
-                Regex::new(r"apollo\.(graphos\.cloud|router\.(operations?|config))(\..*|$)")
-                    .expect("regex should have been valid"),
+                Regex::new(
+                    r"apollo\.(graphos\.cloud|router\.(operations?|config|schema|query))(\..*|$)",
+                )
+                .expect("regex should have been valid"),
             )
             .build()
     }

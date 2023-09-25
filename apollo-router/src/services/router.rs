@@ -17,9 +17,9 @@ use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
+use super::router_service::MULTIPART_DEFER_HEADER_VALUE;
+use super::router_service::MULTIPART_SUBSCRIPTION_HEADER_VALUE;
 use super::supergraph;
-use super::MULTIPART_DEFER_CONTENT_TYPE;
-use super::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::services::TryIntoHeaderName;
@@ -220,8 +220,8 @@ impl Response {
                 .get(CONTENT_TYPE)
                 .iter()
                 .any(|value| {
-                    *value == HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE)
-                        || *value == HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE)
+                    *value == MULTIPART_DEFER_HEADER_VALUE
+                        || *value == MULTIPART_SUBSCRIPTION_HEADER_VALUE
                 })
             {
                 let multipart = Multipart::new(self.response.into_body(), "graphql");

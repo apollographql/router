@@ -132,6 +132,42 @@ where
     }
 
     #[builder(visibility = "pub(crate)")]
+    /// This is the constructor (or builder) to use when constructing a Supergraph
+    /// `Externalizable`.
+    ///
+    fn supergraph_new(
+        stage: PipelineStep,
+        control: Option<Control>,
+        id: Option<String>,
+        headers: Option<HashMap<String, Vec<String>>>,
+        body: Option<T>,
+        context: Option<Context>,
+        status_code: Option<u16>,
+        method: Option<String>,
+        sdl: Option<String>,
+    ) -> Self {
+        assert!(matches!(
+            stage,
+            PipelineStep::SupergraphRequest | PipelineStep::SupergraphResponse
+        ));
+        Externalizable {
+            version: EXTERNALIZABLE_VERSION,
+            stage: stage.to_string(),
+            control,
+            id,
+            headers,
+            body,
+            context,
+            status_code,
+            sdl,
+            uri: None,
+            path: None,
+            method,
+            service_name: None,
+        }
+    }
+
+    #[builder(visibility = "pub(crate)")]
     /// This is the constructor (or builder) to use when constructing a Subgraph
     /// `Externalizable`.
     ///

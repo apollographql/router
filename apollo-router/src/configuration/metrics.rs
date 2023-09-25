@@ -261,9 +261,19 @@ impl Metrics {
             "$.subgraph..enabled[?(@ == true)]"
         );
         log_usage_metrics!(
+            value.apollo.router.config.tls,
+            "$.tls",
+            opt.router.tls.server,
+            "$.supergraph",
+            opt.router.tls.subgraph.ca_override,
+            "$[?(@.subgraph..certificate_authorities)]",
+            opt.router.tls.subgraph.client_authentication,
+            "$.subgraph..client_authentication"
+        );
+        log_usage_metrics!(
             value.apollo.router.config.traffic_shaping,
             "$.traffic_shaping",
-            opt.router.timout,
+            opt.router.timeout,
             "$$[?(@.router.timeout)]",
             opt.router.rate_limit,
             "$.router.global_rate_limit",

@@ -8,7 +8,7 @@ value.apollo.router.config.entities:
 value.apollo.router.config.traffic_shaping:
   - 1
   - opt__router__rate_limit__: false
-    opt__router__timout__: false
+    opt__router__timeout__: false
     opt__subgraph__compression__: false
     opt__subgraph__deduplicate_query__: false
     opt__subgraph__http2__: false
