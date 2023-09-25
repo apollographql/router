@@ -37,6 +37,7 @@ use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
+use crate::configuration::Batching;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
 use crate::graphql;
@@ -228,6 +229,29 @@ async fn service_call(
             let operation_name = body.operation_name.clone();
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
             let is_subscription = plan.is_subscription(operation_name.as_deref());
+
+            if let Some(batching) = context.private_entries.clone().lock().get::<Batching>() {
+                if batching.enabled && (is_deferred || is_subscription) {
+                    let message = if is_deferred {
+                        "BATCHING_DEFER_UNSUPPORTED"
+                    } else {
+                        "BATCHING_SUBSCRIPTION_UNSUPPORTED"
+                    };
+                    let mut response = SupergraphResponse::new_from_graphql_response(
+                            graphql::Response::builder()
+                                .errors(vec![crate::error::Error::builder()
+                                    .message(String::from(
+                                        "Deferred responses and subscriptions aren't supported in batches",
+                                    ))
+                                    .extension_code(message)
+                                    .build()])
+                                .build(),
+                            context,
+                        );
+                    *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
+                    return Ok(response);
+                }
+            }
 
             let ClientRequestAccepts {
                 multipart_defer: accepts_multipart_defer,

@@ -67,6 +67,7 @@ use crate::services::RouterResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::Configuration;
+use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
 
@@ -330,6 +331,7 @@ impl RouterService {
                     results.push(RouterResponse { response, context });
                 } else {
                     // this should be unreachable due to a previous check, but just to be sure...
+                    println!("BOMBING IN unreachable code");
                     results.push(router::Response::error_builder()
                             .error(
                                 graphql::Error::builder()
@@ -594,13 +596,50 @@ impl RouterService {
             .expect("We must have at least one response");
         let sg = http::Request::from_parts(parts, first);
 
+        context
+            .private_entries
+            .lock()
+            .insert(self.experimental_batching.clone());
+        // Building up the batch of supergraph requests is tricky.
+        // Firstly note that any http extensions are only propagated for the first request sent
+        // through the pipeline. This is because there is simply no way to clone http
+        // extensions.
+        //
+        // Secondly, we can't clone private_entries, but we need to propagate at least
+        // ClientRequestAccepts to ensure correct processing of the response. We do that manually,
+        // but the concern is that there may be other private_entries that wish to propagate into
+        // each request or we may add them in future and not know about it here...
+        //
+        // (Technically we could clone private entries, since it is held under an `Arc`, but that
+        // would mean all the requests in a batch shared the same set of private entries and review
+        // comments expressed the sentiment that this may be a bad thing...)
+        //
         for graphql_request in ok_results {
-            // XXX Lose extensions, is that ok?
+            // XXX Lose http extensions, is that ok?
             let mut new = http_ext::clone_http_request(&sg);
             *new.body_mut() = graphql_request;
+            // XXX Lose some private entries, is that ok?
+            let new_context = Context::new();
+            new_context.extend(&context);
+            let client_request_accepts_opt = context
+                .private_entries
+                .lock()
+                .get::<ClientRequestAccepts>()
+                .cloned();
+            if let Some(client_request_accepts) = client_request_accepts_opt {
+                new_context
+                    .private_entries
+                    .lock()
+                    .insert(client_request_accepts);
+            }
+            new_context
+                .private_entries
+                .lock()
+                .insert(self.experimental_batching.clone());
             results.push(SupergraphRequest {
                 supergraph_request: new,
-                context: context.clone(),
+                // Build a new context. Cloning would cause issues.
+                context: new_context,
             });
         }
         results.insert(
