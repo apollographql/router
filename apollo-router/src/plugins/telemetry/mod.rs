@@ -328,7 +328,7 @@ impl Plugin for Telemetry {
                 let client_name = headers
                     .get(client_name_header)
                     .and_then(|h| h.to_str().ok())
-                    .map(|s| s.to_owned());
+                    .unwrap_or("");
                 static DEFAULT_CLIENT_VERSION_HEADER: HeaderName = client_version_header_default();
                 let client_version_header = config
                     .apollo
@@ -338,7 +338,7 @@ impl Plugin for Telemetry {
                 let client_version = headers
                     .get(client_version_header)
                     .and_then(|h| h.to_str().ok())
-                    .map(|s| s.to_owned());
+                    .unwrap_or("");
 
                 let send_headers = config.apollo.as_ref().map(|apollo| &apollo.send_headers).unwrap_or(&default_forward);
 
