@@ -70,6 +70,7 @@ use crate::plugins::subscription::WebSocketConfiguration;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
+use crate::plugins::traffic_shaping::Http2Config;
 use crate::protocols::websocket::convert_websocket_stream;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
@@ -160,7 +161,7 @@ impl SubgraphService {
         service: impl Into<String>,
         configuration: &Configuration,
         tls_root_store: &Option<RootCertStore>,
-        enable_http2: bool,
+        http2: Http2Config,
         subscription_config: Option<SubscriptionConfig>,
     ) -> Result<Self, BoxError> {
         let name: String = service.into();
@@ -217,7 +218,7 @@ impl SubgraphService {
         Ok(SubgraphService::new(
             name,
             enable_apq,
-            enable_http2,
+            http2,
             subscription_config,
             tls_client_config,
             configuration.notify.clone(),
@@ -227,7 +228,7 @@ impl SubgraphService {
     pub(crate) fn new(
         service: impl Into<String>,
         enable_apq: bool,
-        enable_http2: bool,
+        http2: Http2Config,
         subscription_config: Option<SubscriptionConfig>,
         tls_config: ClientConfig,
         notify: Notify<String, graphql::Response>,
@@ -242,7 +243,7 @@ impl SubgraphService {
             .https_or_http()
             .enable_http1();
 
-        let connector = if enable_http2 {
+        let connector = if http2 != Http2Config::Disable {
             builder.enable_http2().wrap_connector(http_connector)
         } else {
             builder.wrap_connector(http_connector)
@@ -250,6 +251,7 @@ impl SubgraphService {
 
         let http_client = hyper::Client::builder()
             .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+            .http2_only(http2 == Http2Config::Http2Only)
             .build(connector);
         Self {
             client: ServiceBuilder::new()
@@ -1850,7 +1852,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "testbis",
             true,
-            false,
+            Http2Config::Disable,
             subscription_config().into(),
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -1905,7 +1907,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            true,
+            Http2Config::Enable,
             None,
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -1948,7 +1950,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            true,
+            Http2Config::Enable,
             None,
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -1991,7 +1993,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            true,
+            Http2Config::Enable,
             None,
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -2039,7 +2041,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            true,
+            Http2Config::Enable,
             None,
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -2091,7 +2093,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            true,
+            Http2Config::Enable,
             None,
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -2141,7 +2143,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            false,
+            Http2Config::Disable,
             subscription_config().into(),
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -2204,7 +2206,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            false,
+            Http2Config::Disable,
             subscription_config().into(),
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -2259,7 +2261,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            true,
+            Http2Config::Enable,
             None,
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -2310,7 +2312,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            true,
+            Http2Config::Enable,
             None,
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -2356,7 +2358,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             false,
-            true,
+            Http2Config::Enable,
             None,
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -2406,7 +2408,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            true,
+            Http2Config::Enable,
             None,
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -2452,7 +2454,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            true,
+            Http2Config::Enable,
             None,
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -2507,7 +2509,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            true,
+            Http2Config::Enable,
             None,
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -2560,7 +2562,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            true,
+            Http2Config::Enable,
             None,
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -2610,7 +2612,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            true,
+            Http2Config::Enable,
             None,
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -2660,7 +2662,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            true,
+            Http2Config::Enable,
             None,
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -2710,7 +2712,7 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             false,
-            true,
+            Http2Config::Enable,
             None,
             ClientConfig::builder()
                 .with_safe_defaults()
@@ -2803,7 +2805,8 @@ mod tests {
             },
         );
         let subgraph_service =
-            SubgraphService::from_config("test", &config, &None, false, None).unwrap();
+            SubgraphService::from_config("test", &config, &None, Http2Config::Enable, None)
+                .unwrap();
 
         let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
         let response = subgraph_service
@@ -2828,6 +2831,7 @@ mod tests {
             })
             .await
             .unwrap();
+
         assert_eq!(response.response.body().data, Some(Value::Null));
     }
 
@@ -2857,7 +2861,8 @@ mod tests {
             },
         );
         let subgraph_service =
-            SubgraphService::from_config("test", &config, &None, false, None).unwrap();
+            SubgraphService::from_config("test", &config, &None, Http2Config::Enable, None)
+                .unwrap();
 
         let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
         let response = subgraph_service
@@ -2965,7 +2970,8 @@ mod tests {
             },
         );
         let subgraph_service =
-            SubgraphService::from_config("test", &config, &None, false, None).unwrap();
+            SubgraphService::from_config("test", &config, &None, Http2Config::Enable, None)
+                .unwrap();
 
         let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
         let response = subgraph_service
@@ -2991,5 +2997,74 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.response.body().data, Some(Value::Null));
+    }
+
+    // starts a local server emulating a subgraph returning status code 401
+    async fn emulate_h2c_server(listener: TcpListener) {
+        async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            println!("h2C server got req: {_request:?}");
+            Ok(http::Response::builder()
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .status(StatusCode::OK)
+                .body(
+                    serde_json::to_string(&Response {
+                        data: Some(Value::default()),
+                        ..Response::default()
+                    })
+                    .expect("always valid")
+                    .into(),
+                )
+                .unwrap())
+        }
+
+        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+        let server = Server::from_tcp(listener)
+            .unwrap()
+            .http2_only(true)
+            .serve(make_svc);
+        server.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_h2c() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_h2c_server(listener));
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            Http2Config::Http2Only,
+            None,
+            rustls::ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(Request::builder().query("query").build())
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(Request::builder().query("query").build())
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Query,
+                context: Context::new(),
+                subscription_stream: None,
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+        assert!(response.response.body().errors.is_empty());
     }
 }

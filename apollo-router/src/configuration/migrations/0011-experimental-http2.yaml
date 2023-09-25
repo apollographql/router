@@ -1,0 +1,25 @@
+description: Move experimental_enable_http2 to experimental_http2
+actions:
+  - type: change
+    path: traffic_shaping.all.experimental_enable_http2
+    from: true
+    to: enable
+  - type: change
+    path: traffic_shaping.all.experimental_enable_http2
+    from: false
+    to: disable
+  - type: move
+    from: traffic_shaping.all.experimental_enable_http2
+    to: traffic_shaping.all.experimental_http2
+
+  - type: change
+    path: traffic_shaping.subgraphs..experimental_enable_http2
+    from: true
+    to: enable
+  - type: change
+    path: traffic_shaping.subgraphs..experimental_enable_http2
+    from: false
+    to: disable
+  - type: move
+    from: traffic_shaping.subgraphs..experimental_enable_http2
+    to: traffic_shaping.subgraphs..experimental_http2
