@@ -2194,7 +2194,7 @@ mod tests {
                     .await;
             make_supergraph_request(plugin.as_ref()).await;
 
-            assert_metric!(
+            assert_counter!(
                 "apollo_router_http_requests_total",
                 1,
                 "another_test" = "my_default_value",
@@ -2204,7 +2204,7 @@ mod tests {
                 "status" = "200",
                 "x-custom" = "coming_from_header"
             );
-            assert_metric!(
+            assert_histogram!(
                 "apollo_router_http_request_duration_seconds",
                 1,
                 "another_test" = "my_default_value",
@@ -2251,7 +2251,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_metric!(
+            assert_counter!(
                 "apollo_router_http_requests_total",
                 1,
                 "another_test" = "my_default_value",
@@ -2323,7 +2323,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_metric!(
+            assert_counter!(
                 "apollo_router_http_requests_total",
                 1,
                 "error" = "custom_error_for_propagation",
@@ -2383,7 +2383,7 @@ mod tests {
                 .await
                 .expect_err("should be an error");
 
-            assert_metric!(
+            assert_counter!(
                 "apollo_router_http_requests_total",
                 1,
                 "message" = "cannot contact the subgraph",
@@ -2431,7 +2431,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_metric!(
+            assert_counter!(
                 "apollo_router_http_requests_total",
                 1,
                 "another_test" = "my_default_value",
@@ -2440,7 +2440,7 @@ mod tests {
                 "renamed_value" = "my_value_set",
                 "status" = "400"
             );
-            assert_metric!(
+            assert_histogram!(
                 "apollo_router_http_request_duration_seconds",
                 1,
                 "another_test" = "my_default_value",

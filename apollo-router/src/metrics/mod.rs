@@ -16,7 +16,7 @@ pub(crate) mod layer;
 // During tests this is a task local so that we can test metrics without having to worry about other tests interfering.
 
 #[cfg(test)]
-mod test_utils {
+pub(crate) mod test_utils {
     use std::fmt::Debug;
     use std::fmt::Display;
     use std::sync::Arc;
@@ -112,7 +112,6 @@ mod test_utils {
             (meter_provider, reader)
         }
     }
-    #[cfg(test)]
     pub(crate) fn meter_provider_and_readers() -> (AggregateMeterProvider, ClonableManualReader) {
         if tokio::runtime::Handle::try_current().is_ok() {
             if let Ok(task_local) = AGGREGATE_METER_PROVIDER_ASYNC
@@ -130,11 +129,6 @@ mod test_utils {
             AGGREGATE_METER_PROVIDER
                 .with(|cell| cell.get_or_init(create_test_meter_provider).clone())
         }
-    }
-
-    #[cfg(not(test))]
-    fn meter_provider_and_readers() -> (AggregateMeterProvider, ClonableManualReader) {
-        AGGREGATE_METER_PROVIDER.with(|cell| cell.get_or_init(create_test_meter_provider).clone())
     }
 
     pub(crate) struct Metrics {
@@ -179,24 +173,25 @@ mod test_utils {
         pub(crate) fn assert<T: NumCast + Display + 'static>(
             &self,
             name: &str,
+            ty: MetricType,
             value: T,
             attributes: &[KeyValue],
         ) {
             let attributes = AttributeSet::from(attributes);
             if let Some(value) = value.to_u64() {
-                if self.metric_exists(name, value, &attributes) {
+                if self.metric_exists(name, &ty, value, &attributes) {
                     return;
                 }
             }
 
             if let Some(value) = value.to_i64() {
-                if self.metric_exists(name, value, &attributes) {
+                if self.metric_exists(name, &ty, value, &attributes) {
                     return;
                 }
             }
 
             if let Some(value) = value.to_f64() {
-                if self.metric_exists(name, value, &attributes) {
+                if self.metric_exists(name, &ty, value, &attributes) {
                     return;
                 }
             }
@@ -312,6 +307,7 @@ mod test_utils {
         fn metric_exists<T: Debug + PartialEq + Display + ToPrimitive + 'static>(
             &self,
             name: &str,
+            ty: &MetricType,
             value: T,
             attributes: &AttributeSet,
         ) -> bool {
@@ -319,24 +315,38 @@ mod test_utils {
                 // Try to downcast the metric to each type of aggregation and assert that the value is correct.
                 if let Some(gauge) = metric.data.as_any().downcast_ref::<Gauge<T>>() {
                     // Find the datapoint with the correct attributes.
-                    return gauge.data_points.iter().any(|datapoint| {
-                        datapoint.attributes == *attributes && datapoint.value == value
-                    });
+                    if matches!(ty, MetricType::Gauge) {
+                        return gauge.data_points.iter().any(|datapoint| {
+                            datapoint.attributes == *attributes && datapoint.value == value
+                        });
+                    }
                 } else if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<T>>() {
-                    return sum.data_points.iter().any(|datapoint| {
-                        datapoint.attributes == *attributes && datapoint.value == value
-                    });
+                    // Note that we can't actually tell if the sum is monotonic or not, so we just check if it's a sum.
+                    if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
+                        return sum.data_points.iter().any(|datapoint| {
+                            datapoint.attributes == *attributes && datapoint.value == value
+                        });
+                    }
                 } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
                 {
-                    if let Some(value) = value.to_u64() {
-                        return histogram.data_points.iter().any(|datapoint| {
-                            datapoint.attributes == *attributes && datapoint.count == value
-                        });
+                    if matches!(ty, MetricType::Histogram) {
+                        if let Some(value) = value.to_u64() {
+                            return histogram.data_points.iter().any(|datapoint| {
+                                datapoint.attributes == *attributes && datapoint.count == value
+                            });
+                        }
                     }
                 }
             }
             false
         }
+    }
+
+    pub(crate) enum MetricType {
+        Counter,
+        UpDownCounter,
+        Histogram,
+        Gauge,
     }
 }
 #[cfg(test)]
@@ -694,25 +704,106 @@ macro_rules! metric {
 }
 
 #[cfg(test)]
-macro_rules! assert_metric {
+macro_rules! assert_counter {
     ($($name:ident).+, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        crate::metrics::collect_metrics().assert(stringify!($($name).+), $value, &attributes);
+        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
     };
 
     ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        crate::metrics::collect_metrics().assert(stringify!($($name).+), $value, &attributes);
+        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
     };
 
     ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        crate::metrics::collect_metrics().assert($name, $value, &attributes);
+        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
     };
 
     ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        crate::metrics::collect_metrics().assert($name, $value, &attributes);
+        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, &attributes);
+    };
+
+    ($name:literal, $value: expr) => {
+        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, &[]);
+    };
+}
+
+#[cfg(test)]
+macro_rules! assert_up_down_counter {
+    ($($name:ident).+, $ty: expr, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
+    };
+
+    ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
+    };
+
+    ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
+    };
+
+    ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, &attributes);
+    };
+
+    ($name:literal, $value: expr) => {
+        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::UpDownCounter, $value, &[]);
+    };
+}
+
+#[cfg(test)]
+macro_rules! assert_gauge {
+    ($($name:ident).+, $ty: expr, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
+    };
+
+    ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
+    };
+
+    ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
+    };
+
+    ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, &attributes);
+    };
+
+    ($name:literal, $value: expr) => {
+        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Gauge, $value, &[]);
+    };
+}
+
+#[cfg(test)]
+macro_rules! assert_histogram {
+    ($($name:ident).+, $ty: expr, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
+    };
+
+    ($($name:ident).+, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        crate::metrics::collect_metrics().assert(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
+    };
+
+    ($name:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
+    };
+
+    ($name:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = vec![$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Histogram, $value, &attributes);
     };
 
     ($name:literal, $value: expr) => {
@@ -769,20 +860,20 @@ mod test {
             .u64_observable_gauge("test")
             .with_callback(|m| m.observe(5, &[]))
             .init();
-        assert_metric!("test", 5);
+        assert_gauge!("test", 5);
     }
 
     #[test]
     fn test_no_attributes() {
         u64_counter!("test", "test description", 1);
-        assert_metric!("test", 1);
+        assert_counter!("test", 1);
     }
 
     #[test]
     fn test_dynamic_attributes() {
         let attributes = vec![KeyValue::new("attr", "val")];
         u64_counter!("test", "test description", 1, attributes);
-        assert_metric!("test", 1, "attr" = "val");
+        assert_counter!("test", 1, "attr" = "val");
     }
 
     #[test]
@@ -794,15 +885,15 @@ mod test {
         my_method("jill");
         my_method("jill");
         my_method("bob");
-        assert_metric!("test", 2, "attr" = "jill");
-        assert_metric!("test", 1, "attr" = "bob");
+        assert_counter!("test", 2, "attr" = "jill");
+        assert_counter!("test", 1, "attr" = "bob");
     }
 
     #[test]
     fn test_non_async() {
         // Each test is run in a separate thread, metrics are stored in a thread local.
         u64_counter!("test", "test description", 1, "attr" = "val");
-        assert_metric!("test", 1, "attr" = "val");
+        assert_counter!("test", 1, "attr" = "val");
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -810,7 +901,7 @@ mod test {
         // Multi-threaded runtime needs to use a tokio task local to avoid tests interfering with each other
         async {
             u64_counter!("test", "test description", 1, "attr" = "val");
-            assert_metric!("test", 1, "attr" = "val");
+            assert_counter!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -821,7 +912,7 @@ mod test {
         async {
             // It's a single threaded tokio runtime, so we can still use a thread local
             u64_counter!("test", "test description", 1, "attr" = "val");
-            assert_metric!("test", 1, "attr" = "val");
+            assert_counter!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -845,11 +936,11 @@ mod test {
                 1,
                 attr.test_underscore = "val"
             );
-            assert_metric!("test", 1, "attr" = "val");
-            assert_metric!("test", 1, "attr.test" = "val");
-            assert_metric!("test", 1, attr.test_underscore = "val");
-            assert_metric!(test.dot, 2, attr.test_underscore = "val");
-            assert_metric!(test.dot, 2, "attr.test_underscore" = "val");
+            assert_counter!("test", 1, "attr" = "val");
+            assert_counter!("test", 1, "attr.test" = "val");
+            assert_counter!("test", 1, attr.test_underscore = "val");
+            assert_counter!(test.dot, 2, attr.test_underscore = "val");
+            assert_counter!(test.dot, 2, "attr.test_underscore" = "val");
         }
         .with_metrics()
         .await;
@@ -859,7 +950,7 @@ mod test {
     async fn test_f64_counter() {
         async {
             f64_counter!("test", "test description", 1.5, "attr" = "val");
-            assert_metric!("test", 1.5, "attr" = "val");
+            assert_counter!("test", 1.5, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -869,7 +960,7 @@ mod test {
     async fn test_i64_up_down_counter() {
         async {
             i64_up_down_counter!("test", "test description", 1, "attr" = "val");
-            assert_metric!("test", 1, "attr" = "val");
+            assert_up_down_counter!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -879,7 +970,7 @@ mod test {
     async fn test_f64_up_down_counter() {
         async {
             f64_up_down_counter!("test", "test description", 1.5, "attr" = "val");
-            assert_metric!("test", 1.5, "attr" = "val");
+            assert_up_down_counter!("test", 1.5, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -889,7 +980,7 @@ mod test {
     async fn test_u64_histogram() {
         async {
             u64_histogram!("test", "test description", 1, "attr" = "val");
-            assert_metric!("test", 1, "attr" = "val");
+            assert_histogram!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -899,7 +990,7 @@ mod test {
     async fn test_i64_histogram() {
         async {
             i64_histogram!("test", "test description", 1, "attr" = "val");
-            assert_metric!("test", 1, "attr" = "val");
+            assert_histogram!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -909,7 +1000,51 @@ mod test {
     async fn test_f64_histogram() {
         async {
             f64_histogram!("test", "test description", 1.0, "attr" = "val");
-            assert_metric!("test", 1, "attr" = "val");
+            assert_histogram!("test", 1, "attr" = "val");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn test_type_histogram() {
+        async {
+            f64_histogram!("test", "test description", 1.0, "attr" = "val");
+            assert_counter!("test", 1, "attr" = "val");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn test_type_counter() {
+        async {
+            f64_counter!("test", "test description", 1.0, "attr" = "val");
+            assert_histogram!("test", 1, "attr" = "val");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn test_type_up_down_counter() {
+        async {
+            f64_up_down_counter!("test", "test description", 1.0, "attr" = "val");
+            assert_histogram!("test", 1, "attr" = "val");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn test_type_gauge() {
+        async {
+            f64_up_down_counter!("test", "test description", 1.0, "attr" = "val");
+            assert_histogram!("test", 1, "attr" = "val");
         }
         .with_metrics()
         .await;
@@ -931,12 +1066,12 @@ mod test {
 
         // Call the metrics, it will be registered
         test();
-        assert_metric!("test", 1, "attr" = "val");
+        assert_counter!("test", 1, "attr" = "val");
         assert_eq!(meter_provider().registered_instruments(), 1);
 
         // Call the metrics again, but the second call will not register a new metric because it will have be retrieved from the static
         test();
-        assert_metric!("test", 2, "attr" = "val");
+        assert_counter!("test", 2, "attr" = "val");
         assert_eq!(meter_provider().registered_instruments(), 1);
 
         // Force invalidation of instruments

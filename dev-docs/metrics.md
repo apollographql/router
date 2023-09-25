@@ -122,7 +122,7 @@ When using the macro in a test you will need a different pattern depending on if
     fn test_non_async() {
         // Each test is run in a separate thread, metrics are stored in a thread local.
         u64_counter!("test", "test description", 1, "attr" => "val");
-        assert_metric!("test", 1, "attr" => "val");
+        assert_counter!("test", 1, "attr" => "val");
     }
 ```
 
@@ -136,7 +136,7 @@ Make sure to use `.with_metrics()` method on the async block to ensure that the 
         // Multi-threaded runtime needs to use a tokio task local to avoid tests interfering with each other
         async {
             u64_counter!("test", "test description", 1, "attr" => "val");
-            assert_metric!("test", 1, "attr" => "val");
+            assert_counter!("test", 1, "attr" => "val");
         }
         .with_metrics()
         .await;
@@ -147,7 +147,7 @@ Make sure to use `.with_metrics()` method on the async block to ensure that the 
         async {
             // It's a single threaded tokio runtime, so we can still use a thread local
             u64_counter!("test", "test description", 1, "attr" => "val");
-            assert_metric!("test", 1, "attr" => "val");
+            assert_counter!("test", 1, "attr" => "val");
         }
         .with_metrics()
         .await;
