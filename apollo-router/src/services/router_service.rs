@@ -8,6 +8,7 @@ use axum::response::*;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
+use futures::future::join_all;
 use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream;
@@ -224,9 +225,8 @@ impl Service<RouterRequest> for RouterService {
 impl RouterService {
     async fn process_supergraph_request(
         &self,
-        results: &mut Vec<router::Response>,
         supergraph_request: SupergraphRequest,
-    ) -> Result<(), BoxError> {
+    ) -> Result<router::Response, BoxError> {
         let mut request_res = self
             .persisted_query_layer
             .supergraph_request(supergraph_request);
@@ -268,7 +268,7 @@ impl RouterService {
         match body.next().await {
             None => {
                 tracing::error!("router service is not available to process request",);
-                results.push(router::Response {
+                Ok(router::Response {
                     response: http::Response::builder()
                         .status(StatusCode::SERVICE_UNAVAILABLE)
                         .body(Body::from(
@@ -276,7 +276,7 @@ impl RouterService {
                         ))
                         .expect("cannot fail"),
                     context,
-                });
+                })
             }
             Some(response) => {
                 if !response.has_next.unwrap_or(false)
@@ -288,12 +288,11 @@ impl RouterService {
                         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
                     tracing::trace_span!("serialize_response").in_scope(|| {
                         let body = serde_json::to_string(&response)?;
-                        results.push(router::Response {
+                        Ok(router::Response {
                             response: http::Response::from_parts(parts, Body::from(body)),
                             context,
-                        });
-                        Ok::<(), BoxError>(())
-                    })?;
+                        })
+                    })
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
                     if accepts_multipart_defer {
                         parts
@@ -334,11 +333,10 @@ impl RouterService {
                         // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
                     });
 
-                    results.push(RouterResponse { response, context });
+                    Ok(RouterResponse { response, context })
                 } else {
                     // this should be unreachable due to a previous check, but just to be sure...
-                    println!("BOMBING IN unreachable code");
-                    results.push(router::Response::error_builder()
+                    Ok(router::Response::error_builder()
                             .error(
                                 graphql::Error::builder()
                                     .message(format!(
@@ -353,11 +351,10 @@ impl RouterService {
                             .status_code(StatusCode::NOT_ACCEPTABLE)
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .context(context)
-                            .build()?);
+                            .build()?)
                 }
             }
         }
-        Ok(())
     }
 
     async fn call_inner(&self, req: RouterRequest) -> Result<RouterResponse, BoxError> {
@@ -387,12 +384,17 @@ impl RouterService {
             }
         };
 
-        let mut results = Vec::with_capacity(supergraph_requests.len());
+        let futures = supergraph_requests
+            .into_iter()
+            .map(|supergraph_request| self.process_supergraph_request(supergraph_request));
 
-        for supergraph_request in supergraph_requests {
-            self.process_supergraph_request(&mut results, supergraph_request)
-                .await?;
-        }
+        // Use join_all to preserve ordering of concurrent operations
+        // (Short circuit processing and propagate any errors in the batch)
+        let mut results: Vec<router::Response> = join_all(futures)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<router::Response>, BoxError>>()?;
+
         // If we only have one result, go ahead and return it. Otherwise, create a new result
         // which is an array of all results.
         if results.len() == 1 {
