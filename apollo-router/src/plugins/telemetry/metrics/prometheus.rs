@@ -98,6 +98,9 @@ impl MetricsConfigurator for Config {
         if self.enabled {
             // Check the last registry to see if the resources are the same, if they are we can use it as is.
             // Otherwise go with the new controller and store it so that it can be committed during telemetry activation.
+            // Note that during tests the prom registry cannot be reused as we have a different meter provider for each test.
+            // Prom reloading IS tested in an integration test.
+            #[cfg(not(test))]
             if let Some((last_config, last_registry)) =
                 EXISTING_PROMETHEUS.lock().expect("lock poisoned").clone()
             {

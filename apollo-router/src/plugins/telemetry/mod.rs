@@ -2456,7 +2456,6 @@ mod tests {
 
     #[tokio::test]
     async fn it_test_prometheus_wrong_endpoint() {
-        let _lock = lock_prometheus().await;
         async {
             let plugin =
                 create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
@@ -2489,12 +2488,8 @@ mod tests {
         .await;
     }
 
-    static PROMETHEUS_LOCK: std::sync::OnceLock<Arc<tokio::sync::Mutex<()>>> =
-        std::sync::OnceLock::new();
-
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics() {
-        let _lock = lock_prometheus().await;
         async {
             let plugin =
                 create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
@@ -2508,7 +2503,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_custom_buckets() {
-        let _lock = lock_prometheus().await;
         async {
             let plugin = create_plugin_with_config(include_str!(
                 "testdata/prometheus_custom_buckets.router.yaml"
@@ -2521,14 +2515,6 @@ mod tests {
         }
         .with_metrics()
         .await;
-    }
-
-    // Prometheus support has some globals. Ideally we fix the plugin API to allow migration of data across reloads. This means that some tests cannot be run in parallel due to interaction with globals.
-    async fn lock_prometheus() -> tokio::sync::MutexGuard<'static, ()> {
-        PROMETHEUS_LOCK
-            .get_or_init(|| Arc::new(tokio::sync::Mutex::new(())))
-            .lock()
-            .await
     }
 
     #[test]
