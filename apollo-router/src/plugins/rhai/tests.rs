@@ -534,7 +534,7 @@ fn it_can_base64decode_string() {
 }
 
 #[test]
-fn it_can_base64encode_string_wit_alphabet() {
+fn it_can_base64encode_string_with_alphabet() {
     let engine = new_rhai_test_engine();
     let encoded: String = engine
         .eval(r#"base64::encode("<<???>>", base64::STANDARD)"#)
