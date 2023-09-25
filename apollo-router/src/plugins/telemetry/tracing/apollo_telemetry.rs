@@ -382,7 +382,7 @@ impl Exporter {
             SUBGRAPH_SPAN_NAME => {
                 let subgraph_name = span
                     .attributes
-                    .get(&Key::from_static_str("apollo.subgraph.name"))
+                    .get(&SUBGRAPH_NAME)
                     .and_then(extract_string)
                     .unwrap_or_default();
                 let error_configuration = self
