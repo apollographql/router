@@ -102,13 +102,7 @@ flowchart LR;
     - Subscription support is an Enterprise feature of self-hosted routers.
 1. **If you compose your router's supergraph schema with GraphOS** (instead of with the Rover CLI), [update your build pipeline](/graphos/graphs/updating#2-update-your-build-pipeline) to use Apollo Federation 2.4 or later.
     - Previous versions of Apollo Federation don't support subscription operations.
-1. Each package that makes up Apollo Federation needs to be updated to version 2.4 or later:
-    - `@apollo/gateway`
-    - `@apollo/query-planner`
-    - `@apollo/subgraph`
-    - `@apollo/federation-internals`
-    - `@apollo/query-graphs`
-    - `@apollo/composition`
+
 1. Modify your subgraph schemas to use Apollo Federation 2.4 or later:
     ```graphql title="stocks.graphql"
     extend schema
@@ -124,6 +118,13 @@ flowchart LR;
 
 1. [Update your Apollo Server instances to version 4 or later](/apollo-server/migration).
     - Follow the Apollo Server 4 [guide for enabling subscriptions](/apollo-server/data/subscriptions#enabling-subscriptions). 
+    - Update each `npm` package that makes up Apollo Federation to version 2.4 or later:
+        - `@apollo/gateway`
+        - `@apollo/query-planner`
+        - `@apollo/subgraph`
+        - `@apollo/federation-internals`
+        - `@apollo/query-graphs`
+        - `@apollo/composition`
 
 After you complete these prerequisites, you can safely [configure your router](#router-setup) for subscriptions.
 
