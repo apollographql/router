@@ -1043,7 +1043,11 @@ mod test {
     #[should_panic]
     async fn test_type_gauge() {
         async {
-            f64_up_down_counter!("test", "test description", 1.0, "attr" = "val");
+            meter_provider()
+                .meter("test")
+                .u64_observable_gauge("test")
+                .with_callback(|m| m.observe(5, &[]))
+                .init();
             assert_histogram!("test", 1, "attr" = "val");
         }
         .with_metrics()
