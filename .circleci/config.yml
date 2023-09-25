@@ -868,6 +868,7 @@ workflows:
             tags:
               only: /v.*/
       - build_release:
+          requires: [ pre_verify_release ]
           matrix:
             parameters:
               platform:
