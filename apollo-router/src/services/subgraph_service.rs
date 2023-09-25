@@ -3014,7 +3014,7 @@ mod tests {
         let server = Server::from_tcp(listener)
             .unwrap()
             .http2_only(true)
-            .serve(make_svc); //Server::from_tcp(listener).unwrap().serve(make_svc);
+            .serve(make_svc);
         server.await.unwrap();
     }
 
