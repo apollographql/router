@@ -32,6 +32,7 @@ traffic_shaping:
         ttl: 10s # for each successful request, we register a token, that expires according to this option (default: 10s)
         retry_percent: 0.2 # defines the proportion of available retries to the current number of tokens
         retry_mutations: false # allows retries on mutations. This should only be enabled if mutations are idempotent
+      experimental_http2: enable # Configures HTTP/2 usage. Can be 'enable' (default), 'disable' or 'http2only'
 ```
 
 ## Client side traffic shaping
@@ -150,6 +151,14 @@ traffic_shaping:
   all:
     deduplicate_query: true # Enable query deduplication for all subgraphs.
 ```
+
+### HTTP/2
+
+The router supports subgraph connections over
+- HTTP/2 with TLS. This is the default configuration.
+- HTTP/2 Cleartext protocol (h2c). This uses HTTP/2 over plaintext connections.
+
+To use h2c, the subgraph URL must have the `http` scheme, and the `experimental_http2` option must be set to `http2only`.
 
 ### Ordering
 
