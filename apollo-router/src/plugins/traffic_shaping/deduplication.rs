@@ -38,7 +38,7 @@ where
 
 type CacheKey = (http_ext::Request<Request>, CacheKeyMetadata);
 
-type WaitMap = Arc<Mutex<HashMap<CacheKey, Sender<Result<CloneSubgraphResponse, String>>>>>;
+type WaitMap = Arc<Mutex<HashMap<CacheKey, Sender<Result<Arc<CloneSubgraphResponse>, String>>>>>;
 
 struct CloneSubgraphResponse(SubgraphResponse);
 
@@ -95,7 +95,8 @@ where
                     match receiver.recv().await {
                         Ok(value) => {
                             return value
-                                .map(|response| {
+                                .map(|arc_response| {
+                                    let response = (*arc_response).clone();
                                     SubgraphResponse::new_from_response(
                                         response.0.response,
                                         request.context,
@@ -146,7 +147,7 @@ where
                     // Let our waiters know
                     let broadcast_value = res
                         .as_ref()
-                        .map(|response| response.clone())
+                        .map(|response| Arc::new(response.clone()))
                         .map_err(|e| e.to_string());
 
                     // We may get errors here, for instance if a task is cancelled,
