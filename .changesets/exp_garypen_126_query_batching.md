@@ -14,6 +14,8 @@ experimental_batching:
   mode: batch_http_link
 ```
 
+All operations within a batch will execute concurrently with respect to each other.
+
 Do not attempt to use subscriptions or `@defer` queries within a batch as they are not supported.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3837
