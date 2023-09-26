@@ -263,10 +263,10 @@ ecdsa = { version = "0.15.1", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "6.3.2", features = ["enable-rustls", "no-client-setname"] }
 futures-test = "0.3.28"
 insta = { version = "1.32.0", features = ["json", "redactions", "yaml"] }
-num-traits = "0.2.16"
 maplit = "1.0.2"
 memchr = { version = "2.6.3", default-features = false }
 mockall = "0.11.4"
+num-traits = "0.2.16"
 once_cell = "1.18.0"
 opentelemetry-stdout = { version = "0.1.0", features = ["trace"] }
 p256 = "0.12.0"
