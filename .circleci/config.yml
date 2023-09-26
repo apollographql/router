@@ -839,6 +839,9 @@ workflows:
                 [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
       - release_approval:
           type: approval
+          requires:
+            - test
+            - test_updated
 
       - pre_verify_release:
           requires: [ release_approval ]
