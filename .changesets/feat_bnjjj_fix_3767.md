@@ -1,8 +1,8 @@
 ### feat(telemetry): add metrics for query plan warmup and schema load ([Issue #3767](https://github.com/apollographql/router/issues/3767))
 
-It adds histogram metrics for `apollo_router_query_planning_warmup_duration` and `apollo_router_schema_load_duration`.
+We added histogram metrics for `apollo_router_query_planning_warmup_duration` and `apollo_router_schema_load_duration`. These metrics make it easier to track the time spent loading a new schema and planning queries in the warm-up phase. You can measure the query plan cache usage for both the in-memory-cache and distributed cache. This makes it easier to know how many entries are used as well ass the cache hit rate.
 
-Example in Prometheus:
+Here is what these metrics would look like in Prometheus:
 
 ```
 # HELP apollo_router_query_planning_warmup_duration apollo_router_query_planning_warmup_duration
