@@ -848,6 +848,8 @@ workflows:
             parameters:
               platform: [ amd_linux_build ]
           filters:
+            branches:
+              ignore: /.*/
             tags:
               only: /v.*/
       # Anything that tagged is deemed a nightly
@@ -861,6 +863,8 @@ workflows:
               platform:
                 [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
           filters:
+            branches:
+              ignore: /.*/
             tags:
               ignore: /v.*/
       # Releases are tagged
@@ -873,10 +877,14 @@ workflows:
               platform:
                 [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
           filters:
+            branches:
+              ignore: /.*/
             tags:
               only: /v.*/
       - publish_github_release:
           requires: [ build_release ]
           filters:
+            branches:
+              ignore: /.*/
             tags:
               only: /v.*/
