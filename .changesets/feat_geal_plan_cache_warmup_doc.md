@@ -2,12 +2,14 @@
 
 The `warm_up_queries` option enables quicker schema updates by precomputing query plans for your most used cached queries and your persisted queries. When a new schema is loaded, a precomputed query plan for it may already be in the in-memory cache.
 
-We made a series of improvements to this feature to make it more easier to use:
-* It is now active by default and warms up the cache with the 30% most used queries of the previous cache. The query cache amount is still configurable, and it can be deactivated by setting it to 0.
+We made a series of improvements to this feature to make it easier to use:
+* It is now active by default.
+* It warms up the cache with the 30% most used queries from previous cache.
+* The query cache percentage continues to be configurable, and it can be deactivated by setting it to 0.
 * The warm-up will now plan queries in random order to make sure that the work can be shared by multiple router instances using distributed caching.
 * Persisted queries are part of the warmed up queries.
 
-We also added histogram metrics for `apollo_router_query_planning_warmup_duration` and `apollo_router_schema_load_duration`. These metrics make it easier to track the time spent loading a new schema and planning queries in the warm-up phase. You can measure the query plan cache usage for both the in-memory-cache and distributed cache. This makes it easier to know how many entries are used as well ass the cache hit rate.
+We also added histogram metrics for `apollo_router_query_planning_warmup_duration` and `apollo_router_schema_load_duration`. These metrics make it easier to track the time spent loading a new schema and planning queries in the warm-up phase. You can measure the query plan cache usage for both the in-memory-cache and distributed cache. This makes it easier to know how many entries are used as well as the cache hit rate.
 
 Here is what these metrics would look like in Prometheus:
 

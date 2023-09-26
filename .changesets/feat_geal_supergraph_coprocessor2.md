@@ -28,6 +28,6 @@ The supergraph response body contains:
 - errors
 - extensions
 
-When using `@defer` or subscriptions a supergraph response may contain multiple GraphQL responses. The coprocessor will be called for each.
+When using `@defer` or subscriptions a supergraph response may contain multiple GraphQL responses. The coprocessor will be called for each response. Please refer to our [coprocessor documentation](https://www.apollographql.com/docs/router/customizations/coprocessor) for more information.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3647
