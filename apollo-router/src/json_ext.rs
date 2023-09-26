@@ -629,17 +629,7 @@ pub(crate) fn serde_json_iterate_path_mut<'a, F>(
                 }
             }
         }
-        Some(PathElement::Fragment(name)) => {
-            /*if data.is_object_of_type(schema, name) {
-                iterate_path_mut(schema, parent, &path[1..], data, f);
-            } else if let Value::Array(array) = data {
-                for (i, value) in array.iter_mut().enumerate() {
-                    parent.push(PathElement::Index(i));
-                    iterate_path_mut(schema, parent, path, value, f);
-                    parent.pop();
-                }
-            }*/
-        }
+        Some(PathElement::Fragment(_name)) => {}
         Some(PathElement::Glob) => {
             if let serde_json::Value::Object(o) = data {
                 for (k, value) in o.iter_mut() {
