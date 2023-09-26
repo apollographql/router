@@ -1,4 +1,4 @@
-### TLS client authentication for subgraph requests ([Issue #3414](https://github.com/apollographql/router/issues/3414))
+### TLS client authentication for subgraph requests. ([Issue #3414](https://github.com/apollographql/router/issues/3414))
 
 The router now supports TLS client authentication when connecting to subgraphs. It can be configured as follows:
 
