@@ -246,44 +246,41 @@ async fn get_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
     request: router::Request,
     filter: T,
 ) -> Report {
-    let mut found_report;
+    let _guard = TEST.lock().await;
+    reports.lock().await.clear();
+    let response = get_router_service(reports.clone(), mocked)
+        .await
+        .ready()
+        .await
+        .expect("router service was never ready")
+        .call(request)
+        .await
+        .expect("router service call failed");
+
+    // Drain the response
+    let mut found_report = match hyper::body::to_bytes(response.response.into_body())
+        .await
+        .map(|b| String::from_utf8(b.to_vec()))
     {
-        let _guard = TEST.lock().await;
-        reports.lock().await.clear();
-        let response = get_router_service(reports.clone(), mocked)
-            .await
-            .ready()
-            .await
-            .expect("router service was never ready")
-            .call(request)
-            .await
-            .expect("router service call failed");
-
-        // Drain the response
-        found_report = match hyper::body::to_bytes(response.response.into_body())
-            .await
-            .map(|b| String::from_utf8(b.to_vec()))
-        {
-            Ok(Ok(response)) => {
-                if response.contains("errors") {
-                    eprintln!("response had errors {response}");
-                }
-                Ok(None)
+        Ok(Ok(response)) => {
+            if response.contains("errors") {
+                eprintln!("response had errors {response}");
             }
-            _ => Err(anyhow!("error retrieving response")),
-        };
-
-        // We must always try to find the report regardless of if the response had failures
-        for _ in 0..10 {
-            let my_reports = reports.lock().await;
-            let report = my_reports.iter().find(filter);
-            if report.is_some() && matches!(found_report, Ok(None)) {
-                found_report = Ok(report.cloned());
-                break;
-            }
-            drop(my_reports);
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            Ok(None)
         }
+        _ => Err(anyhow!("error retrieving response")),
+    };
+
+    // We must always try to find the report regardless of if the response had failures
+    for _ in 0..10 {
+        let my_reports = reports.lock().await;
+        let report = my_reports.iter().find(filter);
+        if report.is_some() && matches!(found_report, Ok(None)) {
+            found_report = Ok(report.cloned());
+            break;
+        }
+        drop(my_reports);
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
     found_report
@@ -297,44 +294,41 @@ async fn get_batch_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static
     request: router::Request,
     filter: T,
 ) -> Report {
-    let mut found_report;
+    let _guard = TEST.lock().await;
+    reports.lock().await.clear();
+    let response = get_batch_router_service(reports.clone(), mocked)
+        .await
+        .ready()
+        .await
+        .expect("router service was never ready")
+        .call(request)
+        .await
+        .expect("router service call failed");
+
+    // Drain the response
+    let mut found_report = match hyper::body::to_bytes(response.response.into_body())
+        .await
+        .map(|b| String::from_utf8(b.to_vec()))
     {
-        let _guard = TEST.lock().await;
-        reports.lock().await.clear();
-        let response = get_batch_router_service(reports.clone(), mocked)
-            .await
-            .ready()
-            .await
-            .expect("router service was never ready")
-            .call(request)
-            .await
-            .expect("router service call failed");
-
-        // Drain the response
-        found_report = match hyper::body::to_bytes(response.response.into_body())
-            .await
-            .map(|b| String::from_utf8(b.to_vec()))
-        {
-            Ok(Ok(response)) => {
-                if response.contains("errors") {
-                    eprintln!("response had errors {response}");
-                }
-                Ok(None)
+        Ok(Ok(response)) => {
+            if response.contains("errors") {
+                eprintln!("response had errors {response}");
             }
-            _ => Err(anyhow!("error retrieving response")),
-        };
-
-        // We must always try to find the report regardless of if the response had failures
-        for _ in 0..10 {
-            let my_reports = reports.lock().await;
-            let report = my_reports.iter().find(filter);
-            if report.is_some() && matches!(found_report, Ok(None)) {
-                found_report = Ok(report.cloned());
-                break;
-            }
-            drop(my_reports);
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            Ok(None)
         }
+        _ => Err(anyhow!("error retrieving response")),
+    };
+
+    // We must always try to find the report regardless of if the response had failures
+    for _ in 0..10 {
+        let my_reports = reports.lock().await;
+        let report = my_reports.iter().find(filter);
+        if report.is_some() && matches!(found_report, Ok(None)) {
+            found_report = Ok(report.cloned());
+            break;
+        }
+        drop(my_reports);
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
     found_report
