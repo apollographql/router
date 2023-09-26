@@ -10,7 +10,7 @@ executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
       - image: cimg/base:stable
-    resource_class: medium
+    resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
       RUST_TEST_THREADS: 6
