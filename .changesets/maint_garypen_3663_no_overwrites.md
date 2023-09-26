@@ -1,4 +1,4 @@
-### Check if docker images and helm charts exist before creating them ([Issue #3663](https://github.com/apollographql/router/issues/3663))
+### Check if docker images and helm charts exist before creating them. ([Issue #3663](https://github.com/apollographql/router/issues/3663))
 
 This improves the resilience of our pipeline.
 

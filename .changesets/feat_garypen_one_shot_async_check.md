@@ -1,4 +1,4 @@
-### Introduce OneShotAsyncCheckpoint ([PR #3819](https://github.com/apollographql/router/pull/3819))
+### Introduce OneShotAsyncCheckpoint. ([PR #3819](https://github.com/apollographql/router/pull/3819))
 
 The existing AsynCheckpoint requires `Clone` and thus introduces a need for Service Buffering which reduces the performance and resiliance of the router.
 
