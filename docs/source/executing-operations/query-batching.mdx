@@ -14,7 +14,7 @@ Modern applications use several operations to render a single page. This is usua
 
 The Apollo Router now supports client request batching. If you’re using Apollo Client, you can leverage the built-in support for batching to reduce the number of individual requests sent to the router.
 
-Once configured, Apollo Client will automatically combine multiple operations into a single HTTP request. The number of operations within a batch is client configurable, including the maximum number of operations in a batch and the maximum duration to wait for operations to accumulate before sending the batch request. 
+Once configured, Apollo Client automatically combines multiple operations into a single HTTP request. The number of operations within a batch is client-configurable, including the maximum number of operations in a batch and the maximum duration to wait for operations to accumulate before sending the batch request. 
 
 The Apollo Router must be configured to receive batch requests, otherwise it rejects them. When processing a batch request, the router deserializes and processes each operation of a batch independently, and it responds to the client only after all operations of the batch have been completed. Each operation executes concurrently with respect to other operations in the batch.
 
