@@ -23,7 +23,6 @@ use prost_types::Timestamp;
 use proto::reports::trace::Node;
 use serde_json::json;
 use tokio::sync::Mutex;
-use tokio::sync::OnceCell;
 use tower::Service;
 use tower::ServiceExt;
 use tower_http::decompression::DecompressionLayer;
@@ -33,85 +32,81 @@ use crate::proto::reports::trace::node::Id::ResponseName;
 use crate::proto::reports::Report;
 use crate::proto::reports::Trace;
 
-static REPORTS: Lazy<Arc<Mutex<Vec<Report>>>> = Lazy::new(Default::default);
-static TEST: Lazy<Arc<Mutex<bool>>> = Lazy::new(Default::default);
 static ROUTER_SERVICE_RUNTIME: Lazy<Arc<tokio::runtime::Runtime>> = Lazy::new(|| {
     Arc::new(tokio::runtime::Runtime::new().expect("must be able to create tokio runtime"))
 });
-static CONFIG: OnceCell<serde_json::Value> = OnceCell::const_new();
-static ROUTER_SERVICE: Lazy<Arc<Mutex<Option<BoxCloneService>>>> = Lazy::new(Default::default);
-static MOCKED_ROUTER_SERVICE: Lazy<Arc<Mutex<Option<BoxCloneService>>>> =
-    Lazy::new(Default::default);
+static TEST: Lazy<Arc<Mutex<()>>> = Lazy::new(Default::default);
 
-async fn config() -> serde_json::Value {
-    CONFIG
-        .get_or_init(|| async {
-            std::env::set_var("APOLLO_KEY", "test");
-            std::env::set_var("APOLLO_GRAPH_REF", "test");
+async fn config(batch: bool, reports: Arc<Mutex<Vec<Report>>>) -> serde_json::Value {
+    std::env::set_var("APOLLO_KEY", "test");
+    std::env::set_var("APOLLO_GRAPH_REF", "test");
 
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            let addr = listener.local_addr().unwrap();
-            let app = axum::Router::new()
-                .route("/", post(report))
-                .layer(DecompressionLayer::new())
-                .layer(tower_http::add_extension::AddExtensionLayer::new(
-                    (*REPORTS).clone(),
-                ));
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = axum::Router::new()
+        .route("/", post(report))
+        .layer(DecompressionLayer::new())
+        .layer(tower_http::add_extension::AddExtensionLayer::new(reports));
 
-            drop(ROUTER_SERVICE_RUNTIME.spawn(async move {
-                axum::Server::from_tcp(listener)
-                    .expect("mut be able to crete report receiver")
-                    .serve(app.into_make_service())
-                    .await
-                    .expect("could not start axum server")
-            }));
+    drop(ROUTER_SERVICE_RUNTIME.spawn(async move {
+        axum::Server::from_tcp(listener)
+            .expect("mut be able to create report receiver")
+            .serve(app.into_make_service())
+            .await
+            .expect("could not start axum server")
+    }));
 
-            let mut config: serde_json::Value =
-                serde_yaml::from_str(include_str!("fixtures/apollo_reports.router.yaml"))
-                    .expect("apollo_reports.router.yaml was invalid");
-            config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.endpoint", &mut |_| {
-                Some(serde_json::Value::String(format!("http://{addr}")))
-            })
-            .expect("Could not sub in endpoint");
-            config
-        })
-        .await
-        .clone()
+    let mut config: serde_json::Value = if batch {
+        serde_yaml::from_str(include_str!("fixtures/apollo_reports.batch_router.yaml"))
+            .expect("apollo_reports.router.yaml was invalid")
+    } else {
+        serde_yaml::from_str(include_str!("fixtures/apollo_reports.router.yaml"))
+            .expect("apollo_reports.router.yaml was invalid")
+    };
+    config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.endpoint", &mut |_| {
+        Some(serde_json::Value::String(format!("http://{addr}")))
+    })
+    .expect("Could not sub in endpoint");
+    config
 }
 
-async fn get_router_service(mocked: bool) -> BoxCloneService {
-    let lazy = if mocked {
-        &MOCKED_ROUTER_SERVICE
+async fn get_router_service(reports: Arc<Mutex<Vec<Report>>>, mocked: bool) -> BoxCloneService {
+    let config = config(false, reports).await;
+    let builder = TestHarness::builder()
+        .try_log_level("INFO")
+        .configuration_json(config)
+        .expect("test harness had config errors")
+        .schema(include_str!("fixtures/supergraph.graphql"));
+    let builder = if mocked {
+        builder.subgraph_hook(|subgraph, _service| subgraph_mocks(subgraph))
     } else {
-        &ROUTER_SERVICE
+        builder.with_subgraph_network_requests()
     };
-    let mut router_service = lazy.lock().await;
-    if router_service.is_none() {
-        let config = config().await;
-        let service = ROUTER_SERVICE_RUNTIME
-            .spawn(async move {
-                let builder = TestHarness::builder()
-                    .try_log_level("INFO")
-                    .configuration_json(config)
-                    .expect("test harness had config errors")
-                    .schema(include_str!("fixtures/supergraph.graphql"));
-                let builder = if mocked {
-                    builder.subgraph_hook(|subgraph, _service| subgraph_mocks(subgraph))
-                } else {
-                    builder.with_subgraph_network_requests()
-                };
-                builder
-                    .build_router()
-                    .await
-                    .expect("could create router test harness")
-            })
-            .await
-            .expect("must be able to create router");
-        *router_service = Some(service);
-    }
-    router_service
-        .clone()
-        .expect("router service must have got created")
+    builder
+        .build_router()
+        .await
+        .expect("could create router test harness")
+}
+
+async fn get_batch_router_service(
+    reports: Arc<Mutex<Vec<Report>>>,
+    mocked: bool,
+) -> BoxCloneService {
+    let config = config(true, reports).await;
+    let builder = TestHarness::builder()
+        .try_log_level("INFO")
+        .configuration_json(config)
+        .expect("test harness had config errors")
+        .schema(include_str!("fixtures/supergraph.graphql"));
+    let builder = if mocked {
+        builder.subgraph_hook(|subgraph, _service| subgraph_mocks(subgraph))
+    } else {
+        builder.with_subgraph_network_requests()
+    };
+    builder
+        .build_router()
+        .await
+        .expect("could create router test harness")
 }
 
 fn encode_ftv1(trace: Trace) -> String {
@@ -191,8 +186,23 @@ async fn report(
     Ok(Json(()))
 }
 
-async fn get_trace_report(request: router::Request) -> Report {
-    get_report(false, request, |r| {
+async fn get_trace_report(reports: Arc<Mutex<Vec<Report>>>, request: router::Request) -> Report {
+    get_report(reports, false, request, |r| {
+        !r.traces_per_query
+            .values()
+            .next()
+            .expect("traces and stats required")
+            .trace
+            .is_empty()
+    })
+    .await
+}
+
+async fn get_batch_trace_report(
+    reports: Arc<Mutex<Vec<Report>>>,
+    request: router::Request,
+) -> Report {
+    get_batch_report(reports, false, request, |r| {
         !r.traces_per_query
             .values()
             .next()
@@ -212,73 +222,126 @@ fn has_metrics(r: &&Report) -> bool {
         .is_empty()
 }
 
-async fn get_metrics_report(request: router::Request) -> Report {
-    get_report(false, request, has_metrics).await
+async fn get_metrics_report(reports: Arc<Mutex<Vec<Report>>>, request: router::Request) -> Report {
+    get_report(reports, false, request, has_metrics).await
 }
 
-async fn get_metrics_report_mocked(request: router::Request) -> Report {
-    get_report(true, request, has_metrics).await
+async fn get_batch_metrics_report(
+    reports: Arc<Mutex<Vec<Report>>>,
+    request: router::Request,
+) -> Report {
+    get_batch_report(reports, false, request, has_metrics).await
+}
+
+async fn get_metrics_report_mocked(
+    reports: Arc<Mutex<Vec<Report>>>,
+    request: router::Request,
+) -> Report {
+    get_report(reports, true, request, has_metrics).await
 }
 
 async fn get_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
+    reports: Arc<Mutex<Vec<Report>>>,
     mocked: bool,
     request: router::Request,
     filter: T,
 ) -> Report {
-    ROUTER_SERVICE_RUNTIME
-        .spawn(async move {
-            let mut found_report;
-            {
-                let _test_guard = TEST.lock().await;
-                {
-                    REPORTS.lock().await.clear();
+    let mut found_report;
+    {
+        let _guard = TEST.lock().await;
+        reports.lock().await.clear();
+        let response = get_router_service(reports.clone(), mocked)
+            .await
+            .ready()
+            .await
+            .expect("router service was never ready")
+            .call(request)
+            .await
+            .expect("router service call failed");
+
+        // Drain the response
+        found_report = match hyper::body::to_bytes(response.response.into_body())
+            .await
+            .map(|b| String::from_utf8(b.to_vec()))
+        {
+            Ok(Ok(response)) => {
+                if response.contains("errors") {
+                    eprintln!("response had errors {response}");
                 }
-
-                let response = get_router_service(mocked)
-                    .await
-                    .ready()
-                    .await
-                    .expect("router service was never ready")
-                    .call(request)
-                    .await
-                    .expect("router service call failed");
-
-                // Drain the response
-                found_report = match hyper::body::to_bytes(response.response.into_body())
-                    .await
-                    .map(|b| String::from_utf8(b.to_vec()))
-                {
-                    Ok(Ok(response)) => {
-                        if response.contains("errors") {
-                            eprintln!("response had errors {response}");
-                        }
-                        Ok(None)
-                    }
-                    _ => Err(anyhow!("error retrieving response")),
-                };
-
-                // We must always try to find the report regardless of if the response had failures
-                // This loop counter must be high than the size of REPORTS. I haven't seen that get
-                // higher than 3 in development testing, so 5 should be safe.
-                for _ in 0..10 {
-                    let reports = REPORTS.lock().await;
-                    let report = reports.iter().find(filter);
-                    if report.is_some() && matches!(found_report, Ok(None)) {
-                        found_report = Ok(report.cloned());
-                        break;
-                    }
-                    drop(reports);
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
+                Ok(None)
             }
+            _ => Err(anyhow!("error retrieving response")),
+        };
 
-            found_report
-        })
-        .await
-        .expect("failed to get report")
+        // We must always try to find the report regardless of if the response had failures
+        for _ in 0..10 {
+            let my_reports = reports.lock().await;
+            let report = my_reports.iter().find(filter);
+            if report.is_some() && matches!(found_report, Ok(None)) {
+                found_report = Ok(report.cloned());
+                break;
+            }
+            drop(my_reports);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    found_report
         .expect("failed to get report")
         .expect("failed to find report")
 }
+
+async fn get_batch_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
+    reports: Arc<Mutex<Vec<Report>>>,
+    mocked: bool,
+    request: router::Request,
+    filter: T,
+) -> Report {
+    let mut found_report;
+    {
+        let _guard = TEST.lock().await;
+        reports.lock().await.clear();
+        let response = get_batch_router_service(reports.clone(), mocked)
+            .await
+            .ready()
+            .await
+            .expect("router service was never ready")
+            .call(request)
+            .await
+            .expect("router service call failed");
+
+        // Drain the response
+        found_report = match hyper::body::to_bytes(response.response.into_body())
+            .await
+            .map(|b| String::from_utf8(b.to_vec()))
+        {
+            Ok(Ok(response)) => {
+                if response.contains("errors") {
+                    eprintln!("response had errors {response}");
+                }
+                Ok(None)
+            }
+            _ => Err(anyhow!("error retrieving response")),
+        };
+
+        // We must always try to find the report regardless of if the response had failures
+        for _ in 0..10 {
+            let my_reports = reports.lock().await;
+            let report = my_reports.iter().find(filter);
+            if report.is_some() && matches!(found_report, Ok(None)) {
+                found_report = Ok(report.cloned());
+                break;
+            }
+            drop(my_reports);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    found_report
+        .expect("failed to get report")
+        .expect("failed to find report")
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn non_defer() {
     let request = supergraph::Request::fake_builder()
@@ -286,7 +349,8 @@ async fn non_defer() {
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
-    let report = get_trace_report(req).await;
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report(reports, req).await;
     assert_report!(report);
 }
 
@@ -299,7 +363,8 @@ async fn test_condition_if() {
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
-    let report = get_trace_report(req).await;
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report(reports, req).await;
     assert_report!(report);
 }
 
@@ -312,7 +377,8 @@ async fn test_condition_else() {
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
-    let report = get_trace_report(req).await;
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report(reports, req).await;
     assert_report!(report);
 }
 
@@ -323,12 +389,12 @@ async fn test_trace_id() {
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
-    let report = get_trace_report(req).await;
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report(reports, req).await;
     assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn test_batch_trace_id() {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -345,7 +411,8 @@ async fn test_batch_trace_id() {
             result.push(b']');
             hyper::Body::from(result)
         });
-    let report = get_trace_report(request.into()).await;
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_batch_trace_report(reports, request.into()).await;
     assert_report!(report);
 }
 
@@ -357,7 +424,8 @@ async fn test_client_name() {
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
-    let report = get_trace_report(req).await;
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report(reports, req).await;
     assert_report!(report);
 }
 
@@ -369,7 +437,8 @@ async fn test_client_version() {
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
-    let report = get_trace_report(req).await;
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report(reports, req).await;
     assert_report!(report);
 }
 
@@ -382,12 +451,13 @@ async fn test_send_header() {
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
-    let report = get_trace_report(req).await;
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report(reports, req).await;
     assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
+// #[ignore]
 async fn test_batch_send_header() {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -406,7 +476,8 @@ async fn test_batch_send_header() {
             result.push(b']');
             hyper::Body::from(result)
         });
-    let report = get_trace_report(request.into()).await;
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_batch_trace_report(reports, request.into()).await;
     assert_report!(report);
 }
 
@@ -419,7 +490,8 @@ async fn test_send_variable_value() {
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
-    let report = get_trace_report(req).await;
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_trace_report(reports, req).await;
     assert_report!(report);
 }
 
@@ -430,12 +502,13 @@ async fn test_stats() {
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
-    let report = get_metrics_report(req).await;
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(reports, req).await;
     assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
+// #[ignore]
 async fn test_batch_stats() {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -452,7 +525,8 @@ async fn test_batch_stats() {
             result.push(b']');
             hyper::Body::from(result)
         });
-    let report = get_metrics_report(request.into()).await;
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_batch_metrics_report(reports, request.into()).await;
     assert_report!(report);
 }
 
@@ -463,7 +537,8 @@ async fn test_stats_mocked() {
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
-    let report = get_metrics_report_mocked(req).await;
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report_mocked(reports, req).await;
     let per_query = report.traces_per_query.values().next().unwrap();
     let stats = per_query.stats_with_context.first().unwrap();
     insta::with_settings!({sort_maps => true}, {

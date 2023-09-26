@@ -21,7 +21,7 @@ traces_per_query:
           operation_subtype: ""
         query_latency_stats:
           latency_count: "[latency_count]"
-          request_count: 1
+          request_count: 2
           cache_hits: 0
           persisted_query_hits: 0
           persisted_query_misses: 0
@@ -42,22 +42,22 @@ traces_per_query:
               name:
                 return_type: String
                 errors_count: 0
-                observed_execution_count: 3
-                estimated_execution_count: 3
+                observed_execution_count: 6
+                estimated_execution_count: 6
                 requests_with_errors_count: 0
                 latency_count: "[latency_count]"
               reviews:
                 return_type: "[Review]"
                 errors_count: 0
-                observed_execution_count: 3
-                estimated_execution_count: 3
+                observed_execution_count: 6
+                estimated_execution_count: 6
                 requests_with_errors_count: 0
                 latency_count: "[latency_count]"
               upc:
                 return_type: String!
                 errors_count: 0
-                observed_execution_count: 3
-                estimated_execution_count: 3
+                observed_execution_count: 6
+                estimated_execution_count: 6
                 requests_with_errors_count: 0
                 latency_count: "[latency_count]"
           Query:
@@ -65,15 +65,15 @@ traces_per_query:
               _entities:
                 return_type: "[_Entity]!"
                 errors_count: 0
-                observed_execution_count: 2
-                estimated_execution_count: 2
+                observed_execution_count: 4
+                estimated_execution_count: 4
                 requests_with_errors_count: 0
                 latency_count: "[latency_count]"
               topProducts:
                 return_type: "[Product]"
                 errors_count: 0
-                observed_execution_count: 1
-                estimated_execution_count: 1
+                observed_execution_count: 2
+                estimated_execution_count: 2
                 requests_with_errors_count: 0
                 latency_count: "[latency_count]"
           Review:
@@ -81,8 +81,8 @@ traces_per_query:
               author:
                 return_type: User
                 errors_count: 0
-                observed_execution_count: 4
-                estimated_execution_count: 4
+                observed_execution_count: 8
+                estimated_execution_count: 8
                 requests_with_errors_count: 0
                 latency_count: "[latency_count]"
           User:
@@ -90,15 +90,15 @@ traces_per_query:
               id:
                 return_type: ID!
                 errors_count: 0
-                observed_execution_count: 4
-                estimated_execution_count: 4
+                observed_execution_count: 8
+                estimated_execution_count: 8
                 requests_with_errors_count: 0
                 latency_count: "[latency_count]"
               name:
                 return_type: String
                 errors_count: 0
-                observed_execution_count: 2
-                estimated_execution_count: 2
+                observed_execution_count: 4
+                estimated_execution_count: 4
                 requests_with_errors_count: 0
                 latency_count: "[latency_count]"
     referenced_fields_by_type:
@@ -125,6 +125,6 @@ operation_count: 0
 operation_count_by_type:
   - type: query
     subtype: ""
-    operation_count: 1
+    operation_count: 2
 traces_pre_aggregated: true
 
