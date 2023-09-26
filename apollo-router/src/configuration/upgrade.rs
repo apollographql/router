@@ -51,6 +51,11 @@ enum Action {
         from: Value,
         to: Value,
     },
+    Rename {
+        path: String,
+        name: String,
+        to: String,
+    },
 }
 
 const REMOVAL_VALUE: &str = "__PLEASE_DELETE_ME";
@@ -261,6 +266,24 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                             .expect("migration must be valid"),
                     );
                 }*/
+            }
+            Action::Rename { path, name, to } => {
+                let path: Path = Path::from_json_path(path);
+
+                println!("from path: {path:?}");
+
+                serde_json_iterate_path_mut(
+                    &mut Path::default(),
+                    &path.0,
+                    &mut new_config,
+                    &mut |_path, value| {
+                        if let Some(o) = value.as_object_mut() {
+                            if let Some(v) = o.remove(name) {
+                                o.insert(to.to_string(), v);
+                            }
+                        }
+                    },
+                );
             }
         }
     }

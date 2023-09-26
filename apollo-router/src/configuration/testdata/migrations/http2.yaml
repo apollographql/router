@@ -1,0 +1,6 @@
+traffic_shaping:
+  all:
+    experimental_enable_http2: false
+  subgraphs:
+    products:
+      experimental_enable_http2: true
