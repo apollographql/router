@@ -236,6 +236,8 @@ impl ValueExt for Value {
 
         for p in path.iter() {
             match p {
+                PathElement::Glob => {}
+
                 PathElement::Flatten => {
                     return res_value;
                 }
@@ -292,6 +294,7 @@ impl ValueExt for Value {
 
         for p in path.iter() {
             match p {
+                PathElement::Glob => {}
                 PathElement::Flatten => {
                     if current_node.is_null() {
                         let a = Vec::new();
@@ -504,6 +507,15 @@ fn iterate_path<'a, F>(
                 }
             }
         }
+        Some(PathElement::Glob) => {
+            if let Value::Object(o) = data {
+                for (k, value) in o.iter() {
+                    parent.push(PathElement::Key(k.as_str().to_string()));
+                    iterate_path(schema, parent, &path[1..], value, f);
+                    parent.pop();
+                }
+            }
+        }
     }
 }
 
@@ -562,7 +574,168 @@ fn iterate_path_mut<'a, F>(
                 }
             }
         }
+        Some(PathElement::Glob) => {
+            if let Value::Object(o) = data {
+                for (k, value) in o.iter_mut() {
+                    parent.push(PathElement::Key(k.as_str().to_string()));
+                    iterate_path_mut(schema, parent, &path[1..], value, f);
+                    parent.pop();
+                }
+            }
+        }
     }
+}
+
+pub(crate) fn serde_json_iterate_path_mut<'a, F>(
+    parent: &mut Path,
+    path: &'a [PathElement],
+    data: &'a mut serde_json::Value,
+    f: &mut F,
+) where
+    F: FnMut(&Path, &'a mut serde_json::Value),
+{
+    match path.get(0) {
+        None => f(parent, data),
+        Some(PathElement::Flatten) => {
+            if let Some(array) = data.as_array_mut() {
+                for (i, value) in array.iter_mut().enumerate() {
+                    parent.push(PathElement::Index(i));
+                    serde_json_iterate_path_mut(parent, &path[1..], value, f);
+                    parent.pop();
+                }
+            }
+        }
+        Some(PathElement::Index(i)) => {
+            if let serde_json::Value::Array(a) = data {
+                if let Some(value) = a.get_mut(*i) {
+                    parent.push(PathElement::Index(*i));
+                    serde_json_iterate_path_mut(parent, &path[1..], value, f);
+                    parent.pop();
+                }
+            }
+        }
+        Some(PathElement::Key(k)) => {
+            if let serde_json::Value::Object(o) = data {
+                if let Some(value) = o.get_mut(k.as_str()) {
+                    parent.push(PathElement::Key(k.to_string()));
+                    serde_json_iterate_path_mut(parent, &path[1..], value, f);
+                    parent.pop();
+                }
+            } else if let serde_json::Value::Array(array) = data {
+                for (i, value) in array.iter_mut().enumerate() {
+                    parent.push(PathElement::Index(i));
+                    serde_json_iterate_path_mut(parent, path, value, f);
+                    parent.pop();
+                }
+            }
+        }
+        Some(PathElement::Fragment(name)) => {
+            /*if data.is_object_of_type(schema, name) {
+                iterate_path_mut(schema, parent, &path[1..], data, f);
+            } else if let Value::Array(array) = data {
+                for (i, value) in array.iter_mut().enumerate() {
+                    parent.push(PathElement::Index(i));
+                    iterate_path_mut(schema, parent, path, value, f);
+                    parent.pop();
+                }
+            }*/
+        }
+        Some(PathElement::Glob) => {
+            if let serde_json::Value::Object(o) = data {
+                for (k, value) in o.iter_mut() {
+                    parent.push(PathElement::Key(k.as_str().to_string()));
+                    serde_json_iterate_path_mut(parent, &path[1..], value, f);
+                    parent.pop();
+                }
+            }
+        }
+    }
+}
+
+pub(crate) fn serde_json_insert(
+    destination: &mut serde_json::Value,
+    path: &Path,
+    value: serde_json::Value,
+) -> Result<(), FetchError> {
+    let mut current_node = destination;
+
+    for p in path.iter() {
+        println!("insert path element {p:?}, current_node = {current_node:?}");
+        match p {
+            PathElement::Glob => {}
+            PathElement::Flatten => {
+                if current_node.is_null() {
+                    let a = Vec::new();
+                    *current_node = serde_json::Value::Array(a);
+                } else if !current_node.is_array() {
+                    return Err(FetchError::ExecutionPathNotFound {
+                        reason: "expected an array".to_string(),
+                    });
+                }
+            }
+
+            &PathElement::Index(index) => match current_node {
+                serde_json::Value::Array(a) => {
+                    // add more elements if the index is after the end
+                    for _ in a.len()..index + 1 {
+                        a.push(serde_json::Value::default());
+                    }
+                    current_node = a
+                        .get_mut(index)
+                        .expect("we just created the value at that index");
+                }
+                serde_json::Value::Null => {
+                    let mut a = Vec::new();
+                    for _ in 0..index + 1 {
+                        a.push(serde_json::Value::default());
+                    }
+
+                    *current_node = serde_json::Value::Array(a);
+                    current_node = current_node
+                        .as_array_mut()
+                        .expect("current_node was just set to a Value::Array")
+                        .get_mut(index)
+                        .expect("we just created the value at that index");
+                }
+                _other => {
+                    return Err(FetchError::ExecutionPathNotFound {
+                        reason: "expected an array".to_string(),
+                    })
+                }
+            },
+            PathElement::Key(k) => match current_node {
+                serde_json::Value::Object(o) => {
+                    if !o.contains_key(k.as_str()) {
+                        o.insert(k.to_owned(), serde_json::Value::Null);
+                    }
+
+                    current_node = o
+                        .get_mut(k.as_str())
+                        .expect("the value at that key was just inserted");
+                }
+                serde_json::Value::Null => {
+                    let mut m = serde_json::Map::new();
+                    m.insert(k.to_string(), serde_json::Value::default());
+
+                    *current_node = serde_json::Value::Object(m);
+                    current_node = current_node
+                        .as_object_mut()
+                        .expect("current_node was just set to a Value::Object")
+                        .get_mut(k.as_str())
+                        .expect("the value at that key was just inserted");
+                }
+                _other => {
+                    return Err(FetchError::ExecutionPathNotFound {
+                        reason: "expected an object".to_string(),
+                    })
+                }
+            },
+            PathElement::Fragment(_) => {}
+        }
+    }
+
+    *current_node = value;
+    Ok(())
 }
 
 /// A GraphQL path element that is composes of strings or numbers.
@@ -589,6 +762,13 @@ pub enum PathElement {
 
     /// A key path element.
     Key(String),
+
+    /// A path element that given an object will apply to all fields
+    #[serde(
+        deserialize_with = "deserialize_glob",
+        serialize_with = "serialize_glob"
+    )]
+    Glob,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -636,6 +816,44 @@ where
     S: serde::Serializer,
 {
     serializer.serialize_str("@")
+}
+
+fn deserialize_glob<'de, D>(deserializer: D) -> Result<(), D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserializer.deserialize_str(GlobVisitor)
+}
+
+struct GlobVisitor;
+
+impl<'de> serde::de::Visitor<'de> for GlobVisitor {
+    type Value = ();
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "a string that is '*'")
+    }
+
+    fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        if s == "*" {
+            Ok(())
+        } else {
+            Err(serde::de::Error::invalid_value(
+                serde::de::Unexpected::Str(s),
+                &self,
+            ))
+        }
+    }
+}
+
+fn serialize_glob<S>(serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str("*")
 }
 
 fn deserialize_fragment<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -688,6 +906,29 @@ impl Path {
                         PathElement::Index(index)
                     } else if s == "@" {
                         PathElement::Flatten
+                    } else {
+                        s.strip_prefix(FRAGMENT_PREFIX).map_or_else(
+                            || PathElement::Key(s.to_string()),
+                            |name| PathElement::Fragment(name.to_string()),
+                        )
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    pub fn from_json_path<T: AsRef<str>>(s: T) -> Self {
+        Self(
+            s.as_ref()
+                .split('.')
+                .map(|s| {
+                    //panic!("path split: {s}");
+                    if let Ok(index) = s.parse::<usize>() {
+                        PathElement::Index(index)
+                    } else if s == "@" {
+                        PathElement::Flatten
+                    } else if s == "*" {
+                        PathElement::Glob
                     } else {
                         s.strip_prefix(FRAGMENT_PREFIX).map_or_else(
                             || PathElement::Key(s.to_string()),
@@ -791,6 +1032,8 @@ where
                         PathElement::Index(index)
                     } else if s == "@" {
                         PathElement::Flatten
+                    } else if s == "*" {
+                        PathElement::Glob
                     } else {
                         s.strip_prefix(FRAGMENT_PREFIX).map_or_else(
                             || PathElement::Key(s.to_string()),
@@ -812,6 +1055,7 @@ impl fmt::Display for Path {
                 PathElement::Key(key) => write!(f, "{key}")?,
                 PathElement::Flatten => write!(f, "@")?,
                 PathElement::Fragment(name) => write!(f, "{FRAGMENT_PREFIX}{name}")?,
+                PathElement::Glob => write!(f, "*")?,
             }
         }
         Ok(())
