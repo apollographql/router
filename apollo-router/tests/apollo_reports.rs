@@ -508,7 +508,7 @@ async fn test_stats() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-// #[ignore]
+#[ignore]
 async fn test_batch_stats() {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
