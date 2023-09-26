@@ -10,7 +10,7 @@ Learn about query batching and how to configure the Apollo Router to receive que
 
 ## About query batching
 
-Modern applications use several operations to render a single page. This is usually the result of a component-based architecture where individual micro-frontends (MFE) make requests separately to fetch data relevant to them. Not only does this cause a performance overhead (i.e. different components may be requesting the same data), it can also cause a consistency issue. To combat this, MFE-based UIs batch multiple client queries and operations, issued close together, into one HTTP request. This is supported in Apollo Client and Apollo Server.
+Modern applications often require several requests to render a single page. This is usually the result of a component-based architecture where individual micro-frontends (MFE) make requests separately to fetch data relevant to them. Not only does this cause a performance overhead—different components may be requesting the same data—it can also cause a consistency issue. To combat this, MFE-based UIs batch multiple client operations, issued close together, into a single HTTP request. This is supported in Apollo Client and Apollo Server.
 
 The Apollo Router supports client request batching. If you’re using Apollo Client, you can leverage the built-in support for batching to reduce the number of individual requests sent to the router.
 
