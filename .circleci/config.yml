@@ -805,7 +805,7 @@ jobs:
 
 workflows:
   ci_checks:
-#    jobs:
+    jobs:
 #      - lint:
 #          matrix:
 #            parameters:
@@ -839,7 +839,6 @@ workflows:
 #                [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
       - release_approval:
           type: approval
-          requires:
 
       - pre_verify_release:
           requires: [ release_approval ]
