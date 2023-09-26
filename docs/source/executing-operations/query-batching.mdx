@@ -12,11 +12,11 @@ Learn about query batching and how to configure the Apollo Router to receive que
 
 Modern applications often require several requests to render a single page. This is usually the result of a component-based architecture where individual micro-frontends (MFE) make requests separately to fetch data relevant to them. Not only does this cause a performance overhead—different components may be requesting the same data—it can also cause a consistency issue. To combat this, MFE-based UIs batch multiple client operations, issued close together, into a single HTTP request. This is supported in Apollo Client and Apollo Server.
 
-The Apollo Router supports client request batching. If you’re using Apollo Client, you can leverage the built-in support for batching to reduce the number of individual requests sent to the router.
+The Apollo Router supports client query batching. If you’re using Apollo Client, you can leverage the built-in support for batching to reduce the number of individual operations sent to the router.
 
-Once configured, Apollo Client automatically combines multiple operations into a single HTTP request. The number of operations within a batch is client-configurable, including the maximum number of operations in a batch and the maximum duration to wait for operations to accumulate before sending the batch request. 
+Once configured, Apollo Client automatically combines multiple operations into a single HTTP request. The number of operations within a batch is client-configurable, including the maximum number in a batch and the maximum duration to wait for operations to accumulate before sending the batch. 
 
-The Apollo Router must be configured to receive batch requests, otherwise it rejects them. When processing a batch request, the router deserializes and processes each operation of a batch independently, and it responds to the client only after all operations of the batch have been completed. Each operation executes concurrently with respect to other operations in the batch.
+The Apollo Router must be configured to receive query batches, otherwise it rejects them. When processing a  batch, the router deserializes and processes each operation of a batch independently, and it responds to the client only after all operations of the batch have been completed. Each operation executes concurrently with respect to other operations in the batch.
 
 ## Configure query batching
 
@@ -24,7 +24,7 @@ Both the Apollo Router and client need to be configured to support query batchin
 
 ### Configure router
 
-By default, receiving client request batches is disabled in the Apollo Router. 
+By default, receiving client query batches is _not_ enabled in the Apollo Router. 
 
 To enable query batching, set the following fields in your `router.yaml` configuration file:
 
@@ -36,7 +36,7 @@ experimental_batching:
 
 | Attribute | Description | Valid Values | Default Value |
 | :-- | :-- | :-- | :-- |
-| `enabled` | Flag to enable reception of client batches | boolean | `false` |
+| `enabled` | Flag to enable reception of client query batches | boolean | `false` |
 | `mode` | Supported client batching mode | `batch_http_link`:  the client uses Apollo Link and its [`BatchHttpLink`](/react/api/link/apollo-link-batch-http) link. | No Default |
 
 ### Configure client
@@ -74,7 +74,7 @@ mode
 </td>
 <td>
 
-Counter for the number of received batch requests.
+Counter for the number of received batches.
 
 </td>
 </tr>
@@ -92,7 +92,7 @@ mode
 </td>
 <td>
 
-Histogram for the size of received batch requests.
+Histogram for the size of received batches.
 
 </td>
 </tr>
@@ -104,7 +104,7 @@ Histogram for the size of received batch requests.
 
 ### Request format
 
-A batched request is an array of operations.
+A query batch is an array of operations.
 
 ```graphql
 [
@@ -123,7 +123,7 @@ query MySecondQuery {
 
 ### Response format
 
-Responses are provided in JSON array, with the order of responses matching the order of operations in the batched request.
+Responses are provided in JSON array, with the order of responses matching the order of operations in the query batch.
 
 ```json
 [
