@@ -9,9 +9,7 @@ In particular metrics have some significant changes:
 
 * The default service name for metrics is now `unknown_service` as per the [OpenTelemetry spec](https://opentelemetry.io/docs/concepts/sdk-configuration/general-sdk-configuration/#otel_service_name).
 
-  Users should ensure to configure service name via router.yaml, or via the `OTEL_SERVICE_NAME` environment variable. 
-
-  We will be following bring tracing into alignment in future. 
+  Users should ensure to configure service name via router.yaml, or via the `OTEL_SERVICE_NAME` environment variable.
 
 * The order of priority for setting service name has been brought into line with the rest of the router configuration. The order of priority is now:
   1. `OTEL_RESOURCE_ATTRIBUTES` environment variable
