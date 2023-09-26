@@ -846,8 +846,6 @@ workflows:
             parameters:
               platform: [ amd_linux_build ]
           filters:
-            branches:
-              ignore: /.*/
             tags:
               only: /v.*/
       # Anything that tagged is deemed a nightly
