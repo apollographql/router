@@ -37,7 +37,10 @@ static ROUTER_SERVICE_RUNTIME: Lazy<Arc<tokio::runtime::Runtime>> = Lazy::new(||
 });
 static TEST: Lazy<Arc<Mutex<()>>> = Lazy::new(Default::default);
 
-async fn config(batch: bool, reports: Arc<Mutex<Vec<Report>>>) -> serde_json::Value {
+async fn config(
+    batch: bool,
+    reports: Arc<Mutex<Vec<Report>>>,
+) -> (tokio::task::JoinHandle<()>, serde_json::Value) {
     std::env::set_var("APOLLO_KEY", "test");
     std::env::set_var("APOLLO_GRAPH_REF", "test");
 
@@ -48,13 +51,13 @@ async fn config(batch: bool, reports: Arc<Mutex<Vec<Report>>>) -> serde_json::Va
         .layer(DecompressionLayer::new())
         .layer(tower_http::add_extension::AddExtensionLayer::new(reports));
 
-    drop(ROUTER_SERVICE_RUNTIME.spawn(async move {
+    let task = ROUTER_SERVICE_RUNTIME.spawn(async move {
         axum::Server::from_tcp(listener)
             .expect("mut be able to create report receiver")
             .serve(app.into_make_service())
             .await
             .expect("could not start axum server")
-    }));
+    });
 
     let mut config: serde_json::Value = if batch {
         serde_yaml::from_str(include_str!("fixtures/apollo_reports.batch_router.yaml"))
@@ -67,11 +70,14 @@ async fn config(batch: bool, reports: Arc<Mutex<Vec<Report>>>) -> serde_json::Va
         Some(serde_json::Value::String(format!("http://{addr}")))
     })
     .expect("Could not sub in endpoint");
-    config
+    (task, config)
 }
 
-async fn get_router_service(reports: Arc<Mutex<Vec<Report>>>, mocked: bool) -> BoxCloneService {
-    let config = config(false, reports).await;
+async fn get_router_service(
+    reports: Arc<Mutex<Vec<Report>>>,
+    mocked: bool,
+) -> (tokio::task::JoinHandle<()>, BoxCloneService) {
+    let (task, config) = config(false, reports).await;
     let builder = TestHarness::builder()
         .try_log_level("INFO")
         .configuration_json(config)
@@ -82,17 +88,20 @@ async fn get_router_service(reports: Arc<Mutex<Vec<Report>>>, mocked: bool) -> B
     } else {
         builder.with_subgraph_network_requests()
     };
-    builder
-        .build_router()
-        .await
-        .expect("could create router test harness")
+    (
+        task,
+        builder
+            .build_router()
+            .await
+            .expect("could create router test harness"),
+    )
 }
 
 async fn get_batch_router_service(
     reports: Arc<Mutex<Vec<Report>>>,
     mocked: bool,
-) -> BoxCloneService {
-    let config = config(true, reports).await;
+) -> (tokio::task::JoinHandle<()>, BoxCloneService) {
+    let (task, config) = config(true, reports).await;
     let builder = TestHarness::builder()
         .try_log_level("INFO")
         .configuration_json(config)
@@ -103,10 +112,13 @@ async fn get_batch_router_service(
     } else {
         builder.with_subgraph_network_requests()
     };
-    builder
-        .build_router()
-        .await
-        .expect("could create router test harness")
+    (
+        task,
+        builder
+            .build_router()
+            .await
+            .expect("could create router test harness"),
+    )
 }
 
 fn encode_ftv1(trace: Trace) -> String {
@@ -248,8 +260,8 @@ async fn get_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
 ) -> Report {
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
-    let response = get_router_service(reports.clone(), mocked)
-        .await
+    let (task, mut service) = get_router_service(reports.clone(), mocked).await;
+    let response = service
         .ready()
         .await
         .expect("router service was never ready")
@@ -282,6 +294,7 @@ async fn get_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
         drop(my_reports);
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    task.abort();
 
     found_report
         .expect("failed to get report")
@@ -296,8 +309,8 @@ async fn get_batch_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static
 ) -> Report {
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
-    let response = get_batch_router_service(reports.clone(), mocked)
-        .await
+    let (task, mut service) = get_batch_router_service(reports.clone(), mocked).await;
+    let response = service
         .ready()
         .await
         .expect("router service was never ready")
@@ -330,6 +343,7 @@ async fn get_batch_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static
         drop(my_reports);
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    task.abort();
 
     found_report
         .expect("failed to get report")
@@ -451,7 +465,6 @@ async fn test_send_header() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-// #[ignore]
 async fn test_batch_send_header() {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
