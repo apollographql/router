@@ -283,7 +283,7 @@ dependencies = [
  "base64 0.21.2",
  "bloomfilter",
  "brotli",
- "buildstructor 0.5.3",
+ "buildstructor",
  "bytes",
  "ci_info",
  "clap 4.4.5",
@@ -618,6 +618,17 @@ dependencies = [
  "hermit-abi 0.1.19",
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "auth-git2"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a32e9930319427b96e1619d5916f45ca6af28d566a79f78161f0029cb952099"
+dependencies = [
+ "dirs",
+ "git2",
+ "terminal-prompt",
 ]
 
 [[package]]
@@ -1155,24 +1166,9 @@ dependencies = [
 
 [[package]]
 name = "buildstructor"
-version = "0.3.2"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "366e31800cdecf1b0438b21e2d2c9a66e922a26b93fde60bdf6bc16e25f33cc7"
-dependencies = [
- "lazy_static",
- "proc-macro2",
- "quote",
- "str_inflector",
- "syn 1.0.109",
- "thiserror",
- "try_match 0.3.0",
-]
-
-[[package]]
-name = "buildstructor"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af80267d1274ea0b4e454b1c747ba9d7c2c001f8e065043105318f53aabe320d"
+checksum = "c3907aac66c65520545ae3cb3c195306e20d5ed5c90bfbb992e061cf12a104d0"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -1180,7 +1176,7 @@ dependencies = [
  "str_inflector",
  "syn 2.0.29",
  "thiserror",
- "try_match 0.4.1",
+ "try_match",
 ]
 
 [[package]]
@@ -1231,12 +1227,13 @@ dependencies = [
 
 [[package]]
 name = "cargo-scaffold"
-version = "0.8.10"
+version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c49ec181476e06d7434b3cd08591b9d677ebfcb14c3a95e1bb53461b227b04b8"
+checksum = "cf9db1ea8a6020a23eba0a0bbb64fa1e85bdf6b792d88de589078445362b0314"
 dependencies = [
  "anyhow",
- "buildstructor 0.3.2",
+ "auth-git2",
+ "buildstructor",
  "clap 2.34.0",
  "console 0.12.0",
  "dialoguer",
@@ -2795,9 +2792,9 @@ checksum = "b6c80984affa11d98d1b88b66ac8853f143217b399d3c74116778ff8fdb4ed2e"
 
 [[package]]
 name = "git2"
-version = "0.16.1"
+version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccf7f68c2995f392c49fffb4f95ae2c873297830eb25c6bc4c114ce8f4562acc"
+checksum = "7b989d6a7ca95a362cf2cfc5ad688b3a467be1f87e480b8dad07fee8c79b0044"
 dependencies = [
  "bitflags 1.3.2",
  "libc",
@@ -3542,9 +3539,9 @@ dependencies = [
 
 [[package]]
 name = "libgit2-sys"
-version = "0.14.2+1.5.1"
+version = "0.15.2+1.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f3d95f6b51075fe9810a7ae22c7095f12b98005ab364d8544797a825ce946a4"
+checksum = "a80df2e11fb4a61f4ba2ab42dbe7f74468da143f1a75c74e11dee7c813f694fa"
 dependencies = [
  "cc",
  "libc",
@@ -3562,9 +3559,9 @@ checksum = "f7012b1bbb0719e1097c47611d3898568c546d597c2e74d66f6087edd5233ff4"
 
 [[package]]
 name = "libssh2-sys"
-version = "0.2.23"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b094a36eb4b8b8c8a7b4b8ae43b2944502be3e59cd87687595cf6b0a71b3f4ca"
+checksum = "2dc8a030b787e2119a731f1951d6a773e2280c660f8ec4b0f5e1505a386e71ee"
 dependencies = [
  "cc",
  "libc",
@@ -6064,6 +6061,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "terminal-prompt"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "572818b3472910acbd5dff46a3413715c18e934b071ab2ba464a7b2c2af16376"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "terminal_size"
 version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6738,32 +6745,11 @@ checksum = "3528ecfd12c466c6f163363caf2d02a71161dd5e1cc6ae7b34207ea2d42d81ed"
 
 [[package]]
 name = "try_match"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "789f9cd474cc74c591dcc98669b846e158f2409ace4e6e342502ab44a41c584b"
-dependencies = [
- "try_match_inner 0.4.0",
-]
-
-[[package]]
-name = "try_match"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61ae3c1941e8859e30d28e572683fbfa89ae5330748b45139aedf488389e2be4"
 dependencies = [
- "try_match_inner 0.5.1",
-]
-
-[[package]]
-name = "try_match_inner"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "607e6b75bc1bdf1a60d4201c500ca965834c11f30e25921cfd28569315db49a9"
-dependencies = [
- "proc-macro-error",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
+ "try_match_inner",
 ]
 
 [[package]]
