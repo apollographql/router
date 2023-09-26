@@ -852,6 +852,7 @@ workflows:
               only: /v.*/
       # Anything that tagged is deemed a nightly
       - build_release:
+          name: build nightly release << matrix.platform >>
           nightly: true
           requires: [ release_approval ]
           matrix:
@@ -864,6 +865,7 @@ workflows:
               ignore: /v.*/
       # Releases are tagged
       - build_release:
+          name: build release << matrix.platform >>
           nightly: false
           requires: [ pre_verify_release ]
           matrix:
