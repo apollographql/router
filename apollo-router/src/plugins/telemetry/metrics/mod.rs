@@ -37,6 +37,7 @@ pub(crate) mod apollo;
 pub(crate) mod otlp;
 pub(crate) mod prometheus;
 pub(crate) mod span_metrics_exporter;
+static UNKNOWN_SERVICE: &str = "unknown_service";
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -543,7 +544,7 @@ impl MetricsBuilder {
         // Otel resources can be initialized from env variables, there is an override mechanism, but it's broken for service name as it will always override service.name
         // If the service name is set to unknown service then override it from the config
         if resource.get(opentelemetry_semantic_conventions::resource::SERVICE_NAME)
-            == Some("unknown_service".into())
+            == Some(UNKNOWN_SERVICE.into())
         {
             if let Some(service_name) = Resource::from_detectors(
                 Duration::from_secs(0),
