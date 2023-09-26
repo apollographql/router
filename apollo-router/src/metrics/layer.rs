@@ -28,7 +28,7 @@ pub(crate) const METRIC_PREFIX_VALUE: &str = "value.";
 
 macro_rules! log_and_panic_in_debug_build {
     ($($tokens:tt)+) => {{
-        tracing::debug!($($tokens)+);
+        tracing::error!($($tokens)+);
         #[cfg(debug_assertions)]
         panic!("metric type error, see DEBUG log for details. Release builds will not panic but will still emit a debug log message");
     }};
@@ -206,19 +206,27 @@ impl<'a> Visit for MetricVisitor<'a> {
 
     fn record_i64(&mut self, field: &Field, value: i64) {
         if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_MONOTONIC_COUNTER) {
-            log_and_panic_in_debug_build!(
-                metric_name,
-                "monotonic counter must be u64 or f64. This metric will be ignored"
-            );
+            if value < 0 {
+                log_and_panic_in_debug_build!(
+                    metric_name,
+                    "monotonic counter must be u64 or f64. This metric will be ignored"
+                );
+            } else {
+                self.set_metric(metric_name, InstrumentType::CounterU64(value as u64));
+            }
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_COUNTER) {
             self.set_metric(metric_name, InstrumentType::UpDownCounterI64(value));
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_HISTOGRAM) {
             self.set_metric(metric_name, InstrumentType::HistogramI64(value));
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_VALUE) {
-            log_and_panic_in_debug_build!(
-                metric_name,
-                "gauge must be u64. This metric will be ignored"
-            );
+            if value < 0 {
+                log_and_panic_in_debug_build!(
+                    metric_name,
+                    "gauge must be u64. This metric will be ignored"
+                );
+            } else {
+                self.set_metric(metric_name, InstrumentType::GaugeU64(value as u64));
+            }
         } else if self.metric.is_some() {
             self.custom_attributes.push(KeyValue::new(
                 Key::from_static_str(field.name()),
@@ -233,10 +241,7 @@ impl<'a> Visit for MetricVisitor<'a> {
         if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_MONOTONIC_COUNTER) {
             self.set_metric(metric_name, InstrumentType::CounterU64(value));
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_COUNTER) {
-            log_and_panic_in_debug_build!(
-                metric_name,
-                "counter must be i64. This metric will be ignored"
-            );
+            self.set_metric(metric_name, InstrumentType::UpDownCounterI64(value as i64));
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_HISTOGRAM) {
             self.set_metric(metric_name, InstrumentType::HistogramU64(value));
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_VALUE) {

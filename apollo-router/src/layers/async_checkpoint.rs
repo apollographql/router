@@ -30,7 +30,7 @@ where
     Fut: Future<Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>>,
 {
     checkpoint_fn: Arc<Pin<Box<dyn Fn(Request) -> Fut + Send + Sync + 'static>>>,
-    phantom: PhantomData<S>, // XXX: The compiler can't detect that S is used in the Future...
+    phantom: PhantomData<S>, // We use PhantomData because the compiler can't detect that S is used in the Future.
 }
 
 impl<S, Fut, Request> AsyncCheckpointLayer<S, Fut, Request>
@@ -131,11 +131,9 @@ where
 
     fn call(&mut self, req: Request) -> Self::Future {
         let checkpoint_fn = Arc::clone(&self.checkpoint_fn);
-        let inner = self
-            .inner
-            .take()
-            .expect("One shot must only be called once");
+        let inner = self.inner.take();
         Box::pin(async move {
+            let inner = inner.ok_or("One shot must only be called once")?;
             match (checkpoint_fn)(req).await {
                 Ok(ControlFlow::Break(response)) => Ok(response),
                 Ok(ControlFlow::Continue(request)) => inner.oneshot(request).await,
@@ -223,7 +221,7 @@ where
     Fut: Future<Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>>,
 {
     checkpoint_fn: Arc<Pin<Box<dyn Fn(Request) -> Fut + Send + Sync + 'static>>>,
-    phantom: PhantomData<S>, // XXX: The compiler can't detect that S is used in the Future...
+    phantom: PhantomData<S>, // We use PhantomData because the compiler can't detect that S is used in the Future.
 }
 
 impl<S, Fut, Request> OneShotAsyncCheckpointLayer<S, Fut, Request>
@@ -563,5 +561,55 @@ mod async_checkpoint_tests {
             .to_string();
 
         assert_eq!(actual_error, expected_error)
+    }
+
+    #[tokio::test]
+    async fn test_double_ready_doesnt_panic() {
+        let router_service = MockExecutionService::new();
+
+        let mut service_stack = OneShotAsyncCheckpointLayer::new(|_req| async {
+            Ok(ControlFlow::Break(
+                ExecutionResponse::fake_builder()
+                    .label("returned_before_mock_service".to_string())
+                    .build()
+                    .unwrap(),
+            ))
+        })
+        .layer(router_service);
+
+        service_stack.ready().await.unwrap();
+        service_stack
+            .call(ExecutionRequest::fake_builder().build())
+            .await
+            .unwrap();
+
+        assert!(service_stack.ready().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_double_call_doesnt_panic() {
+        let router_service = MockExecutionService::new();
+
+        let mut service_stack = OneShotAsyncCheckpointLayer::new(|_req| async {
+            Ok(ControlFlow::Break(
+                ExecutionResponse::fake_builder()
+                    .label("returned_before_mock_service".to_string())
+                    .build()
+                    .unwrap(),
+            ))
+        })
+        .layer(router_service);
+
+        service_stack.ready().await.unwrap();
+
+        service_stack
+            .call(ExecutionRequest::fake_builder().build())
+            .await
+            .unwrap();
+
+        assert!(service_stack
+            .call(ExecutionRequest::fake_builder().build())
+            .await
+            .is_err());
     }
 }

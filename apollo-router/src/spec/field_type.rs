@@ -109,8 +109,8 @@ fn validate_input_value(
         //
         // In practice it seems Int works too
         (hir::Type::Named { name, .. }, Value::String(_)) if name == "ID" => Ok(()),
-        (hir::Type::Named { name, .. }, maybe_int) if name == "ID" => {
-            if maybe_int == &Value::Null || maybe_int.is_valid_int_input() {
+        (hir::Type::Named { name, .. }, value) if name == "ID" => {
+            if value == &Value::Null || value.is_valid_id_input() {
                 Ok(())
             } else {
                 Err(InvalidValue)

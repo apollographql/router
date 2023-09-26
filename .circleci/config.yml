@@ -10,7 +10,7 @@ executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
       - image: cimg/base:stable
-    resource_class: medium
+    resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
       RUST_TEST_THREADS: 6
@@ -378,6 +378,9 @@ commands:
                 key: "<< pipeline.parameters.merge_version >>-lint"
                 paths:
                   - target
+  xtask_release_preverify:
+    steps:
+      - run: xtask release pre-verify
 
   xtask_check_helm:
     steps:
@@ -529,6 +532,18 @@ jobs:
             cargo fetch
       - xtask_test:
           variant: "updated"
+  pre_verify_release:
+    environment:
+      <<: *common_job_environment
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - setup_environment:
+          platform: << parameters.platform >>
+      - xtask_release_preverify
 
   build_release:
     parameters:
@@ -843,7 +858,17 @@ workflows:
     when:
       not: << pipeline.parameters.nightly >>
     jobs:
+      - pre_verify_release:
+          matrix:
+            parameters:
+              platform: [ amd_linux_build ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
       - build_release:
+          requires: [ pre_verify_release ]
           matrix:
             parameters:
               platform:

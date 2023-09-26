@@ -282,7 +282,7 @@ impl Metrics {
             opt.subgraph.rate_limit,
             "$[?(@.all.global_rate_limit || @.subgraphs..global_rate_limit)]",
             opt.subgraph.http2,
-            "$[?(@.all.experimental_enable_http2 == true || @.subgraphs..experimental_enable_http2 == true)]",
+            "$[?(@.all.experimental_http2 == 'enable' || @.all.experimental_http2 == 'http2only' || @.subgraphs..experimental_http2 == 'enable' || @.subgraphs..experimental_http2 == 'http2only')]",
             opt.subgraph.compression,
             "$[?(@.all.compression || @.subgraphs..compression)]",
             opt.subgraph.deduplicate_query,

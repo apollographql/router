@@ -3,12 +3,14 @@ use std::fmt::Debug;
 use std::time::Duration;
 use std::time::Instant;
 
+use futures::Future;
 use futures::Stream;
 use futures::StreamExt;
 use graphql_client::QueryBody;
 use thiserror::Error;
 use tokio::sync::mpsc::channel;
 use tokio_stream::wrappers::ReceiverStream;
+use tower::BoxError;
 use tracing::instrument::WithSubscriber;
 use url::Url;
 
@@ -160,13 +162,43 @@ impl UplinkConfig {
 /// Regularly fetch from Uplink
 /// If urls are supplied then they will be called round robin
 pub(crate) fn stream_from_uplink<Query, Response>(
-    mut uplink_config: UplinkConfig,
+    uplink_config: UplinkConfig,
 ) -> impl Stream<Item = Result<Response, Error>>
 where
     Query: graphql_client::GraphQLQuery,
     <Query as graphql_client::GraphQLQuery>::ResponseData: Into<UplinkResponse<Response>> + Send,
     <Query as graphql_client::GraphQLQuery>::Variables: From<UplinkRequest> + Send + Sync,
     Response: Send + 'static + Debug,
+{
+    stream_from_uplink_transforming_new_response::<Query, Response, Response>(
+        uplink_config,
+        |response| Box::new(Box::pin(async { Ok(response) })),
+    )
+}
+
+/// Like stream_from_uplink, but applies an async transformation function to the
+/// result of the HTTP fetch if the response is an UplinkResponse::New. If this
+/// function returns Err, we fail over to the next Uplink endpoint, just like if
+/// the HTTP fetch itself failed. This serves the use case where an Uplink
+/// endpoint's response includes another URL located close to the Uplink
+/// endpoint; if that second URL is down, we want to try the next Uplink
+/// endpoint rather than fully giving up.
+pub(crate) fn stream_from_uplink_transforming_new_response<Query, Response, TransformedResponse>(
+    mut uplink_config: UplinkConfig,
+    transform_new_response: impl Fn(
+            Response,
+        )
+            -> Box<dyn Future<Output = Result<TransformedResponse, BoxError>> + Send + Unpin>
+        + Send
+        + Sync
+        + 'static,
+) -> impl Stream<Item = Result<TransformedResponse, Error>>
+where
+    Query: graphql_client::GraphQLQuery,
+    <Query as graphql_client::GraphQLQuery>::ResponseData: Into<UplinkResponse<Response>> + Send,
+    <Query as graphql_client::GraphQLQuery>::Variables: From<UplinkRequest> + Send + Sync,
+    Response: Send + 'static + Debug,
+    TransformedResponse: Send + 'static + Debug,
 {
     let query = query_name::<Query>();
     let (sender, receiver) = channel(2);
@@ -193,7 +225,14 @@ where
 
             let query_body = Query::build_query(variables.into());
 
-            match fetch::<Query, Response>(&client, &query_body, &mut endpoints.iter()).await {
+            match fetch::<Query, Response, TransformedResponse>(
+                &client,
+                &query_body,
+                &mut endpoints.iter(),
+                &transform_new_response,
+            )
+            .await
+            {
                 Ok(response) => {
                     tracing::info!(
                         monotonic_counter.apollo_router_uplink_fetch_count_total = 1u64,
@@ -264,68 +303,102 @@ where
     ReceiverStream::new(receiver).boxed()
 }
 
-pub(crate) async fn fetch<Query, Response>(
+pub(crate) async fn fetch<Query, Response, TransformedResponse>(
     client: &reqwest::Client,
     request_body: &QueryBody<Query::Variables>,
     urls: &mut impl Iterator<Item = &Url>,
-) -> Result<UplinkResponse<Response>, Error>
+    // See stream_from_uplink_transforming_new_response for an explanation of
+    // this argument.
+    transform_new_response: &(impl Fn(
+        Response,
+    ) -> Box<dyn Future<Output = Result<TransformedResponse, BoxError>> + Send + Unpin>
+          + Send
+          + Sync
+          + 'static),
+) -> Result<UplinkResponse<TransformedResponse>, Error>
 where
     Query: graphql_client::GraphQLQuery,
     <Query as graphql_client::GraphQLQuery>::ResponseData: Into<UplinkResponse<Response>> + Send,
     <Query as graphql_client::GraphQLQuery>::Variables: From<UplinkRequest> + Send + Sync,
     Response: Send + Debug + 'static,
+    TransformedResponse: Send + Debug + 'static,
 {
     let query = query_name::<Query>();
     for url in urls {
         let now = Instant::now();
         match http_request::<Query>(client, url.as_str(), request_body).await {
-            Ok(response) => {
-                let response = response.data.map(Into::into);
-                match &response {
-                    None => {
-                        tracing::info!(
-                            histogram.apollo_router_uplink_fetch_duration_seconds =
-                                now.elapsed().as_secs_f64(),
-                            query,
-                            url = url.to_string(),
-                            "kind" = "uplink_error",
-                            error = "empty response from uplink",
-                        );
-                    }
-                    Some(UplinkResponse::New { .. }) => {
-                        tracing::info!(
-                            histogram.apollo_router_uplink_fetch_duration_seconds =
-                                now.elapsed().as_secs_f64(),
-                            query,
-                            url = url.to_string(),
-                            "kind" = "new"
-                        );
-                        return Ok(response.expect("we are in the some branch, qed"));
-                    }
-                    Some(UplinkResponse::Unchanged { .. }) => {
-                        tracing::info!(
-                            histogram.apollo_router_uplink_fetch_duration_seconds =
-                                now.elapsed().as_secs_f64(),
-                            query,
-                            url = url.to_string(),
-                            "kind" = "unchanged"
-                        );
-                        return Ok(response.expect("we are in the some branch, qed"));
-                    }
-                    Some(UplinkResponse::Error { message, code, .. }) => {
-                        tracing::info!(
-                            histogram.apollo_router_uplink_fetch_duration_seconds =
-                                now.elapsed().as_secs_f64(),
-                            query,
-                            url = url.to_string(),
-                            "kind" = "uplink_error",
-                            error = message,
-                            code
-                        );
-                        return Ok(response.expect("we are in the some branch, qed"));
+            Ok(response) => match response.data.map(Into::into) {
+                None => {
+                    tracing::info!(
+                        histogram.apollo_router_uplink_fetch_duration_seconds =
+                            now.elapsed().as_secs_f64(),
+                        query,
+                        url = url.to_string(),
+                        "kind" = "uplink_error",
+                        error = "empty response from uplink",
+                    );
+                }
+                Some(UplinkResponse::New {
+                    response,
+                    id,
+                    delay,
+                }) => {
+                    tracing::info!(
+                        histogram.apollo_router_uplink_fetch_duration_seconds =
+                            now.elapsed().as_secs_f64(),
+                        query,
+                        url = url.to_string(),
+                        "kind" = "new"
+                    );
+                    match transform_new_response(response).await {
+                        Ok(res) => {
+                            return Ok(UplinkResponse::New {
+                                response: res,
+                                id,
+                                delay,
+                            })
+                        }
+                        Err(err) => {
+                            tracing::debug!(
+                                    "failed to process results of Uplink response from {}: {}. Other endpoints will be tried",
+                                    url,
+                                    err
+                                );
+                            continue;
+                        }
                     }
                 }
-            }
+                Some(UplinkResponse::Unchanged { id, delay }) => {
+                    tracing::info!(
+                        histogram.apollo_router_uplink_fetch_duration_seconds =
+                            now.elapsed().as_secs_f64(),
+                        query,
+                        url = url.to_string(),
+                        "kind" = "unchanged"
+                    );
+                    return Ok(UplinkResponse::Unchanged { id, delay });
+                }
+                Some(UplinkResponse::Error {
+                    message,
+                    code,
+                    retry_later,
+                }) => {
+                    tracing::info!(
+                        histogram.apollo_router_uplink_fetch_duration_seconds =
+                            now.elapsed().as_secs_f64(),
+                        query,
+                        url = url.to_string(),
+                        "kind" = "uplink_error",
+                        error = message,
+                        code
+                    );
+                    return Ok(UplinkResponse::Error {
+                        message,
+                        code,
+                        retry_later,
+                    });
+                }
+            },
             Err(e) => {
                 tracing::info!(
                     histogram.apollo_router_uplink_fetch_duration_seconds =
@@ -415,6 +488,7 @@ mod test {
     use wiremock::ResponseTemplate;
 
     use crate::uplink::stream_from_uplink;
+    use crate::uplink::stream_from_uplink_transforming_new_response;
     use crate::uplink::Endpoints;
     use crate::uplink::Error;
     use crate::uplink::UplinkConfig;
@@ -435,6 +509,13 @@ mod test {
     struct QueryResult {
         name: String,
         ordering: i64,
+    }
+
+    #[allow(dead_code)]
+    #[derive(Debug)]
+    struct TransformedQueryResult {
+        name: String,
+        halved_ordering: i64,
     }
 
     impl From<UplinkRequest> for test_query::Variables {
@@ -789,7 +870,50 @@ mod test {
         assert_yaml_snapshot!(results.into_iter().map(to_friendly).collect::<Vec<_>>());
     }
 
-    fn to_friendly(r: Result<QueryResult, Error>) -> Result<String, String> {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_from_uplink_transforming_new_response_first_response_transform_fails() {
+        let (mock_server, url1, url2, _url3) = init_mock_server().await;
+        MockResponses::builder()
+            .mock_server(&mock_server)
+            .endpoint(&url1)
+            .response(response_ok(15))
+            .build()
+            .await;
+        MockResponses::builder()
+            .mock_server(&mock_server)
+            .endpoint(&url2)
+            .response(response_ok(100))
+            .build()
+            .await;
+        let results = stream_from_uplink_transforming_new_response::<
+            TestQuery,
+            QueryResult,
+            TransformedQueryResult,
+        >(
+            mock_uplink_config_with_fallback_urls(vec![url1, url2]),
+            |result| {
+                Box::new(Box::pin(async move {
+                    let QueryResult { name, ordering } = result;
+                    if ordering % 2 == 0 {
+                        // This will trigger on url2's response.
+                        Ok(TransformedQueryResult {
+                            name,
+                            halved_ordering: ordering / 2,
+                        })
+                    } else {
+                        // This will trigger on url1's response.
+                        Err("cannot halve an odd number".into())
+                    }
+                }))
+            },
+        )
+        .take(1)
+        .collect::<Vec<_>>()
+        .await;
+        assert_yaml_snapshot!(results.into_iter().map(to_friendly).collect::<Vec<_>>());
+    }
+
+    fn to_friendly<R: std::fmt::Debug>(r: Result<R, Error>) -> Result<String, String> {
         match r {
             Ok(e) => Ok(format!("result {:?}", e)),
             Err(e) => Err(e.to_string()),
