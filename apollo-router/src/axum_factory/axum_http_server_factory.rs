@@ -402,9 +402,10 @@ where
             (license, Instant::now(), Arc::new(AtomicU64::new(0))),
             license_handler,
         ))
-        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license }))
         .layer(Extension(service_factory))
-        .layer(cors);
+        .layer(cors)
+        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license }))
+        .layer(middleware::from_fn(metrics_handler));
 
     let route = endpoints_on_main_listener
         .into_iter()
@@ -412,6 +413,17 @@ where
 
     let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
+}
+
+async fn metrics_handler<B>(request: Request<B>, next: Next<B>) -> Response {
+    let resp = next.run(request).await;
+    u64_counter!(
+        "apollo.router.operations",
+        "The number of graphql operations performed by the Router",
+        1,
+        "http.response.status_code" = resp.status().as_u16() as i64
+    );
+    resp
 }
 
 async fn license_handler<B>(
