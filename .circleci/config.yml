@@ -80,9 +80,6 @@ parameters:
   protoc_version:
     type: string
     default: "21.8"
-  nightly:
-    type: boolean
-    default: false
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -808,8 +805,6 @@ jobs:
 
 workflows:
   ci_checks:
-    when:
-      not: << pipeline.parameters.nightly >>
     jobs:
       - lint:
           matrix:
@@ -842,46 +837,44 @@ workflows:
             parameters:
               platform:
                 [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
-
-  nightly:
-    when: << pipeline.parameters.nightly >>
-    jobs:
-      - build_release:
-          nightly: true
-          context: router
-          matrix:
-            parameters:
-              platform:
-                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
-
-  release:
-    when:
-      not: << pipeline.parameters.nightly >>
-    jobs:
+      - release_approval:
+          type: approval
+          requires:
+            - test
+            - test_updated
       - pre_verify_release:
+          requires: [ release_approval ]
           matrix:
             parameters:
               platform: [ amd_linux_build ]
           filters:
-            branches:
-              ignore: /.*/
             tags:
               only: /v.*/
+      # Anything that tagged is deemed a nightly
       - build_release:
+          nightly: true
+          requires: [ release_approval ]
+          matrix:
+            alias: build_release_nightly
+            parameters:
+              platform:
+                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
+          filters:
+            tags:
+              ignore: /v.*/
+      # Releases are tagged
+      - build_release:
+          nightly: false
           requires: [ pre_verify_release ]
           matrix:
             parameters:
               platform:
                 [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
           filters:
-            branches:
-              ignore: /.*/
             tags:
               only: /v.*/
       - publish_github_release:
           requires: [ build_release ]
           filters:
-            branches:
-              ignore: /.*/
             tags:
               only: /v.*/
