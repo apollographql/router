@@ -231,6 +231,7 @@ impl Selection {
 
     pub(crate) fn contains_error_path(&self, path: &[PathElement], fragments: &Fragments) -> bool {
         match (path.get(0), self) {
+            (Some(PathElement::Glob), _) => false,
             (None, _) => true,
             (
                 Some(PathElement::Key(key)),

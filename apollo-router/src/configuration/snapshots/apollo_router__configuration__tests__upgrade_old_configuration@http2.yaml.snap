@@ -1,0 +1,12 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+traffic_shaping:
+  all:
+    experimental_http2: disable
+  subgraphs:
+    products:
+      experimental_http2: enable
+

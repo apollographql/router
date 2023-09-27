@@ -1,13 +1,15 @@
 use std::fmt::Write as _;
 
 use itertools::Itertools;
-use proteus::Parser;
-use proteus::TransformBuilder;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::error::ConfigurationError;
+use crate::json_ext::serde_json_insert;
+use crate::json_ext::serde_json_iterate_path_mut;
+use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 
 #[derive(RustEmbed)]
 #[folder = "src/configuration/migrations"]
@@ -19,7 +21,7 @@ struct Migration {
     actions: Vec<Action>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Action {
     Add {
@@ -43,10 +45,14 @@ enum Action {
         from: Value,
         to: Value,
     },
+    Rename {
+        path: String,
+        name: String,
+        to: String,
+    },
 }
 
 const REMOVAL_VALUE: &str = "__PLEASE_DELETE_ME";
-const REMOVAL_EXPRESSION: &str = r#"const("__PLEASE_DELETE_ME")"#;
 
 pub(crate) fn upgrade_configuration(
     config: &serde_json::Value,
@@ -81,81 +87,129 @@ pub(crate) fn upgrade_configuration(
 }
 
 fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, ConfigurationError> {
-    let mut transformer_builder = TransformBuilder::default();
-    //We always copy the entire doc to the destination first
-    transformer_builder =
-        transformer_builder.add_action(Parser::parse("", "").expect("migration must be valid"));
+    let mut new_config = config.to_owned();
+
     for action in &migration.actions {
         match action {
             Action::Add { path, name, value } => {
-                if !jsonpath_lib::select(config, &format!("$.{path}"))
-                    .unwrap_or_default()
-                    .is_empty()
-                    && jsonpath_lib::select(config, &format!("$.{path}.{name}"))
-                        .unwrap_or_default()
-                        .is_empty()
-                {
-                    transformer_builder = transformer_builder.add_action(
-                        Parser::parse(&format!(r#"const({value})"#), &format!("{path}.{name}"))
-                            .expect("migration must be valid"),
+                let mut path = Path::from_json_path(path);
+                let mut found_parent = false;
+
+                serde_json_iterate_path_mut(
+                    &mut Path::default(),
+                    &path.0,
+                    &mut new_config,
+                    &mut |_path, _value| {
+                        found_parent = true;
+                    },
+                );
+
+                if found_parent {
+                    path.push(PathElement::Key(name.to_owned()));
+
+                    let mut found_element = false;
+
+                    serde_json_iterate_path_mut(
+                        &mut Path::default(),
+                        &path.0,
+                        &mut new_config,
+                        &mut |_path, _value| {
+                            found_element = true;
+                        },
                     );
+                    if !found_element {
+                        let _ = serde_json_insert(&mut new_config, &path, value.clone());
+                    }
                 }
             }
             Action::Delete { path } => {
-                if !jsonpath_lib::select(config, &format!("$.{path}"))
-                    .unwrap_or_default()
-                    .is_empty()
-                {
-                    // Deleting isn't actually supported by protus so we add a magic value to delete later
-                    transformer_builder = transformer_builder.add_action(
-                        Parser::parse(REMOVAL_EXPRESSION, path).expect("migration must be valid"),
-                    );
-                }
+                let path = Path::from_json_path(path);
+
+                serde_json_iterate_path_mut(
+                    &mut Path::default(),
+                    &path.0,
+                    &mut new_config,
+                    &mut |_path, value| {
+                        *value = Value::Null;
+                    },
+                );
             }
             Action::Copy { from, to } => {
-                if !jsonpath_lib::select(config, &format!("$.{from}"))
-                    .unwrap_or_default()
-                    .is_empty()
-                {
-                    transformer_builder = transformer_builder
-                        .add_action(Parser::parse(from, to).expect("migration must be valid"));
+                let from_path = Path::from_json_path(from);
+
+                let mut matched = None;
+
+                serde_json_iterate_path_mut(
+                    &mut Path::default(),
+                    &from_path.0,
+                    &mut new_config,
+                    &mut |_path, value| {
+                        if matched.is_none() {
+                            matched = Some(value.clone());
+                        }
+                    },
+                );
+
+                let to_path = Path::from_json_path(to);
+
+                if let Some(from_value) = matched.take() {
+                    let _ = serde_json_insert(&mut new_config, &to_path, from_value);
                 }
             }
             Action::Move { from, to } => {
-                if !jsonpath_lib::select(config, &format!("$.{from}"))
-                    .unwrap_or_default()
-                    .is_empty()
-                {
-                    transformer_builder = transformer_builder
-                        .add_action(Parser::parse(from, to).expect("migration must be valid"));
-                    // Deleting isn't actually supported by protus so we add a magic value to delete later
-                    transformer_builder = transformer_builder.add_action(
-                        Parser::parse(REMOVAL_EXPRESSION, from).expect("migration must be valid"),
-                    );
+                let from_path: Path = Path::from_json_path(from);
+
+                let mut matched = None;
+
+                serde_json_iterate_path_mut(
+                    &mut Path::default(),
+                    &from_path.0,
+                    &mut new_config,
+                    &mut |_path, value| {
+                        if matched.is_none() {
+                            matched = Some(std::mem::replace(value, Value::Null));
+                        }
+                    },
+                );
+
+                let to_path = Path::from_json_path(to);
+
+                if let Some(from_value) = matched.take() {
+                    let _ = serde_json_insert(&mut new_config, &to_path, from_value);
                 }
             }
             Action::Change { path, from, to } => {
-                if !jsonpath_lib::select(config, &format!("$.{path} == {from}"))
-                    .unwrap_or_default()
-                    .is_empty()
-                {
-                    transformer_builder = transformer_builder.add_action(
-                        Parser::parse(&format!(r#"const({to})"#), path)
-                            .expect("migration must be valid"),
-                    );
-                }
+                let from_path: Path = Path::from_json_path(path);
+
+                serde_json_iterate_path_mut(
+                    &mut Path::default(),
+                    &from_path.0,
+                    &mut new_config,
+                    &mut |_path, value| {
+                        if value == from {
+                            *value = to.to_owned();
+                        }
+                    },
+                );
+            }
+            Action::Rename { path, name, to } => {
+                let path: Path = Path::from_json_path(path);
+
+                serde_json_iterate_path_mut(
+                    &mut Path::default(),
+                    &path.0,
+                    &mut new_config,
+                    &mut |_path, value| {
+                        if let Some(o) = value.as_object_mut() {
+                            if let Some(v) = o.remove(name) {
+                                o.insert(to.to_string(), v);
+                            }
+                        }
+                    },
+                );
             }
         }
     }
-    let transformer = transformer_builder
-        .build()
-        .expect("transformer for migration must be valid");
-    let mut new_config =
-        transformer
-            .apply(config)
-            .map_err(|e| ConfigurationError::MigrationFailure {
-                error: e.to_string(),
-            })?;
 
     // Now we need to clean up elements that should be deleted.
     cleanup(&mut new_config);
@@ -163,6 +217,7 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
     Ok(new_config)
 }
 
+//struct ChangeAction
 pub(crate) fn generate_upgrade(config: &str, diff: bool) -> Result<String, ConfigurationError> {
     let parsed_config =
         serde_yaml::from_str(config).map_err(|e| ConfigurationError::MigrationFailure {
@@ -236,13 +291,13 @@ fn cleanup(value: &mut Value) {
         Value::Number(_) => {}
         Value::String(_) => {}
         Value::Array(a) => {
-            a.retain(|v| &Value::String(REMOVAL_VALUE.to_string()) != v);
+            a.retain(|v| &Value::String(REMOVAL_VALUE.to_string()) != v && *v != Value::Null);
             for value in a {
                 cleanup(value);
             }
         }
         Value::Object(o) => {
-            o.retain(|_, v| &Value::String(REMOVAL_VALUE.to_string()) != v);
+            o.retain(|_, v| &Value::String(REMOVAL_VALUE.to_string()) != v && *v != Value::Null);
             for value in o.values_mut() {
                 cleanup(value);
             }
@@ -293,7 +348,7 @@ mod test {
             &source_doc(),
             &Migration::builder()
                 .action(Action::Delete {
-                    path: "arr[0]".to_string()
+                    path: "arr.0".to_string()
                 })
                 .description("delete arr[0]")
                 .build(),
@@ -381,8 +436,8 @@ mod test {
             &source_doc(),
             &Migration::builder()
                 .action(Action::Move {
-                    from: "arr[0]".to_string(),
-                    to: "new.arr[0]".to_string()
+                    from: "arr.0".to_string(),
+                    to: "new.arr.0".to_string()
                 })
                 .description("move arr[0]")
                 .build(),
@@ -411,8 +466,8 @@ mod test {
             &source_doc(),
             &Migration::builder()
                 .action(Action::Copy {
-                    from: "arr[0]".to_string(),
-                    to: "new.arr[0]".to_string()
+                    from: "arr.0".to_string(),
+                    to: "new.arr.0".to_string()
                 })
                 .description("copy arr[0]")
                 .build(),
