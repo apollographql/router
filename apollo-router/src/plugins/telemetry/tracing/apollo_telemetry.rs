@@ -23,7 +23,6 @@ use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceError;
 use opentelemetry::Key;
 use opentelemetry::Value;
-use opentelemetry_semantic_conventions::trace::HTTP_METHOD;
 use prost::Message;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
@@ -74,6 +73,8 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 
+// TODO Remove this and use otel constants again https://github.com/apollographql/router/issues/3833
+const HTTP_METHOD: Key = Key::from_static_str("http.method");
 const APOLLO_PRIVATE_REQUEST: Key = Key::from_static_str("apollo_private.request");
 pub(crate) const APOLLO_PRIVATE_DURATION_NS: &str = "apollo_private.duration_ns";
 const APOLLO_PRIVATE_DURATION_NS_KEY: Key = Key::from_static_str(APOLLO_PRIVATE_DURATION_NS);
