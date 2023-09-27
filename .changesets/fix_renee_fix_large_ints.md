@@ -1,4 +1,4 @@
-### Fix error response on large number types in query transformations. ([PR #3820](https://github.com/apollographql/router/pull/3820))
+### Fix error response on large number types in query transformations ([PR #3820](https://github.com/apollographql/router/pull/3820))
 
 This bug caused the router to reject operations where a large hardcoded integer was used as input for a Float field:
 
