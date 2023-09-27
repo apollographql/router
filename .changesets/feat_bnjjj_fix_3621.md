@@ -2,7 +2,7 @@
 
 We added configuration to override default timeout for Redis requests. Default timeout was also changed from 1ms to **2ms**.
 
-Here is an exmample to change the timeout for APQ:
+Here is an example to change the timeout for [Distributed APQ](https://www.apollographql.com/docs/router/configuration/distributed-caching#distributed-apq-caching) (an Enterprise Feature):
 ```yaml
 apq:
   router:
