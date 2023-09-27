@@ -4,6 +4,196 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.31.0] - 2023-09-27
+
+## 🚀 Features
+
+### TLS client authentication for subgraph requests ([Issue #3414](https://github.com/apollographql/router/issues/3414))
+
+The router now supports TLS client authentication when connecting to subgraphs. It can be configured as follows:
+
+```yaml
+tls:
+  subgraph:
+    all:
+      client_authentication:
+        certificate_chain: 
+        key: 
+    # if configuring for a specific subgraph:
+    subgraphs:
+      # subgraph name
+      products:
+        client_authentication:
+          certificate_chain: 
+          key: 
+```
+
+Details on TLS client authentication can be found in the [documentation](https://www.apollographql.com/docs/router/configuration/overview#tls-client-authentication-for-subgraph-requests)
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3794
+
+### Added configuration to set redis request timeout ([Issue #3621](https://github.com/apollographql/router/issues/3621))
+
+We added configuration to override default timeout for Redis requests. Default timeout was also changed from 1ms to **2ms**.
+
+Here is an example to change the timeout for [Distributed APQ](https://www.apollographql.com/docs/router/configuration/distributed-caching#distributed-apq-caching) (an Enterprise Feature):
+```yaml
+apq:
+  router:
+    cache:
+      redis:
+        urls: ["redis://..."]
+        timeout: 5ms
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3817
+
+### JSON encoding and decoding in Rhai ([PR #3785](https://github.com/apollographql/router/pull/3785))
+
+It is now possible to encode or decode JSON from Rhai scripts using `json::encode` and `json::decode`.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3785
+
+### Supergraph coprocessor implementation ([PR #3647](https://github.com/apollographql/router/pull/3647))
+
+Coprocessors now support supergraph service interception.
+
+On the request side, the coprocessor payload can contain:
+- method
+- headers
+- body
+- context
+- sdl
+
+On the response side, the payload can contain:
+- status_code
+- headers
+- body
+- context
+- sdl
+
+The supergraph request body contains:
+- query
+- operation name
+- variables
+- extensions
+
+The supergraph response body contains:
+- label
+- data
+- errors
+- extensions
+
+When using `@defer` or subscriptions a supergraph response may contain multiple GraphQL responses. The coprocessor will be called for each response. Please refer to our [coprocessor documentation](https://www.apollographql.com/docs/router/customizations/coprocessor) for more information.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3647
+
+### Adds support for the OpenTelemetry AWS X-Ray tracing propagator ([PR #3580](https://github.com/apollographql/router/pull/3580))
+
+This propagator helps propagate tracing information from upstream services (such as AWS load balancers) to downstream services. It also handles conversion between the X-Ray trace id format and OpenTelemetry span contexts.
+
+By [@scottmace](https://github.com/scottmace) in https://github.com/apollographql/router/pull/3580
+
+### HTTP/2 Cleartext protocol (H2C) support for subgraph connections ([Issue #3535](https://github.com/apollographql/router/issues/3535))
+
+The router can now connect to subgraphs over HTTP/2 Cleartext (H2C), which uses the HTTP/2 binary protocol directly over TCP **without TLS**, which is a mode of operation desired with some service mesh configurations (e.g., Istio, Envoy) where the value of added encryption is unnecessary. To activate it, set the `experimental_http2` option to `http2_only`.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3852
+
+### Query plan cache warm-up improvements ([Issue #3704](https://github.com/apollographql/router/issues/3704), [Issue #3767](https://github.com/apollographql/router/issues/3767))
+
+The `warm_up_queries` option enables quicker schema updates by precomputing query plans for your most used cached queries and your persisted queries. When a new schema is loaded, a precomputed query plan for it may already be in the in-memory cache.
+
+We made a series of improvements to this feature to make it easier to use:
+* It is now active by default.
+* It warms up the cache with the 30% most used queries from previous cache.
+* The query cache percentage continues to be configurable, and it can be deactivated by setting it to 0.
+* The warm-up will now plan queries in random order to make sure that the work can be shared by multiple router instances using distributed caching.
+* Persisted queries are part of the warmed up queries.
+
+We also added histogram metrics for `apollo_router_query_planning_warmup_duration` and `apollo_router_schema_load_duration`. These metrics make it easier to track the time spent loading a new schema and planning queries in the warm-up phase. You can measure the query plan cache usage for both the in-memory-cache and distributed cache. This makes it easier to know how many entries are used as well as the cache hit rate.
+
+Here is what these metrics would look like in Prometheus:
+
+```
+# HELP apollo_router_query_planning_warmup_duration apollo_router_query_planning_warmup_duration
+# TYPE apollo_router_query_planning_warmup_duration histogram
+apollo_router_query_planning_warmup_duration_bucket{service_name="apollo-router",otel_scope_name="apollo/router",otel_scope_version="",le="0.05"} 1
+apollo_router_query_planning_warmup_duration_bucket{service_name="apollo-router",otel_scope_name="apollo/router",otel_scope_version="",le="0.1"} 1
+apollo_router_query_planning_warmup_duration_bucket{service_name="apollo-router",otel_scope_name="apollo/router",otel_scope_version="",le="0.25"} 1
+apollo_router_query_planning_warmup_duration_sum{service_name="apollo-router",otel_scope_name="apollo/router",otel_scope_version=""} 0.022390619
+apollo_router_query_planning_warmup_duration_count{service_name="apollo-router",otel_scope_name="apollo/router",otel_scope_version=""} 1
+# HELP apollo_router_schema_load_duration apollo_router_schema_load_duration
+# TYPE apollo_router_schema_load_duration histogram
+apollo_router_schema_load_duration_bucket{service_name="apollo-router",otel_scope_name="apollo/router",otel_scope_version="",le="0.05"} 8
+apollo_router_schema_load_duration_bucket{service_name="apollo-router",otel_scope_name="apollo/router",otel_scope_version="",le="0.1"} 8
+apollo_router_schema_load_duration_bucket{service_name="apollo-router",otel_scope_name="apollo/router",otel_scope_version="",le="0.25"} 8
+```
+
+You can get more information about operating the query plan cache and its warm-up phase in the [documentation](https://www.apollographql.com/docs/router/configuration/in-memory-caching#cache-warm-up)
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3815 https://github.com/apollographql/router/pull/3801 https://github.com/apollographql/router/pull/3767 https://github.com/apollographql/router/pull/3769 https://github.com/apollographql/router/pull/3770
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3807
+
+## 🐛 Fixes
+
+### Fix error response on large number types in query transformations ([PR #3820](https://github.com/apollographql/router/pull/3820))
+
+This bug caused the router to reject operations where a large hardcoded integer was used as input for a Float field:
+
+```graphql
+# Schema
+type Query {
+    field(argument: Float): Int!
+}
+# Operation
+{
+    field(argument: 123456789123)
+}
+```
+
+This number is now correctly interpreted as a `Float`. This bug only affected hardcoded numbers, not numbers provided through variables.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/3820
+
+### Fix validation error with `ID` variable values overflowing 32-bit integers ([Issue #3873](https://github.com/apollographql/router/issues/3873))
+
+Input values for variables of type `ID` were previously validated as "either like a GraphQL `Int` or like a GraphQL `String`". GraphQL `Int` is specified as a signed 32-bit integer, such that values that overflow fail validation. Applying this range restriction to `ID` values was incorrect. Instead, validation for `ID` now accepts any JSON integer or JSON string value, so that IDs larger than 32 bits can be used.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/3896
+
+### Improve multi-cloud failover and error handling for Persisted Queries ([PR #3863](https://github.com/apollographql/router/pull/3863))
+
+Improves the resilience of the Persisted Queries feature to Uplink outages. This makes errors while fetching persisted query manifests from Uplink more visible.
+
+By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/3863
+
+### Coprocessors: Discard content-length sent by coprocessors ([PR #3802](https://github.com/apollographql/router/pull/3802))
+
+The `content-length` of an HTTP response can only be computed when a router response is being sent.
+We now discard coprocessors `content-length` header to make sure the value is computed correctly.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3802
+
+### Helm: If there are `extraLabels` add them to all resources ([PR #3622](https://github.com/apollographql/router/pull/3622))
+
+This extends the functionality of `extraLabels` so that, if they are defined, they will be templated for all resources created by the chart.
+
+Previously, they were only templated onto the `Deployment` resource.
+
+By [@garypen](https://github.com/garypen) and [@bjoernw](https://github.com/bjoernw) in https://github.com/apollographql/router/pull/3622
+
+## 📚 Documentation
+
+### Rhai documentation: remove incorrect statement about request.subgraph fields ([PR #3808](https://github.com/apollographql/router/pull/3808))
+
+It is possible to modify `request.subgraph` fields from a Rhai script, which is now correctly reflected in [Rhai documentation](https://www.apollographql.com/docs/router/customizations/rhai-api/#request-interface).
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3808
+
+
+
 # [1.30.1] - 2023-09-22
 
 ## 🐛 Fixes
@@ -285,7 +475,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 This exposes a new key in the `Context`, `apollo_operation_id`, which identifies operation you can find in studio:
 
 ```
-https://studio.apollographql.com/graph/<your_graph_variant>/variant/<your_graph_variant>/operations?query=<apollo_operation_id>
+https://studio.apollographql.com/graph/<your_graph_id>/variant/<your_graph_variant>/operations?query=<apollo_operation_id>
 ```
 
 The `apollo_operation_id` context key is exposed during:
@@ -503,7 +693,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Spelling of `content_negociation` corrected to `content_negotiation` ([Issue #3204](https://github.com/apollographql/router/issues/3204))
 
-We had a bit of a French twist on one of our internal module names.  We won't promise it won't happen again, but  `content_negociation` is spelled as `content_negotiation` now. 😄
+We had a bit of a French twist on one of our internal module names.  We won't promise it won't happen again, but  `content_negociation` is spelled as `content_negotiation` now. 😄  
 
 Thank you for this contribution!
 
@@ -1859,7 +2049,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Small gzip'd responses no longer cause a panic
 
-A regression introduced in v1.17.0 — again related to compression — has been resolved.  This occurred when small responses used invalid buffer management, causing a panic.
+A regression introduced in v1.17.0 — again related to compression — has been resolved.  This occurred when small responses used invalid buffer management, causing a panic.
 
 By [@dbanty](https://github.com/dbanty) in https://github.com/apollographql/router/pull/3047
 
@@ -2393,7 +2583,7 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ### Distributed caching: Don't send Redis' `CLIENT SETNAME` ([PR #2825](https://github.com/apollographql/router/pull/2825))
 
-We won't send [the `CLIENT SETNAME` command](https://redis.io/commands/client-setname/) to connected Redis servers.  This resolves an incompatibility with some Redis-compatible servers since not all "Redis-compatible" offerings (like Google Memorystore) actually support _every_ Redis command.  We weren't actually necessitating this feature, it was just a feature that could be enabled optionally on our Redis client.  No Router functionality is impacted.
+We won't send [the `CLIENT SETNAME` command](https://redis.io/commands/client-setname/) to connected Redis servers.  This resolves an incompatibility with some Redis-compatible servers since not all "Redis-compatible" offerings (like Google Memorystore) actually support _every_ Redis command.  We weren't actually necessitating this feature, it was just a feature that could be enabled optionally on our Redis client.  No Router functionality is impacted.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2825
 
@@ -3563,7 +3753,7 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ### Optimize header propagation plugin's regular expression matching ([PR #2392](https://github.com/apollographql/router/pull/2392))
 
-We've changed the header propagation plugins' behavior to reduce the chance of memory allocations occurring when applying regex-based header propagation rules.
+We've changed the header propagation plugins' behavior to reduce the chance of memory allocations occurring when applying regex-based header propagation rules.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2392
 
@@ -3613,7 +3803,7 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 Configuration changes will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However, you should update your source configuration files as these will become breaking changes in a future major release.
 
-### Defer support graduates from preview ([Issue #2368](https://github.com/apollographql/router/issues/2368))
+### Defer support graduates from preview ([Issue #2368](https://github.com/apollographql/router/issues/2368))
 
 We're pleased to announce that [`@defer` support](https://www.apollographql.com/docs/router/executing-operations/defer-support/) has been promoted to general availability in accordance with our [product launch stages](https://www.apollographql.com/docs/resources/product-launch-stages/).
 

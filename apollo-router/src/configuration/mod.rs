@@ -20,7 +20,6 @@ use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
 use std::sync::Arc;
-#[cfg(not(test))]
 use std::time::Duration;
 
 use derivative::Derivative;
@@ -827,11 +826,12 @@ impl Default for Apq {
 pub(crate) struct QueryPlanning {
     /// Cache configuration
     pub(crate) experimental_cache: Cache,
-    /// Warm up the cache on reloads by running the query plan over
-    /// a list of the most used queries
-    /// Defaults to 0 (do not warm up the cache)
+    /// Warms up the cache on reloads by running the query plan over
+    /// a list of the most used queries (from the in memory cache)
+    /// Configures the number of queries warmed up. Defaults to 1/3 of
+    /// the in memory cache
     #[serde(default)]
-    pub(crate) warmed_up_queries: usize,
+    pub(crate) warmed_up_queries: Option<usize>,
 }
 
 /// Cache configuration
@@ -866,6 +866,11 @@ impl Default for InMemoryCache {
 pub(crate) struct RedisCache {
     /// List of URLs to the Redis cluster
     pub(crate) urls: Vec<url::Url>,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    /// Redis request timeout (default: 2ms)
+    pub(crate) timeout: Option<Duration>,
 }
 
 /// TLS related configuration options.
@@ -924,13 +929,11 @@ where
         .map_err(serde::de::Error::custom)
         .and_then(|mut certs| {
             if certs.len() > 1 {
-                Err(serde::de::Error::custom(
-                    "expected exactly one server certificate",
-                ))
+                Err(serde::de::Error::custom("expected exactly one certificate"))
             } else {
-                certs.pop().ok_or(serde::de::Error::custom(
-                    "expected exactly one server certificate",
-                ))
+                certs
+                    .pop()
+                    .ok_or(serde::de::Error::custom("expected exactly one certificate"))
             }
         })
 }
@@ -950,16 +953,16 @@ where
 {
     let data = String::deserialize(deserializer)?;
 
-    load_keys(&data).map_err(serde::de::Error::custom)
+    load_key(&data).map_err(serde::de::Error::custom)
 }
 
-fn load_certs(data: &str) -> io::Result<Vec<Certificate>> {
+pub(crate) fn load_certs(data: &str) -> io::Result<Vec<Certificate>> {
     certs(&mut BufReader::new(data.as_bytes()))
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cert"))
         .map(|mut certs| certs.drain(..).map(Certificate).collect())
 }
 
-fn load_keys(data: &str) -> io::Result<PrivateKey> {
+pub(crate) fn load_key(data: &str) -> io::Result<PrivateKey> {
     let mut reader = BufReader::new(data.as_bytes());
     let mut key_iterator = iter::from_fn(|| read_one(&mut reader).transpose());
 
@@ -1003,14 +1006,20 @@ fn load_keys(data: &str) -> io::Result<PrivateKey> {
 pub(crate) struct TlsSubgraph {
     /// list of certificate authorities in PEM format
     pub(crate) certificate_authorities: Option<String>,
+    /// client certificate authentication
+    pub(crate) client_authentication: Option<TlsClientAuth>,
 }
 
 #[buildstructor::buildstructor]
 impl TlsSubgraph {
     #[builder]
-    pub(crate) fn new(certificate_authorities: Option<String>) -> Self {
+    pub(crate) fn new(
+        certificate_authorities: Option<String>,
+        client_authentication: Option<TlsClientAuth>,
+    ) -> Self {
         Self {
             certificate_authorities,
+            client_authentication,
         }
     }
 }
@@ -1019,6 +1028,20 @@ impl Default for TlsSubgraph {
     fn default() -> Self {
         Self::builder().build()
     }
+}
+
+/// TLS client authentication
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TlsClientAuth {
+    /// list of certificates in PEM format
+    #[serde(deserialize_with = "deserialize_certificate_chain", skip_serializing)]
+    #[schemars(with = "String")]
+    pub(crate) certificate_chain: Vec<Certificate>,
+    /// key in PEM format
+    #[serde(deserialize_with = "deserialize_key", skip_serializing)]
+    #[schemars(with = "String")]
+    pub(crate) key: PrivateKey,
 }
 
 /// Configuration options pertaining to the sandbox page.

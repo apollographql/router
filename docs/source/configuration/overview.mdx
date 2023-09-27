@@ -238,7 +238,7 @@ If set, disables sending anonymous usage information to Apollo.
 </td>
 <td>
 
-If set, the listen address of the router. 
+If set, the listen address of the router.
 
 </td>
 </tr>
@@ -567,7 +567,7 @@ The router expects the file referenced in the `certificate_chain` value to be a 
 
 The router verifies TLS connections to subgraphs using the list of certificate authorities the system provides. You can override this list with a combination of global and per-subgraph settings:
 
-```yaml title="router.yaml"
+```yaml
 tls:
   subgraph:
     # Use these certificate authorities unless overridden per-subgraph
@@ -604,6 +604,26 @@ issuerAltName          = issuer:copy
 
 > Make sure to change the `subjectAltName` field to the subgraph's name.
 This produces the file as `server.crt` which can be used in `certificate_authorities`.
+
+#### TLS client authentication for subgraph requests
+
+The router supports mutual TLS authentication (mTLS) with the subgraphs. This means that it can authenticate itself to the subgraph using a certificate chain and a cryptographic key. It can be configured as follows:
+
+```yaml
+tls:
+  subgraph:
+    # Use these certificates and key unless overridden per-subgraph
+    all:
+      client_authentication:
+        certificate_chain: ${file./path/to/certificate_chain.pem}
+        key: ${file./path/to/key.pem}
+    # Override global setting for individual subgraphs
+    subgraphs:
+      products:
+        client_authentication:
+          certificate_chain: ${file./path/to/certificate_chain.pem}
+          key: ${file./path/to/key.pem}
+```
 
 ### Request limits
 

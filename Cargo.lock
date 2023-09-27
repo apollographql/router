@@ -216,11 +216,11 @@ dependencies = [
 
 [[package]]
 name = "apollo-compiler"
-version = "0.11.1"
+version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7170c0c3761b0f11b9b0bd51b9720176776e1004df9f3b190d53a4f455873bcc"
+checksum = "d9c5a0aa9cc4b5f9fc4aec3ecd76f4acc4407922c3c0e862b87f1c761c96a9bf"
 dependencies = [
- "apollo-parser 0.6.1",
+ "apollo-parser 0.6.2",
  "ariadne",
  "indexmap 2.0.0",
  "ordered-float 3.9.0",
@@ -236,8 +236,8 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b323dfc43b95a8806a401aed913e84db297162c6295bca620c0f57956cdb52cf"
 dependencies = [
- "apollo-compiler 0.11.1",
- "apollo-parser 0.6.1",
+ "apollo-compiler 0.11.2",
+ "apollo-parser 0.6.2",
  "thiserror",
 ]
 
@@ -253,23 +253,24 @@ dependencies = [
 
 [[package]]
 name = "apollo-parser"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72d7e4a7f8862c19d5154b4a146f59d26a5f86678acd4fec1d5d87bd4c9284ab"
+checksum = "e565c10133fbefa3cc9ac6c940bbfc2ed6086def9ec39b0f87a86cf9499aadd2"
 dependencies = [
+ "memchr",
  "rowan",
  "thiserror",
 ]
 
 [[package]]
 name = "apollo-router"
-version = "1.30.1"
+version = "1.31.0"
 dependencies = [
  "access-json",
  "anyhow",
- "apollo-compiler 0.11.1",
+ "apollo-compiler 0.11.2",
  "apollo-encoder",
- "apollo-parser 0.6.1",
+ "apollo-parser 0.6.2",
  "arc-swap",
  "askama",
  "async-compression",
@@ -285,7 +286,7 @@ dependencies = [
  "buildstructor 0.5.3",
  "bytes",
  "ci_info",
- "clap 4.4.2",
+ "clap 4.4.4",
  "console-subscriber",
  "dashmap",
  "derivative",
@@ -332,6 +333,7 @@ dependencies = [
  "nu-ansi-term 0.49.0",
  "once_cell",
  "opentelemetry",
+ "opentelemetry-aws",
  "opentelemetry-datadog",
  "opentelemetry-http",
  "opentelemetry-jaeger",
@@ -380,7 +382,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.24.1",
  "tokio-stream",
- "tokio-tungstenite 0.18.0",
+ "tokio-tungstenite",
  "tokio-util",
  "toml 0.7.6",
  "tonic 0.8.3",
@@ -409,9 +411,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.30.1"
+version = "1.31.0"
 dependencies = [
- "apollo-parser 0.6.1",
+ "apollo-parser 0.6.2",
  "apollo-router",
  "apollo-smith",
  "arbitrary",
@@ -425,11 +427,11 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.30.1"
+version = "1.31.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
- "clap 4.4.2",
+ "clap 4.4.4",
  "copy_dir",
  "regex",
  "str_inflector",
@@ -444,7 +446,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13ed94bb9de9f24da12ca2122b8eeaa7484d17b090dc84daaaba6b6ac2bee89b"
 dependencies = [
  "apollo-encoder",
- "apollo-parser 0.6.1",
+ "apollo-parser 0.6.2",
  "arbitrary",
  "once_cell",
  "thiserror",
@@ -972,7 +974,7 @@ dependencies = [
  "sha1 0.10.5",
  "sync_wrapper",
  "tokio",
- "tokio-tungstenite 0.20.0",
+ "tokio-tungstenite",
  "tower",
  "tower-layer",
  "tower-service",
@@ -1346,9 +1348,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.4.2"
+version = "4.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a13b88d2c62ff462f88e4a121f17a82c1af05693a2f192b5c38d14de73c19f6"
+checksum = "b1d7b8d5ec32af0fadc644bf1fd509a688c2103b185644bb1e29d164e0703136"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1356,9 +1358,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.4.2"
+version = "4.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bb9faaa7c2ef94b2743a21f5a29e6f0010dff4caa69ac8e9d6cf8b6fa74da08"
+checksum = "5179bb514e4d7c2051749d8fcefa2ed6d06a9f4e6d69faf3805f5d80b8cf8d56"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1666,7 +1668,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.4.2",
+ "clap 4.4.4",
  "criterion-plot",
  "futures",
  "is-terminal",
@@ -2545,9 +2547,9 @@ checksum = "6c2141d6d6c8512188a7891b4b01590a45f6dac67afb4f255c4124dbb86d4eaa"
 
 [[package]]
 name = "fred"
-version = "6.3.1"
+version = "6.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dca2a979eaeb5d8a819edc193860ce54797730559464bc253cd3a2f765e58bd5"
+checksum = "a15cc18b56395b8b15ffcdcea7fe8586e3a3ccb3d9dc3b9408800d9814efb08e"
 dependencies = [
  "arc-swap",
  "arcstr",
@@ -3285,9 +3287,9 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.31.0"
+version = "1.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0770b0a3d4c70567f0d58331f3088b0e4c4f56c9b8d764efe654b4a5d46de3a"
+checksum = "a3e02c584f4595792d09509a94cdb92a3cef7592b1eb2d9877ee6f527062d0ea"
 dependencies = [
  "console 0.15.7",
  "lazy_static",
@@ -4078,6 +4080,16 @@ checksum = "5f4b8347cc26099d3aeee044065ecc3ae11469796b4d65d065a23a584ed92a6f"
 dependencies = [
  "opentelemetry_api",
  "opentelemetry_sdk",
+]
+
+[[package]]
+name = "opentelemetry-aws"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72a394d24777936802edd6c03a68daab4db39630418c7e431a5648e9befa80b8"
+dependencies = [
+ "once_cell",
+ "opentelemetry",
 ]
 
 [[package]]
@@ -5051,9 +5063,9 @@ dependencies = [
 
 [[package]]
 name = "rhai"
-version = "1.16.1"
+version = "1.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "637a4f79f65571b1fd1a0ebbae05bbbf58a01faf612abbc3eea15cda34f0b87a"
+checksum = "206cee941730eaf90a22c84235b25193df661393688162e15551164f92f09eca"
 dependencies = [
  "ahash",
  "bitflags 2.4.0",
@@ -5192,7 +5204,7 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
- "apollo-parser 0.6.1",
+ "apollo-parser 0.6.2",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",
@@ -5580,9 +5592,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.106"
+version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cc66a619ed80bf7a0f6b17dd063a84b88f6dea1813737cf469aef1d081142c2"
+checksum = "6b420ce6e3d8bd882e9b243c6eed35dbc9a6110c9769e74b584e0d68d1f20c65"
 dependencies = [
  "indexmap 2.0.0",
  "itoa",
@@ -6376,30 +6388,17 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54319c93411147bced34cb5609a80e0a8e44c5999c93903a81cd866630ec0bfd"
-dependencies = [
- "futures-util",
- "log",
- "rustls 0.20.8",
- "rustls-native-certs",
- "tokio",
- "tokio-rustls 0.23.4",
- "tungstenite 0.18.0",
- "webpki",
-]
-
-[[package]]
-name = "tokio-tungstenite"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b2dbec703c26b00d74844519606ef15d09a7d6857860f84ad223dec002ddea2"
 dependencies = [
  "futures-util",
  "log",
+ "rustls 0.21.6",
+ "rustls-native-certs",
  "tokio",
- "tungstenite 0.20.0",
+ "tokio-rustls 0.24.1",
+ "tungstenite",
 ]
 
 [[package]]
@@ -6780,27 +6779,6 @@ dependencies = [
 
 [[package]]
 name = "tungstenite"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30ee6ab729cd4cf0fd55218530c4522ed30b7b6081752839b68fcec8d0960788"
-dependencies = [
- "base64 0.13.1",
- "byteorder",
- "bytes",
- "http",
- "httparse",
- "log",
- "rand 0.8.5",
- "rustls 0.20.8",
- "sha1 0.10.5",
- "thiserror",
- "url",
- "utf-8",
- "webpki",
-]
-
-[[package]]
-name = "tungstenite"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e862a1c4128df0112ab625f55cd5c934bcb4312ba80b39ae4b4835a3fd58e649"
@@ -6812,6 +6790,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.8.5",
+ "rustls 0.21.6",
  "sha1 0.10.5",
  "thiserror",
  "url",

@@ -12,6 +12,9 @@ metadata:
   labels:
     app.fullName: {{ $fullName }}
     {{- include "router.labels" . | nindent 4 }}
+    {{- if .Values.extraLabels }}
+    {{- include "common.templatizeExtraLabels" . | trim | nindent 4 }}
+    {{- end }}
   {{- with .Values.serviceentry.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}

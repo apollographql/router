@@ -42,6 +42,7 @@ use super::HasPlugins;
 #[cfg(test)]
 use super::HasSchema;
 use super::SupergraphCreator;
+use super::APPLICATION_JSON_HEADER_VALUE;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
 use super::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
 use crate::cache::DeduplicatingCache;
@@ -62,6 +63,14 @@ use crate::services::SupergraphResponse;
 use crate::Configuration;
 use crate::Endpoint;
 use crate::ListenAddr;
+
+pub(crate) static MULTIPART_DEFER_HEADER_VALUE: HeaderValue =
+    HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE);
+pub(crate) static MULTIPART_SUBSCRIPTION_HEADER_VALUE: HeaderValue =
+    HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE);
+static ACCEL_BUFFERING_HEADER_NAME: HeaderName = HeaderName::from_static("x-accel-buffering");
+static ACCEL_BUFFERING_HEADER_VALUE: HeaderValue = HeaderValue::from_static("no");
+static ORIGIN_HEADER_VALUE: HeaderValue = HeaderValue::from_static("origin");
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
@@ -123,6 +132,7 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
 
     RouterCreator::new(
         QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
+        Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
         Arc::new(supergraph_creator),
         configuration,
     )
@@ -172,6 +182,7 @@ pub(crate) async fn empty() -> impl Service<
 
     RouterCreator::new(
         QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
+        Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
         Arc::new(supergraph_creator),
         Arc::new(Configuration::default()),
     )
@@ -284,10 +295,9 @@ impl RouterService {
                     && !response.subscribed.unwrap_or(false)
                     && (accepts_json || accepts_wildcard)
                 {
-                    parts.headers.insert(
-                        CONTENT_TYPE,
-                        HeaderValue::from_static(APPLICATION_JSON.essence_str()),
-                    );
+                    parts
+                        .headers
+                        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
                     tracing::trace_span!("serialize_response").in_scope(|| {
                         let body = serde_json::to_string(&response)?;
                         Ok(router::Response {
@@ -297,20 +307,18 @@ impl RouterService {
                     })
                 } else if accepts_multipart_defer || accepts_multipart_subscription {
                     if accepts_multipart_defer {
-                        parts.headers.insert(
-                            CONTENT_TYPE,
-                            HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
-                        );
+                        parts
+                            .headers
+                            .insert(CONTENT_TYPE, MULTIPART_DEFER_HEADER_VALUE.clone());
                     } else if accepts_multipart_subscription {
-                        parts.headers.insert(
-                            CONTENT_TYPE,
-                            HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE),
-                        );
+                        parts
+                            .headers
+                            .insert(CONTENT_TYPE, MULTIPART_SUBSCRIPTION_HEADER_VALUE.clone());
                     }
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
                     parts.headers.insert(
-                        HeaderName::from_static("x-accel-buffering"),
-                        HeaderValue::from_static("no"),
+                        ACCEL_BUFFERING_HEADER_NAME.clone(),
+                        ACCEL_BUFFERING_HEADER_VALUE.clone(),
                     );
                     let multipart_stream = match response.subscribed {
                         Some(true) => {
@@ -454,7 +462,7 @@ impl RouterService {
 fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
     if headers.get(VARY).is_none() {
         // We don't have a VARY header, add one with value "origin"
-        headers.insert(VARY, HeaderValue::from_static("origin"));
+        headers.insert(VARY, ORIGIN_HEADER_VALUE.clone());
     }
 }
 
@@ -496,6 +504,7 @@ impl RouterFactory for RouterCreator {
 impl RouterCreator {
     pub(crate) async fn new(
         query_analysis_layer: QueryAnalysisLayer,
+        persisted_query_layer: Arc<PersistedQueryLayer>,
         supergraph_creator: Arc<SupergraphCreator>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, BoxError> {
@@ -508,8 +517,6 @@ impl RouterCreator {
         } else {
             APQLayer::disabled()
         };
-
-        let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
 
         Ok(Self {
             supergraph_creator,
@@ -552,7 +559,7 @@ impl RouterCreator {
 }
 
 impl RouterCreator {
-    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<WarmUpCachingQueryKey> {
+    pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
         self.supergraph_creator.cache_keys(count).await
     }
 
