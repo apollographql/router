@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::RwLock;
 
@@ -52,9 +53,14 @@ impl JwksManager {
         let downloads = list
             .iter()
             .cloned()
-            .map(|JwksConfig { url, .. }| {
-                get_jwks(url.clone()).map(|opt_jwks| opt_jwks.map(|jwks| (url, jwks)))
-            })
+            .map(
+                |JwksConfig {
+                     url, algorithms, ..
+                 }| {
+                    get_jwks(url.clone(), algorithms.clone())
+                        .map(|opt_jwks| opt_jwks.map(|jwks| (url, jwks)))
+                },
+            )
             .collect::<Vec<_>>();
 
         let jwks_map: HashMap<_, _> = join_all(downloads).await.into_iter().flatten().collect();
@@ -103,7 +109,7 @@ async fn poll(
             repeat((config, jwks_map)).then(|(config, jwks_map)| async move {
                 tokio::time::sleep(DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL).await;
 
-                if let Some(jwks) = get_jwks(config.url.clone()).await {
+                if let Some(jwks) = get_jwks(config.url.clone(), config.algorithms.clone()).await {
                     if let Ok(mut map) = jwks_map.write() {
                         map.insert(config.url, jwks);
                     }
@@ -133,7 +139,7 @@ async fn poll(
 // This function is expected to return an Optional value, but we'd like to let
 // users know the various failure conditions. Hence the various clumsy map_err()
 // scattered through the processing.
-pub(super) async fn get_jwks(url: Url) -> Option<JwkSet> {
+pub(super) async fn get_jwks(url: Url, algorithms: Option<HashSet<Algorithm>>) -> Option<JwkSet> {
     let data = if url.scheme() == "file" {
         let path = url
             .to_file_path()
@@ -183,30 +189,39 @@ pub(super) async fn get_jwks(url: Url) -> Option<JwkSet> {
     // we can't just deserialize from the retrieved data and proceed. Any unrecognised
     // algorithms will cause deserialization to fail.
     //
-    // The only known failing case right now is "ES512". To accomodate this, we create a Value from
-    // the retrieved JWKS data. We then process this to discard any entries with an algorithm of "ES512".
-    //
-    // We always print a WARN to let people know that if their JWKS contains a key with an alg of
-    // ES512 we will not be using it.
-    //
-    // We may need to continue to update this over time as the jsonwebtoken library evolves or if
-    // other problematic algorithms are identified.
+    // We use the list of algorithms specified by the user in configuration to constrain the
+    // processing and exclude keys which are not in the optional specified list. If there is no
+    // optional list of algorithms, we accept the full set.
 
-    tracing::warn!(
-        "If your JWKS contains keys with an 'alg' of 'ES512', they are ignored by the router."
-    );
     let mut raw_json: Value = serde_json::from_str(&data)
         .map_err(|e| {
             tracing::error!(%e, "could not create JSON Value from url content");
             e
         })
         .ok()?;
-    let ignore_alg = serde_json::json!("ES512");
-    raw_json.get_mut("keys").and_then(|keys| {
-        keys.as_array_mut().map(|array| {
-            array.retain(|row| row.get("alg").unwrap_or_else(|| &Value::Null) != &ignore_alg)
-        })
-    });
+    if let Some(retain_list) = algorithms {
+        raw_json.get_mut("keys").and_then(|keys| {
+            keys.as_array_mut().map(|array| {
+                array.retain(|key| {
+                    let alg_json = key.get("alg").unwrap_or_else(|| &Value::Null);
+                    // Retention rules are, retain if:
+                    //  - we can't find an alg field
+                    //  - alg field isn't a string
+                    //  - our list of algorithms contains the identifed algorithm
+                    if alg_json == &Value::Null || !alg_json.is_string() {
+                        true
+                    } else {
+                        match Algorithm::from_str(
+                            alg_json.as_str().expect("we checked it's a string"),
+                        ) {
+                            Ok(alg) => retain_list.contains(&alg),
+                            Err(_) => false,
+                        }
+                    }
+                })
+            })
+        });
+    }
     let jwks: JwkSet = serde_json::from_value(raw_json)
         .map_err(|e| {
             tracing::error!(%e, "could not create JWKS from url content");
