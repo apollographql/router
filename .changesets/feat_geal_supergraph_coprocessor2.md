@@ -1,6 +1,6 @@
 ### Supergraph coprocessor implementation ([PR #3647](https://github.com/apollographql/router/pull/3647))
 
-Coprocessors now support supergraph service interception. 
+Coprocessors now support supergraph service interception.
 
 On the request side, the coprocessor payload can contain:
 - method
@@ -17,17 +17,17 @@ On the response side, the payload can contain:
 - sdl
 
 The supergraph request body contains:
-* query
-* operation name
-* variables
-* extensions
+- query
+- operation name
+- variables
+- extensions
 
 The supergraph response body contains:
-* label
-* data
-* errors
-* extensions
+- label
+- data
+- errors
+- extensions
 
-When using `@defer` or subscriptions a supergraph response may contain multiple GraphQL responses, and the coprocessor will be called for each.
+When using `@defer` or subscriptions a supergraph response may contain multiple GraphQL responses. The coprocessor will be called for each response. Please refer to our [coprocessor documentation](https://www.apollographql.com/docs/router/customizations/coprocessor) for more information.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3647

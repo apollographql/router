@@ -18,4 +18,6 @@ tls:
           key: ${file./path/to/key.pem}
 ```
 
+Details on TLS client authentication can be found in the [documentation](https://www.apollographql.com/docs/router/configuration/overview#tls-client-authentication-for-subgraph-requests)
+
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3794
