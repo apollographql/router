@@ -128,6 +128,11 @@ Note that the initial call to uplink during router startup will not be reflected
 - `apollo_router_deduplicated_subscriptions_total` - Number of subscriptions that has been deduplicated
 - `apollo_router_skipped_event_count` - Number of subscription events that has been skipped because too many events have been received from the subgraph but not yet sent to the client.
 
+#### Batching
+
+- `apollo_router.operations.batching` - A counter of the number of query batches received by the router.
+- `apollo_router.operations.batching.size` - A histogram tracking the number of queries contained within a query batch.
+
 ## Using OpenTelemetry Collector
 
 You can send metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) for processing and reporting metrics.
