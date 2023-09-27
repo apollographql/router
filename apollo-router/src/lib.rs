@@ -80,6 +80,7 @@ pub use crate::configuration::ListenAddr;
 pub use crate::context::Context;
 pub use crate::executable::main;
 pub use crate::executable::Executable;
+pub use crate::executable::Opt;
 pub use crate::notification::Notify;
 pub use crate::router::ApolloRouterError;
 pub use crate::router::ConfigurationSource;
