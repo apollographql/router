@@ -404,6 +404,8 @@ where
         ))
         .layer(Extension(service_factory))
         .layer(cors)
+        // Telemetry layers MUST be last. This means that they will be hit first during execution of the pipeline
+        // Adding layers after telemetry will cause us to lose metrics and spans.
         .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license }))
         .layer(middleware::from_fn(metrics_handler));
 
