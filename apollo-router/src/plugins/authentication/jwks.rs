@@ -14,6 +14,7 @@ use http::header::CONTENT_TYPE;
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::Algorithm;
 use mime::APPLICATION_JSON;
+use serde_json::Value;
 use tokio::fs::read_to_string;
 use tokio::sync::oneshot;
 use tower::BoxError;
@@ -178,7 +179,35 @@ pub(super) async fn get_jwks(url: Url) -> Option<JwkSet> {
             })
             .ok()?
     };
-    let jwks: JwkSet = serde_json::from_str(&data)
+    // Some JWKS contain algorithms which are not supported by the jsonwebtoken library. That means
+    // we can't just deserialize from the retrieved data and proceed. Any unrecognised
+    // algorithms will cause deserialization to fail.
+    //
+    // The only known failing case right now is "ES512". To accomodate this, we create a Value from
+    // the retrieved JWKS data. We then process this to discard any entries with an algorithm of "ES512".
+    //
+    // We always print a WARN to let people know that if their JWKS contains a key with an alg of
+    // ES512 we will not be using it.
+    //
+    // We may need to continue to update this over time as the jsonwebtoken library evolves or if
+    // other problematic algorithms are identified.
+
+    tracing::warn!(
+        "If your JWKS contains keys with an 'alg' of 'ES512', they are ignored by the router."
+    );
+    let mut raw_json: Value = serde_json::from_str(&data)
+        .map_err(|e| {
+            tracing::error!(%e, "could not create JSON Value from url content");
+            e
+        })
+        .ok()?;
+    let ignore_alg = serde_json::json!("ES512");
+    raw_json.get_mut("keys").and_then(|keys| {
+        keys.as_array_mut().map(|array| {
+            array.retain(|row| row.get("alg").unwrap_or_else(|| &Value::Null) != &ignore_alg)
+        })
+    });
+    let jwks: JwkSet = serde_json::from_value(raw_json)
         .map_err(|e| {
             tracing::error!(%e, "could not create JWKS from url content");
             e
