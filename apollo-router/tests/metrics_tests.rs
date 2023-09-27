@@ -11,7 +11,7 @@ const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
 const SUBGRAPH_AUTH_CONFIG: &str = include_str!("fixtures/subgraph_auth.router.yaml");
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_metrics_reloading() -> Result<(), BoxError> {
+async fn test_metrics_reloading() {
     let mut router = IntegrationTest::builder()
         .config(PROMETHEUS_CONFIG)
         .build()
@@ -68,12 +68,10 @@ async fn test_metrics_reloading() -> Result<(), BoxError> {
         router.assert_metrics_contains(r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#, Some(Duration::from_secs(120))).await;
         router.assert_metrics_contains(r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#, Some(Duration::from_secs(1))).await;
     }
-
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_subgraph_auth_metrics() -> Result<(), BoxError> {
+async fn test_subgraph_auth_metrics() {
     let mut router = IntegrationTest::builder()
         .config(SUBGRAPH_AUTH_CONFIG)
         .build()
@@ -108,6 +106,18 @@ async fn test_subgraph_auth_metrics() -> Result<(), BoxError> {
     );
 
     router.assert_metrics_contains(r#"apollo_router_operations_authentication_aws_sigv4_total{authentication_aws_sigv4_failed="false",subgraph_service_name="products",otel_scope_name="apollo/router"} 2"#, None).await;
+}
 
-    Ok(())
+#[tokio::test(flavor = "multi_thread")]
+async fn test_metrics_bad_query() {
+    let mut router = IntegrationTest::builder()
+        .config(SUBGRAPH_AUTH_CONFIG)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    // This query won't make it to the supergraph service
+    router.execute_bad_query().await;
+    router.assert_metrics_contains(r#"apollo_router_operations_total{http_response_status_code="400",otel_scope_name="apollo/router"} 1"#, None).await;
 }
