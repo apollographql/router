@@ -53,6 +53,8 @@ mod supergraph;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
+const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
+const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
 type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
 
@@ -595,7 +597,7 @@ where
     );
 
     tracing::debug!(?co_processor_result, "co-processor returned");
-    let co_processor_output = co_processor_result?;
+    let mut co_processor_output = co_processor_result?;
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
@@ -611,21 +613,29 @@ where
         // At this point our body is a String. Try to get a valid JSON value from it
         let body_as_value = co_processor_output
             .body
-            .and_then(|b| serde_json::from_str(&b).ok())
+            .as_ref()
+            .and_then(|b| serde_json::from_str(b).ok())
             .unwrap_or(serde_json::Value::Null);
         // Now we have some JSON, let's see if it's the right "shape" to create a graphql_response.
         // If it isn't, we create a graphql error response
-        let graphql_response: crate::graphql::Response = serde_json::from_value(body_as_value)
-            .unwrap_or_else(|error| {
+        let graphql_response: crate::graphql::Response = match body_as_value {
+            serde_json::Value::Null => crate::graphql::Response::builder()
+                .errors(vec![Error::builder()
+                    .message(co_processor_output.body.take().unwrap_or_default())
+                    .extension_code(COPROCESSOR_ERROR_EXTENSION)
+                    .build()])
+                .build(),
+            _ => serde_json::from_value(body_as_value).unwrap_or_else(|error| {
                 crate::graphql::Response::builder()
                     .errors(vec![Error::builder()
                         .message(format!(
                             "couldn't deserialize coprocessor output body: {error}"
                         ))
-                        .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
+                        .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
                         .build()])
                     .build()
-            });
+            }),
+        };
 
         let res = router::Response::builder()
             .errors(graphql_response.errors)
@@ -936,17 +946,24 @@ where
 
         let res = {
             let graphql_response: crate::graphql::Response =
-                serde_json::from_value(co_processor_output.body.unwrap_or(serde_json::Value::Null))
-                    .unwrap_or_else(|error| {
+                match co_processor_output.body.unwrap_or(serde_json::Value::Null) {
+                    serde_json::Value::String(s) => crate::graphql::Response::builder()
+                        .errors(vec![Error::builder()
+                            .message(s)
+                            .extension_code(COPROCESSOR_ERROR_EXTENSION)
+                            .build()])
+                        .build(),
+                    value => serde_json::from_value(value).unwrap_or_else(|error| {
                         crate::graphql::Response::builder()
                             .errors(vec![Error::builder()
                                 .message(format!(
                                     "couldn't deserialize coprocessor output body: {error}"
                                 ))
-                                .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
+                                .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
                                 .build()])
                             .build()
-                    });
+                    }),
+                };
 
             let mut http_response = http::Response::builder()
                 .status(code)
