@@ -188,14 +188,6 @@ expression: get_spans()
                   [
                     "apollo_private.operation_signature",
                     "# ExampleQuery\nquery ExampleQuery($reviewsForAuthorAuthorId:ID!,$topProductsFirst:Int){topProducts(first:$topProductsFirst){name reviewsForAuthor(authorID:$reviewsForAuthorAuthorId){author{id name}body}}}"
-                  ],
-                  [
-                    "monotonic_counter.apollo.router.operations",
-                    1
-                  ],
-                  [
-                    "http.response.status_code",
-                    400
                   ]
                 ],
                 "metadata": {

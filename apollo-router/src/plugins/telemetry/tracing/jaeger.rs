@@ -1,14 +1,9 @@
 //! Configuration for jaeger tracing.
 use std::fmt::Debug;
 
-use opentelemetry::sdk::export::trace::SpanData;
+use opentelemetry::runtime;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
-use opentelemetry::sdk::trace::Span;
-use opentelemetry::sdk::trace::SpanProcessor;
-use opentelemetry::sdk::trace::TracerProvider;
-use opentelemetry::trace::TraceResult;
-use opentelemetry::Context;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -102,7 +97,7 @@ impl TracingConfigurator for Config {
                 tracing::info!("Configuring Jaeger tracing: {}", batch_processor);
                 // We are waiting for a release of https://github.com/open-telemetry/opentelemetry-rust/issues/894
                 // Until that time we need to wrap a tracer provider with Jeager in.
-                let tracer_provider = opentelemetry_jaeger::new_collector_pipeline()
+                let exporter = opentelemetry_jaeger::new_collector_pipeline()
                     .with_trace_config(trace_config.into())
                     .with_service_name(trace_config.service_name.clone())
                     .with(&collector.username, |b, u| b.with_username(u))
@@ -110,34 +105,13 @@ impl TracingConfigurator for Config {
                     .with_endpoint(&collector.endpoint.to_string())
                     .with_reqwest()
                     .with_batch_processor_config(batch_processor.clone().into())
-                    .build_batch(opentelemetry::runtime::Tokio)?;
-                Ok(builder
-                    .with_span_processor(DelegateSpanProcessor { tracer_provider }.filtered()))
+                    .build_collector_exporter::<runtime::Tokio>()?;
+                Ok(builder.with_span_processor(
+                    BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
+                        .with_batch_config(batch_processor.clone().into())
+                        .build(),
+                ))
             }
         }
-    }
-}
-
-#[derive(Debug)]
-struct DelegateSpanProcessor {
-    tracer_provider: TracerProvider,
-}
-
-impl SpanProcessor for DelegateSpanProcessor {
-    fn on_start(&self, span: &mut Span, cx: &Context) {
-        self.tracer_provider.span_processors()[0].on_start(span, cx)
-    }
-
-    fn on_end(&self, span: SpanData) {
-        self.tracer_provider.span_processors()[0].on_end(span)
-    }
-
-    fn force_flush(&self) -> TraceResult<()> {
-        self.tracer_provider.span_processors()[0].force_flush()
-    }
-
-    fn shutdown(&mut self) -> TraceResult<()> {
-        // It's safe to not call shutdown as dropping tracer_provider will cause shutdown to happen separately.
-        Ok(())
     }
 }

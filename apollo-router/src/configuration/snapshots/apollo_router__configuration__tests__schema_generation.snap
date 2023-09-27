@@ -1009,6 +1009,37 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "experimental_batching": {
+      "description": "Batching configuration.",
+      "default": {
+        "enabled": false,
+        "mode": "batch_http_link"
+      },
+      "type": "object",
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "enabled": {
+          "description": "Activates Batching (disabled by default)",
+          "default": false,
+          "type": "boolean"
+        },
+        "mode": {
+          "description": "Batching mode",
+          "oneOf": [
+            {
+              "description": "batch_http_link",
+              "type": "string",
+              "enum": [
+                "batch_http_link"
+              ]
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "experimental_chaos": {
       "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions. You probably don’t want this in production!",
       "default": {
