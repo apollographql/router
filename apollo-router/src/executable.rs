@@ -28,6 +28,7 @@ use url::Url;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::Discussed;
+use crate::metrics::meter_provider;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router::ConfigurationSource;
@@ -468,8 +469,12 @@ impl Executable {
             None => Self::inner_start(shutdown, schema, config, license, opt).await,
         };
 
-        //We should be good to shutdown the tracer provider now as the router should have finished everything.
-        opentelemetry::global::shutdown_tracer_provider();
+        // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
+        tokio::task::spawn_blocking(move || {
+            opentelemetry::global::shutdown_tracer_provider();
+            meter_provider().shutdown();
+        })
+        .await?;
         result
     }
 
