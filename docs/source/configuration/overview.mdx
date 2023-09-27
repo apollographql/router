@@ -565,6 +565,8 @@ tls:
     key: ${file./path/to/key.pem}
 ```
 
+> To set the file paths in your configuration with Unix-style expansion, you can follow the examples in the [variable expansion](#variable-expansion) guide. 
+
 The router expects the file referenced in the `certificate_chain` value to be a combination of several PEM certificates concatenated together into a single file (as is commonplace with Apache TLS configuration).
 
 #### Overriding certificate authorities for subgraphs
