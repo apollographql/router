@@ -1029,7 +1029,7 @@ expression: "&schema"
           "description": "Batching mode",
           "oneOf": [
             {
-              "description": "batch_http_link mode",
+              "description": "batch_http_link",
               "type": "string",
               "enum": [
                 "batch_http_link"

@@ -1,3 +1,23 @@
+//! Be aware that this test file contains some fairly flaky tests which embed a number of
+//! assumptions about how traces and stats are reported to Apollo Studio.
+//!
+//! In particular:
+//!  - There are timings (sleeps) which work as things are implemented right now, but
+//!    may be sources of problems in the future.
+//!
+//!  - There is a global TEST lock which forces these tests to execute serially to stop router
+//!    global tracing effect from breaking the tests. DO NOT BE TEMPTED to remove this TEST lock to
+//!    try and speed things up (unless you have time and patience to re-work a lot of test code).
+//!
+//!  - There are assumptions about the different ways in which traces and metrics work. The main
+//!    limitation with these tests is that you are unlikely to get a single report containing all the
+//!    metrics that you need to make a test assertion. You might, but raciness in the way metrics are
+//!    generated in the router means you probably won't. That's why the test `test_batch_stats` has
+//!    its own stack of functions for testing and only tests that the total number of requests match.
+//!
+//! Summary: The dragons here are ancient and very evil. Do not attempt to take their treasure.
+//!
+use std::future::Future;
 use std::io::Read;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,6 +43,7 @@ use prost_types::Timestamp;
 use proto::reports::trace::Node;
 use serde_json::json;
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 use tower::Service;
 use tower::ServiceExt;
 use tower_http::decompression::DecompressionLayer;
@@ -40,7 +61,7 @@ static TEST: Lazy<Arc<Mutex<()>>> = Lazy::new(Default::default);
 async fn config(
     batch: bool,
     reports: Arc<Mutex<Vec<Report>>>,
-) -> (tokio::task::JoinHandle<()>, serde_json::Value) {
+) -> (JoinHandle<()>, serde_json::Value) {
     std::env::set_var("APOLLO_KEY", "test");
     std::env::set_var("APOLLO_GRAPH_REF", "test");
 
@@ -76,7 +97,7 @@ async fn config(
 async fn get_router_service(
     reports: Arc<Mutex<Vec<Report>>>,
     mocked: bool,
-) -> (tokio::task::JoinHandle<()>, BoxCloneService) {
+) -> (JoinHandle<()>, BoxCloneService) {
     let (task, config) = config(false, reports).await;
     let builder = TestHarness::builder()
         .try_log_level("INFO")
@@ -100,7 +121,7 @@ async fn get_router_service(
 async fn get_batch_router_service(
     reports: Arc<Mutex<Vec<Report>>>,
     mocked: bool,
-) -> (tokio::task::JoinHandle<()>, BoxCloneService) {
+) -> (JoinHandle<()>, BoxCloneService) {
     let (task, config) = config(true, reports).await;
     let builder = TestHarness::builder()
         .try_log_level("INFO")
@@ -199,7 +220,7 @@ async fn report(
 }
 
 async fn get_trace_report(reports: Arc<Mutex<Vec<Report>>>, request: router::Request) -> Report {
-    get_report(reports, false, request, |r| {
+    get_report(get_router_service, reports, false, request, |r| {
         !r.traces_per_query
             .values()
             .next()
@@ -214,7 +235,7 @@ async fn get_batch_trace_report(
     reports: Arc<Mutex<Vec<Report>>>,
     request: router::Request,
 ) -> Report {
-    get_batch_report(reports, false, request, |r| {
+    get_report(get_batch_router_service, reports, false, request, |r| {
         !r.traces_per_query
             .values()
             .next()
@@ -235,32 +256,36 @@ fn has_metrics(r: &&Report) -> bool {
 }
 
 async fn get_metrics_report(reports: Arc<Mutex<Vec<Report>>>, request: router::Request) -> Report {
-    get_report(reports, false, request, has_metrics).await
+    get_report(get_router_service, reports, false, request, has_metrics).await
 }
 
 async fn get_batch_metrics_report(
     reports: Arc<Mutex<Vec<Report>>>,
     request: router::Request,
-) -> Report {
-    get_batch_report(reports, false, request, has_metrics).await
+) -> u64 {
+    get_batch_stats_report(reports, false, request, has_metrics).await
 }
 
 async fn get_metrics_report_mocked(
     reports: Arc<Mutex<Vec<Report>>>,
     request: router::Request,
 ) -> Report {
-    get_report(reports, true, request, has_metrics).await
+    get_report(get_router_service, reports, true, request, has_metrics).await
 }
 
-async fn get_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
+async fn get_report<Fut, T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
+    service_fn: impl FnOnce(Arc<Mutex<Vec<Report>>>, bool) -> Fut,
     reports: Arc<Mutex<Vec<Report>>>,
     mocked: bool,
     request: router::Request,
     filter: T,
-) -> Report {
+) -> Report
+where
+    Fut: Future<Output = (JoinHandle<()>, BoxCloneService)>,
+{
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
-    let (task, mut service) = get_router_service(reports.clone(), mocked).await;
+    let (task, mut service) = service_fn(reports.clone(), mocked).await;
     let response = service
         .ready()
         .await
@@ -301,12 +326,12 @@ async fn get_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
         .expect("failed to find report")
 }
 
-async fn get_batch_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
+async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
     reports: Arc<Mutex<Vec<Report>>>,
     mocked: bool,
     request: router::Request,
     filter: T,
-) -> Report {
+) -> u64 {
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) = get_batch_router_service(reports.clone(), mocked).await;
@@ -318,36 +343,30 @@ async fn get_batch_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static
         .await
         .expect("router service call failed");
 
-    // Drain the response
-    let mut found_report = match hyper::body::to_bytes(response.response.into_body())
-        .await
-        .map(|b| String::from_utf8(b.to_vec()))
-    {
-        Ok(Ok(response)) => {
-            if response.contains("errors") {
-                eprintln!("response had errors {response}");
-            }
-            Ok(None)
-        }
-        _ => Err(anyhow!("error retrieving response")),
-    };
+    // Drain the response (and throw it away)
+    let _found_report = hyper::body::to_bytes(response.response.into_body()).await;
 
-    // We must always try to find the report regardless of if the response had failures
-    for _ in 0..10 {
-        let my_reports = reports.lock().await;
-        let report = my_reports.iter().find(filter);
-        if report.is_some() && matches!(found_report, Ok(None)) {
-            found_report = Ok(report.cloned());
-            break;
-        }
-        drop(my_reports);
-        tokio::time::sleep(Duration::from_millis(100)).await;
+    // Give the server a little time to export something
+    // If this test fails, consider increasing this time.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let mut request_count = 0;
+
+    // In a more ideal world we would have an implementation of `AddAssign<&reports::Report>
+    // However we don't. Let's do the minimal amount of checking and ensure that at least the
+    // number of requests can be tested. Clearly, this doesn't test all of the stats, but it's a
+    // fairly reliable check and at least we are testing something.
+    for report in reports.lock().await.iter().filter(filter) {
+        let stats = &report
+            .traces_per_query
+            .values()
+            .next()
+            .expect("has something")
+            .stats_with_context;
+        request_count += stats[0].query_latency_stats.as_ref().unwrap().request_count;
     }
     task.abort();
-
-    found_report
-        .expect("failed to get report")
-        .expect("failed to find report")
+    request_count
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -515,7 +534,6 @@ async fn test_stats() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn test_batch_stats() {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -523,7 +541,7 @@ async fn test_batch_stats() {
         .unwrap()
         .supergraph_request
         .map(|req| {
-            // Modify the request so that it is a valid array of requests.
+            // Modify the request so that it is a valid array containing 2 requests.
             let mut json_bytes = serde_json::to_vec(&req).unwrap();
             let mut result = vec![b'['];
             result.append(&mut json_bytes.clone());
@@ -533,8 +551,12 @@ async fn test_batch_stats() {
             hyper::Body::from(result)
         });
     let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_batch_metrics_report(reports, request.into()).await;
-    assert_report!(report);
+    // We can't do a report assert here because we will probably have multiple reports which we
+    // can't merge...
+    // Let's call a function that enables us to at least assert that we received the correct number
+    // of requests.
+    let request_count = get_batch_metrics_report(reports, request.into()).await;
+    assert_eq!(2, request_count);
 }
 
 #[tokio::test(flavor = "multi_thread")]
