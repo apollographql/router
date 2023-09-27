@@ -833,12 +833,6 @@ impl Telemetry {
                 if !parts.status.is_success() {
                     metric_attrs.push(KeyValue::new("error", parts.status.to_string()));
                 }
-                u64_counter!(
-                    "apollo.router.operations",
-                    "The number of graphql operations performed by the Router",
-                    1,
-                    "http.response.status_code" = parts.status.as_u16() as i64
-                );
                 let response = http::Response::from_parts(
                     parts,
                     once(ready(first_response.unwrap_or_default()))
@@ -850,12 +844,6 @@ impl Telemetry {
             }
             Err(err) => {
                 metric_attrs.push(KeyValue::new("status", "500"));
-                u64_counter!(
-                    "apollo.router.operations",
-                    "The number of graphql operations performed by the Router",
-                    1,
-                    "http.response.status_code" = 500
-                );
                 Err(err)
             }
         };

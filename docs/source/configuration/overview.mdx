@@ -238,7 +238,7 @@ If set, disables sending anonymous usage information to Apollo.
 </td>
 <td>
 
-If set, the listen address of the router. 
+If set, the listen address of the router.
 
 </td>
 </tr>
@@ -565,6 +565,8 @@ tls:
     key: ${file./path/to/key.pem}
 ```
 
+> To set the file paths in your configuration with Unix-style expansion, you can follow the examples in the [variable expansion](#variable-expansion) guide. 
+
 The router expects the file referenced in the `certificate_chain` value to be a combination of several PEM certificates concatenated together into a single file (as is commonplace with Apache TLS configuration).
 
 #### Overriding certificate authorities for subgraphs
@@ -611,7 +613,7 @@ This produces the file as `server.crt` which can be used in `certificate_authori
 
 #### TLS client authentication for subgraph requests
 
-The router support mutual TLS authentication (mTLS) with the subgraphs. This means that it can authenticate itself to the subgraph using a certificate chain and a cryptographic key. It can be configured as follows:
+The router supports mutual TLS authentication (mTLS) with the subgraphs. This means that it can authenticate itself to the subgraph using a certificate chain and a cryptographic key. It can be configured as follows:
 
 ```yaml
 tls:
