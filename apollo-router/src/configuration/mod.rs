@@ -185,6 +185,10 @@ pub struct Configuration {
 
     #[serde(default, skip_serializing, skip_deserializing)]
     pub(crate) notify: Notify<String, graphql::Response>,
+
+    /// Batching configuration.
+    #[serde(default)]
+    pub(crate) experimental_batching: Batching,
 }
 
 impl PartialEq for Configuration {
@@ -234,6 +238,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: Limits,
             experimental_chaos: Chaos,
             experimental_graphql_validation_mode: GraphQLValidationMode,
+            experimental_batching: Batching,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -252,6 +257,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .chaos(ad_hoc.experimental_chaos)
             .uplink(ad_hoc.uplink)
             .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
+            .experimental_batching(ad_hoc.experimental_batching)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -288,6 +294,7 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
+        experimental_batching: Option<Batching>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -322,6 +329,7 @@ impl Configuration {
             },
             tls: tls.unwrap_or_default(),
             uplink,
+            experimental_batching: experimental_batching.unwrap_or_default(),
             #[cfg(test)]
             notify: notify.unwrap_or_default(),
             #[cfg(not(test))]
@@ -360,6 +368,7 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
+        experimental_batching: Option<Batching>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -382,6 +391,7 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             preview_persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
+            experimental_batching: experimental_batching.unwrap_or_default(),
         };
 
         configuration.validate()
@@ -1272,4 +1282,24 @@ fn default_graphql_path() -> String {
 
 fn default_graphql_introspection() -> bool {
     false
+}
+
+#[derive(Clone, Debug, Default, Error, Display, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum BatchingMode {
+    /// batch_http_link
+    #[default]
+    BatchHttpLink,
+}
+
+/// Configuration for Batching
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Batching {
+    /// Activates Batching (disabled by default)
+    #[serde(default)]
+    pub(crate) enabled: bool,
+
+    /// Batching mode
+    pub(crate) mode: BatchingMode,
 }

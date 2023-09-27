@@ -3,6 +3,8 @@ use std::collections::HashMap;
 
 use indexmap::map::Entry;
 use indexmap::IndexMap;
+use opentelemetry::sdk::metrics::reader::TemporalitySelector;
+use opentelemetry::sdk::metrics::InstrumentKind;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
@@ -216,6 +218,29 @@ pub(crate) enum Temporality {
     Cumulative,
     /// Export delta metrics. `Delta` should be used when exporting to DataDog Agent.
     Delta,
+}
+
+pub(crate) struct CustomTemporalitySelector(
+    pub(crate) opentelemetry::sdk::metrics::data::Temporality,
+);
+
+impl TemporalitySelector for CustomTemporalitySelector {
+    fn temporality(&self, _kind: InstrumentKind) -> opentelemetry::sdk::metrics::data::Temporality {
+        self.0
+    }
+}
+
+impl From<&Temporality> for Box<dyn TemporalitySelector> {
+    fn from(value: &Temporality) -> Self {
+        Box::new(match value {
+            Temporality::Cumulative => CustomTemporalitySelector(
+                opentelemetry::sdk::metrics::data::Temporality::Cumulative,
+            ),
+            Temporality::Delta => {
+                CustomTemporalitySelector(opentelemetry::sdk::metrics::data::Temporality::Delta)
+            }
+        })
+    }
 }
 
 mod metadata_map_serde {
