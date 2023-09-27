@@ -8,6 +8,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
 
+use crate::configuration::BatchingMode;
 use crate::json_ext::Object;
 
 /// A GraphQL `Request` used to represent both supergraph and subgraph requests.
@@ -198,12 +199,12 @@ impl Request {
         if value.is_array() {
             tracing::info!(
                 histogram.apollo_router.operations.batching.size = result.len() as f64,
-                mode = "batch_http_link" // Only supported mode right now
+                mode = %BatchingMode::BatchHttpLink // Only supported mode right now
             );
 
             tracing::info!(
                 monotonic_counter.apollo_router.operations.batching = 1u64,
-                mode = "batch_http_link" // Only supported mode right now
+                mode = %BatchingMode::BatchHttpLink // Only supported mode right now
             );
             for entry in value
                 .as_array()
