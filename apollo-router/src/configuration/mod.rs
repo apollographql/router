@@ -1287,7 +1287,7 @@ fn default_graphql_introspection() -> bool {
 #[derive(Clone, Debug, Default, Error, Display, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum BatchingMode {
-    /// batch_http_link mode
+    /// batch_http_link
     #[default]
     BatchHttpLink,
 }
