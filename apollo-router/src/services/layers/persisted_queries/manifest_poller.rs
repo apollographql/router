@@ -398,19 +398,18 @@ async fn poll_uplink(
     while let Some(event) = uplink_executor.next().await {
         match event {
             ManifestPollEvent::NewManifest(new_manifest) => {
-                let freeform_graphql_behavior = if config.preview_persisted_queries.safelist.enabled
-                {
-                    if config.preview_persisted_queries.safelist.require_id {
+                let freeform_graphql_behavior = if config.persisted_queries.safelist.enabled {
+                    if config.persisted_queries.safelist.require_id {
                         FreeformGraphQLBehavior::DenyAll {
-                            log_unknown: config.preview_persisted_queries.log_unknown,
+                            log_unknown: config.persisted_queries.log_unknown,
                         }
                     } else {
                         FreeformGraphQLBehavior::AllowIfInSafelist {
                             safelist: FreeformGraphQLSafelist::new(&new_manifest),
-                            log_unknown: config.preview_persisted_queries.log_unknown,
+                            log_unknown: config.persisted_queries.log_unknown,
                         }
                     }
-                } else if config.preview_persisted_queries.log_unknown {
+                } else if config.persisted_queries.log_unknown {
                     FreeformGraphQLBehavior::LogUnlessInSafelist {
                         safelist: FreeformGraphQLSafelist::new(&new_manifest),
                         apq_enabled: config.apq.enabled,
