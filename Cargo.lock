@@ -222,7 +222,7 @@ checksum = "d9c5a0aa9cc4b5f9fc4aec3ecd76f4acc4407922c3c0e862b87f1c761c96a9bf"
 dependencies = [
  "apollo-parser 0.6.2",
  "ariadne",
- "indexmap 2.0.0",
+ "indexmap 2.0.1",
  "ordered-float 3.9.0",
  "rowan",
  "salsa",
@@ -311,7 +311,7 @@ dependencies = [
  "humantime-serde",
  "hyper",
  "hyper-rustls",
- "indexmap 2.0.0",
+ "indexmap 2.0.1",
  "insta",
  "itertools 0.11.0",
  "jsonpath-rust",
@@ -3399,9 +3399,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.0.0"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5477fe2230a79769d8dc68e0eabf5437907c0457a5614a9e8dddb67f65eb65d"
+checksum = "ad227c3af19d4914570ad36d30409928b75967c298feb9ea1969db3a610bb14e"
 dependencies = [
  "equivalent",
  "hashbrown 0.14.0",
@@ -3458,9 +3458,9 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.32.0"
+version = "1.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3e02c584f4595792d09509a94cdb92a3cef7592b1eb2d9877ee6f527062d0ea"
+checksum = "1aa511b2e298cd49b1856746f6bb73e17036bcd66b25f5e92cdcdbec9bd75686"
 dependencies = [
  "console 0.15.7",
  "lazy_static",
@@ -4678,7 +4678,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1d3afd2628e69da2be385eb6f2fd57c8ac7977ceeff6dc166ff1657b0e386a9"
 dependencies = [
  "fixedbitset",
- "indexmap 2.0.0",
+ "indexmap 2.0.1",
  "serde",
  "serde_derive",
 ]
@@ -5840,7 +5840,7 @@ version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b420ce6e3d8bd882e9b243c6eed35dbc9a6110c9769e74b584e0d68d1f20c65"
 dependencies = [
- "indexmap 2.0.0",
+ "indexmap 2.0.1",
  "itoa",
  "ryu",
  "serde",
@@ -5853,7 +5853,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "feb260b2939374fad6f939f803662d4971d03395fcd03752b674bdba06565779"
 dependencies = [
  "bytes",
- "indexmap 2.0.0",
+ "indexmap 2.0.1",
  "serde",
  "serde_json",
 ]
@@ -6695,7 +6695,7 @@ version = "0.19.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8123f27e969974a3dfba720fdb560be359f57b44302d280ba72e76a74480e8a"
 dependencies = [
- "indexmap 2.0.0",
+ "indexmap 2.0.1",
  "serde",
  "serde_spanned",
  "toml_datetime",

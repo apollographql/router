@@ -99,7 +99,7 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "0.14.27", features = ["server", "client"] }
 hyper-rustls = { version = "0.24.1", features = ["http1", "http2"] }
-indexmap = { version = "2.0.0", features = ["serde"] }
+indexmap = { version = "2.0.1", features = ["serde"] }
 itertools = "0.11.0"
 jsonpath_lib = "0.3.0"
 jsonpath-rust = "0.3.2"
@@ -267,7 +267,7 @@ axum = { version = "0.6.20", features = [
 ecdsa = { version = "0.15.1", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "6.3.2", features = ["enable-rustls", "no-client-setname"] }
 futures-test = "0.3.28"
-insta = { version = "1.32.0", features = ["json", "redactions", "yaml"] }
+insta = { version = "1.33.0", features = ["json", "redactions", "yaml"] }
 maplit = "1.0.2"
 memchr = { version = "2.6.3", default-features = false }
 mockall = "0.11.4"
