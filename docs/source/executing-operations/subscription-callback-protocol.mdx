@@ -102,6 +102,7 @@ The protocol's main loop remains active for the duration of the subscription. Du
 ## Message types
 
 During the [protocol flow](#protocol-flow), **Subgraph** and **Emitter** send various messages to **Router**'s callback URL via HTTP POST requests.
+All HTTP requests should include callback protocol version header (`subscription-protocol: callback/1.0`).
 
 _All_ of these messages include the following base properties in their JSON body:
 
@@ -213,7 +214,7 @@ If `id` and `verifier` both match **Router**'s provided values, **Router** shoul
 
 - A 204 HTTP status code
 - An empty response body
-- The response header `subscription-protocol: callback`
+- The response header that specifies the maximum supported protocol version `subscription-protocol: callback/1.0`
 
 Otherwise, **Router** should respond with an error.
 
