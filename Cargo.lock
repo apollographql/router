@@ -5202,7 +5202,6 @@ name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
  "apollo-parser 0.6.2",
- "apollo-router",
  "apollo-smith",
  "clap 4.4.5",
  "env_logger",
