@@ -59,8 +59,7 @@
         "Safelisting with persisted queries": [
           "/configuration/persisted-queries",
           [
-            "enterprise",
-            "preview"
+            "enterprise"
           ]
         ],
         "Privacy and data collection": "/privacy"
