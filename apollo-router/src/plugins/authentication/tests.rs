@@ -922,7 +922,7 @@ async fn it_rejects_key_with_restricted_algorithm() {
 }
 
 #[tokio::test]
-async fn it_rejects_key_with_restricted_algorithm_and_unknown_jwks_algorithm() {
+async fn it_rejects_and_accepts_keys_with_restricted_algorithms_and_unknown_jwks_algorithm() {
     let mut sets = vec![];
     let mut urls = vec![];
 
@@ -936,7 +936,7 @@ async fn it_rejects_key_with_restricted_algorithm_and_unknown_jwks_algorithm() {
         urls.push(JwksConfig {
             url,
             issuer: None,
-            algorithms: Some(HashSet::from([Algorithm::RS256, Algorithm::HS256])),
+            algorithms: Some(HashSet::from([Algorithm::RS256])),
         });
     }
 
@@ -948,8 +948,9 @@ async fn it_rejects_key_with_restricted_algorithm_and_unknown_jwks_algorithm() {
         alg: Algorithm::HS256,
     };
 
-    assert!(search_jwks(&jwks_manager, &criteria).is_some());
+    assert!(search_jwks(&jwks_manager, &criteria).is_none());
 
+    // the JWT contains a RSA key (configured to allow)
     let criteria = JWTCriteria {
         kid: None,
         alg: Algorithm::RS256,
