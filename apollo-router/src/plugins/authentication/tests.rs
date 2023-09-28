@@ -920,3 +920,40 @@ async fn it_rejects_key_with_restricted_algorithm() {
 
     assert!(search_jwks(&jwks_manager, &criteria).is_none());
 }
+
+#[tokio::test]
+async fn it_rejects_key_with_restricted_algorithm_and_unknown_jwks_algorithm() {
+    let mut sets = vec![];
+    let mut urls = vec![];
+
+    // Use a jwks which contains an algorithm (ES512) which jsonwebtoken doesn't support
+    let jwks_url = create_an_url("jwks-unknown-alg.json");
+
+    sets.push(jwks_url);
+
+    for s_url in &sets {
+        let url: Url = Url::from_str(s_url).expect("created a valid url");
+        urls.push(JwksConfig {
+            url,
+            issuer: None,
+            algorithms: Some(HashSet::from([Algorithm::RS256, Algorithm::HS256])),
+        });
+    }
+
+    let jwks_manager = JwksManager::new(urls).await.unwrap();
+
+    // the JWT contains a HMAC key but we configured a restriction to RSA signing
+    let criteria = JWTCriteria {
+        kid: None,
+        alg: Algorithm::HS256,
+    };
+
+    assert!(search_jwks(&jwks_manager, &criteria).is_some());
+
+    let criteria = JWTCriteria {
+        kid: None,
+        alg: Algorithm::RS256,
+    };
+
+    assert!(search_jwks(&jwks_manager, &criteria).is_some());
+}
