@@ -78,7 +78,7 @@ All actions described in these steps are performed by one of **Router**, **Subgr
     - If the `check` message is valid, **Router** responds with the following details:
       - A 204 HTTP status code
       - An empty response body
-      - The response header that specifies maximum supported protocol version `subscription-protocol: callback/1.0`
+      - The response header that specifies the maximum supported protocol version `subscription-protocol: callback/1.0`
     - If the `check` message is _invalid_, **Router** responds with a status code _besides_ 204 (400-level recommended).
       - If this occurs, **Subgraph** then responds to **Router**'s request with a 400-level status code, and the subscription is canceled.
 
