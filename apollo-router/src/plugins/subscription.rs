@@ -706,6 +706,12 @@ mod tests {
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
+        assert_eq!(
+            resp.headers()
+                .get(CALLBACK_SUBSCRIPTION_HEADER_NAME)
+                .unwrap(),
+            &CALLBACK_SUBSCRIPTION_HEADER_VALUE
+        );
 
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
@@ -924,6 +930,12 @@ mod tests {
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
+        assert_eq!(
+            resp.headers()
+                .get(CALLBACK_SUBSCRIPTION_HEADER_NAME)
+                .unwrap(),
+            &CALLBACK_SUBSCRIPTION_HEADER_VALUE
+        );
 
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
