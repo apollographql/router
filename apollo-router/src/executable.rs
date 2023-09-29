@@ -419,9 +419,7 @@ impl Executable {
         config: Option<ConfigurationSource>,
         cli_args: Option<Opt>,
     ) -> Result<()> {
-        tracing::info!("before");
         let opt = cli_args.unwrap_or_else(Opt::parse);
-        tracing::info!("here {opt:?}");
 
         if opt.version {
             println!("{}", std::env!("CARGO_PKG_VERSION"));
@@ -439,7 +437,6 @@ impl Executable {
             return Ok(());
         }
 
-        tracing::info!("-----");
         let result = match opt.command.as_ref() {
             Some(Commands::Config(ConfigSubcommandArgs {
                 command: ConfigSubcommand::Schema,
@@ -470,7 +467,6 @@ impl Executable {
             }
             None => Self::inner_start(shutdown, schema, config, license, opt).await,
         };
-        tracing::info!("after");
 
         //We should be good to shutdown the tracer provider now as the router should have finished everything.
         opentelemetry::global::shutdown_tracer_provider();
