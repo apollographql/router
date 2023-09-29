@@ -1,14 +1,27 @@
 ---
 title: Containerizing the Apollo Router
+description: Running Apollo Router images in containers
 ---
 
 import ElasticNotice from '../../shared/elastic-notice.mdx';
 
-> More details about Apollo Router images are available [on GitHub](https://github.com/apollographql/router/pkgs/container/router).
-
-Each release of the Apollo Router includes both default and debug images. Each image for a release contains the same build. Debug images have helpful debugging utilities installed and run the router under the control of heaptrack (https://github.com/KDE/heaptrack).
-
 <ElasticNotice />
+
+Apollo provides container images of the Apollo Router [on GitHub](https://github.com/apollographql/router/pkgs/container/router).
+
+Each release of the Apollo Router includes both default (production) and debug images. While each image for a release contains the same build, the debug images have helpful debugging utilities installed and run the router under the control of heaptrack (https://github.com/KDE/heaptrack).
+
+## Example running router with Docker
+
+To run the router, your Docker container must have the `APOLLO_GRAPH_REF` and `APOLLO_KEY` environment variables set to your graph's reference and ID, respectively. (TODO: link to env var reference)
+
+- The reference of your graph in Apollo's registry (`<your-graph-ref>`).
+-  The [graph API key](https://www.apollographql.com/docs/studio/api-keys/#graph-api-keys) that Apollo Server should use to authenticate with Apollo Studio. You can set this with the `APOLLO_KEY` environment variable. (`<your-graph-id>`).
+
+- `graphRef`: A reference of your graph in Apollo's registry, such as `graph-id@my-variant` or just `graph-id`. You can set this with the `APOLLO_GRAPH_REF` environment variable.
+- `graphId`: The ID of your graph in Apollo's registry. You can set this with the `APOLLO_GRAPH_ID` environment variable. You may not specify this if you specify the graph ref.
+
+- Set your `APOLLO_GRAPH_REF` and `APOLLO_KEY` 
 
 Here's a basic example of running a router image with Docker (make sure to replace `<image version>` with whichever version you want to use, such as `v1.4.0`):
 
