@@ -5203,13 +5203,11 @@ version = "0.0.0"
 dependencies = [
  "apollo-parser 0.6.2",
  "apollo-smith",
- "clap 4.4.5",
  "env_logger",
  "libfuzzer-sys",
  "log",
  "reqwest",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
