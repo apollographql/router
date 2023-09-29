@@ -55,7 +55,8 @@ All actions described in these steps are performed by one of **Router**, **Subgr
     - `subscription_id`: The generated unique ID for the subscription operation
     - `verifier`: A string that **Emitter** will include in all HTTP callback requests to verify its identity
 
-3. _Before **Subgraph** responds to **Router**'s request,_ it sends a [`check` message](#check) to the provided `callback_url` for confirmation from **Router**:
+3. _Before **Subgraph** responds to **Router**'s request,_ it sends a [`check` message](#check) with callback protocol version header
+(`subscription-protocol: callback/1.0`) to the provided `callback_url` for confirmation from **Router**:
 
     ```json
     {
@@ -77,13 +78,13 @@ All actions described in these steps are performed by one of **Router**, **Subgr
     - If the `check` message is valid, **Router** responds with the following details:
       - A 204 HTTP status code
       - An empty response body
-      - The response header `subscription-protocol: callback`
+      - The response header that specifies the maximum supported protocol version `subscription-protocol: callback/1.0`
     - If the `check` message is _invalid_, **Router** responds with a status code _besides_ 204 (400-level recommended).
       - If this occurs, **Subgraph** then responds to **Router**'s request with a 400-level status code, and the subscription is canceled.
 
 5. If validation succeeds, **Subgraph** spawns a background process or notifies a separate system (**Emitter**) to begin listening for subscription events.
 
-6. **Subgraph** finally responds to **Router** with a 200-level status code. This indicates to **Router** that the subscription has been initialized.
+6. **Subgraph** finally responds to **Router** with a 200-level status code and empty data GraphQL response (`{ "data": null }`). This indicates to **Router** that the subscription has been initialized.
 
 With initialization complete, the protocol commences its [main loop](#main-loop).
 
@@ -101,6 +102,7 @@ The protocol's main loop remains active for the duration of the subscription. Du
 ## Message types
 
 During the [protocol flow](#protocol-flow), **Subgraph** and **Emitter** send various messages to **Router**'s callback URL via HTTP POST requests.
+All HTTP requests should include callback protocol version header (`subscription-protocol: callback/1.0`).
 
 _All_ of these messages include the following base properties in their JSON body:
 
@@ -212,7 +214,7 @@ If `id` and `verifier` both match **Router**'s provided values, **Router** shoul
 
 - A 204 HTTP status code
 - An empty response body
-- The response header `subscription-protocol: callback`
+- The response header that specifies the maximum supported protocol version `subscription-protocol: callback/1.0`
 
 Otherwise, **Router** should respond with an error.
 
