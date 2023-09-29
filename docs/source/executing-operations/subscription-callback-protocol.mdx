@@ -92,7 +92,7 @@ With initialization complete, the protocol commences its [main loop](#main-loop)
 
 The protocol's main loop remains active for the duration of the subscription. During the main loop, all of the following occur:
 
-- Every five seconds, **Emitter** must send a [`heartbeat` message](#heartbeat) to **Router** to confirm that **Router** is still listening.
+- Every five seconds, **Emitter** must send a [`check` message](#check) to **Router** to confirm that **Router** is still listening.
 - Whenever new subscription data is available, **Emitter** sends a [`next` message](#next) to **Router** containing the new data.
 - If an error occurs and the subscription must be terminated, **Emitter** sends a [`complete` message](#complete) to **Router** and includes the `errors` field.
 - If the subscription reaches the end of its stream and no new data is forthcoming, **Emitter** sends a [`complete` message](#complete) to **Router** and _omits_ the `errors` field.
@@ -197,7 +197,7 @@ Fields and behaviors specific to individual message types are documented below.
 
 During protocol [initialization](#initialization), **Subgraph** sends a synchronous `check` message to **Router** to help ensure that it can send callbacks successfully, and that the `id` and `verifier` fields provided by **Router** are correct.
 
-> While subscriptions are active, you can also use a `check` message in place of a [`heartbeat`](#heartbeat) message if you only need to verify _one_ active subscription. (If you want to verify _multiple_ active subscriptions with a single message, use `heartbeat`.)
+As long as subscription is active, **Emitter** must send a `check` message to **Router** every five seconds. This enables **Emitter** to confirm both that it can still reach **Router**'s callback endpoint, and that subscription is still active.
 
 A `check` message includes only [base message fields](#message-types):
 
@@ -216,31 +216,9 @@ If `id` and `verifier` both match **Router**'s provided values, **Router** shoul
 - An empty response body
 - The response header that specifies the maximum supported protocol version `subscription-protocol: callback/1.0`
 
-Otherwise, **Router** should respond with an error.
+Otherwise, **Router** should respond with an error and subgraph should terminate the associated subscription.
 
 > During [initialization](#initialization), **Subgraph** _must_ send this message _synchronously_. That's because it sends this message to **Router** to confirm a subscription request from **Router**, _before responding to that request_.
-
-### `heartbeat`
-
-**Emitter** must send a `heartbeat` message to **Router** every five seconds. This enables **Emitter** to confirm both that it can still reach **Router**'s callback endpoint, and that subscription is still active.
-
-```json
-{
-    "kind": "subscription",
-    "action": "heartbeat",
-    "id": "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
-    "verifier": "XXX"
-}
-```
-
-On receiving a `heartbeat` message, **Router** checks whether subscription is still active on _its_ end.
-
-- If subscription is active, **Router** should respond with the following details:
-  - A 204 HTTP status code
-  - An empty response body
-- If subscription is _inactive_, **Router** should respond with the following details:
-  - A 404 HTTP status code
-  - An empty response body
 
 ### `next`
 
