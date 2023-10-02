@@ -40,21 +40,21 @@ For more information on other configuration aspects, see the [GraphOS persisted 
 
 The router provides four configuration options that you can combine to create the recommended [security levels](#router-security-levels). This section details each configuration option. Refer to the [security levels](#router-security-levels) section for recommended combinations.
 
-#### `preview_persisted_queries`
+#### `persisted_queries`
 
 This base configuration enables the feature. All other configuration options build off this one.
 
 ```yaml title="router.yaml"
-preview_persisted_queries:
+persisted_queries:
   enabled: true
 ```
 
 #### `log_unknown`
 
-Adding `log_unknown: true` to `preview_persisted_queries` configures the router to log any incoming operations not registered to the PQL.
+Adding `log_unknown: true` to `persisted_queries` configures the router to log any incoming operations not registered to the PQL.
 
 ```yaml title="router.yaml"
-preview_persisted_queries:
+persisted_queries:
   enabled: true
   log_unknown: true
 ```
@@ -63,10 +63,10 @@ If used with the [`safelist`](#safelist) option, the router logs unregistered an
 
 #### `safelist`
 
-Adding `safelist: true` to `preview_persisted_queries` causes the router to reject any operations that haven't been registered to your PQL.
+Adding `safelist: true` to `persisted_queries` causes the router to reject any operations that haven't been registered to your PQL.
 
 ```yaml title="router.yaml"
-preview_persisted_queries:
+persisted_queries:
   enabled: true
   safelist:
     enabled: true
@@ -85,7 +85,7 @@ Adding `require_id: true` to the `safelist` option causes the router to reject a
 - use a full operation string rather than the operation ID
 
 ```yaml title="router.yaml"
-preview_persisted_queries:
+persisted_queries:
   enabled: true
   safelist:
     enabled: true
