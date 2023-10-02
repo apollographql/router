@@ -19,15 +19,11 @@ use tower::ServiceExt;
 
 use self::authenticated::AuthenticatedCheckVisitor;
 use self::authenticated::AuthenticatedVisitor;
-use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
 use self::policy::PolicyExtractionVisitor;
 use self::policy::PolicyFilteringVisitor;
-use self::policy::POLICY_DIRECTIVE_NAME;
 use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
-use self::scopes::REQUIRES_SCOPES_DIRECTIVE_NAME;
 use crate::error::QueryPlannerError;
-use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::json_ext::Path;
