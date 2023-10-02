@@ -19,11 +19,15 @@ use tower::ServiceExt;
 
 use self::authenticated::AuthenticatedCheckVisitor;
 use self::authenticated::AuthenticatedVisitor;
+use self::authenticated::AUTHENTICATED_SPEC_URL;
 use self::policy::PolicyExtractionVisitor;
 use self::policy::PolicyFilteringVisitor;
+use self::policy::POLICY_SPEC_URL;
 use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
+use self::scopes::REQUIRES_SCOPES_SPEC_URL;
 use crate::error::QueryPlannerError;
+use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::json_ext::Path;
@@ -31,6 +35,9 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authorization::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
+use crate::plugins::authorization::policy::POLICY_DIRECTIVE_NAME;
+use crate::plugins::authorization::scopes::REQUIRES_SCOPES_DIRECTIVE_NAME;
 use crate::query_planner::FilteredQuery;
 use crate::query_planner::QueryKey;
 use crate::register_plugin;
@@ -87,7 +94,7 @@ pub(crate) struct AuthorizationPlugin {
 impl AuthorizationPlugin {
     pub(crate) fn enable_directives(
         configuration: &Configuration,
-        _schema: &Schema,
+        schema: &Schema,
     ) -> Result<bool, ServiceBuildError> {
         let has_config = configuration
             .apollo_plugins
@@ -96,21 +103,9 @@ impl AuthorizationPlugin {
             .find(|(s, _)| s.as_str() == "authorization")
             .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
             .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()));
-        let has_authorization_directives = schema
-            .type_system
-            .definitions
-            .directives
-            .contains_key(AUTHENTICATED_DIRECTIVE_NAME)
-            || schema
-                .type_system
-                .definitions
-                .directives
-                .contains_key(REQUIRES_SCOPES_DIRECTIVE_NAME)
-            || schema
-                .type_system
-                .definitions
-                .directives
-                .contains_key(POLICY_DIRECTIVE_NAME);
+        let has_authorization_directives = schema.has_spec(AUTHENTICATED_SPEC_URL)
+            || schema.has_spec(REQUIRES_SCOPES_SPEC_URL)
+            || schema.has_spec(POLICY_SPEC_URL);
 
         match has_config {
             Some(b) => Ok(b),

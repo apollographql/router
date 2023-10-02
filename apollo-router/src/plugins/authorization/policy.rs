@@ -29,6 +29,7 @@ pub(crate) struct PolicyExtractionVisitor<'a> {
 }
 
 pub(crate) const POLICY_DIRECTIVE_NAME: &str = "policy";
+pub(crate) const POLICY_SPEC_URL: &str = "https://specs.apollo.dev/policy/v0.1";
 
 impl<'a> PolicyExtractionVisitor<'a> {
     #[allow(dead_code)]

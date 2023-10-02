@@ -21,6 +21,7 @@ use crate::json_ext::PathElement;
 use crate::spec::query::transform;
 use crate::spec::query::transform::get_field_type;
 use crate::spec::query::traverse;
+use crate::spec::Schema;
 
 pub(crate) struct ScopeExtractionVisitor<'a> {
     compiler: &'a ApolloCompiler,
@@ -30,33 +31,20 @@ pub(crate) struct ScopeExtractionVisitor<'a> {
 }
 
 pub(crate) const REQUIRES_SCOPES_DIRECTIVE_NAME: &str = "requiresScopes";
+pub(crate) const REQUIRES_SCOPES_SPEC_URL: &str = "https://specs.apollo.dev/requiresScopes/v0.1";
 
 impl<'a> ScopeExtractionVisitor<'a> {
     #[allow(dead_code)]
     pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Option<Self> {
-        let requires_scopes_directive_name = if let Some(link) = compiler
-            .db
-            .schema()
-            .directives_by_name("link")
-            .filter(|link| {
-                link.argument_by_name("url")
-                    .and_then(|value| value.as_str())
-                    == Some("https://specs.apollo.dev/requiresScopes/v0.1")
-            })
-            .next()
-        {
-            link.argument_by_name("as")
-                .and_then(|value| value.as_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| REQUIRES_SCOPES_DIRECTIVE_NAME.to_string())
-        } else {
-            return None;
-        };
-
         Some(Self {
             compiler,
             file_id,
             extracted_scopes: HashSet::new(),
-            requires_scopes_directive_name,
+            requires_scopes_directive_name: Schema::directive_name(
+                compiler,
+                REQUIRES_SCOPES_SPEC_URL,
+                REQUIRES_SCOPES_DIRECTIVE_NAME,
+            )?,
         })
     }
 
@@ -222,24 +210,6 @@ impl<'a> ScopeFilteringVisitor<'a> {
         file_id: FileId,
         scopes: HashSet<String>,
     ) -> Option<Self> {
-        let requires_scopes_directive_name = if let Some(link) = compiler
-            .db
-            .schema()
-            .directives_by_name("link")
-            .filter(|link| {
-                link.argument_by_name("url")
-                    .and_then(|value| value.as_str())
-                    == Some("https://specs.apollo.dev/requiresScopes/v0.1")
-            })
-            .next()
-        {
-            link.argument_by_name("as")
-                .and_then(|value| value.as_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| REQUIRES_SCOPES_DIRECTIVE_NAME.to_string())
-        } else {
-            return None;
-        };
-
         Some(Self {
             compiler,
             file_id,
@@ -247,7 +217,11 @@ impl<'a> ScopeFilteringVisitor<'a> {
             query_requires_scopes: false,
             unauthorized_paths: vec![],
             current_path: Path::default(),
-            requires_scopes_directive_name,
+            requires_scopes_directive_name: Schema::directive_name(
+                compiler,
+                REQUIRES_SCOPES_SPEC_URL,
+                REQUIRES_SCOPES_DIRECTIVE_NAME,
+            )?,
         })
     }
 

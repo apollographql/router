@@ -13,8 +13,10 @@ use crate::json_ext::PathElement;
 use crate::spec::query::transform;
 use crate::spec::query::transform::get_field_type;
 use crate::spec::query::traverse;
+use crate::spec::Schema;
 
 pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: &str = "authenticated";
+pub(crate) const AUTHENTICATED_SPEC_URL: &str = "https://specs.apollo.dev/authenticated/v0.1";
 
 pub(crate) struct AuthenticatedCheckVisitor<'a> {
     compiler: &'a ApolloCompiler,
@@ -25,29 +27,15 @@ pub(crate) struct AuthenticatedCheckVisitor<'a> {
 
 impl<'a> AuthenticatedCheckVisitor<'a> {
     pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Option<Self> {
-        let authenticated_directive_name = if let Some(link) = compiler
-            .db
-            .schema()
-            .directives_by_name("link")
-            .filter(|link| {
-                link.argument_by_name("url")
-                    .and_then(|value| value.as_str())
-                    == Some("https://specs.apollo.dev/authenticated/v0.1")
-            })
-            .next()
-        {
-            link.argument_by_name("as")
-                .and_then(|value| value.as_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| AUTHENTICATED_DIRECTIVE_NAME.to_string())
-        } else {
-            return None;
-        };
-
         Some(Self {
             compiler,
             file_id,
             found: false,
-            authenticated_directive_name,
+            authenticated_directive_name: Schema::directive_name(
+                compiler,
+                AUTHENTICATED_SPEC_URL,
+                AUTHENTICATED_DIRECTIVE_NAME,
+            )?,
         })
     }
 
@@ -161,33 +149,17 @@ pub(crate) struct AuthenticatedVisitor<'a> {
 
 impl<'a> AuthenticatedVisitor<'a> {
     pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Option<Self> {
-        let authenticated_directive_name = if let Some(link) = compiler
-            .db
-            .schema()
-            .directives_by_name("link")
-            .filter(|link| {
-                link.argument_by_name("url")
-                    .and_then(|value| value.as_str())
-                    == Some("https://specs.apollo.dev/authenticated/v0.1")
-            })
-            .next()
-        {
-            link.argument_by_name("as")
-                .and_then(|value| value.as_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| AUTHENTICATED_DIRECTIVE_NAME.to_string())
-        } else {
-            return None;
-        };
-
-        println!("AuthenticatedVisitor: auth directive name = {authenticated_directive_name}");
-
         Some(Self {
             compiler,
             file_id,
             query_requires_authentication: false,
             unauthorized_paths: Vec::new(),
             current_path: Path::default(),
-            authenticated_directive_name,
+            authenticated_directive_name: Schema::directive_name(
+                compiler,
+                AUTHENTICATED_SPEC_URL,
+                AUTHENTICATED_DIRECTIVE_NAME,
+            )?,
         })
     }
 

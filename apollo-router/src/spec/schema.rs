@@ -239,6 +239,63 @@ impl Schema {
     pub(crate) fn has_errors(&self) -> bool {
         !self.diagnostics.is_empty()
     }
+
+    pub(crate) fn has_spec(&self, url: &str) -> bool {
+        self.type_system
+            .definitions
+            .schema
+            /*self.type_system
+                .definitions
+                .directives
+                .get("link")
+                .filter(|link| {
+                    link.arguments().input_values().iter().filter_map(|arg| if arg.name() == "url" {
+                        arg.v
+                    })
+                    link.argument_by_name("url")
+                        .and_then(|value| value.as_str())
+                        == Some(url)
+                })
+                .next()
+                .is_some()*/
+            /*compiler
+            .db
+            .schema()*/
+            .directives_by_name("link")
+            .filter(|link| {
+                link.argument_by_name("url")
+                    .and_then(|value| value.as_str())
+                    == Some(url)
+            })
+            .next()
+            .is_some()
+    }
+
+    pub(crate) fn directive_name(
+        compiler: &ApolloCompiler,
+        url: &str,
+        default: &str,
+    ) -> Option<String> {
+        if let Some(link) = compiler
+            .db
+            .schema()
+            .directives_by_name("link")
+            .filter(|link| {
+                link.argument_by_name("url")
+                    .and_then(|value| value.as_str())
+                    == Some(url)
+            })
+            .next()
+        {
+            Some(
+                link.argument_by_name("as")
+                    .and_then(|value| value.as_str().map(|s| s.to_string()))
+                    .unwrap_or_else(|| default.to_string()),
+            )
+        } else {
+            return None;
+        }
+    }
 }
 
 #[derive(Debug)]
