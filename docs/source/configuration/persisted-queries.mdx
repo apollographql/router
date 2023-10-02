@@ -51,7 +51,7 @@ persisted_queries:
 
 #### `log_unknown`
 
-Adding `log_unknown: true` to `persisted_queries` configures the router to log any incoming operations not registered to the PQL.
+Adding `log_unknown: true` to `persisted_queries` configures the router to log any incoming operations not preregistered to the PQL.
 
 ```yaml title="router.yaml"
 persisted_queries:
@@ -63,7 +63,7 @@ If used with the [`safelist`](#safelist) option, the router logs unregistered an
 
 #### `safelist`
 
-Adding `safelist: true` to `persisted_queries` causes the router to reject any operations that haven't been registered to your PQL.
+Adding `safelist: true` to `persisted_queries` causes the router to reject any operations that haven't been preregistered to your PQL.
 
 ```yaml title="router.yaml"
 persisted_queries:

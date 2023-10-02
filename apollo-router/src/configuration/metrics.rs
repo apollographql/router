@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use jsonpath_rust::JsonPathInst;
 use paste::paste;
+use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::OwnedSemaphorePermit;
 
@@ -16,7 +17,39 @@ pub(crate) struct MetricsHandle {
 
 pub(crate) struct Metrics {
     yaml: Value,
-    metrics: HashMap<String, (u64, HashMap<String, String>)>,
+    metrics: HashMap<String, (u64, HashMap<String, AttributeValue>)>,
+}
+
+enum AttributeValue {
+    Bool(bool),
+    U64(u64),
+    I64(i64),
+    F64(f64),
+    String(String),
+}
+
+impl Serialize for AttributeValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            AttributeValue::Bool(value) => serializer.serialize_bool(*value),
+            AttributeValue::U64(value) => serializer.serialize_u64(*value),
+            AttributeValue::I64(value) => serializer.serialize_i64(*value),
+            AttributeValue::F64(value) => serializer.serialize_f64(*value),
+            AttributeValue::String(value) => serializer.serialize_str(value),
+        }
+    }
+}
+
+impl AttributeValue {
+    fn dyn_value(self: &AttributeValue) -> &dyn tracing::Value {
+        match self {
+            AttributeValue::Bool(value) => value as &dyn tracing::Value,
+            AttributeValue::U64(value) => value as &dyn tracing::Value,
+            AttributeValue::I64(value) => value as &dyn tracing::Value,
+            AttributeValue::F64(value) => value as &dyn tracing::Value,
+            AttributeValue::String(value) => value as &dyn tracing::Value,
+        }
+    }
 }
 
 impl Metrics {
@@ -98,12 +131,19 @@ impl Metrics {
                             let attr_name = stringify!([<$($attr __ )+>]).to_string();
                             match JsonPathInst::from_str($attr_path).expect("json path must be valid").find_slice(value).into_iter().next().as_deref() {
                                 // If the value is an object we can only state that it is set, but not what it is set to.
-                                Some(Value::Object(_value)) => {attributes.insert(attr_name, "true".to_string());},
-                                Some(Value::Array(value)) if !value.is_empty() => {attributes.insert(attr_name, "true".to_string());},
+                                Some(Value::Object(_value)) => {attributes.insert(attr_name, AttributeValue::Bool(true));},
+                                Some(Value::Array(value)) if !value.is_empty() => {attributes.insert(attr_name, AttributeValue::Bool(true));},
                                 // Scalars can be logged as is.
-                                Some(value) => {attributes.insert(attr_name, value.to_string());},
+                                Some(Value::Number(value)) if value.is_f64() => {attributes.insert(attr_name, AttributeValue::F64(value.as_f64().expect("checked, qed")));},
+                                Some(Value::Number(value)) if value.is_i64() => {attributes.insert(attr_name, AttributeValue::I64(value.as_i64().expect("checked, qed")));},
+                                Some(Value::Number(value)) => {attributes.insert(attr_name, AttributeValue::U64(value.as_u64().expect("checked, qed")));},
+                                Some(Value::String(value)) => {attributes.insert(attr_name, AttributeValue::String(value.clone()));},
+                                Some(Value::Bool(value)) => {attributes.insert(attr_name, AttributeValue::Bool(*value));},
+
                                 // If the value is not set we don't specify the attribute.
-                                None => {attributes.insert(attr_name, "false".to_string());},
+                                None => {attributes.insert(attr_name, AttributeValue::Bool(false));},
+
+                                _ => {},
                             };)+
                             (1, attributes)
                         }
@@ -113,7 +153,7 @@ impl Metrics {
                             let mut attributes = HashMap::new();
                             $(
                                 let attr_name = stringify!([<$($attr __ )+>]).to_string();
-                                attributes.insert(attr_name, "false".to_string());
+                                attributes.insert(attr_name, AttributeValue::Bool(false));
                             )+
                             (0, attributes)
                         }
@@ -122,7 +162,7 @@ impl Metrics {
 
                 // Now log the metric
                 paste!{
-                    tracing::info!($($metric).+ = metric.0, $($($attr).+ = metric.1.get(stringify!([<$($attr __ )+>])).expect("attribute must be in map")),+);
+                    tracing::info!($($metric).+ = metric.0, $($($attr).+ = metric.1.get(stringify!([<$($attr __ )+>])).expect("attribute must be in map").dyn_value()),+);
                 }
             };
         }
@@ -166,7 +206,7 @@ impl Metrics {
         );
         log_usage_metrics!(
             value.apollo.router.config.persisted_queries,
-            "$.preview_persisted_queries[?(@.enabled == true)]",
+            "$.persisted_queries[?(@.enabled == true)]",
             opt.log_unknown,
             "$[?(@.log_unknown == true)]",
             opt.safelist.require_id,
@@ -221,9 +261,19 @@ impl Metrics {
             "$.subgraph..enabled[?(@ == true)]"
         );
         log_usage_metrics!(
+            value.apollo.router.config.tls,
+            "$.tls",
+            opt.router.tls.server,
+            "$.supergraph",
+            opt.router.tls.subgraph.ca_override,
+            "$[?(@.subgraph..certificate_authorities)]",
+            opt.router.tls.subgraph.client_authentication,
+            "$.subgraph..client_authentication"
+        );
+        log_usage_metrics!(
             value.apollo.router.config.traffic_shaping,
             "$.traffic_shaping",
-            opt.router.timout,
+            opt.router.timeout,
             "$$[?(@.router.timeout)]",
             opt.router.rate_limit,
             "$.router.global_rate_limit",
@@ -232,7 +282,7 @@ impl Metrics {
             opt.subgraph.rate_limit,
             "$[?(@.all.global_rate_limit || @.subgraphs..global_rate_limit)]",
             opt.subgraph.http2,
-            "$[?(@.all.experimental_enable_http2 == true || @.subgraphs..experimental_enable_http2 == true)]",
+            "$[?(@.all.experimental_http2 == 'enable' || @.all.experimental_http2 == 'http2only' || @.subgraphs..experimental_http2 == 'enable' || @.subgraphs..experimental_http2 == 'http2only')]",
             opt.subgraph.compression,
             "$[?(@.all.compression || @.subgraphs..compression)]",
             opt.subgraph.deduplicate_query,
@@ -262,6 +312,12 @@ impl Metrics {
             "$.tracing.jaeger[?(@..endpoint)]",
             opt.tracing.zipkin,
             "$.tracing.zipkin[?(@.endpoint)]"
+        );
+        log_usage_metrics!(
+            value.apollo.router.config.batching,
+            "$.experimental_batching[?(@.enabled == true)]",
+            opt.mode,
+            "$.mode"
         );
     }
 }

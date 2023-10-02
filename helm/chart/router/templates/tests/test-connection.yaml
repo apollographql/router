@@ -4,6 +4,9 @@ metadata:
   name: "{{ include "router.fullname" . }}-test-connection"
   labels:
     {{- include "router.labels" . | nindent 4 }}
+    {{- if .Values.extraLabels }}
+    {{- include "common.templatizeExtraLabels" . | trim | nindent 4 }}
+    {{- end }}
   annotations:
     "helm.sh/hook": test
 spec:

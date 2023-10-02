@@ -91,7 +91,7 @@ impl BridgeQueryPlanner {
 
                     if has_validation_errors && !schema.has_errors() {
                         tracing::warn!(
-                            monotonic_counter.apollo.router.validation = 1,
+                            monotonic_counter.apollo.router.validation = 1u64,
                             validation.source = VALIDATION_SOURCE_SCHEMA,
                             validation.result = VALIDATION_FALSE_NEGATIVE,
                             "validation mismatch: JS query planner reported a schema validation error, but apollo-rs did not"
@@ -106,7 +106,7 @@ impl BridgeQueryPlanner {
         if configuration.experimental_graphql_validation_mode == GraphQLValidationMode::Both {
             if schema.has_errors() {
                 tracing::warn!(
-                    monotonic_counter.apollo.router.validation = 1,
+                    monotonic_counter.apollo.router.validation = 1u64,
                     validation.source = VALIDATION_SOURCE_SCHEMA,
                     validation.result = VALIDATION_FALSE_POSITIVE,
                     "validation mismatch: apollo-rs reported a schema validation error, but JS query planner did not"
@@ -114,7 +114,7 @@ impl BridgeQueryPlanner {
             } else {
                 // false_negative was an early return so we know it was correct here
                 tracing::info!(
-                    monotonic_counter.apollo.router.validation = 1,
+                    monotonic_counter.apollo.router.validation = 1u64,
                     validation.source = VALIDATION_SOURCE_SCHEMA,
                     validation.result = VALIDATION_MATCH
                 );
@@ -275,6 +275,50 @@ impl BridgeQueryPlanner {
         operation: Option<String>,
         selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
+        /// Compare errors from graphql-js and apollo-rs validation, and produce metrics on
+        /// whether they had the same result.
+        ///
+        /// The result isn't inspected deeply: it only checks validation success/failure.
+        fn compare_validation_errors(
+            js_validation_error: Option<&router_bridge::planner::PlanErrors>,
+            rs_validation_error: Option<&crate::error::ValidationErrors>,
+        ) {
+            let is_validation_error = js_validation_error
+                .map_or(false, |js| js.errors.iter().all(|err| err.validation_error));
+            match (is_validation_error, rs_validation_error) {
+                (false, Some(validation_error)) => {
+                    tracing::warn!(
+                        monotonic_counter.apollo.router.validation = 1u64,
+                        validation.source = VALIDATION_SOURCE_OPERATION,
+                        validation.result = VALIDATION_FALSE_POSITIVE,
+                        "validation mismatch: JS query planner did not report query validation error, but apollo-rs did"
+                    );
+                    tracing::warn!(
+                        "validation mismatch: Rust validation reported: {validation_error}"
+                    );
+                }
+                (true, None) => {
+                    tracing::warn!(
+                        monotonic_counter.apollo.router.validation = 1u64,
+                        validation.source = VALIDATION_SOURCE_OPERATION,
+                        validation.result = VALIDATION_FALSE_NEGATIVE,
+                        "validation mismatch: apollo-rs did not report query validation error, but JS query planner did"
+                    );
+                    tracing::warn!(
+                        "validation mismatch: JS validation reported: {}",
+                        // Unwrapping is safe because `is_validation_error` is true
+                        js_validation_error.unwrap(),
+                    );
+                }
+                // if JS and Rust implementations agree, we return the JS result for now.
+                _ => tracing::info!(
+                    monotonic_counter.apollo.router.validation = 1u64,
+                    validation.source = VALIDATION_SOURCE_OPERATION,
+                    validation.result = VALIDATION_MATCH,
+                ),
+            }
+        }
+
         let planner_result = self
             .planner
             .plan(filtered_query.clone(), operation.clone())
@@ -282,34 +326,22 @@ impl BridgeQueryPlanner {
             .map_err(QueryPlannerError::RouterBridgeError)?
             .into_result()
             .map_err(|err| {
-                let is_validation_error = err.errors.iter().all(|err| err.validation_error);
-                match (is_validation_error, &selections.validation_error) {
-                    (false, Some(_)) => {
-                        tracing::warn!(
-                            monotonic_counter.apollo.router.validation = 1,
-                            validation.source = VALIDATION_SOURCE_OPERATION,
-                            validation.result = VALIDATION_FALSE_POSITIVE,
-                            "validation mismatch: JS query planner did not report query validation error, but apollo-rs did"
-                        );
-                    }
-                    (true, None) => {
-                        tracing::warn!(
-                            monotonic_counter.apollo.router.validation = 1,
-                            validation.source = VALIDATION_SOURCE_OPERATION,
-                            validation.result = VALIDATION_FALSE_NEGATIVE,
-                            "validation mismatch: apollo-rs did not report query validation error, but JS query planner did"
-                        );
-                    }
-                    // if JS and Rust implementations agree, we return the JS result for now.
-                    _ => tracing::info!(
-                            monotonic_counter.apollo.router.validation = 1,
-                            validation.source = VALIDATION_SOURCE_OPERATION,
-                            validation.result = VALIDATION_MATCH,
-                    ),
+                if matches!(
+                    self.configuration.experimental_graphql_validation_mode,
+                    GraphQLValidationMode::Both
+                ) {
+                    compare_validation_errors(Some(&err), selections.validation_error.as_ref());
                 }
 
                 QueryPlannerError::from(err)
             })?;
+
+        if matches!(
+            self.configuration.experimental_graphql_validation_mode,
+            GraphQLValidationMode::Both
+        ) {
+            compare_validation_errors(None, selections.validation_error.as_ref());
+        }
 
         // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
         let operation_signature = if original_query != filtered_query {
@@ -444,7 +476,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 )
                 .await;
             let duration = start.elapsed().as_secs_f64();
-            tracing::info!(histogram.apollo_router_query_planning_time = duration,);
+            tracing::info!(histogram.apollo_router_query_planning_time = duration);
 
             match res {
                 Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()

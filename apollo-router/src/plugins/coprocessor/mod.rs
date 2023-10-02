@@ -12,8 +12,9 @@ use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
 use futures::TryStreamExt;
-use http::header::HeaderName;
+use http::header;
 use http::HeaderMap;
+use http::HeaderName;
 use http::HeaderValue;
 use hyper::client::HttpConnector;
 use hyper::Body;
@@ -30,11 +31,12 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::error::Error;
-use crate::layers::async_checkpoint::AsyncCheckpointLayer;
+use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::services;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
@@ -44,8 +46,15 @@ use crate::services::router;
 use crate::services::subgraph;
 use crate::tracer::TraceId;
 
+#[cfg(test)]
+mod test;
+
+mod supergraph;
+
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
+const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
+const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
 type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
 
@@ -84,6 +93,13 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         self.router_service(service)
+    }
+
+    fn supergraph_service(
+        &self,
+        service: services::supergraph::BoxService,
+    ) -> services::supergraph::BoxService {
+        self.supergraph_service(service)
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
@@ -142,6 +158,18 @@ where
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         self.configuration.router.as_service(
+            self.http_client.clone(),
+            service,
+            self.configuration.url.clone(),
+            self.sdl.clone(),
+        )
+    }
+
+    fn supergraph_service(
+        &self,
+        service: services::supergraph::BoxService,
+    ) -> services::supergraph::BoxService {
+        self.configuration.supergraph.as_service(
             self.http_client.clone(),
             service,
             self.configuration.url.clone(),
@@ -239,6 +267,9 @@ struct Conf {
     /// The router stage request/response configuration
     #[serde(default)]
     router: RouterStage,
+    /// The supergraph stage request/response configuration
+    #[serde(default)]
+    supergraph: supergraph::SupergraphStage,
     /// The subgraph stage request/response configuration
     #[serde(default)]
     subgraph: SubgraphStages,
@@ -279,7 +310,7 @@ impl RouterStage {
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
-            AsyncCheckpointLayer::new(move |request: router::Request| {
+            OneShotAsyncCheckpointLayer::new(move |request: router::Request| {
                 let request_config = request_config.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
@@ -365,7 +396,6 @@ impl RouterStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered()
             .service(service)
             .boxed()
     }
@@ -412,7 +442,7 @@ impl SubgraphStage {
             let http_client = http_client.clone();
             let coprocessor_url = coprocessor_url.clone();
             let service_name = service_name.clone();
-            AsyncCheckpointLayer::new(move |request: subgraph::Request| {
+            OneShotAsyncCheckpointLayer::new(move |request: subgraph::Request| {
                 let http_client = http_client.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let service_name = service_name.clone();
@@ -499,7 +529,6 @@ impl SubgraphStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered()
             .service(service)
             .boxed()
     }
@@ -568,7 +597,7 @@ where
     );
 
     tracing::debug!(?co_processor_result, "co-processor returned");
-    let co_processor_output = co_processor_result?;
+    let mut co_processor_output = co_processor_result?;
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
@@ -584,21 +613,29 @@ where
         // At this point our body is a String. Try to get a valid JSON value from it
         let body_as_value = co_processor_output
             .body
-            .and_then(|b| serde_json::from_str(&b).ok())
+            .as_ref()
+            .and_then(|b| serde_json::from_str(b).ok())
             .unwrap_or(serde_json::Value::Null);
         // Now we have some JSON, let's see if it's the right "shape" to create a graphql_response.
         // If it isn't, we create a graphql error response
-        let graphql_response: crate::graphql::Response = serde_json::from_value(body_as_value)
-            .unwrap_or_else(|error| {
+        let graphql_response: crate::graphql::Response = match body_as_value {
+            serde_json::Value::Null => crate::graphql::Response::builder()
+                .errors(vec![Error::builder()
+                    .message(co_processor_output.body.take().unwrap_or_default())
+                    .extension_code(COPROCESSOR_ERROR_EXTENSION)
+                    .build()])
+                .build(),
+            _ => serde_json::from_value(body_as_value).unwrap_or_else(|error| {
                 crate::graphql::Response::builder()
                     .errors(vec![Error::builder()
                         .message(format!(
                             "couldn't deserialize coprocessor output body: {error}"
                         ))
-                        .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
+                        .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
                         .build()])
                     .build()
-            });
+            }),
+        };
 
         let res = router::Response::builder()
             .errors(graphql_response.errors)
@@ -676,7 +713,7 @@ where
     // If first is None, or contains an error we return an error
     let opt_first: Option<Bytes> = first.and_then(|f| f.ok());
     let bytes = match opt_first {
-        Some(b) => b.to_vec(),
+        Some(b) => b,
         None => {
             tracing::error!(
                 "Coprocessor cannot convert body into future due to problem with first part"
@@ -695,7 +732,7 @@ where
         .transpose()?;
     let body_to_send = response_config
         .body
-        .then(|| String::from_utf8(bytes.clone()))
+        .then(|| std::str::from_utf8(&bytes).map(|s| s.to_string()))
         .transpose()?;
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
     let context_to_send = response_config.context.then(|| response.context.clone());
@@ -857,7 +894,6 @@ where
     // First, extract the data we need from our request and prepare our
     // external call. Use our configuration to figure out which data to send.
     let (parts, body) = request.subgraph_request.into_parts();
-    let bytes = Bytes::from(serde_json::to_vec(&body)?);
 
     let headers_to_send = request_config
         .headers
@@ -866,7 +902,7 @@ where
 
     let body_to_send = request_config
         .body
-        .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
+        .then(|| serde_json::to_value(&body))
         .transpose()?;
     let context_to_send = request_config.context.then(|| request.context.clone());
     let uri = request_config.uri.then(|| parts.uri.to_string());
@@ -910,17 +946,24 @@ where
 
         let res = {
             let graphql_response: crate::graphql::Response =
-                serde_json::from_value(co_processor_output.body.unwrap_or(serde_json::Value::Null))
-                    .unwrap_or_else(|error| {
+                match co_processor_output.body.unwrap_or(serde_json::Value::Null) {
+                    serde_json::Value::String(s) => crate::graphql::Response::builder()
+                        .errors(vec![Error::builder()
+                            .message(s)
+                            .extension_code(COPROCESSOR_ERROR_EXTENSION)
+                            .build()])
+                        .build(),
+                    value => serde_json::from_value(value).unwrap_or_else(|error| {
                         crate::graphql::Response::builder()
                             .errors(vec![Error::builder()
                                 .message(format!(
                                     "couldn't deserialize coprocessor output body: {error}"
                                 ))
-                                .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
+                                .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
                                 .build()])
                             .build()
-                    });
+                    }),
+                };
 
             let mut http_response = http::Response::builder()
                 .status(code)
@@ -997,7 +1040,6 @@ where
     // external call. Use our configuration to figure out which data to send.
 
     let (parts, body) = response.response.into_parts();
-    let bytes = Bytes::from(serde_json::to_vec(&body)?);
 
     let headers_to_send = response_config
         .headers
@@ -1008,7 +1050,7 @@ where
 
     let body_to_send = response_config
         .body
-        .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
+        .then(|| serde_json::to_value(&body))
         .transpose()?;
     let context_to_send = response_config.context.then(|| response.context.clone());
     let service_name = response_config.service_name.then_some(service_name);
@@ -1098,7 +1140,7 @@ fn validate_coprocessor_output<T>(
 }
 
 /// Convert a HeaderMap into a HashMap
-pub(super) fn externalize_header_map(
+pub(crate) fn externalize_header_map(
     input: &HeaderMap<HeaderValue>,
 ) -> Result<HashMap<String, Vec<String>>, BoxError> {
     let mut output = HashMap::new();
@@ -1114,8 +1156,12 @@ pub(super) fn externalize_header_map(
 pub(super) fn internalize_header_map(
     input: HashMap<String, Vec<String>>,
 ) -> Result<HeaderMap<HeaderValue>, BoxError> {
-    let mut output = HeaderMap::new();
-    for (k, values) in input {
+    // better than nothing even though it doesnt account for the values len
+    let mut output = HeaderMap::with_capacity(input.len());
+    for (k, values) in input
+        .into_iter()
+        .filter(|(k, _)| k != header::CONTENT_LENGTH.as_str())
+    {
         for v in values {
             let key = HeaderName::from_str(k.as_ref())?;
             let value = HeaderValue::from_str(v.as_ref())?;

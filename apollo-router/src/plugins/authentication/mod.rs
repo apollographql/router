@@ -44,7 +44,7 @@ use crate::services::router;
 use crate::Context;
 
 mod jwks;
-mod subgraph;
+pub(crate) mod subgraph;
 
 #[cfg(test)]
 mod tests;

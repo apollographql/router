@@ -4,15 +4,15 @@ expression: "&metrics.metrics"
 ---
 value.apollo.router.config.entities:
   - 1
-  - opt__cache__: "true"
+  - opt__cache__: true
 value.apollo.router.config.traffic_shaping:
   - 1
-  - opt__router__rate_limit__: "false"
-    opt__router__timout__: "false"
-    opt__subgraph__compression__: "false"
-    opt__subgraph__deduplicate_query__: "false"
-    opt__subgraph__http2__: "false"
-    opt__subgraph__rate_limit__: "false"
-    opt__subgraph__retry__: "false"
-    opt__subgraph__timeout__: "false"
+  - opt__router__rate_limit__: false
+    opt__router__timeout__: false
+    opt__subgraph__compression__: false
+    opt__subgraph__deduplicate_query__: false
+    opt__subgraph__http2__: false
+    opt__subgraph__rate_limit__: false
+    opt__subgraph__retry__: false
+    opt__subgraph__timeout__: false
 

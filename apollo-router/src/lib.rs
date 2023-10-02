@@ -47,6 +47,9 @@ mod json_ext;
 #[macro_use]
 pub mod plugin;
 
+#[macro_use]
+pub(crate) mod metrics;
+
 pub(crate) mod axum_factory;
 mod cache;
 mod configuration;

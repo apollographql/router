@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use apollo_compiler::diagnostics::ApolloDiagnostic;
 use apollo_compiler::ApolloCompiler;
@@ -13,6 +14,7 @@ use http::Uri;
 use sha2::Digest;
 use sha2::Sha256;
 
+use super::FieldType;
 use crate::configuration::GraphQLValidationMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
@@ -60,6 +62,7 @@ impl Schema {
     }
 
     pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
+        let start = Instant::now();
         let mut compiler = ApolloCompiler::new();
         let id = compiler.add_type_system(sdl, "schema.graphql");
 
@@ -91,7 +94,6 @@ impl Schema {
             let errors = ValidationErrors {
                 errors: diagnostics.clone(),
             };
-            errors.print();
 
             // Only error out if new validation is used: with `Both`, we take the legacy
             // validation as authoritative and only use the new result for comparison
@@ -129,6 +131,9 @@ impl Schema {
         let mut hasher = Sha256::new();
         hasher.update(sdl.as_bytes());
         let schema_id = Some(format!("{:x}", hasher.finalize()));
+        tracing::info!(
+            histogram.apollo.router.schema.load.duration = start.elapsed().as_secs_f64()
+        );
 
         Ok(Schema {
             raw_sdl: Arc::new(sdl.to_string()),
@@ -158,6 +163,50 @@ impl Schema {
             .get(abstract_type)
             .map(|x| x.contains(maybe_subtype))
             .unwrap_or(false)
+    }
+
+    pub(crate) fn is_implementation(&self, interface: &str, implementor: &str) -> bool {
+        self.type_system
+            .definitions
+            .interfaces
+            .get(interface)
+            .map(|interface| {
+                interface
+                    .implements_interfaces()
+                    .any(|i| i.interface() == implementor)
+            })
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn is_interface(&self, abstract_type: &str) -> bool {
+        self.type_system
+            .definitions
+            .interfaces
+            .contains_key(abstract_type)
+    }
+
+    // given two field, returns the one that implements the other, if applicable
+    pub(crate) fn most_precise<'f>(
+        &self,
+        a: &'f FieldType,
+        b: &'f FieldType,
+    ) -> Option<&'f FieldType> {
+        let typename_a = a.inner_type_name().unwrap_or_default();
+        let typename_b = b.inner_type_name().unwrap_or_default();
+        if typename_a == typename_b {
+            return Some(a);
+        }
+        if self.is_subtype(typename_a, typename_b) || self.is_implementation(typename_a, typename_b)
+        {
+            Some(b)
+        } else if self.is_subtype(typename_b, typename_a)
+            || self.is_implementation(typename_b, typename_a)
+        {
+            Some(a)
+        } else {
+            // No relationship between a and b
+            None
+        }
     }
 
     /// Return an iterator over subgraphs that yields the subgraph name and its URL.

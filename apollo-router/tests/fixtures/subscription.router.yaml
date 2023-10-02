@@ -7,7 +7,7 @@ homepage:
 sandbox:
   enabled: true
 override_subgraph_url:
-  accounts: "http://localhost:4041"
+  products: http://localhost:4005
 include_subgraph_errors:
   all: true
 subscription:

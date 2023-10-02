@@ -402,9 +402,12 @@ where
             (license, Instant::now(), Arc::new(AtomicU64::new(0))),
             license_handler,
         ))
-        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license }))
         .layer(Extension(service_factory))
-        .layer(cors);
+        .layer(cors)
+        // Telemetry layers MUST be last. This means that they will be hit first during execution of the pipeline
+        // Adding layers after telemetry will cause us to lose metrics and spans.
+        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license }))
+        .layer(middleware::from_fn(metrics_handler));
 
     let route = endpoints_on_main_listener
         .into_iter()
@@ -412,6 +415,17 @@ where
 
     let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
+}
+
+async fn metrics_handler<B>(request: Request<B>, next: Next<B>) -> Response {
+    let resp = next.run(request).await;
+    u64_counter!(
+        "apollo.router.operations",
+        "The number of graphql operations performed by the Router",
+        1,
+        "http.response.status_code" = resp.status().as_u16() as i64
+    );
+    resp
 }
 
 async fn license_handler<B>(
@@ -500,7 +514,7 @@ async fn handle_graphql(
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    tracing::info!(counter.apollo_router_session_count_active = 1,);
+    tracing::info!(counter.apollo_router_session_count_active = 1i64,);
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();
@@ -518,7 +532,7 @@ async fn handle_graphql(
 
     match res {
         Err(e) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1,);
+            tracing::info!(counter.apollo_router_session_count_active = -1i64,);
             if let Some(source_err) = e.source() {
                 if source_err.is::<RateLimited>() {
                     return RateLimited::new().into_response();
@@ -541,7 +555,7 @@ async fn handle_graphql(
                 .into_response()
         }
         Ok(response) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1,);
+            tracing::info!(counter.apollo_router_session_count_active = -1i64,);
             let (mut parts, body) = response.response.into_parts();
 
             let opt_compressor = accept_encoding
