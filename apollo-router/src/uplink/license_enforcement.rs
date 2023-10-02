@@ -244,7 +244,7 @@ impl Display for LicenseEnforcementReport {
             write!(f, "Configuration yaml:\n{restricted_config}")?;
 
             if !self.restricted_schema_in_use.is_empty() {
-                write!(f, "\n")?;
+                writeln!(f)?;
             }
         }
 
