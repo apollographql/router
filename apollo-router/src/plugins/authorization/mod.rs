@@ -19,10 +19,13 @@ use tower::ServiceExt;
 
 use self::authenticated::AuthenticatedCheckVisitor;
 use self::authenticated::AuthenticatedVisitor;
+use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
 use self::policy::PolicyExtractionVisitor;
 use self::policy::PolicyFilteringVisitor;
+use self::policy::POLICY_DIRECTIVE_NAME;
 use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
+use self::scopes::REQUIRES_SCOPES_DIRECTIVE_NAME;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -101,7 +104,23 @@ impl AuthorizationPlugin {
             .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
             .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()));
 
-        Ok(has_config.unwrap_or(true))
+        let has_authorization_directives = schema
+            .type_system
+            .definitions
+            .directives
+            .contains_key(AUTHENTICATED_DIRECTIVE_NAME)
+            || schema
+                .type_system
+                .definitions
+                .directives
+                .contains_key(REQUIRES_SCOPES_DIRECTIVE_NAME)
+            || schema
+                .type_system
+                .definitions
+                .directives
+                .contains_key(POLICY_DIRECTIVE_NAME);
+
+        Ok(has_config.unwrap_or(true) && has_authorization_directives)
     }
 
     pub(crate) async fn query_analysis(
