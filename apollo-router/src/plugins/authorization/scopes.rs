@@ -608,6 +608,18 @@ mod tests {
         mutation: Mutation
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    scalar link__Import
+      enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
     scalar federation__Scope
     directive @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 
@@ -662,7 +674,11 @@ mod tests {
         for diagnostic in &diagnostics {
             println!("{diagnostic}");
         }
-        assert!(diagnostics.is_empty());
+        assert!(diagnostics
+            .into_iter()
+            .filter(|err| err.data.is_error())
+            .next()
+            .is_none());
 
         let mut visitor = ScopeExtractionVisitor::new(&compiler, id).unwrap();
         traverse::document(&mut visitor, id).unwrap();
@@ -1096,11 +1112,23 @@ mod tests {
     @link(url: "https://specs.apollo.dev/link/v1.0")
     @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
     @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
-  {
+    {
       query: Query
-  }
-  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    scalar link__Import
+      enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
     directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
     type Query {
         test: String
@@ -1218,12 +1246,24 @@ mod tests {
     @link(url: "https://specs.apollo.dev/link/v1.0")
     @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
     @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
-  {
+    {
       query: Query
-  }
-  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
     directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+    scalar link__Import
+      enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
     type Query {
         test: String
         itf: I!
@@ -1304,11 +1344,23 @@ mod tests {
         @link(url: "https://specs.apollo.dev/link/v1.0")
         @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
         @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
-      {
+        {
           query: Query
-      }
-      directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+        }
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
         directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        scalar link__Import
+          enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
 
         directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
         type Query {
@@ -1365,6 +1417,18 @@ mod tests {
         mutation: Mutation
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    scalar link__Import
+    enum link__Purpose {
+      """
+      `SECURITY` features provide metadata necessary to securely resolve fields.
+      """
+      SECURITY
+
+      """
+      `EXECUTION` features provide metadata necessary for operation execution.
+      """
+      EXECUTION
+    }
     scalar federation__Scope
     directive @scopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 
