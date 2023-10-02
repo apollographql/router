@@ -524,7 +524,28 @@ mod tests {
     use crate::spec::query::traverse;
 
     static BASIC_SCHEMA: &str = r#"
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+    {
+      query: Query
+      mutation: Mutation
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    scalar link__Import
+      enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
 
     type Query {
       topProducts: Product
@@ -563,17 +584,21 @@ mod tests {
     }
     "#;
 
-    fn extract(query: &str) -> BTreeSet<String> {
+    fn extract(schema: &str, query: &str) -> BTreeSet<String> {
         let mut compiler = ApolloCompiler::new();
 
-        let _schema_id = compiler.add_type_system(BASIC_SCHEMA, "schema.graphql");
+        let _schema_id = compiler.add_type_system(schema, "schema.graphql");
         let id = compiler.add_executable(query, "query.graphql");
 
         let diagnostics = compiler.validate();
         for diagnostic in &diagnostics {
             println!("{diagnostic}");
         }
-        assert!(diagnostics.is_empty());
+        assert!(diagnostics
+            .into_iter()
+            .filter(|err| err.data.is_error())
+            .next()
+            .is_none());
 
         let mut visitor = PolicyExtractionVisitor::new(&compiler, id);
         traverse::document(&mut visitor, id).unwrap();
@@ -596,7 +621,7 @@ mod tests {
         }
         "#;
 
-        let doc = extract(QUERY);
+        let doc = extract(BASIC_SCHEMA, QUERY);
         insta::assert_debug_snapshot!(doc);
     }
 
@@ -620,6 +645,28 @@ mod tests {
         )
     }
 
+    struct TestResult<'a> {
+        query: &'a str,
+        extracted_policies: &'a BTreeSet<String>,
+        result: apollo_encoder::Document,
+        successful_policies: Vec<String>,
+        paths: Vec<Path>,
+    }
+
+    impl<'a> std::fmt::Display for TestResult<'a> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "query:\n{}\nextracted_policies: {:?}\nsuccessful policies: {:?}\nfiltered:\n{}\npaths: {:?}",
+                self.query,
+                self.extracted_policies,
+                self.successful_policies,
+                self.result,
+                self.paths.iter().map(|p| p.to_string()).collect::<Vec<_>>()
+            )
+        }
+    }
+
     #[test]
     fn filter_basic_query() {
         static QUERY: &str = r#"
@@ -636,12 +683,15 @@ mod tests {
         }
         "#;
 
-        let doc = extract(QUERY);
-        insta::assert_debug_snapshot!(doc);
-
+        let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
+            result: doc,
+            paths
+        });
 
         let (doc, paths) = filter(
             BASIC_SCHEMA,
@@ -650,8 +700,15 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: ["profile".to_string(), "internal".to_string()]
+                .into_iter()
+                .collect(),
+            result: doc,
+            paths
+        });
 
         let (doc, paths) = filter(
             BASIC_SCHEMA,
@@ -664,8 +721,19 @@ mod tests {
             .into_iter()
             .collect(),
         );
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: [
+                "profile".to_string(),
+                "read user".to_string(),
+                "internal".to_string()
+            ]
+            .into_iter()
+            .collect(),
+            result: doc,
+            paths
+        });
 
         let (doc, paths) = filter(
             BASIC_SCHEMA,
@@ -678,8 +746,19 @@ mod tests {
             .into_iter()
             .collect(),
         );
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: [
+                "profile".to_string(),
+                "read user".to_string(),
+                "read username".to_string(),
+            ]
+            .into_iter()
+            .collect(),
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -693,13 +772,16 @@ mod tests {
         }
         "#;
 
-        let doc = extract(QUERY);
-        insta::assert_debug_snapshot!(doc);
-
+        let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -716,13 +798,16 @@ mod tests {
         }
         "#;
 
-        let doc = extract(QUERY);
-        insta::assert_debug_snapshot!(doc);
-
+        let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -739,13 +824,15 @@ mod tests {
         }
         "#;
 
-        let doc = extract(QUERY);
-        insta::assert_debug_snapshot!(doc);
-
+        let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -759,13 +846,15 @@ mod tests {
         }
         "#;
 
-        let doc = extract(QUERY);
-        insta::assert_debug_snapshot!(doc);
-
+        let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -784,13 +873,15 @@ mod tests {
         }
         "#;
 
-        let doc = extract(QUERY);
-        insta::assert_debug_snapshot!(doc);
-
+        let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -809,13 +900,15 @@ mod tests {
         }
         "#;
 
-        let doc = extract(QUERY);
-        insta::assert_debug_snapshot!(doc);
-
+        let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
+            result: doc,
+            paths
+        });
     }
 
     #[test]
@@ -836,13 +929,15 @@ mod tests {
         }
         "#;
 
-        let doc = extract(QUERY);
-        insta::assert_debug_snapshot!(doc);
-
+        let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
+            result: doc,
+            paths
+        });
 
         let (doc, paths) = filter(
             BASIC_SCHEMA,
@@ -851,14 +946,41 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: ["read user".to_string(), "read username".to_string()]
+                .into_iter()
+                .collect(),
+            result: doc,
+            paths
+        });
     }
 
     static INTERFACE_SCHEMA: &str = r#"
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+    {
+      query: Query
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
     directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+    scalar link__Import
+      enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
+
     type Query {
         test: String
         itf: I!
@@ -887,19 +1009,28 @@ mod tests {
         }
         "#;
 
+        let extracted_policies = extract(INTERFACE_SCHEMA, QUERY);
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY, HashSet::new());
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
+            result: doc,
+            paths
+        });
 
         let (doc, paths) = filter(
             INTERFACE_SCHEMA,
             QUERY,
             ["itf".to_string()].into_iter().collect(),
         );
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: ["itf".to_string()].into_iter().collect(),
+            result: doc,
+            paths
+        });
 
         static QUERY2: &str = r#"
         query {
@@ -915,33 +1046,67 @@ mod tests {
         }
         "#;
 
+        let extracted_policies = extract(INTERFACE_SCHEMA, QUERY2);
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY2, HashSet::new());
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY2,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
+            result: doc,
+            paths
+        });
 
         let (doc, paths) = filter(
             INTERFACE_SCHEMA,
             QUERY2,
             ["itf".to_string()].into_iter().collect(),
         );
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY2,
+            extracted_policies: &extracted_policies,
+            successful_policies: ["itf".to_string()].into_iter().collect(),
+            result: doc,
+            paths
+        });
 
         let (doc, paths) = filter(
             INTERFACE_SCHEMA,
             QUERY2,
             ["itf".to_string(), "a".to_string()].into_iter().collect(),
         );
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY2,
+            extracted_policies: &extracted_policies,
+            successful_policies: ["itf".to_string(), "a".to_string()].into_iter().collect(),
+            result: doc,
+            paths
+        });
     }
 
     static INTERFACE_FIELD_SCHEMA: &str = r#"
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+    {
+      query: Query
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
     directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+    scalar link__Import
+      enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
+
     type Query {
         test: String
         itf: I!
@@ -974,10 +1139,15 @@ mod tests {
         }
         "#;
 
+        let extracted_policies = extract(INTERFACE_FIELD_SCHEMA, QUERY);
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY, HashSet::new());
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
+            result: doc,
+            paths
+        });
 
         static QUERY2: &str = r#"
         query {
@@ -995,17 +1165,43 @@ mod tests {
         }
         "#;
 
+        let extracted_policies = extract(INTERFACE_FIELD_SCHEMA, QUERY2);
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY2, HashSet::new());
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY2,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
+            result: doc,
+            paths
+        });
     }
 
     #[test]
     fn union() {
         static UNION_MEMBERS_SCHEMA: &str = r#"
+        schema
+          @link(url: "https://specs.apollo.dev/link/v1.0")
+          @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+          @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+        {
+          query: Query
+        }
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
         directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
         directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+        scalar link__Import
+          enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
+
         type Query {
             test: String
             uni: I!
@@ -1033,13 +1229,99 @@ mod tests {
         }
         "#;
 
+        let extracted_policies = extract(UNION_MEMBERS_SCHEMA, QUERY);
         let (doc, paths) = filter(
             UNION_MEMBERS_SCHEMA,
             QUERY,
             ["a".to_string()].into_iter().collect(),
         );
-
-        insta::assert_display_snapshot!(doc);
-        insta::assert_debug_snapshot!(paths);
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: ["a".to_string()].into_iter().collect(),
+            result: doc,
+            paths
+        });
     }
+
+    /*
+      static RENAMED_SCHEMA: &str = r#"
+      schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        @link(url: "https://specs.apollo.dev/policy/v0.1", as: "policies" for: SECURITY)
+      {
+          query: Query
+          mutation: Mutation
+      }
+      directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+      directive @policies(policies: [String!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+      scalar link__Import
+        enum link__Purpose {
+      """
+      `SECURITY` features provide metadata necessary to securely resolve fields.
+      """
+      SECURITY
+
+      """
+      `EXECUTION` features provide metadata necessary for operation execution.
+      """
+      EXECUTION
+    }
+
+      type Query {
+        topProducts: Product
+        customer: User
+        me: User @policies(policies: ["profile"])
+        itf: I
+      }
+      type Mutation @policies(policies: ["mut"]) {
+          ping: User @policies(policies: ["ping"])
+          other: String
+      }
+      interface I {
+          id: ID
+      }
+      type Product {
+        type: String
+        price(setPrice: Int): Int
+        reviews: [Review]
+        internal: Internal
+        publicReviews: [Review]
+      }
+      scalar Internal @policies(policies: ["internal", "test"]) @specifiedBy(url: "http///example.com/test")
+      type Review @policies(policies: ["review"]) {
+          body: String
+          author: User
+      }
+      type User implements I @policies(policies: ["read:user"]) {
+        id: ID
+        name: String @policies(policies: ["read:username"])
+      }
+      "#;
+
+      #[test]
+      fn renamed_directive() {
+          static QUERY: &str = r#"
+          query {
+              topProducts {
+                  type
+              }
+              me {
+                  name
+              }
+          }
+          "#;
+
+          let extracted_scopes = extract(RENAMED_SCHEMA, QUERY);
+          let (doc, paths) = filter(RENAMED_SCHEMA, QUERY, HashSet::new());
+
+          insta::assert_display_snapshot!(TestResult {
+              query: QUERY,
+              extracted_policies: &extracted_policies,
+              successful_policies: Vec::new(),
+              result: doc,
+              paths
+          });
+      }*/
 }
