@@ -1,25 +1,27 @@
 //! Configuration for jaeger tracing.
 use std::fmt::Debug;
 
+use http::Uri;
+use lazy_static::lazy_static;
 use opentelemetry::runtime;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tower::BoxError;
-use url::Url;
 
-use super::agent_endpoint;
-use super::deser_endpoint;
-use super::AgentEndpoint;
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::endpoint::SocketEndpoint;
+use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+lazy_static! {
+    static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://localhost:14268/api/traces");
+}
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum Config {
     Agent {
@@ -40,20 +42,18 @@ pub(crate) enum Config {
     },
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AgentConfig {
     /// The endpoint to send to
-    #[schemars(schema_with = "agent_endpoint")]
-    #[serde(deserialize_with = "deser_endpoint")]
-    endpoint: AgentEndpoint,
+    endpoint: SocketEndpoint,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CollectorConfig {
     /// The endpoint to send reports to
-    endpoint: Url,
+    endpoint: UriEndpoint,
     /// The optional username
     username: Option<String>,
     /// The optional password
@@ -68,20 +68,10 @@ impl TracingConfigurator for Config {
                 batch_processor,
             } => {
                 tracing::info!("Configuring Jaeger tracing: {}", batch_processor);
-                let socket = match &agent.endpoint {
-                    AgentEndpoint::Default(_) => None,
-                    AgentEndpoint::Url(u) => {
-                        let socket_addr = u
-                            .socket_addrs(|| None)?
-                            .pop()
-                            .ok_or_else(|| format!("cannot resolve url ({u}) for jaeger agent"))?;
-                        Some(socket_addr)
-                    }
-                };
                 let exporter = opentelemetry_jaeger::new_agent_pipeline()
                     .with_trace_config(trace_config.into())
                     .with_service_name(trace_config.service_name.clone())
-                    .with(&socket, |b, s| b.with_endpoint(s))
+                    .with(&agent.endpoint.to_socket(), |b, s| b.with_endpoint(s))
                     .build_async_agent_exporter(opentelemetry::runtime::Tokio)?;
                 Ok(builder.with_span_processor(
                     BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
@@ -95,14 +85,14 @@ impl TracingConfigurator for Config {
                 batch_processor,
             } => {
                 tracing::info!("Configuring Jaeger tracing: {}", batch_processor);
-                // We are waiting for a release of https://github.com/open-telemetry/opentelemetry-rust/issues/894
-                // Until that time we need to wrap a tracer provider with Jeager in.
                 let exporter = opentelemetry_jaeger::new_collector_pipeline()
                     .with_trace_config(trace_config.into())
                     .with_service_name(trace_config.service_name.clone())
                     .with(&collector.username, |b, u| b.with_username(u))
                     .with(&collector.password, |b, p| b.with_password(p))
-                    .with_endpoint(&collector.endpoint.to_string())
+                    .with(&collector.endpoint.to_uri(&DEFAULT_ENDPOINT), |b, p| {
+                        b.with_endpoint(p.to_string())
+                    })
                     .with_reqwest()
                     .with_batch_processor_config(batch_processor.clone().into())
                     .build_collector_exporter::<runtime::Tokio>()?;
