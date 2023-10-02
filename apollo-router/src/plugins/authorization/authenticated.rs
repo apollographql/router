@@ -424,7 +424,6 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
 
 #[cfg(test)]
 mod tests {
-
     use apollo_compiler::ApolloCompiler;
     use multimap::MultiMap;
     use serde_json_bytes::json;
