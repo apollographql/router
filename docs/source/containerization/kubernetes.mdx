@@ -9,26 +9,21 @@ import HelmShowOutput from '../../shared/helm-show-router-output.mdx';
 import K8SManualConfig from '../../shared/k8s-manual-config.mdx';
 import RouterCommonConfig from '../../shared/router-common-config.mdx';
 
+Learn how to deploy a self-hosted supergraph with GraphOS and the Apollo Router on Kubernetes: 
+
+* Get the Helm chart provided with each release of the router.
+* Divide a router configuration between one chart for common settings across all environments, and a separate chart for each specific environment.
+* Choose chart settings that best migrate from gateway to the router.
+* Install your Helm charts to deploy the router.
+
 <ElasticNotice />
-
-Learn about deploying a self-hosted supergraph with GraphOS and the Apollo Router on Kubernetes (k8s). Use Helm charts for the router, one with common configuration and another with custom, in-house configuration.
-
-This guide covers:
-
-* Explaining the Helm chart for Apollo Router
-* Setting up your cluster and self-hosted router
-* Configuring the router Helm chart and installing the router package
-
 
 ## About the router Helm chart
 
-[Helm](https://helm.sh) is a package manager for Kubernetes. You create a Helm _chart_ to describe the resources in a package, then you install the chart with Helm to deploy the package on Kubernetes.
+[Helm](https://helm.sh) is a package manager for Kubernetes. You create a Helm _chart_ to describe the resources in a package then install the chart with Helm to deploy the package on Kubernetes (k8s).
 
-Apollo provides an application Helm chart with each release of Apollo Router in GitHub. The chart for the latest release of the router is available [here](https://github.com/apollographql/router/tree/v1.31.1/helm/chart/router).
+Apollo provides an application Helm chart with each release of Apollo Router in GitHub. Each released Helm chart sets specific values for the router, including:
 
-Since version 0.14.0 of the router, Apollo has also released a Helm chart for the router as an [Open Container Initiative (OCI)](https://helm.sh/docs/topics/registries/) image in the GitHub Container registry. The path to the OCI router chart is `oci://ghcr.io/apollographql/helm-charts/router`.
-
-The released Helm chart sets specific values for the router, including:
 * Coprocessor
 * Header propagation
 * Max request sizes
@@ -36,7 +31,18 @@ The released Helm chart sets specific values for the router, including:
 * CORS
 * Metrics and labels
 
-<ExpansionPanel title="Click to expand OCI chart for router v1.31.0">
+
+## Get the router Helm chart
+
+The Helm chart for each release of the Apollo Router is available from the router's GitHub repository in `<repo>/helm/chart/router`. 
+
+> For example, the Helm chart of the latest release of the router is available [here](https://github.com/apollographql/router/tree/v1.31.1/helm/chart/router).
+
+Since the router v0.14.0, Apollo has also released a Helm chart for the router as an [Open Container Initiative (OCI)](https://helm.sh/docs/topics/registries/) image in the GitHub Container registry. 
+
+> The path to the OCI router chart is `oci://ghcr.io/apollographql/helm-charts/router`.
+
+<ExpansionPanel title="Click to expand example chart for router v1.31.0">
 
 The values of the Helm chart for Apollo Router v1.31.0 in the GitHub container repository, as output by the `helm show` command:
 
@@ -48,13 +54,133 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 
 </ExpansionPanel>
 
-### Separate common and environment-specific configurations
+## Separate configurations per environment
 
-To support different deployment configurations for different environments (development, staging, production, etc.), Apollo recommends separating your configuration values into separate Helm charts:
+To support your different deployment configurations for different environments (development, staging, production, etc.), Apollo recommends separating your configuration values into separate files (`values.yaml`):
 
-- A **common** chart, containing values that apply across all environments.
-- Unique **environment** charts, each including the common chart and overriding common values with environment-specific values or adding new values.
+- A **common** file, which contains values that apply across all environments.
+- A unique **environment** file per environment, which includes and overrides the values from the common chart while adding new environment-specific values.
 
+### Common value configuration
+
+Configuring a `values.yaml` file for settings common across environments.
+
+<ExpansionPanel title="Example router Helm chart for common configuration across environments">
+
+<RouterCommonConfig/>
+
+</ExpansionPanel>
+
+(TODO: explain `fullnameOverride`)
+
+Setting router command-line arguments and YAML config file keys/values. 
+
+```yaml title="values.yaml"
+router:
+  router:
+    # args: router binary command-line args
+    args: [<router-command-line-args>]
+    # configuration: router config 
+    configuration:
+      ...
+```
+
+Configure Rhai script path and entry point.
+
+```yaml title="values.yaml"
+router:
+  router:
+    configuration:
+      rhai:
+        scripts: <rhai-scripts-path>
+        main: <rhai-main-script>.rhai
+```
+
+Configure metrics endpoints.
+
+```yaml title="values.yaml"
+router:
+  router:
+    configuration:
+      telemetry:
+        metrics:
+          prometheus:
+            enabled: true
+          otlp:
+            temporality: delta
+            endpoint: <otlp-endpoint-addr>
+```
+
+Coprocessor container configuration
+
+```yaml title="values.yaml"
+router:
+  router:
+    configuration:
+      coprocessor:
+        timeout: 3s
+        url: <coprocessor-ip>:<coprocessor-container-port>
+        router:
+          request:
+            ...
+          response:
+            ...
+        subgraph:
+  extraContainers:
+    - name: <coprocessor-app-name>
+      image: <coprocessor-app-image>
+      ports:
+        - containerPort: <coprocessor-container-port>
+      env:
+        ...
+
+```
+
+#### Configuring migration from gateway
+
+The gateway's maximum supported request size is 20MB, which is different than the router's default maximum request size, so it needs to be configured.
+
+```yaml title="values.yaml"
+router:
+  router:
+    configuration:
+      limits:
+        experimental_http_max_request_bytes: 20000000 #20MB
+```
+
+The router's timeout is increased to accommodate slow subgraphs. Only HTTP 1.1 suport is enabled.
+
+```yaml title="values.yaml"
+router:
+  router:
+    configuration:
+      traffic_shaping:
+        router:
+          timeout: 6min
+        all:
+          experimental_enable_http2: false
+          timeout: 5min
+```
+
+Support for `@defer` is unsupported in gateway, so it needs to be disabled in the router.
+
+```yaml title="values.yaml"
+router:
+  router:
+    configuration:
+      supergraph:
+        defer_support: false
+```
+
+The gateway propagates subgraph errors to clients, but the router doesn't by default, so it needs to be configured to propagate subgraph errors.
+
+```yaml title="values.yaml"
+router:
+  router:
+    configuration:
+      include_subgraph_errors:
+        all: true
+```
 
 ## Deploy router with Helm
 
@@ -68,7 +194,7 @@ To support different deployment configurations for different environments (devel
 
 Install the tools and provision the infrastructure for your Kubernetes cluster.
 
-For example, see the [Setup from Apollo's Build a Supergraph tutorial](https://github.com/apollosolutions/build-a-supergraph/tree/main/01-setup#01---setup). It provides steps you can reference for gathering accounts and credentials for your cloud platform (GCP or AWS), provisioning resources, and deploying your subgraphs.
+> For example, see the [Setup from Apollo's Build a Supergraph tutorial](https://github.com/apollosolutions/build-a-supergraph/tree/main/01-setup#01---setup). It provides steps you can reference for gathering accounts and credentials for your cloud platform (GCP or AWS), provisioning resources, and deploying your subgraphs.
 
 (TODO: refine the steps between this #set-up-cluster and the next #set-up-self-hosted-router)
 
@@ -76,15 +202,6 @@ For example, see the [Setup from Apollo's Build a Supergraph tutorial](https://g
 
 Set up a self-hosted router by following the [first six steps of the self-hosted router quickstart](/graphos/quickstart/self-hosted), and stopping when you reach step [7. Deploy your router and connect clients](https://www.apollographql.com/docs/graphos/quickstart/self-hosted/#7-deploy-your-router-and-connect-clients).
 
-## Customize router charts
-
-<ExpansionPanel>
-
-<RouterCommonConfig/>
-
-</ExpansionPanel>
-
-(TODO: explain common config settings)
 
 ## Install router Helm chart
 
