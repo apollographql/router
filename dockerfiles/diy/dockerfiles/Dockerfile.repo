@@ -10,7 +10,8 @@ RUN apt-get update
 RUN apt-get -y install \
     npm \
     nodejs \
-    protobuf-compiler
+    protobuf-compiler \
+    cmake
 
 # Add rustfmt since build requires it
 RUN rustup component add rustfmt

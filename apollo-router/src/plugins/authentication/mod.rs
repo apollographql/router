@@ -44,7 +44,7 @@ use crate::services::router;
 use crate::Context;
 
 mod jwks;
-mod subgraph;
+pub(crate) mod subgraph;
 
 #[cfg(test)]
 mod tests;
@@ -627,7 +627,7 @@ fn authenticate(
             monotonic_counter.apollo_authentication_success_count = 1u64,
             kind = %AUTHENTICATION_KIND
         );
-        tracing::info!(monotonic_counter.apollo.router.operations.jwt = 1);
+        tracing::info!(monotonic_counter.apollo.router.operations.jwt = 1u64);
         return Ok(ControlFlow::Continue(request));
     }
 

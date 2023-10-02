@@ -37,6 +37,7 @@ use mediatype::names::JSON;
 use mediatype::MediaType;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
+use rustls::ClientConfig;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -60,6 +61,7 @@ use super::Plugins;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
+use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -68,12 +70,14 @@ use crate::plugins::subscription::WebSocketConfiguration;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
+use crate::plugins::traffic_shaping::Http2Config;
 use crate::protocols::websocket::convert_websocket_stream;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
 use crate::services::layers::apq;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::Configuration;
 use crate::Context;
 use crate::Notify;
 
@@ -91,7 +95,10 @@ const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5)
 
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
-const ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
+static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
+pub(crate) static APPLICATION_JSON_HEADER_VALUE: HeaderValue =
+    HeaderValue::from_static("application/json");
+static APP_GRAPHQL_JSON: HeaderValue = HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
 
 enum APQError {
     PersistedQueryNotSupported,
@@ -150,34 +157,93 @@ pub(crate) struct SubgraphService {
 }
 
 impl SubgraphService {
+    pub(crate) fn from_config(
+        service: impl Into<String>,
+        configuration: &Configuration,
+        tls_root_store: &Option<RootCertStore>,
+        http2: Http2Config,
+        subscription_config: Option<SubscriptionConfig>,
+    ) -> Result<Self, BoxError> {
+        let name: String = service.into();
+        let tls_cert_store = configuration
+            .tls
+            .subgraph
+            .subgraphs
+            .get(&name)
+            .as_ref()
+            .and_then(|subgraph| subgraph.create_certificate_store())
+            .transpose()?
+            .or_else(|| tls_root_store.clone());
+        let enable_apq = configuration
+            .apq
+            .subgraph
+            .subgraphs
+            .get(&name)
+            .map(|apq| apq.enabled)
+            .unwrap_or(configuration.apq.subgraph.all.enabled);
+        let client_cert_config = configuration
+            .tls
+            .subgraph
+            .subgraphs
+            .get(&name)
+            .as_ref()
+            .and_then(|tls| tls.client_authentication.as_ref())
+            .or(configuration
+                .tls
+                .subgraph
+                .all
+                .client_authentication
+                .as_ref());
+
+        let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
+        let tls_client_config = match (tls_cert_store, client_cert_config) {
+            (None, None) => tls_builder.with_native_roots().with_no_client_auth(),
+            (Some(store), None) => tls_builder
+                .with_root_certificates(store)
+                .with_no_client_auth(),
+            (None, Some(client_auth_config)) => {
+                tls_builder.with_native_roots().with_client_auth_cert(
+                    client_auth_config.certificate_chain.clone(),
+                    client_auth_config.key.clone(),
+                )?
+            }
+            (Some(store), Some(client_auth_config)) => tls_builder
+                .with_root_certificates(store)
+                .with_client_auth_cert(
+                    client_auth_config.certificate_chain.clone(),
+                    client_auth_config.key.clone(),
+                )?,
+        };
+
+        Ok(SubgraphService::new(
+            name,
+            enable_apq,
+            http2,
+            subscription_config,
+            tls_client_config,
+            configuration.notify.clone(),
+        ))
+    }
+
     pub(crate) fn new(
         service: impl Into<String>,
         enable_apq: bool,
-        tls_cert_store: Option<RootCertStore>,
-        enable_http2: bool,
+        http2: Http2Config,
         subscription_config: Option<SubscriptionConfig>,
+        tls_config: ClientConfig,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
         let mut http_connector = HttpConnector::new();
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
-        let tls_config = match tls_cert_store {
-            None => rustls::ClientConfig::builder()
-                .with_safe_defaults()
-                .with_native_roots()
-                .with_no_client_auth(),
-            Some(store) => rustls::ClientConfig::builder()
-                .with_safe_defaults()
-                .with_root_certificates(store)
-                .with_no_client_auth(),
-        };
+
         let builder = hyper_rustls::HttpsConnectorBuilder::new()
             .with_tls_config(tls_config)
             .https_or_http()
             .enable_http1();
 
-        let connector = if enable_http2 {
+        let connector = if http2 != Http2Config::Disable {
             builder.enable_http2().wrap_connector(http_connector)
         } else {
             builder.wrap_connector(http_connector)
@@ -185,6 +251,7 @@ impl SubgraphService {
 
         let http_client = hyper::Client::builder()
             .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
+            .http2_only(http2 == Http2Config::Http2Only)
             .build(connector);
         Self {
             client: ServiceBuilder::new()
@@ -431,6 +498,13 @@ async fn call_websocket(
     subgraph_cfg: &WebSocketConfiguration,
     subscription_hash: String,
 ) -> Result<SubgraphResponse, BoxError> {
+    let operation_name = request
+        .subgraph_request
+        .body()
+        .operation_name
+        .clone()
+        .unwrap_or_default();
+
     let SubgraphRequest {
         subgraph_request,
         subscription_stream,
@@ -445,7 +519,6 @@ async fn call_websocket(
     let (handle, created) = notify
         .create_or_subscribe(subscription_hash.clone(), false)
         .await?;
-    let operation_name = context.operation_name().unwrap_or_default();
     tracing::info!(
         monotonic_counter.apollo.router.operations.subscriptions = 1u64,
         subscriptions.mode = %"passthrough",
@@ -482,11 +555,28 @@ async fn call_websocket(
     };
 
     let request = get_websocket_request(service_name.clone(), parts, subgraph_cfg)?;
+
     let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
+
+    let signing_params = context
+        .private_entries
+        .lock()
+        .get::<SigningParamsConfig>()
+        .cloned();
+
+    let request = if let Some(signing_params) = signing_params {
+        signing_params
+            .sign_empty(request, service_name.as_str())
+            .await?
+    } else {
+        request
+    };
+
     if display_headers {
         tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Websocket request headers to subgraph {service_name:?}");
     }
+
     if display_body {
         tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Websocket request body to subgraph {service_name:?}");
     }
@@ -518,20 +608,30 @@ async fn call_websocket(
 
     let (ws_stream, mut resp) = match request.uri().scheme_str() {
         Some("wss") => {
-            connect_async_tls_with_config(request, None, None)
+            connect_async_tls_with_config(request, None, false, None)
                 .instrument(subgraph_req_span)
                 .await
         }
         _ => connect_async(request).instrument(subgraph_req_span).await,
     }
-    .map_err(|err| FetchError::SubrequestWsError {
-        service: service_name.clone(),
-        reason: format!("cannot connect websocket to subgraph: {err}"),
+    .map_err(|err| {
+        if display_body || display_headers {
+            tracing::info!(
+                http.response.error = format!("{:?}", &err), apollo.subgraph.name = %service_name, "Websocket connection error from subgraph {service_name:?} received"
+            );
+        }
+        FetchError::SubrequestWsError {
+            service: service_name.clone(),
+            reason: format!("cannot connect websocket to subgraph: {err}"),
+        }
     })?;
 
+    if display_headers {
+        tracing::info!(response.headers = ?resp.headers(), apollo.subgraph.name = %service_name, "Websocket response headers to subgraph {service_name:?}");
+    }
     if display_body {
         tracing::info!(
-            response.body = %String::from_utf8_lossy(&resp.body_mut().take().unwrap_or_default()), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+            response.body = %String::from_utf8_lossy(&resp.body_mut().take().unwrap_or_default()), apollo.subgraph.name = %service_name, "Websocket response body from subgraph {service_name:?} received"
         );
     }
 
@@ -609,15 +709,19 @@ async fn call_http(
         })?;
 
     let mut request = http::request::Request::from_parts(parts, compressed_body.into());
-    let app_json: HeaderValue = HeaderValue::from_static(APPLICATION_JSON.essence_str());
-    let app_graphql_json: HeaderValue =
-        HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
-    request.headers_mut().insert(CONTENT_TYPE, app_json.clone());
-    request.headers_mut().insert(ACCEPT, app_json);
-    request.headers_mut().append(ACCEPT, app_graphql_json);
+
     request
         .headers_mut()
-        .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS);
+        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
+    request
+        .headers_mut()
+        .insert(ACCEPT, APPLICATION_JSON_HEADER_VALUE.clone());
+    request
+        .headers_mut()
+        .append(ACCEPT, APP_GRAPHQL_JSON.clone());
+    request
+        .headers_mut()
+        .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS.clone());
 
     let schema_uri = request.uri();
     let host = schema_uri.host().unwrap_or_default();
@@ -668,6 +772,18 @@ async fn call_http(
     let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
     let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
 
+    let signing_params = context
+        .private_entries
+        .lock()
+        .get::<SigningParamsConfig>()
+        .cloned();
+
+    let request = if let Some(signing_params) = signing_params {
+        signing_params.sign(request, service_name).await?
+    } else {
+        request
+    };
+
     // Print out the debug for the request
     if display_headers {
         tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Request headers to subgraph {service_name:?}");
@@ -687,6 +803,18 @@ async fn call_http(
     )
     .instrument(subgraph_req_span)
     .await?;
+
+    // Print out the debug for the response
+    if display_headers {
+        tracing::info!(response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}");
+    }
+    if display_body {
+        if let Some(Ok(b)) = &body {
+            tracing::info!(
+                response.body = %String::from_utf8_lossy(b), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+            );
+        }
+    }
 
     let mut graphql_response = match (content_type, body, parts.status.is_success()) {
         (Ok(ContentType::ApplicationGraphqlResponseJson), Some(Ok(body)), _)
@@ -1030,6 +1158,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
+    use std::io;
     use std::net::SocketAddr;
     use std::net::TcpListener;
     use std::str::FromStr;
@@ -1047,8 +1176,15 @@ mod tests {
     use http::header::HOST;
     use http::StatusCode;
     use http::Uri;
+    use http::Version;
+    use hyper::server::conn::AddrIncoming;
     use hyper::service::make_service_fn;
     use hyper::Body;
+    use hyper_rustls::TlsAcceptor;
+    use rustls::server::AllowAnyAuthenticatedClient;
+    use rustls::Certificate;
+    use rustls::PrivateKey;
+    use rustls::ServerConfig;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use tower::service_fn;
@@ -1057,6 +1193,10 @@ mod tests {
     use SubgraphRequest;
 
     use super::*;
+    use crate::configuration::load_certs;
+    use crate::configuration::load_key;
+    use crate::configuration::TlsClientAuth;
+    use crate::configuration::TlsSubgraph;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
@@ -1712,9 +1852,12 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "testbis",
             true,
-            None,
-            false,
+            Http2Config::Disable,
             subscription_config().into(),
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
             Notify::builder().build(),
         );
         let (tx, _rx) = mpsc::channel(2);
@@ -1761,8 +1904,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_graphql_response(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            Http2Config::Enable,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1795,8 +1947,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_json_response(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            Http2Config::Enable,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1829,8 +1990,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_ok_status_invalid_response(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            Http2Config::Enable,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1868,8 +2038,17 @@ mod tests {
         tokio::task::spawn(
             emulate_subgraph_invalid_response_invalid_status_application_json(listener),
         );
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            Http2Config::Enable,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1911,8 +2090,17 @@ mod tests {
         tokio::task::spawn(
             emulate_subgraph_invalid_response_invalid_status_application_graphql(listener),
         );
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            Http2Config::Enable,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1955,9 +2143,12 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            false,
+            Http2Config::Disable,
             subscription_config().into(),
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
             Notify::builder().build(),
         );
         let (tx, mut rx) = mpsc::channel(2);
@@ -2015,9 +2206,12 @@ mod tests {
         let subgraph_service = SubgraphService::new(
             "test",
             true,
-            None,
-            false,
+            Http2Config::Disable,
             subscription_config().into(),
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
             Notify::builder().build(),
         );
         let (tx, _rx) = mpsc::channel(2);
@@ -2064,8 +2258,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_bad_request(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            Http2Config::Enable,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2106,8 +2309,17 @@ mod tests {
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_bad_response_format(listener));
 
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            Http2Config::Enable,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2143,8 +2355,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_compressed_response(listener));
-        let subgraph_service =
-            SubgraphService::new("test", false, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            false,
+            Http2Config::Enable,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -2184,8 +2405,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_unauthorized(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            Http2Config::Enable,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2221,8 +2451,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_persisted_query_not_supported_message(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            Http2Config::Enable,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         assert!(subgraph_service.clone().apq.as_ref().load(Relaxed));
 
@@ -2267,8 +2506,17 @@ mod tests {
         tokio::task::spawn(emulate_persisted_query_not_supported_extension_code(
             listener,
         ));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            Http2Config::Enable,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         assert!(subgraph_service.clone().apq.as_ref().load(Relaxed));
 
@@ -2311,8 +2559,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_persisted_query_not_found_message(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            Http2Config::Enable,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -2352,8 +2609,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_persisted_query_not_found_extension_code(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            Http2Config::Enable,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -2393,8 +2659,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_expected_apq_enabled_configuration(listener));
-        let subgraph_service =
-            SubgraphService::new("test", true, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            Http2Config::Enable,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -2434,8 +2709,17 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_expected_apq_disabled_configuration(listener));
-        let subgraph_service =
-            SubgraphService::new("test", false, None, true, None, Notify::default());
+        let subgraph_service = SubgraphService::new(
+            "test",
+            false,
+            Http2Config::Enable,
+            None,
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -2468,5 +2752,319 @@ mod tests {
         };
 
         assert_eq!(resp.response.body(), &expected_resp);
+    }
+
+    async fn tls_server(
+        listener: tokio::net::TcpListener,
+        certificates: Vec<Certificate>,
+        key: PrivateKey,
+        body: &'static str,
+    ) {
+        let acceptor = TlsAcceptor::builder()
+            .with_single_cert(certificates, key)
+            .unwrap()
+            .with_all_versions_alpn()
+            .with_incoming(AddrIncoming::from_listener(listener).unwrap());
+        let service = make_service_fn(|_| async {
+            Ok::<_, io::Error>(service_fn(|_req| async {
+                Ok::<_, io::Error>(
+                    http::Response::builder()
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .status(StatusCode::OK)
+                        .version(Version::HTTP_11)
+                        .body::<Body>(body.into())
+                        .unwrap(),
+                )
+            }))
+        });
+        let server = Server::builder(acceptor).serve(service);
+        server.await.unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tls_self_signed() {
+        let certificate_pem = include_str!("./testdata/server_self_signed.crt");
+        let key_pem = include_str!("./testdata/server.key");
+
+        let certificates = load_certs(certificate_pem).unwrap();
+        let key = load_key(key_pem).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(tls_server(listener, certificates, key, r#"{"data": null}"#));
+
+        // we cannot parse a configuration from text, because certificates are generally
+        // added by file expansion and we don't have access to that here, and inserting
+        // the PEM data directly generates parsing issues due to end of line characters
+        let mut config = Configuration::default();
+        config.tls.subgraph.subgraphs.insert(
+            "test".to_string(),
+            TlsSubgraph {
+                certificate_authorities: Some(certificate_pem.into()),
+                client_authentication: None,
+            },
+        );
+        let subgraph_service =
+            SubgraphService::from_config("test", &config, &None, Http2Config::Enable, None)
+                .unwrap();
+
+        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(Request::builder().query("query").build())
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(Request::builder().query("query").build())
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Query,
+                context: Context::new(),
+                subscription_stream: None,
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(response.response.body().data, Some(Value::Null));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tls_custom_root() {
+        let certificate_pem = include_str!("./testdata/server.crt");
+        let ca_pem = include_str!("./testdata/CA/ca.crt");
+        let key_pem = include_str!("./testdata/server.key");
+
+        let mut certificates = load_certs(certificate_pem).unwrap();
+        certificates.extend(load_certs(ca_pem).unwrap());
+        let key = load_key(key_pem).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(tls_server(listener, certificates, key, r#"{"data": null}"#));
+
+        // we cannot parse a configuration from text, because certificates are generally
+        // added by file expansion and we don't have access to that here, and inserting
+        // the PEM data directly generates parsing issues due to end of line characters
+        let mut config = Configuration::default();
+        config.tls.subgraph.subgraphs.insert(
+            "test".to_string(),
+            TlsSubgraph {
+                certificate_authorities: Some(ca_pem.into()),
+                client_authentication: None,
+            },
+        );
+        let subgraph_service =
+            SubgraphService::from_config("test", &config, &None, Http2Config::Enable, None)
+                .unwrap();
+
+        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(Request::builder().query("query").build())
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(Request::builder().query("query").build())
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Query,
+                context: Context::new(),
+                subscription_stream: None,
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.response.body().data, Some(Value::Null));
+    }
+
+    async fn tls_server_with_client_auth(
+        listener: tokio::net::TcpListener,
+        certificates: Vec<Certificate>,
+        key: PrivateKey,
+        client_root: Certificate,
+        body: &'static str,
+    ) {
+        let mut client_auth_roots = RootCertStore::empty();
+        client_auth_roots.add(&client_root).unwrap();
+
+        let client_auth = AllowAnyAuthenticatedClient::new(client_auth_roots).boxed();
+
+        let acceptor = TlsAcceptor::builder()
+            .with_tls_config(
+                ServerConfig::builder()
+                    .with_safe_defaults()
+                    .with_client_cert_verifier(client_auth)
+                    .with_single_cert(certificates, key)
+                    .unwrap(),
+            )
+            .with_all_versions_alpn()
+            .with_incoming(AddrIncoming::from_listener(listener).unwrap());
+        let service = make_service_fn(|_| async {
+            Ok::<_, io::Error>(service_fn(|_req| async {
+                Ok::<_, io::Error>(
+                    http::Response::builder()
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .status(StatusCode::OK)
+                        .version(Version::HTTP_11)
+                        .body::<Body>(body.into())
+                        .unwrap(),
+                )
+            }))
+        });
+        let server = Server::builder(acceptor).serve(service);
+        server.await.unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tls_client_auth() {
+        let server_certificate_pem = include_str!("./testdata/server.crt");
+        let ca_pem = include_str!("./testdata/CA/ca.crt");
+        let server_key_pem = include_str!("./testdata/server.key");
+
+        let mut server_certificates = load_certs(server_certificate_pem).unwrap();
+        let ca_certificate = load_certs(ca_pem).unwrap().remove(0);
+        server_certificates.push(ca_certificate.clone());
+        let key = load_key(server_key_pem).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(tls_server_with_client_auth(
+            listener,
+            server_certificates,
+            key,
+            ca_certificate,
+            r#"{"data": null}"#,
+        ));
+
+        let client_certificate_pem = include_str!("./testdata/client.crt");
+        let client_key_pem = include_str!("./testdata/client.key");
+
+        let client_certificates = load_certs(client_certificate_pem).unwrap();
+        let client_key = load_key(client_key_pem).unwrap();
+
+        // we cannot parse a configuration from text, because certificates are generally
+        // added by file expansion and we don't have access to that here, and inserting
+        // the PEM data directly generates parsing issues due to end of line characters
+        let mut config = Configuration::default();
+        config.tls.subgraph.subgraphs.insert(
+            "test".to_string(),
+            TlsSubgraph {
+                certificate_authorities: Some(ca_pem.into()),
+                client_authentication: Some(TlsClientAuth {
+                    certificate_chain: client_certificates,
+                    key: client_key,
+                }),
+            },
+        );
+        let subgraph_service =
+            SubgraphService::from_config("test", &config, &None, Http2Config::Enable, None)
+                .unwrap();
+
+        let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(Request::builder().query("query").build())
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(Request::builder().query("query").build())
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Query,
+                context: Context::new(),
+                subscription_stream: None,
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(response.response.body().data, Some(Value::Null));
+    }
+
+    // starts a local server emulating a subgraph returning status code 401
+    async fn emulate_h2c_server(listener: TcpListener) {
+        async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            println!("h2C server got req: {_request:?}");
+            Ok(http::Response::builder()
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .status(StatusCode::OK)
+                .body(
+                    serde_json::to_string(&Response {
+                        data: Some(Value::default()),
+                        ..Response::default()
+                    })
+                    .expect("always valid")
+                    .into(),
+                )
+                .unwrap())
+        }
+
+        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+        let server = Server::from_tcp(listener)
+            .unwrap()
+            .http2_only(true)
+            .serve(make_svc);
+        server.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_h2c() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_h2c_server(listener));
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            Http2Config::Http2Only,
+            None,
+            rustls::ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::default(),
+        );
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(Request::builder().query("query").build())
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(Request::builder().query("query").build())
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Query,
+                context: Context::new(),
+                subscription_stream: None,
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+        assert!(response.response.body().errors.is_empty());
     }
 }

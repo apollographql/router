@@ -17,7 +17,7 @@ mod tests {
     use tower::BoxError;
     use tower::ServiceExt;
 
-    use super::super::coprocessor::*;
+    use super::super::*;
     use crate::plugin::test::MockHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
@@ -287,7 +287,7 @@ mod tests {
             Box::pin(async {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
-                        r##"{
+                        r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
                                 "control": {
@@ -299,7 +299,7 @@ mod tests {
                                         "body": "Errors need a message, this will fail to deserialize"
                                     }]
                                 }
-                            }"##,
+                            }"#,
                     ))
                     .unwrap())
             })
@@ -386,7 +386,7 @@ mod tests {
             Box::pin(async {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
-                        r##"{
+                        r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
                                 "control": "continue",
@@ -429,7 +429,7 @@ mod tests {
                                   },
                                   "serviceName": "service name shouldn't change",
                                   "uri": "http://thisurihaschanged"
-                            }"##,
+                            }"#,
                     ))
                     .unwrap())
             })
@@ -478,7 +478,7 @@ mod tests {
             Box::pin(async {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
-                        r##"{
+                        r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
                                 "control": {
@@ -495,7 +495,7 @@ mod tests {
                                 "headers": {
                                     "aheader": ["a value"]
                                 }
-                            }"##,
+                            }"#,
                     ))
                     .unwrap())
             })
@@ -522,6 +522,69 @@ mod tests {
         assert_eq!(
             "my error message",
             response.into_body().errors[0].message.as_str()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_request_controlflow_break_with_message_string() {
+        let subgraph_stage = SubgraphStage {
+            request: SubgraphRequestConf {
+                headers: false,
+                context: false,
+                body: true,
+                uri: false,
+                method: false,
+                service_name: false,
+            },
+            response: Default::default(),
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mock_subgraph_service = MockSubgraphService::new();
+
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+            Box::pin(async {
+                Ok(hyper::Response::builder()
+                    .body(Body::from(
+                        r#"{
+                                "version": 1,
+                                "stage": "SubgraphRequest",
+                                "control": {
+                                    "break": 200
+                                },
+                                "body": "my error message"
+                            }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+
+        let response = service.oneshot(request).await.unwrap().response;
+
+        assert_eq!(response.status(), http::StatusCode::OK);
+
+        let actual_response = response.into_body();
+
+        assert_eq!(
+            actual_response,
+            serde_json::from_value(json!({
+                "errors": [{
+                   "message": "my error message",
+                   "extensions": {
+                      "code": "ERROR"
+                   }
+                }]
+            }))
+            .unwrap(),
         );
     }
 
@@ -556,7 +619,7 @@ mod tests {
             Box::pin(async {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
-                        r##"{
+                        r#"{
                                 "version": 1,
                                 "stage": "SubgraphResponse",
                                 "headers": {
@@ -598,7 +661,7 @@ mod tests {
                                       "this-is-a-test-context": 42
                                     }
                                   }
-                            }"##,
+                            }"#,
                     ))
                     .unwrap())
             })
@@ -971,6 +1034,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn external_plugin_router_request_controlflow_break_with_message_string() {
+        let router_stage = RouterStage {
+            request: RouterRequestConf {
+                headers: true,
+                context: true,
+                body: true,
+                sdl: true,
+                path: true,
+                method: true,
+            },
+            response: Default::default(),
+        };
+
+        let mock_router_service = MockRouterService::new();
+
+        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
+            Box::pin(async {
+                let deserialized_request: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+                        .unwrap();
+
+                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
+                assert_eq!(
+                    PipelineStep::RouterRequest.to_string(),
+                    deserialized_request.stage
+                );
+
+                let input = json!(
+                    {
+                    "version": 1,
+                    "stage": "RouterRequest",
+                    "control": {
+                        "break": 401
+                    },
+                    "id": "1b19c05fdafc521016df33148ad63c1b",
+                    "body": "this is a test error",
+                }
+                );
+                Ok(hyper::Response::builder()
+                    .body(Body::from(serde_json::to_string(&input).unwrap()))
+                    .unwrap())
+            })
+        });
+
+        let service = router_stage.as_service(
+            mock_http_client,
+            mock_router_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::canned_builder().build().unwrap();
+
+        let response = service
+            .oneshot(request.try_into().unwrap())
+            .await
+            .unwrap()
+            .response;
+
+        assert_eq!(response.status(), http::StatusCode::UNAUTHORIZED);
+        let actual_response = serde_json::from_slice::<serde_json::Value>(
+            &hyper::body::to_bytes(response.into_body()).await.unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            json!({
+                "errors": [{
+                   "message": "this is a test error",
+                   "extensions": {
+                      "code": "ERROR"
+                   }
+                }]
+            }),
+            actual_response
+        );
+    }
+
+    #[tokio::test]
     async fn external_plugin_router_response() {
         let router_stage = RouterStage {
             response: RouterResponseConf {
@@ -1158,6 +1300,9 @@ mod tests {
                 TEXT_HTML.essence_str().to_string(),
             ],
         );
+
+        // This header should be stripped
+        external_form.insert("content-length".to_string(), vec!["1024".to_string()]);
 
         let actual = internalize_header_map(external_form).expect("internalized header map");
 

@@ -23,6 +23,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::event;
 use tracing::Instrument;
+use tracing::Span;
 use tracing_core::Level;
 
 use super::new_service::ServiceFactory;
@@ -171,17 +172,21 @@ impl ExecutionService {
         let schema = self.schema.clone();
         let mut nullified_paths: Vec<Path> = vec![];
 
+        let execution_span = Span::current();
+
         let stream = stream
             .filter_map(move |response: Response| {
-                ready(Self::process_graphql_response(
-                    &query,
-                    operation_name.as_deref(),
-                    &variables,
-                    is_deferred,
-                    &schema,
-                    &mut nullified_paths,
-                    response,
-                ))
+                ready(execution_span.in_scope(|| {
+                    Self::process_graphql_response(
+                        &query,
+                        operation_name.as_deref(),
+                        &variables,
+                        is_deferred,
+                        &schema,
+                        &mut nullified_paths,
+                        response,
+                    )
+                }))
             })
             .boxed();
 
@@ -262,9 +267,9 @@ impl ExecutionService {
                         schema.api_schema(),
                         variables_set,
                     )
-                    .into_iter(),
+                    ,
             );
-            nullified_paths.extend(paths.into_iter());
+            nullified_paths.extend(paths);
         });
 
         match (response.path.as_ref(), response.data.as_ref()) {

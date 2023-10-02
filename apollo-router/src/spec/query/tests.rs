@@ -18,6 +18,26 @@ macro_rules! assert_eq_and_ordered {
     };
 }
 
+macro_rules! assert_eq_and_ordered_json {
+    ($a:expr, $b:expr $(,)?) => {
+        assert_eq!(
+            $a,
+            $b,
+            "assertion failed: objects are not the same:\
+            \n  left: `{}`\n right: `{}`",
+            serde_json::to_string(&$a).unwrap(),
+            serde_json::to_string(&$b).unwrap()
+        );
+        assert!(
+            $a.eq_and_ordered(&$b),
+            "assertion failed: objects are not ordered the same:\
+            \n  left: `{}`\n right: `{}`",
+            serde_json::to_string(&$a).unwrap(),
+            serde_json::to_string(&$b).unwrap(),
+        );
+    };
+}
+
 #[derive(Default)]
 struct FormatTest {
     schema: Option<&'static str>,
@@ -122,15 +142,21 @@ impl FormatTest {
         );
 
         if let Some(e) = self.expected {
-            assert_eq_and_ordered!(response.data.as_ref().unwrap(), &e);
+            assert_eq_and_ordered_json!(
+                serde_json_bytes::to_value(response.data.as_ref()).unwrap(),
+                e
+            );
         }
 
         if let Some(e) = self.expected_errors {
-            assert_eq_and_ordered!(serde_json_bytes::to_value(&response.errors).unwrap(), e);
+            assert_eq_and_ordered_json!(serde_json_bytes::to_value(&response.errors).unwrap(), e);
         }
 
         if let Some(e) = self.expected_extensions {
-            assert_eq_and_ordered!(serde_json_bytes::to_value(&response.extensions).unwrap(), e);
+            assert_eq_and_ordered_json!(
+                serde_json_bytes::to_value(&response.extensions).unwrap(),
+                e
+            );
         }
     }
 }
@@ -498,7 +524,86 @@ fn reformat_response_data_best_effort() {
                     "array": [
                         {},
                         null,
-                        {},
+                        {}
+                    ],
+                    "other": null,
+                },
+            }
+        })
+        .test();
+}
+
+#[test]
+// just like the test above, except the query is one the planner would generate.
+fn reformat_response_data_best_effort_relevant_query() {
+    FormatTest::builder()
+        .schema(
+            "type Query {
+        get: Thing
+    }
+    type Thing {
+        foo: String
+        stuff: Baz
+        array: [Element]
+        other: Bar
+    }
+
+    type Baz {
+        bar: String
+        baz: String
+    }
+
+    type Bar {
+        bar: String
+    }
+
+    union Element = Baz | Bar
+    ",
+        )
+        .query("{get{foo stuff{bar baz}array{...on Baz{bar baz}}other{bar}}}")
+        // the planner generates this:
+        // {get{foo stuff{bar baz}array{__typename ...on Baz{bar baz}}other{bar}}}
+        .response(json! {
+            {
+                "get": {
+                    "foo": "1",
+                    "stuff": {"baz": "2"},
+                    "array": [
+                        {
+                            "__typename": "Baz",
+                            "baz": "3"
+                        },
+                        "4",
+                        {
+                            "__typename": "Baz",
+                            "baz": "5"
+                        },
+                    ],
+                    "other": "6",
+                },
+                "should_be_removed": {
+                    "aaa": 2
+                },
+            }
+        })
+        .expected(json! {
+            {
+                "get": {
+                    "foo": "1",
+                    "stuff": {
+                        "bar": null,
+                        "baz": "2",
+                    },
+                    "array": [
+                        {
+                            "bar":null,
+                            "baz":"3"
+                        },
+                        null,
+                        {
+                            "bar": null,
+                            "baz":"5"
+                        }
                     ],
                     "other": null,
                 },

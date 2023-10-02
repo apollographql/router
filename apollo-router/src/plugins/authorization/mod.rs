@@ -116,7 +116,7 @@ impl AuthorizationPlugin {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
-            if traverse::document(&mut visitor, file_id).is_ok() && !visitor.found {
+            if traverse::document(&mut visitor, file_id).is_ok() && visitor.found {
                 context.insert(AUTHENTICATED_KEY, true).unwrap();
             }
         }
@@ -228,7 +228,7 @@ impl AuthorizationPlugin {
         let compiler = match filter_res {
             None => compiler,
             Some((query, paths)) => {
-                unauthorized_paths.extend(paths.into_iter());
+                unauthorized_paths.extend(paths);
 
                 if query.is_empty() {
                     return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
@@ -248,7 +248,7 @@ impl AuthorizationPlugin {
         let compiler = match filter_res {
             None => compiler,
             Some((query, paths)) => {
-                unauthorized_paths.extend(paths.into_iter());
+                unauthorized_paths.extend(paths);
 
                 if query.is_empty() {
                     return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
@@ -268,7 +268,7 @@ impl AuthorizationPlugin {
         let compiler = match filter_res {
             None => compiler,
             Some((query, paths)) => {
-                unauthorized_paths.extend(paths.into_iter());
+                unauthorized_paths.extend(paths);
 
                 if query.is_empty() {
                     return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
@@ -466,9 +466,9 @@ impl Plugin for AuthorizationPlugin {
                 if needs_authenticated || needs_requires_scopes {
                     tracing::info!(
                         monotonic_counter.apollo.router.operations.authorization = 1u64,
-                        filtered = filtered,
-                        authenticated = needs_authenticated,
-                        requires_scopes = needs_requires_scopes,
+                        authorization.filtered = filtered,
+                        authorization.needs_authenticated = needs_authenticated,
+                        authorization.needs_requires_scopes = needs_requires_scopes,
                     );
                 }
 

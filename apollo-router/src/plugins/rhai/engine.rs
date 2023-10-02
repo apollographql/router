@@ -6,6 +6,7 @@ use std::time::SystemTime;
 
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine as _;
+use bytes::Bytes;
 use http::header::InvalidHeaderName;
 use http::uri::Authority;
 use http::uri::Parts;
@@ -30,6 +31,7 @@ use tower::BoxError;
 use uuid::Uuid;
 
 use super::execution;
+use super::router;
 use super::subgraph;
 use super::supergraph;
 use super::Rhai;
@@ -97,6 +99,32 @@ mod router_base64 {
     #[rhai_fn(pure)]
     pub(crate) fn encode(input: &mut ImmutableString) -> String {
         BASE64_STANDARD.encode(input.as_bytes())
+    }
+}
+
+#[export_module]
+mod router_json {
+    pub(crate) type Object = crate::json_ext::Object;
+    pub(crate) type Value = crate::json_ext::Value;
+
+    #[rhai_fn(name = "to_string", pure)]
+    pub(crate) fn object_to_string(x: &mut Object) -> String {
+        format!("{x:?}")
+    }
+
+    #[rhai_fn(name = "to_string", pure)]
+    pub(crate) fn value_to_string(x: &mut Value) -> String {
+        format!("{x:?}")
+    }
+
+    #[rhai_fn(pure, return_raw)]
+    pub(crate) fn encode(input: &mut Dynamic) -> Result<String, Box<EvalAltResult>> {
+        serde_json::to_string(input).map_err(|e| e.to_string().into())
+    }
+
+    #[rhai_fn(pure, return_raw)]
+    pub(crate) fn decode(input: &mut ImmutableString) -> Result<Dynamic, Box<EvalAltResult>> {
+        serde_json::from_str(input).map_err(|e| e.to_string().into())
     }
 }
 
@@ -280,22 +308,6 @@ mod router_header_map {
 }
 
 #[export_module]
-mod router_json {
-    pub(crate) type Object = crate::json_ext::Object;
-    pub(crate) type Value = crate::json_ext::Value;
-
-    #[rhai_fn(name = "to_string", pure)]
-    pub(crate) fn object_to_string(x: &mut Object) -> String {
-        format!("{x:?}")
-    }
-
-    #[rhai_fn(name = "to_string", pure)]
-    pub(crate) fn value_to_string(x: &mut Value) -> String {
-        format!("{x:?}")
-    }
-}
-
-#[export_module]
 mod router_context {
     pub(crate) type Context = crate::Context;
 
@@ -350,7 +362,67 @@ mod router_context {
         format!("{x:?}")
     }
 
+    #[rhai_fn(get = "context", pure, return_raw)]
+    pub(crate) fn router_first_response_context_get(
+        obj: &mut SharedMut<router::FirstResponse>,
+    ) -> Result<Context, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.context.clone()))
+    }
+    #[rhai_fn(set = "context", return_raw)]
+    pub(crate) fn router_first_response_context_set(
+        obj: &mut SharedMut<router::FirstResponse>,
+        context: Context,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| response.context = context);
+        Ok(())
+    }
+
+    #[rhai_fn(get = "context", pure, return_raw)]
+    pub(crate) fn supergraph_first_response_context_get(
+        obj: &mut SharedMut<supergraph::FirstResponse>,
+    ) -> Result<Context, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.context.clone()))
+    }
+    #[rhai_fn(set = "context", return_raw)]
+    pub(crate) fn supergraph_first_response_context_set(
+        obj: &mut SharedMut<supergraph::FirstResponse>,
+        context: Context,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| response.context = context);
+        Ok(())
+    }
+
+    #[rhai_fn(get = "context", pure, return_raw)]
+    pub(crate) fn execution_first_response_context_get(
+        obj: &mut SharedMut<execution::FirstResponse>,
+    ) -> Result<Context, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.context.clone()))
+    }
+    #[rhai_fn(set = "context", return_raw)]
+    pub(crate) fn execution_first_response_context_set(
+        obj: &mut SharedMut<execution::FirstResponse>,
+        context: Context,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| response.context = context);
+        Ok(())
+    }
+
     // Add context getter/setters for deferred responses
+    #[rhai_fn(get = "context", pure, return_raw)]
+    pub(crate) fn router_deferred_response_context_get(
+        obj: &mut SharedMut<router::DeferredResponse>,
+    ) -> Result<Context, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.context.clone()))
+    }
+    #[rhai_fn(set = "context", return_raw)]
+    pub(crate) fn router_deferred_response_context_set(
+        obj: &mut SharedMut<router::DeferredResponse>,
+        context: Context,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| response.context = context);
+        Ok(())
+    }
+
     #[rhai_fn(get = "context", pure, return_raw)]
     pub(crate) fn supergraph_deferred_response_context_get(
         obj: &mut SharedMut<supergraph::DeferredResponse>,
@@ -469,21 +541,47 @@ mod router_plugin {
     // End of SubgraphRequest specific section
 
     #[rhai_fn(get = "headers", pure, return_raw)]
+    pub(crate) fn get_originating_headers_router_response(
+        obj: &mut SharedMut<router::FirstResponse>,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.response.headers().clone()))
+    }
+
+    #[rhai_fn(name = "is_primary", pure)]
+    pub(crate) fn router_response_is_primary(_obj: &mut SharedMut<router::FirstResponse>) -> bool {
+        true
+    }
+
+    #[rhai_fn(get = "headers", pure, return_raw)]
+    pub(crate) fn get_originating_headers_router_deferred_response(
+        _obj: &mut SharedMut<router::DeferredResponse>,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+    }
+
+    #[rhai_fn(name = "is_primary", pure)]
+    pub(crate) fn router_deferred_response_is_primary(
+        _obj: &mut SharedMut<router::DeferredResponse>,
+    ) -> bool {
+        false
+    }
+
+    #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_supergraph_response(
-        obj: &mut SharedMut<supergraph::Response>,
+        obj: &mut SharedMut<supergraph::FirstResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
     #[rhai_fn(name = "is_primary", pure)]
     pub(crate) fn supergraph_response_is_primary(
-        _obj: &mut SharedMut<supergraph::Response>,
+        _obj: &mut SharedMut<supergraph::FirstResponse>,
     ) -> bool {
         true
     }
 
     #[rhai_fn(get = "headers", pure, return_raw)]
-    pub(crate) fn get_originating_headers_router_deferred_response(
+    pub(crate) fn get_originating_headers_supergraph_deferred_response(
         _obj: &mut SharedMut<supergraph::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
@@ -498,13 +596,15 @@ mod router_plugin {
 
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_execution_response(
-        obj: &mut SharedMut<execution::Response>,
+        obj: &mut SharedMut<execution::FirstResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
     #[rhai_fn(name = "is_primary", pure)]
-    pub(crate) fn execution_response_is_primary(_obj: &mut SharedMut<execution::Response>) -> bool {
+    pub(crate) fn execution_response_is_primary(
+        _obj: &mut SharedMut<execution::FirstResponse>,
+    ) -> bool {
         true
     }
 
@@ -529,16 +629,24 @@ mod router_plugin {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
+    /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
+    #[rhai_fn(get = "body", pure, return_raw)]
+    pub(crate) fn get_originating_body_router_response(
+        obj: &mut SharedMut<router::FirstResponse>,
+    ) -> Result<Vec<u8>, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.response.body().to_vec()))
+    }*/
+
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_supergraph_response(
-        obj: &mut SharedMut<supergraph::Response>,
+        obj: &mut SharedMut<supergraph::FirstResponse>,
     ) -> Result<Response, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.body().clone()))
     }
 
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_execution_response(
-        obj: &mut SharedMut<execution::Response>,
+        obj: &mut SharedMut<execution::FirstResponse>,
     ) -> Result<Response, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.body().clone()))
     }
@@ -550,8 +658,24 @@ mod router_plugin {
         Ok(obj.with_mut(|response| response.response.body().clone()))
     }
 
+    /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_router_deferred_response(
+        obj: &mut SharedMut<router::DeferredResponse>,
+    ) -> Result<String, Box<EvalAltResult>> {
+        // Get the body
+        let bytes = obj.with_mut(|response| {
+            let bytes = std::mem::take(&mut response.response);
+            // Copy back the response so it can continue to be used
+            response.response = bytes.clone();
+            Ok::<Bytes, Box<EvalAltResult>>(bytes)
+        })?;
+
+        String::from_utf8(bytes.to_vec()).map_err(|err| err.to_string().into())
+    }*/
+
+    #[rhai_fn(get = "body", pure, return_raw)]
+    pub(crate) fn get_originating_body_supergraph_deferred_response(
         obj: &mut SharedMut<supergraph::DeferredResponse>,
     ) -> Result<Response, Box<EvalAltResult>> {
         Ok(obj.with_mut(|response| response.response.clone()))
@@ -565,8 +689,8 @@ mod router_plugin {
     }
 
     #[rhai_fn(set = "headers", return_raw)]
-    pub(crate) fn set_originating_headers_supergraph_response(
-        obj: &mut SharedMut<supergraph::Response>,
+    pub(crate) fn set_originating_headers_router_response(
+        obj: &mut SharedMut<router::FirstResponse>,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| *response.response.headers_mut() = headers);
@@ -575,6 +699,23 @@ mod router_plugin {
 
     #[rhai_fn(set = "headers", return_raw)]
     pub(crate) fn set_originating_headers_router_deferred_response(
+        _obj: &mut SharedMut<router::DeferredResponse>,
+        _headers: HeaderMap,
+    ) -> Result<(), Box<EvalAltResult>> {
+        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+    }
+
+    #[rhai_fn(set = "headers", return_raw)]
+    pub(crate) fn set_originating_headers_supergraph_response(
+        obj: &mut SharedMut<supergraph::FirstResponse>,
+        headers: HeaderMap,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| *response.response.headers_mut() = headers);
+        Ok(())
+    }
+
+    #[rhai_fn(set = "headers", return_raw)]
+    pub(crate) fn set_originating_headers_supergraph_deferred_response(
         _obj: &mut SharedMut<supergraph::DeferredResponse>,
         _headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
@@ -583,7 +724,7 @@ mod router_plugin {
 
     #[rhai_fn(set = "headers", return_raw)]
     pub(crate) fn set_originating_headers_execution_response(
-        obj: &mut SharedMut<execution::Response>,
+        obj: &mut SharedMut<execution::FirstResponse>,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| *response.response.headers_mut() = headers);
@@ -607,9 +748,20 @@ mod router_plugin {
         Ok(())
     }
 
+    /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
+    #[rhai_fn(set = "body", return_raw)]
+    pub(crate) fn set_originating_body_router_response(
+        obj: &mut SharedMut<router::FirstResponse>,
+        body: String,
+    ) -> Result<(), Box<EvalAltResult>> {
+        let bytes = Bytes::from(body);
+        obj.with_mut(|response| *response.response.body_mut() = bytes);
+        Ok(())
+    }*/
+
     #[rhai_fn(set = "body", return_raw)]
     pub(crate) fn set_originating_body_supergraph_response(
-        obj: &mut SharedMut<supergraph::Response>,
+        obj: &mut SharedMut<supergraph::FirstResponse>,
         body: Response,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| *response.response.body_mut() = body);
@@ -618,7 +770,7 @@ mod router_plugin {
 
     #[rhai_fn(set = "body", return_raw)]
     pub(crate) fn set_originating_body_execution_response(
-        obj: &mut SharedMut<execution::Response>,
+        obj: &mut SharedMut<execution::FirstResponse>,
         body: Response,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| *response.response.body_mut() = body);
@@ -634,8 +786,19 @@ mod router_plugin {
         Ok(())
     }
 
+    /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
     #[rhai_fn(set = "body", return_raw)]
     pub(crate) fn set_originating_body_router_deferred_response(
+        obj: &mut SharedMut<router::DeferredResponse>,
+        body: String,
+    ) -> Result<(), Box<EvalAltResult>> {
+        let bytes = Bytes::from(body);
+        obj.with_mut(|response| response.response = bytes);
+        Ok(())
+    }*/
+
+    #[rhai_fn(set = "body", return_raw)]
+    pub(crate) fn set_originating_body_supergraph_deferred_response(
         obj: &mut SharedMut<supergraph::DeferredResponse>,
         body: Response,
     ) -> Result<(), Box<EvalAltResult>> {
@@ -678,7 +841,18 @@ mod router_plugin {
     }
 
     #[rhai_fn(name = "headers_are_available", pure)]
-    pub(crate) fn supergraph_response(_: &mut SharedMut<supergraph::Response>) -> bool {
+    pub(crate) fn router_response(_: &mut SharedMut<router::FirstResponse>) -> bool {
+        true
+    }
+
+    /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
+    #[rhai_fn(name = "headers_are_available", pure)]
+    pub(crate) fn router_deferred_response(_: &mut SharedMut<router::DeferredResponse>) -> bool {
+        false
+    }*/
+
+    #[rhai_fn(name = "headers_are_available", pure)]
+    pub(crate) fn supergraph_response(_: &mut SharedMut<supergraph::FirstResponse>) -> bool {
         true
     }
 
@@ -690,7 +864,7 @@ mod router_plugin {
     }
 
     #[rhai_fn(name = "headers_are_available", pure)]
-    pub(crate) fn execution_response(_: &mut SharedMut<execution::Response>) -> bool {
+    pub(crate) fn execution_response(_: &mut SharedMut<execution::FirstResponse>) -> bool {
         true
     }
 
@@ -934,15 +1108,29 @@ mod router_plugin {
 }
 
 #[derive(Default)]
-pub(crate) struct RhaiExecutionResponse {
+pub(crate) struct RhaiRouterFirstRequest {
     pub(crate) context: Context,
-    pub(crate) response: http_ext::Response<Response>,
+    pub(crate) request: http::Request<()>,
+}
+
+#[allow(dead_code)]
+#[derive(Default)]
+pub(crate) struct RhaiRouterChunkedRequest {
+    pub(crate) context: Context,
+    pub(crate) request: Bytes,
 }
 
 #[derive(Default)]
-pub(crate) struct RhaiExecutionDeferredResponse {
+pub(crate) struct RhaiRouterResponse {
     pub(crate) context: Context,
-    pub(crate) response: Response,
+    pub(crate) response: http::Response<()>,
+}
+
+#[allow(dead_code)]
+#[derive(Default)]
+pub(crate) struct RhaiRouterChunkedResponse {
+    pub(crate) context: Context,
+    pub(crate) response: Bytes,
 }
 
 #[derive(Default)]
@@ -957,12 +1145,170 @@ pub(crate) struct RhaiSupergraphDeferredResponse {
     pub(crate) response: Response,
 }
 
+#[derive(Default)]
+pub(crate) struct RhaiExecutionResponse {
+    pub(crate) context: Context,
+    pub(crate) response: http_ext::Response<Response>,
+}
+
+#[derive(Default)]
+pub(crate) struct RhaiExecutionDeferredResponse {
+    pub(crate) context: Context,
+    pub(crate) response: Response,
+}
+
 macro_rules! if_subgraph {
     ( subgraph => $subgraph: block else $not_subgraph: block ) => {
         $subgraph
     };
     ( $base: ident => $subgraph: block else $not_subgraph: block ) => {
         $not_subgraph
+    };
+}
+
+macro_rules! register_rhai_router_interface {
+    ($engine: ident, $($base: ident), *) => {
+        $(
+            // Context stuff
+            $engine.register_get(
+                "context",
+                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<Context, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|request| request.context.clone()))
+                }
+            )
+            .register_get(
+                "context",
+                |obj: &mut SharedMut<$base::ChunkedRequest>| -> Result<Context, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|request| request.context.clone()))
+                }
+            ).register_get(
+                "context",
+                |obj: &mut SharedMut<$base::Response>| -> Result<Context, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|response| response.context.clone()))
+                }
+            )
+            .register_get(
+                "context",
+                |obj: &mut SharedMut<$base::DeferredResponse>| -> Result<Context, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|response| response.context.clone()))
+                }
+            );
+
+            $engine.register_set(
+                "context",
+                |obj: &mut SharedMut<$base::FirstRequest>, context: Context| {
+                    obj.with_mut(|request| request.context = context);
+                    Ok(())
+                }
+            )
+            .register_set(
+                "context",
+                |obj: &mut SharedMut<$base::ChunkedRequest>, context: Context| {
+                    obj.with_mut(|request| request.context = context);
+                    Ok(())
+                }
+            )
+            .register_set(
+                "context",
+                |obj: &mut SharedMut<$base::Response>, context: Context| {
+                    obj.with_mut(|response| response.context = context);
+                    Ok(())
+                }
+            ).register_set(
+                "context",
+                |obj: &mut SharedMut<$base::DeferredResponse>, context: Context| {
+                    obj.with_mut(|response| response.context = context);
+                    Ok(())
+                }
+            );
+
+            // Originating Request
+            $engine.register_get(
+                "headers",
+                |obj: &mut SharedMut<$base::FirstRequest>| -> Result<HeaderMap, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|request| request.request.headers().clone()))
+                }
+            ).register_get(
+                "headers",
+                |obj: &mut SharedMut<$base::Response>| -> Result<HeaderMap, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|response| response.response.headers().clone()))
+                }
+            );
+
+            $engine.register_set(
+                "headers",
+                |obj: &mut SharedMut<$base::FirstRequest>, headers: HeaderMap| {
+                    if_subgraph! {
+                        $base => {
+                            let _unused = (obj, headers);
+                            Err("cannot mutate originating request on a subgraph".into())
+                        } else {
+                            obj.with_mut(|request| *request.request.headers_mut() = headers);
+                            Ok(())
+                        }
+                    }
+                }
+            ).register_set(
+                "headers",
+                |obj: &mut SharedMut<$base::Response>, headers: HeaderMap| {
+                    if_subgraph! {
+                        $base => {
+                            let _unused = (obj, headers);
+                            Err("cannot mutate originating request on a subgraph".into())
+                        } else {
+                            obj.with_mut(|response| *response.response.headers_mut() = headers);
+                            Ok(())
+                        }
+                    }
+                }
+            );
+
+            /*TODO: reenable when https://github.com/apollographql/router/issues/3642 is decided
+            $engine.register_get(
+                "body",
+                |obj: &mut SharedMut<$base::ChunkedRequest>| -> Result<Vec<u8>, Box<EvalAltResult>> {
+                    Ok( obj.with_mut(|request| { request.request.to_vec()}))
+                }
+            );
+
+            $engine.register_set(
+                "body",
+                |obj: &mut SharedMut<$base::ChunkedRequest>, body: Vec<u8>| {
+                    if_subgraph! {
+                        $base => {
+                            let _unused = (obj, body);
+                            Err("cannot mutate originating request on a subgraph".into())
+                        } else {
+                            let bytes = Bytes::from(body);
+                            obj.with_mut(|request| request.request = bytes);
+                            Ok(())
+                        }
+                    }
+                }
+            );*/
+
+            $engine.register_get(
+                "uri",
+                |obj: &mut SharedMut<$base::Request>| -> Result<Uri, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|request| request.router_request.uri().clone()))
+                }
+            );
+
+            $engine.register_set(
+                "uri",
+                |obj: &mut SharedMut<$base::Request>, uri: Uri| {
+                    if_subgraph! {
+                        $base => {
+                            let _unused = (obj, uri);
+                            Err("cannot mutate originating request on a subgraph".into())
+                        } else {
+                            obj.with_mut(|request| *request.router_request.uri_mut() = uri);
+                            Ok(())
+                        }
+                    }
+                }
+            );
+        )*
     };
 }
 
@@ -1141,10 +1487,11 @@ impl Rhai {
         let mut module = exported_module!(router_plugin);
         combine_with_exported_module!(&mut module, "header", router_header_map);
         combine_with_exported_module!(&mut module, "method", router_method);
-        combine_with_exported_module!(&mut module, "json", router_json);
         combine_with_exported_module!(&mut module, "context", router_context);
 
         let base64_module = exported_module!(router_base64);
+        let json_module = exported_module!(router_json);
+
         let expansion_module = exported_module!(router_expansion);
 
         // Share main so we can move copies into each closure as required for logging
@@ -1168,6 +1515,8 @@ impl Rhai {
             .register_global_module(module.into())
             // Register our base64 module (not global)
             .register_static_module("base64", base64_module.into())
+            // Register our json module (not global)
+            .register_static_module("json", json_module.into())
             // Register our expansion module (not global)
             // Hide the fact that it is an expansion module by calling it "env"
             .register_static_module("env", expansion_module.into())
@@ -1189,6 +1538,8 @@ impl Rhai {
             .register_fn("log_error", move |message: Dynamic| {
                 tracing::error!(%message, target = %error_main);
             });
+        // Add common getter/setters for different types
+        register_rhai_router_interface!(engine, router);
         // Add common getter/setters for different types
         register_rhai_interface!(engine, supergraph, execution, subgraph);
 

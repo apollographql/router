@@ -1,0 +1,106 @@
+tls:
+  supergraph:
+      # write the cert content directly because the test does not do expansion
+      certificate: &cert |
+        -----BEGIN CERTIFICATE-----
+        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
+        -----END CERTIFICATE-----
+      certificate_chain: *cert
+      key: &key |
+        -----BEGIN PRIVATE KEY-----
+        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
+        wJ/KXhcyqjcyToe5KOxF5cOo0BLFpNwQ
+        -----END PRIVATE KEY-----
+
+  subgraph:
+    all:
+      client_authentication:
+        certificate_chain: *cert
+        key: *key
+    # if configuring for a specific subgraph:
+    subgraphs:
+      # subgraph name
+      products:
+        certificate_authorities: *cert
+        client_authentication:
+          certificate_chain: *cert
+          key: *key

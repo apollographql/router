@@ -28,6 +28,7 @@ use tracing_futures::Instrument;
 use super::execution::QueryPlan;
 use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use super::layers::content_negotiation;
+use super::layers::persisted_queries::PersistedQueryLayer;
 use super::layers::query_analysis::Compiler;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
@@ -36,6 +37,7 @@ use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
+use crate::configuration::Batching;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
 use crate::graphql;
@@ -227,6 +229,29 @@ async fn service_call(
             let operation_name = body.operation_name.clone();
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
             let is_subscription = plan.is_subscription(operation_name.as_deref());
+
+            if let Some(batching) = context.private_entries.clone().lock().get::<Batching>() {
+                if batching.enabled && (is_deferred || is_subscription) {
+                    let message = if is_deferred {
+                        "BATCHING_DEFER_UNSUPPORTED"
+                    } else {
+                        "BATCHING_SUBSCRIPTION_UNSUPPORTED"
+                    };
+                    let mut response = SupergraphResponse::new_from_graphql_response(
+                            graphql::Response::builder()
+                                .errors(vec![crate::error::Error::builder()
+                                    .message(String::from(
+                                        "Deferred responses and subscriptions aren't supported in batches",
+                                    ))
+                                    .extension_code(message)
+                                    .build()])
+                                .build(),
+                            context,
+                        );
+                    *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
+                    return Ok(response);
+                }
+            }
 
             let ClientRequestAccepts {
                 multipart_defer: accepts_multipart_defer,
@@ -752,7 +777,7 @@ impl SupergraphCreator {
             )
     }
 
-    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<WarmUpCachingQueryKey> {
+    pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
         self.query_planner_service.cache_keys(count).await
     }
 
@@ -763,10 +788,11 @@ impl SupergraphCreator {
     pub(crate) async fn warm_up_query_planner(
         &mut self,
         query_parser: &QueryAnalysisLayer,
+        persisted_query_layer: &PersistedQueryLayer,
         cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
         self.query_planner_service
-            .warm_up(query_parser, cache_keys)
+            .warm_up(query_parser, persisted_query_layer, cache_keys)
             .await
     }
 }
@@ -776,8 +802,11 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
+    use tower::ServiceExt;
+
     use super::*;
     use crate::plugin::test::MockSubgraph;
+    use crate::services::subgraph;
     use crate::services::supergraph;
     use crate::test_harness::MockedSubgraphs;
     use crate::Notify;
@@ -2923,5 +2952,441 @@ mod tests {
         let mut stream = service.oneshot(request).await.unwrap();
 
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn no_typename_on_interface() {
+        let subgraphs = MockedSubgraphs([
+            ("animal", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"query dog__animal__0{dog{id name}}", "operationName": "dog__animal__0"}},
+                serde_json::json!{{"data":{"dog":{"id":"4321","name":"Spot"}}}}
+            ).with_json(
+                serde_json::json!{{"query":"query dog__animal__0{dog{__typename id name}}", "operationName": "dog__animal__0"}},
+                serde_json::json!{{"data":{"dog":{"__typename":"Dog","id":"8765","name":"Spot"}}}}
+            ).with_json(
+                serde_json::json!{{"query":"query dog__animal__0{dog{name id}}", "operationName": "dog__animal__0"}},
+                serde_json::json!{{"data":{"dog":{"id":"0000","name":"Spot"}}}}
+            ).build()),
+        ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(
+                r#"schema
+                @core(feature: "https://specs.apollo.dev/core/v0.2"),
+                @core(feature: "https://specs.apollo.dev/join/v0.1", for: EXECUTION)
+              {
+                query: Query
+              }
+              directive @core(as: String, feature: String!, for: core__Purpose) repeatable on SCHEMA
+              directive @join__field(graph: join__Graph, provides: join__FieldSet, requires: join__FieldSet) on FIELD_DEFINITION
+              directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+              directive @join__owner(graph: join__Graph!) on INTERFACE | OBJECT
+              directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on INTERFACE | OBJECT
+
+              interface Animal {
+                id: String!
+              }
+
+              type Dog implements Animal {
+                id: String!
+                name: String!
+              }
+
+              type Query {
+                animal: Animal! @join__field(graph: ANIMAL)
+                dog: Dog! @join__field(graph: ANIMAL)
+              }
+
+              enum core__Purpose {
+                """
+                `EXECUTION` features provide metadata necessary to for operation execution.
+                """
+                EXECUTION
+
+                """
+                `SECURITY` features provide metadata necessary to securely resolve fields.
+                """
+                SECURITY
+              }
+
+              scalar join__FieldSet
+
+              enum join__Graph {
+                ANIMAL @join__graph(name: "animal" url: "http://localhost:8080/query")
+              }
+              "#,
+            )
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .context(defer_context())
+            .query(
+                "query dog {
+                dog {
+                  ...on Animal {
+                    id
+                    ...on Dog {
+                      name
+                    }
+                  }
+                }
+              }",
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.clone().oneshot(request).await.unwrap();
+
+        let no_typename = stream.next_response().await.unwrap();
+        insta::assert_json_snapshot!(no_typename);
+
+        let request = supergraph::Request::fake_builder()
+            .context(defer_context())
+            .query(
+                "query dog {
+                dog {
+                  ...on Animal {
+                    id
+                    __typename
+                    ...on Dog {
+                      name
+                    }
+                  }
+                }
+              }",
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.clone().oneshot(request).await.unwrap();
+
+        let with_typename = stream.next_response().await.unwrap();
+        assert_eq!(
+            with_typename
+                .data
+                .clone()
+                .unwrap()
+                .get("dog")
+                .unwrap()
+                .get("name")
+                .unwrap(),
+            no_typename
+                .data
+                .clone()
+                .unwrap()
+                .get("dog")
+                .unwrap()
+                .get("name")
+                .unwrap(),
+            "{:?}\n{:?}",
+            with_typename,
+            no_typename
+        );
+        insta::assert_json_snapshot!(with_typename);
+
+        let request = supergraph::Request::fake_builder()
+            .context(defer_context())
+            .query(
+                "query dog {
+                    dog {
+                        ...on Dog {
+                            name
+                            ...on Animal {
+                                id
+                            }
+                        }
+                    }
+                }",
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+
+        let with_reversed_fragments = stream.next_response().await.unwrap();
+        assert_eq!(
+            with_reversed_fragments
+                .data
+                .clone()
+                .unwrap()
+                .get("dog")
+                .unwrap()
+                .get("name")
+                .unwrap(),
+            no_typename
+                .data
+                .clone()
+                .unwrap()
+                .get("dog")
+                .unwrap()
+                .get("name")
+                .unwrap(),
+            "{:?}\n{:?}",
+            with_reversed_fragments,
+            no_typename
+        );
+        insta::assert_json_snapshot!(with_reversed_fragments);
+    }
+
+    #[tokio::test]
+    async fn multiple_interface_types() {
+        let schema = r#"
+      schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+        query: Query
+      }
+
+      directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+      directive @join__field(
+        graph: join__Graph
+        requires: join__FieldSet
+        provides: join__FieldSet
+        type: String
+        external: Boolean
+        override: String
+        usedOverridden: Boolean
+      ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+      directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+      directive @join__implements(
+        graph: join__Graph!
+        interface: String!
+      ) repeatable on OBJECT | INTERFACE
+
+      directive @join__type(
+        graph: join__Graph!
+        key: join__FieldSet
+        extension: Boolean! = false
+        resolvable: Boolean! = true
+        isInterfaceObject: Boolean! = false
+      ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+      directive @join__unionMember(
+        graph: join__Graph!
+        member: String!
+      ) repeatable on UNION
+
+      directive @link(
+        url: String
+        as: String
+        for: link__Purpose
+        import: [link__Import]
+      ) repeatable on SCHEMA
+
+      directive @tag(
+        name: String!
+      ) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+
+      enum link__Purpose {
+        EXECUTION
+        SECURITY
+      }
+
+      scalar join__FieldSet
+      scalar link__Import
+
+      enum join__Graph {
+        GRAPH1 @join__graph(name: "graph1", url: "http://localhost:8080/graph1")
+      }
+
+      type Query @join__type(graph: GRAPH1) {
+        root(id: ID!): Root @join__field(graph: GRAPH1)
+      }
+
+      type Root @join__type(graph: GRAPH1, key: "id") {
+        id: ID!
+        operation(a: Int, b: Int): OperationResult!
+      }
+
+      union OperationResult
+        @join__type(graph: GRAPH1)
+        @join__unionMember(graph: GRAPH1, member: "Operation") =
+          Operation
+
+      type Operation @join__type(graph: GRAPH1) {
+        id: ID!
+        item: [OperationItem!]!
+      }
+
+      interface OperationItem @join__type(graph: GRAPH1) {
+        type: OperationType!
+      }
+
+      enum OperationType @join__type(graph: GRAPH1) {
+        ADD_ARGUMENT @join__enumValue(graph: GRAPH1)
+      }
+
+      interface OperationItemRootType implements OperationItem
+        @join__implements(graph: GRAPH1, interface: "OperationItem")
+        @join__type(graph: GRAPH1) {
+        rootType: String!
+        type: OperationType!
+      }
+
+      interface OperationItemStuff implements OperationItem
+        @join__implements(graph: GRAPH1, interface: "OperationItem")
+        @join__type(graph: GRAPH1) {
+        stuff: String!
+        type: OperationType!
+      }
+
+      type OperationAddArgument implements OperationItem & OperationItemStuff & OperationItemValue
+        @join__implements(graph: GRAPH1, interface: "OperationItem")
+        @join__implements(graph: GRAPH1, interface: "OperationItemStuff")
+        @join__implements(graph: GRAPH1, interface: "OperationItemValue")
+        @join__type(graph: GRAPH1) {
+        stuff: String!
+        type: OperationType!
+        value: String!
+      }
+
+      interface OperationItemValue implements OperationItem
+        @join__implements(graph: GRAPH1, interface: "OperationItem")
+        @join__type(graph: GRAPH1) {
+        type: OperationType!
+        value: String!
+      }
+
+      type OperationRemoveSchemaRootOperation implements OperationItem & OperationItemRootType
+        @join__implements(graph: GRAPH1, interface: "OperationItem")
+        @join__implements(graph: GRAPH1, interface: "OperationItemRootType")
+        @join__type(graph: GRAPH1) {
+        rootType: String!
+        type: OperationType!
+      }
+      "#;
+
+        let query = r#"fragment OperationItemFragment on OperationItem {
+            __typename
+            ... on OperationItemStuff {
+              __typename
+              stuff
+            }
+            ... on OperationItemRootType {
+              __typename
+              rootType
+            }
+          }
+          query MyQuery($id: ID!, $a: Int, $b: Int) {
+            root(id: $id) {
+              __typename
+              operation(a: $a, b: $b) {
+                __typename
+                ... on Operation {
+                  __typename
+                  item {
+                    __typename
+                    ...OperationItemFragment
+                    ... on OperationItemStuff {
+                      __typename
+                      stuff
+                    }
+                    ... on OperationItemValue {
+                      __typename
+                      value
+                    }
+                  }
+                  id
+                }
+              }
+              id
+            }
+          }"#;
+
+        let subgraphs = MockedSubgraphs([
+            // The response isn't interesting to us,
+            // we just need to make sure the query makes it through parsing and validation
+            ("graph1", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"query MyQuery__graph1__0($id:ID!$a:Int$b:Int){root(id:$id){__typename operation(a:$a b:$b){__typename ...on Operation{__typename item{__typename ...on OperationItemStuff{__typename stuff}...on OperationItemRootType{__typename rootType}...on OperationItemValue{__typename value}}id}}id}}", "operationName": "MyQuery__graph1__0", "variables":{"id":"1234","a":1,"b":2}}},
+                serde_json::json!{{"data": null }}
+            ).build()),
+            ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(schema)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .context(defer_context())
+            .query(query)
+            .variables(
+                serde_json_bytes::json! {{ "id": "1234", "a": 1, "b": 2}}
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.clone().oneshot(request).await.unwrap();
+        let response = stream.next_response().await.unwrap();
+        assert_eq!(serde_json_bytes::Value::Null, response.data.unwrap());
+    }
+
+    #[tokio::test]
+    async fn id_scalar_can_overflow_i32() {
+        // Hack to let the first subgraph fetch contain an ID variable:
+        // ```
+        // type Query {
+        //     user(id: ID!): User @join__field(graph: USER)
+        // }
+        // ```
+        assert!(SCHEMA.contains("currentUser:"));
+        let schema = SCHEMA.replace("currentUser:", "user(id: ID!):");
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(&schema)
+            .subgraph_hook(|_subgraph_name, _service| {
+                tower::service_fn(|request: subgraph::Request| async move {
+                    let id = &request.subgraph_request.body().variables["id"];
+                    Err(format!("$id = {id}").into())
+                })
+                .boxed()
+            })
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let large: i64 = 1 << 53;
+        let large_plus_one = large + 1;
+        // f64 rounds since it doesn’t have enough mantissa bits
+        assert!(large_plus_one as f64 as i64 == large);
+        // i64 of course doesn’t round
+        assert!(large_plus_one != large);
+
+        let request = supergraph::Request::fake_builder()
+            .query("query($id: ID!) { user(id: $id) { name }}")
+            .variable("id", large_plus_one)
+            .build()
+            .unwrap();
+        let response = service
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+        // The router did not panic or respond with an early validation error.
+        // Instead it did a subgraph fetch, which recieved the correct ID variable without rounding:
+        assert_eq!(
+            response.errors[0].extensions["reason"].as_str().unwrap(),
+            "$id = 9007199254740993"
+        );
+        assert_eq!(large_plus_one.to_string(), "9007199254740993");
     }
 }

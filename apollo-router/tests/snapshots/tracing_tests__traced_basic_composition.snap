@@ -200,14 +200,6 @@ expression: get_spans()
                   [
                     "apollo_private.operation_signature",
                     "# -\n{topProducts{name reviews{author{id name}id product{name}}upc}}"
-                  ],
-                  [
-                    "monotonic_counter.apollo.router.operations",
-                    1
-                  ],
-                  [
-                    "http.response.status_code",
-                    200
                   ]
                 ],
                 "metadata": {
@@ -707,24 +699,24 @@ expression: get_spans()
                           }
                         }
                       }
+                    },
+                    "apollo_router::services::execution_service::format_response": {
+                      "name": "apollo_router::services::execution_service::format_response",
+                      "record": {
+                        "entries": [],
+                        "metadata": {
+                          "name": "format_response",
+                          "target": "apollo_router::services::execution_service",
+                          "level": "DEBUG",
+                          "module_path": "apollo_router::services::execution_service",
+                          "fields": {
+                            "names": []
+                          }
+                        }
+                      },
+                      "children": {}
                     }
                   }
-                },
-                "apollo_router::services::execution_service::format_response": {
-                  "name": "apollo_router::services::execution_service::format_response",
-                  "record": {
-                    "entries": [],
-                    "metadata": {
-                      "name": "format_response",
-                      "target": "apollo_router::services::execution_service",
-                      "level": "DEBUG",
-                      "module_path": "apollo_router::services::execution_service",
-                      "fields": {
-                        "names": []
-                      }
-                    }
-                  },
-                  "children": {}
                 }
               }
             }

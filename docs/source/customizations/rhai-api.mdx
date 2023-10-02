@@ -12,6 +12,7 @@ This article documents symbols and behaviors that are specific to [Rhai customiz
 Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the Apollo Router's [request-handling lifecycle](./rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
 
 ```rhai
+fn router_service(service) {}
 fn supergraph_service(service) {}
 fn execution_service(service) {}
 fn subgraph_service(service, subgraph) {}
@@ -192,6 +193,31 @@ fn supergraph_service(service) {
 }
 ```
 
+## json encode/decode strings
+
+Your Rhai customization can use the functions `json::encode()` and `json::decode()` to convert Rhai objects to/from valid JSON encoded strings. Both functions can fail, so always handle exceptions when using them.
+
+```rhai
+fn router_service(service) {
+    let original = `{"valid":"object"}`;
+    try {
+        let encoded = json::decode(original);
+        // encoded is a Rhai object, with a property (or key) named valid with a String value of "object"
+        print(`encoded.valid: ${encoded.valid}`);
+        let and_back = json::encode(encoded);
+        // and_back will be a string == original.
+        if and_back != original {
+            throw "something has gone wrong";
+        }
+    }
+    catch(err)
+    {
+        // log any errors
+        log_error(`json coding error: ${err}`);
+    }
+}
+```
+
 ## base64 encode/decode strings
 
 Your Rhai customization can use the functions `base64::encode()` and `base64::decode()` to encode/decode strings. `encode()` does not fail, but `decode()` can fail, so always handle exceptions when using the `decode()` function.
@@ -263,7 +289,7 @@ Note: get() may fail, so it's best to handle exceptions when using it.
 
 ## `Request` interface
 
-All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, most of which a callback can modify in-place (read-write):
+All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields:
 
 ```
 request.context
@@ -276,9 +302,9 @@ request.body.extensions
 request.uri.host
 request.uri.path
 ```
-Note: `method` is read-only.
+Note: These fields are typically modifiable, apart from `method` which is always read-only. However, when the callback service is `subgraph_service`,the only modifiable field is `request.context`.
 
-**For `subgraph_service` callbacks only,** the `request` object provides _additional_ fields for interacting with the request that will be sent to the corresponding subgraph:
+**For `subgraph_service` callbacks only,** the `request` object provides _additional_ modifiable fields for interacting with the request that will be sent to the corresponding subgraph:
 
 ```
 request.subgraph.headers
@@ -289,8 +315,6 @@ request.subgraph.body.extensions
 request.subgraph.uri.host
 request.subgraph.uri.path
 ```
-
-These additional fields are shared across all subgraph invocations and are thus read-only.
 
 ### `request.context`
 
@@ -464,9 +488,10 @@ The following fields are identical in behavior to their `request` counterparts:
 
 * [`context`](#requestcontext)
 * [`headers`](#requestheaders)
+* [`body`](#requestbody)
 * [`body.extensions`](#requestbodyextensions)
 
-Note: Be particularly careful when interacting with headers in a response context. For supergraph_service() and execution_service(), response headers only exist for the first response in a deferred response stream. You can handle this by making use of the `is_primary()` function which will return true if a response is the first (or primary) response. If you do try to access the headers in a non-primary response, then you'll raise an exception which can be handled like any other rhai exception, but is not so convenient as using the `is_primary()` method.
+Note: Be particularly careful when interacting with headers in a response context. For router_service(), supergraph_service() and execution_service(), response headers only exist for the first response in a deferred response stream. You can handle this by making use of the `is_primary()` function which will return true if a response is the first (or primary) response. If you do try to access the headers in a non-primary response, then you'll raise an exception which can be handled like any other rhai exception, but is not so convenient as using the `is_primary()` method.
 
 ```rhai
     if response.is_primary() {

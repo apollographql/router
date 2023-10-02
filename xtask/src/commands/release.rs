@@ -14,12 +14,16 @@ use crate::commands::changeset::slurp_and_remove_changesets;
 pub enum Command {
     /// Prepare a new release
     Prepare(Prepare),
+
+    /// Verify that a release is ready to be published
+    PreVerify,
 }
 
 impl Command {
     pub fn run(&self) -> Result<()> {
         match self {
             Command::Prepare(command) => command.run(),
+            Command::PreVerify => PreVerify::run(),
         }
     }
 }
@@ -407,6 +411,46 @@ impl Prepare {
     fn update_lock(&self) -> Result<()> {
         println!("updating lock file");
         cargo!(["check"]);
+        Ok(())
+    }
+}
+
+struct PreVerify();
+
+impl PreVerify {
+    fn run() -> Result<()> {
+        let version = format!("v{}", *PKG_VERSION);
+
+        // Get the git tag name as a string
+        let tags_output = std::process::Command::new("git")
+            .args(["describe", "--tags", "--exact-match"])
+            .output()
+            .map_err(|e| {
+                anyhow!(
+                    "failed to execute 'git describe --tags --exact-match': {}",
+                    e
+                )
+            })?
+            .stdout;
+        let tags_raw = String::from_utf8_lossy(&tags_output);
+        let tags_list = tags_raw
+            .split("\n")
+            .filter(|s| !s.trim().is_empty())
+            .collect::<Vec<_>>();
+
+        // If the tags contains the version, then we're good
+        if tags_list.is_empty() {
+            return Err(anyhow!(
+                "release cannot be performed because current git tree is not tagged"
+            ));
+        }
+        if !tags_list.contains(&version.as_str()) {
+            return Err(anyhow!(
+                "the git tree tags {{{}}} does not contain the version {} from the Cargo.toml",
+                tags_list.join(", "),
+                version
+            ));
+        }
         Ok(())
     }
 }

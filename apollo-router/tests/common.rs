@@ -162,7 +162,17 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn start(&mut self) {
-        let mut router = Command::new(&self.router_location)
+        let mut router = Command::new(&self.router_location);
+        if let (Ok(apollo_key), Ok(apollo_graph_ref)) = (
+            std::env::var("TEST_APOLLO_KEY"),
+            std::env::var("TEST_APOLLO_GRAPH_REF"),
+        ) {
+            router
+                .env("APOLLO_KEY", apollo_key)
+                .env("APOLLO_GRAPH_REF", apollo_graph_ref);
+        }
+
+        router
             .args([
                 "--hr",
                 "--config",
@@ -173,9 +183,9 @@ impl IntegrationTest {
                 "--log",
                 "error,apollo_router=info",
             ])
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("router should start");
+            .stdout(Stdio::piped());
+
+        let mut router = router.spawn().expect("router should start");
         let reader = BufReader::new(router.stdout.take().expect("out"));
         let stdio_tx = self.stdio_tx.clone();
         let collect_stdio = self.collect_stdio.take();
@@ -324,7 +334,7 @@ impl IntegrationTest {
     pub fn execute_default_query(
         &self,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
-        self.execute_query_internal(None)
+        self.execute_query_internal(&json!({"query":"query {topProducts{name}}","variables":{}}))
     }
 
     #[allow(dead_code)]
@@ -332,21 +342,26 @@ impl IntegrationTest {
         &self,
         query: &Value,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
-        self.execute_query_internal(Some(query))
+        self.execute_query_internal(query)
+    }
+
+    #[allow(dead_code)]
+    pub fn execute_bad_query(
+        &self,
+    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+        self.execute_query_internal(&json!({"garbage":{}}))
     }
 
     fn execute_query_internal(
         &self,
-        query: Option<&Value>,
+        query: &Value,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
-        let default_query = &json!({"query":"query {topProducts{name}}","variables":{}});
-        let query = query.unwrap_or(default_query).clone();
         let dispatch = self.subscriber.clone();
-
+        let query = query.clone();
         async move {
             let span = info_span!("client_request");
             let span_id = span.context().span().span_context().trace_id().to_string();

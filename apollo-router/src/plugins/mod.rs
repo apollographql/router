@@ -23,8 +23,6 @@ macro_rules! schemar_fn {
 pub(crate) mod authentication;
 pub(crate) mod authorization;
 mod coprocessor;
-#[cfg(test)]
-mod coprocessor_test;
 pub(crate) mod csrf;
 mod expose_query_plan;
 mod forbid_mutations;
