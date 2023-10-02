@@ -18,6 +18,7 @@ pub(crate) struct UriEndpoint {
 }
 
 impl UriEndpoint {
+    /// Converts an endpoint to a URI using the default endpoint as reference for any URI parts that are missing.
     pub(crate) fn to_uri(&self, default_endpoint: &Uri) -> Option<Uri> {
         self.uri.as_ref().map(|uri| {
             let mut parts = uri.clone().into_parts();
@@ -54,6 +55,10 @@ impl UriEndpoint {
                     }
                 }
                 _ => {}
+            }
+
+            if parts.path_and_query.is_none() {
+                parts.path_and_query = default_endpoint.path_and_query().cloned();
             }
 
             Uri::from_parts(parts)
@@ -210,6 +215,24 @@ mod test {
 
     #[test]
     fn test_to_url() {
+        assert_eq!(
+            UriEndpoint::from(Uri::from_static("example.com"))
+                .to_uri(&Uri::from_static("http://localhost:9411/path2"))
+                .unwrap(),
+            Uri::from_static("http://example.com:9411/path2")
+        );
+        assert_eq!(
+            UriEndpoint::from(Uri::from_static("example.com:2000"))
+                .to_uri(&Uri::from_static("http://localhost:9411/path2"))
+                .unwrap(),
+            Uri::from_static("http://example.com:2000/path2")
+        );
+        assert_eq!(
+            UriEndpoint::from(Uri::from_static("http://example.com:2000/"))
+                .to_uri(&Uri::from_static("http://localhost:9411/path2"))
+                .unwrap(),
+            Uri::from_static("http://example.com:2000/")
+        );
         assert_eq!(
             UriEndpoint::from(Uri::from_static("http://example.com:2000/path1"))
                 .to_uri(&Uri::from_static("http://localhost:9411/path2"))
