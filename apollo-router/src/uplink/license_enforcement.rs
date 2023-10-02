@@ -28,6 +28,8 @@ use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::spec::LINK_DIRECTIVE_NAME;
+use crate::spec::LINK_URL_ARGUMENT;
 use crate::Configuration;
 
 pub(crate) const LICENSE_EXPIRED_URL: &str = "https://go.apollo.dev/o/elp";
@@ -134,9 +136,9 @@ impl LicenseEnforcementReport {
         let feature_urls = schema
             .db
             .schema()
-            .directives_by_name("link")
+            .directives_by_name(LINK_DIRECTIVE_NAME)
             .filter_map(|link| {
-                link.argument_by_name("url")
+                link.argument_by_name(LINK_URL_ARGUMENT)
                     .and_then(|value| value.as_str().map(|s| s.to_string()))
             })
             .collect::<HashSet<_>>();
