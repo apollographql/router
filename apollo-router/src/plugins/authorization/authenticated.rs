@@ -20,20 +20,40 @@ pub(crate) struct AuthenticatedCheckVisitor<'a> {
     compiler: &'a ApolloCompiler,
     file_id: FileId,
     pub(crate) found: bool,
+    authenticated_directive_name: String,
 }
 
 impl<'a> AuthenticatedCheckVisitor<'a> {
-    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Self {
-        Self {
+    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Option<Self> {
+        let authenticated_directive_name = if let Some(link) = compiler
+            .db
+            .schema()
+            .directives_by_name("link")
+            .filter(|link| {
+                link.argument_by_name("url")
+                    .and_then(|value| value.as_str())
+                    == Some("https://specs.apollo.dev/authenticated/v0.1")
+            })
+            .next()
+        {
+            link.argument_by_name("as")
+                .and_then(|value| value.as_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| AUTHENTICATED_DIRECTIVE_NAME.to_string())
+        } else {
+            return None;
+        };
+
+        Some(Self {
             compiler,
             file_id,
             found: false,
-        }
+            authenticated_directive_name,
+        })
     }
 
     fn is_field_authenticated(&self, field: &FieldDefinition) -> bool {
         field
-            .directive_by_name(AUTHENTICATED_DIRECTIVE_NAME)
+            .directive_by_name(&self.authenticated_directive_name)
             .is_some()
             || field
                 .ty()
@@ -43,7 +63,8 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
     }
 
     fn is_type_authenticated(&self, t: &TypeDefinition) -> bool {
-        t.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some()
+        t.directive_by_name(&self.authenticated_directive_name)
+            .is_some()
     }
 }
 
@@ -135,22 +156,44 @@ pub(crate) struct AuthenticatedVisitor<'a> {
     pub(crate) query_requires_authentication: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
     current_path: Path,
+    authenticated_directive_name: String,
 }
 
 impl<'a> AuthenticatedVisitor<'a> {
-    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Self {
-        Self {
+    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Option<Self> {
+        let authenticated_directive_name = if let Some(link) = compiler
+            .db
+            .schema()
+            .directives_by_name("link")
+            .filter(|link| {
+                link.argument_by_name("url")
+                    .and_then(|value| value.as_str())
+                    == Some("https://specs.apollo.dev/authenticated/v0.1")
+            })
+            .next()
+        {
+            link.argument_by_name("as")
+                .and_then(|value| value.as_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| AUTHENTICATED_DIRECTIVE_NAME.to_string())
+        } else {
+            return None;
+        };
+
+        println!("AuthenticatedVisitor: auth directive name = {authenticated_directive_name}");
+
+        Some(Self {
             compiler,
             file_id,
             query_requires_authentication: false,
             unauthorized_paths: Vec::new(),
             current_path: Path::default(),
-        }
+            authenticated_directive_name,
+        })
     }
 
     fn is_field_authenticated(&self, field: &FieldDefinition) -> bool {
         field
-            .directive_by_name(AUTHENTICATED_DIRECTIVE_NAME)
+            .directive_by_name(&self.authenticated_directive_name)
             .is_some()
             || field
                 .ty()
@@ -160,7 +203,8 @@ impl<'a> AuthenticatedVisitor<'a> {
     }
 
     fn is_type_authenticated(&self, t: &TypeDefinition) -> bool {
-        t.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some()
+        t.directive_by_name(&self.authenticated_directive_name)
+            .is_some()
     }
 
     fn implementors_with_different_requirements(
@@ -198,8 +242,9 @@ impl<'a> AuthenticatedVisitor<'a> {
                 .cloned()
                 .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
             {
-                let ty_is_authenticated =
-                    ty.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some();
+                let ty_is_authenticated = ty
+                    .directive_by_name(&self.authenticated_directive_name)
+                    .is_some();
                 match is_authenticated {
                     None => is_authenticated = Some(ty_is_authenticated),
                     Some(other_ty_is_authenticated) => {
@@ -238,8 +283,9 @@ impl<'a> AuthenticatedVisitor<'a> {
                     .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
                 {
                     if let Some(f) = ty.field(&self.compiler.db, field.name()) {
-                        let field_is_authenticated =
-                            f.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some();
+                        let field_is_authenticated = f
+                            .directive_by_name(&self.authenticated_directive_name)
+                            .is_some();
                         match is_authenticated {
                             Some(other) => {
                                 if field_is_authenticated != other {
@@ -269,7 +315,10 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
     ) -> Result<Option<apollo_encoder::OperationDefinition>, BoxError> {
         let operation_requires_authentication = node
             .object_type(&self.compiler.db)
-            .map(|ty| ty.directive_by_name(AUTHENTICATED_DIRECTIVE_NAME).is_some())
+            .map(|ty| {
+                ty.directive_by_name(&self.authenticated_directive_name)
+                    .is_some()
+            })
             .unwrap_or(false);
 
         if operation_requires_authentication {
@@ -442,6 +491,16 @@ mod tests {
     use crate::TestHarness;
 
     static BASIC_SCHEMA: &str = r#"
+
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
+    {
+      query: Query
+      mutation: Mutation
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
     directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
 
@@ -498,7 +557,7 @@ mod tests {
         }
         assert!(diagnostics.is_empty());
 
-        let mut visitor = AuthenticatedVisitor::new(&compiler, file_id);
+        let mut visitor = AuthenticatedVisitor::new(&compiler, file_id).unwrap();
 
         (
             transform::document(&mut visitor, file_id).unwrap(),
@@ -734,6 +793,14 @@ mod tests {
     }
 
     static INTERFACE_SCHEMA: &str = r#"
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
+    {
+      query: Query
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
     directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
 
@@ -801,6 +868,14 @@ mod tests {
     }
 
     static INTERFACE_FIELD_SCHEMA: &str = r#"
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
+    {
+      query: Query
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
     directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
 
@@ -876,6 +951,14 @@ mod tests {
     #[test]
     fn union() {
         static UNION_MEMBERS_SCHEMA: &str = r#"
+        schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
+    {
+      query: Query
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
         directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
         directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
 
@@ -918,19 +1001,184 @@ mod tests {
         });
     }
 
+    static RENAMED_SCHEMA: &str = r#"
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/authenticated/v0.1", as: "auth", for: SECURITY)
+    {
+      query: Query
+      mutation: Mutation
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    directive @auth on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+
+    type Query {
+      topProducts: Product
+      customer: User
+      me: User @auth
+      itf: I!
+    }
+
+    type Mutation @auth {
+        ping: User
+        other: String
+    }
+
+    interface I {
+        id: ID
+    }
+
+    type Product {
+      type: String
+      price(setPrice: Int): Int
+      reviews: [Review] @auth
+      internal: Internal
+      publicReviews: [Review]
+      nonNullId: ID! @auth
+    }
+
+    scalar Internal @auth @specifiedBy(url: "http///example.com/test")
+
+    type Review {
+        body: String
+        author: User
+    }
+
+    type User
+        implements I
+        @auth {
+      id: ID
+      name: String
+    }
+    "#;
+
+    #[test]
+    fn renamed_directive() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+            }
+
+            me {
+                name
+            }
+        }
+        "#;
+
+        let (doc, paths) = filter(RENAMED_SCHEMA, QUERY);
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
+    }
+
+    static ALTERNATIVE_DIRECTIVE_SCHEMA: &str = r#"
+    schema
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/OtherAuthenticated/v0.1", import: ["@authenticated"])
+    {
+      query: Query
+      mutation: Mutation
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+
+    type Query {
+      topProducts: Product
+      customer: User
+      me: User @authenticated
+      itf: I!
+    }
+
+    type Mutation @authenticated {
+        ping: User
+        other: String
+    }
+
+    interface I {
+        id: ID
+    }
+
+    type Product {
+      type: String
+      price(setPrice: Int): Int
+      reviews: [Review] @authenticated
+      internal: Internal
+      publicReviews: [Review]
+      nonNullId: ID! @authenticated
+    }
+
+    scalar Internal @authenticated @specifiedBy(url: "http///example.com/test")
+
+    type Review {
+        body: String
+        author: User
+    }
+
+    type User
+        implements I
+        @authenticated {
+      id: ID
+      name: String
+    }
+    "#;
+
+    // a directive named `@authenticated` imported from a different spec should not be considered
+    #[test]
+    #[should_panic]
+    fn alternative_directive() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+            }
+
+            me {
+                name
+            }
+        }
+        "#;
+
+        let _ = filter(ALTERNATIVE_DIRECTIVE_SCHEMA, QUERY);
+    }
+
     const SCHEMA: &str = r#"schema
-        @core(feature: "https://specs.apollo.dev/core/v0.1")
-        @core(feature: "https://specs.apollo.dev/join/v0.1")
-        @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+      @link(url: "https://specs.apollo.dev/link/v1.0")
+      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
          {
         query: Query
    }
-   directive @core(feature: String!) repeatable on SCHEMA
-   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-   directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-   directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-   directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+   scalar link__Import
+
+   enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
+
+  
    scalar join__FieldSet
    enum join__Graph {
        USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
@@ -939,12 +1187,14 @@ mod tests {
 
    directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 
-   type Query {
+   type Query
+   @join__type(graph: ORGA)
+   @join__type(graph: USER)
+   {
        currentUser: User @join__field(graph: USER) @authenticated
        orga(id: ID): Organization @join__field(graph: ORGA)
    }
    type User
-   @join__owner(graph: USER)
    @join__type(graph: ORGA, key: "id")
    @join__type(graph: USER, key: "id"){
        id: ID!
@@ -953,7 +1203,6 @@ mod tests {
        activeOrganization: Organization
    }
    type Organization
-   @join__owner(graph: ORGA)
    @join__type(graph: ORGA, key: "id")
    @join__type(graph: USER, key: "id") {
        id: ID
@@ -989,6 +1238,9 @@ mod tests {
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{"query":"{orga(id:1){id creatorUser{__typename id}}}"}},
             serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": { "__typename": "User", "id": 0 } }}}}
+        ).with_json(
+            serde_json::json!{{"query":"{orga(id:1){id creatorUser{id name phone}}}"}},
+            serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": { "__typename": "User", "id": 0, "name":"Ada", "phone": "1234" } }}}}
         ).build())
     ].into_iter().collect());
 
@@ -1060,10 +1312,16 @@ mod tests {
                         ]
                     }
                 }},
+            ).with_json(
+                serde_json::json!{{"query":"{orga(id:1){id creatorUser{id name}}}"}},
+                serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": {"id": 0, "name":"Ada" } }}}}
             ).build()),
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{"query":"{orga(id:1){id creatorUser{__typename id}}}"}},
             serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": { "__typename": "User", "id": 0 } }}}}
+        ).with_json(
+            serde_json::json!{{"query":"{orga(id:1){id creatorUser{id name}}}"}},
+            serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": {"id": 0, "name":"Ada" } }}}}
         ).build())
     ].into_iter().collect());
 
