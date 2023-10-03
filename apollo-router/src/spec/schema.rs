@@ -244,23 +244,6 @@ impl Schema {
         self.type_system
             .definitions
             .schema
-            /*self.type_system
-                .definitions
-                .directives
-                .get("link")
-                .filter(|link| {
-                    link.arguments().input_values().iter().filter_map(|arg| if arg.name() == "url" {
-                        arg.v
-                    })
-                    link.argument_by_name("url")
-                        .and_then(|value| value.as_str())
-                        == Some(url)
-                })
-                .next()
-                .is_some()*/
-            /*compiler
-            .db
-            .schema()*/
             .directives_by_name("link")
             .filter(|link| {
                 link.argument_by_name("url")
