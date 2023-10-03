@@ -1009,6 +1009,37 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "experimental_batching": {
+      "description": "Batching configuration.",
+      "default": {
+        "enabled": false,
+        "mode": "batch_http_link"
+      },
+      "type": "object",
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "enabled": {
+          "description": "Activates Batching (disabled by default)",
+          "default": false,
+          "type": "boolean"
+        },
+        "mode": {
+          "description": "Batching mode",
+          "oneOf": [
+            {
+              "description": "batch_http_link",
+              "type": "string",
+              "enum": [
+                "batch_http_link"
+              ]
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "experimental_chaos": {
       "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions. You probably don’t want this in production!",
       "default": {
@@ -1603,6 +1634,52 @@ expression: "&schema"
         }
       ]
     },
+    "persisted_queries": {
+      "description": "Configures managed persisted queries",
+      "default": {
+        "enabled": false,
+        "log_unknown": false,
+        "safelist": {
+          "enabled": false,
+          "require_id": false
+        }
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Activates Persisted Queries (disabled by default)",
+          "default": false,
+          "type": "boolean"
+        },
+        "log_unknown": {
+          "description": "Enabling this field configures the router to log any freeform GraphQL request that is not in the persisted query list",
+          "default": false,
+          "type": "boolean"
+        },
+        "safelist": {
+          "description": "Restricts execution of operations that are not found in the Persisted Query List",
+          "default": {
+            "enabled": false,
+            "require_id": false
+          },
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "Enables using the persisted query list as a safelist (disabled by default)",
+              "default": false,
+              "type": "boolean"
+            },
+            "require_id": {
+              "description": "Enabling this field configures the router to reject any request that does not include the persisted query ID",
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "plugins": {
       "description": "Plugin configuration",
       "default": null,
@@ -1662,52 +1739,6 @@ expression: "&schema"
               "type": "string"
             }
           }
-        }
-      },
-      "additionalProperties": false
-    },
-    "preview_persisted_queries": {
-      "description": "Configures managed persisted queries",
-      "default": {
-        "enabled": false,
-        "log_unknown": false,
-        "safelist": {
-          "enabled": false,
-          "require_id": false
-        }
-      },
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "description": "Activates Persisted Queries (disabled by default)",
-          "default": false,
-          "type": "boolean"
-        },
-        "log_unknown": {
-          "description": "Enabling this field configures the router to log any freeform GraphQL request that is not in the persisted query list",
-          "default": false,
-          "type": "boolean"
-        },
-        "safelist": {
-          "description": "Restricts execution of operations that are not found in the Persisted Query List",
-          "default": {
-            "enabled": false,
-            "require_id": false
-          },
-          "type": "object",
-          "properties": {
-            "enabled": {
-              "description": "Enables using the persisted query list as a safelist (disabled by default)",
-              "default": false,
-              "type": "boolean"
-            },
-            "require_id": {
-              "description": "Enabling this field configures the router to reject any request that does not include the persisted query ID",
-              "default": false,
-              "type": "boolean"
-            }
-          },
-          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -4740,7 +4771,6 @@ expression: "&schema"
                 },
                 "endpoint": {
                   "description": "The endpoint to send to",
-                  "default": "default",
                   "type": "string"
                 }
               },
@@ -4782,7 +4812,6 @@ expression: "&schema"
                       "properties": {
                         "endpoint": {
                           "description": "The endpoint to send to",
-                          "default": "default",
                           "type": "string"
                         }
                       },
@@ -4918,8 +4947,7 @@ expression: "&schema"
                       "properties": {
                         "endpoint": {
                           "description": "The endpoint to send reports to",
-                          "type": "string",
-                          "format": "uri"
+                          "type": "string"
                         },
                         "password": {
                           "description": "The optional password",
@@ -5305,6 +5333,9 @@ expression: "&schema"
             "zipkin": {
               "description": "Zipkin exporter configuration",
               "type": "object",
+              "required": [
+                "endpoint"
+              ],
               "properties": {
                 "batch_processor": {
                   "description": "Batch processor configuration",
@@ -5364,7 +5395,6 @@ expression: "&schema"
                 },
                 "endpoint": {
                   "description": "The endpoint to send to",
-                  "default": "default",
                   "type": "string"
                 }
               },
@@ -5558,11 +5588,6 @@ expression: "&schema"
               "type": "boolean",
               "nullable": true
             },
-            "experimental_enable_http2": {
-              "description": "Enable HTTP2 for subgraphs",
-              "type": "boolean",
-              "nullable": true
-            },
             "experimental_entity_caching": {
               "description": "Enable entity caching",
               "type": "object",
@@ -5576,6 +5601,33 @@ expression: "&schema"
                 }
               },
               "additionalProperties": false,
+              "nullable": true
+            },
+            "experimental_http2": {
+              "description": "Enable HTTP2 for subgraphs",
+              "oneOf": [
+                {
+                  "description": "Enable HTTP2 for subgraphs",
+                  "type": "string",
+                  "enum": [
+                    "enable"
+                  ]
+                },
+                {
+                  "description": "Disable HTTP2 for subgraphs",
+                  "type": "string",
+                  "enum": [
+                    "disable"
+                  ]
+                },
+                {
+                  "description": "Only HTTP2 is active",
+                  "type": "string",
+                  "enum": [
+                    "http2only"
+                  ]
+                }
+              ],
               "nullable": true
             },
             "experimental_retry": {
@@ -5746,11 +5798,6 @@ expression: "&schema"
                 "type": "boolean",
                 "nullable": true
               },
-              "experimental_enable_http2": {
-                "description": "Enable HTTP2 for subgraphs",
-                "type": "boolean",
-                "nullable": true
-              },
               "experimental_entity_caching": {
                 "description": "Enable entity caching",
                 "type": "object",
@@ -5764,6 +5811,33 @@ expression: "&schema"
                   }
                 },
                 "additionalProperties": false,
+                "nullable": true
+              },
+              "experimental_http2": {
+                "description": "Enable HTTP2 for subgraphs",
+                "oneOf": [
+                  {
+                    "description": "Enable HTTP2 for subgraphs",
+                    "type": "string",
+                    "enum": [
+                      "enable"
+                    ]
+                  },
+                  {
+                    "description": "Disable HTTP2 for subgraphs",
+                    "type": "string",
+                    "enum": [
+                      "disable"
+                    ]
+                  },
+                  {
+                    "description": "Only HTTP2 is active",
+                    "type": "string",
+                    "enum": [
+                      "http2only"
+                    ]
+                  }
+                ],
                 "nullable": true
               },
               "experimental_retry": {

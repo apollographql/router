@@ -91,8 +91,8 @@ All cache metrics listed above have the following attributes:
 
 #### Coprocessor
 
-- `apollo_router_operations_coprocessor_total` - Total operations with co-processors enabled.
-- `apollo_router_operations_coprocessor.duration` - Time spent waiting for the coprocessor to answer, in seconds
+- `apollo_router_operations_coprocessor_total` - Total operations with coprocessors enabled.
+- `apollo_router_operations_coprocessor.duration` - Time spent waiting for the coprocessor to answer, in seconds.
 
 The coprocessor operations metric has the following attributes:
 
@@ -127,6 +127,11 @@ Note that the initial call to uplink during router startup will not be reflected
 - `apollo_router_opened_subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated)
 - `apollo_router_deduplicated_subscriptions_total` - Number of subscriptions that has been deduplicated
 - `apollo_router_skipped_event_count` - Number of subscription events that has been skipped because too many events have been received from the subgraph but not yet sent to the client.
+
+#### Batching
+
+- `apollo_router.operations.batching` - A counter of the number of query batches received by the router.
+- `apollo_router.operations.batching.size` - A histogram tracking the number of queries contained within a query batch.
 
 ## Using OpenTelemetry Collector
 
@@ -213,7 +218,7 @@ telemetry:
                   path: .type # JSON query path to fetch data from extensions
                 - name: message
                   path: .reason
-            # Will create this kind of metric for example apollo_router_http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name",subgraph_error_extended_type="SubrequestHttpError"}
+            # Will create this kind of metric for example apollo_router_http_requests_error_total{message="cannot contact the subgraph",subgraph="my_subgraph_name",subgraph_error_extended_type="SubrequestHttpError"}
           subgraphs:
             my_subgraph_name: # Apply these rules only for the subgraph named `my_subgraph_name`
               request:
