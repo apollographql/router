@@ -50,7 +50,7 @@ docs_rs = ["router-bridge/docs_rs"]
 features = ["docs_rs"]
 
 [dependencies]
-askama = "0.12.0"
+askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.75"
 apollo-compiler = "0.11.2"
@@ -69,7 +69,7 @@ base64 = "0.21.4"
 bloomfilter = "1.0.12"
 buildstructor = "0.5.4"
 bytes = "1.5.0"
-clap = { version = "4.4.5", default-features = false, features = [
+clap = { version = "4.4.6", default-features = false, features = [
     "env",
     "derive",
     "std",
@@ -99,7 +99,7 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "0.14.27", features = ["server", "client"] }
 hyper-rustls = { version = "0.24.1", features = ["http1", "http2"] }
-indexmap = { version = "2.0.1", features = ["serde"] }
+indexmap = { version = "2.0.2", features = ["serde"] }
 itertools = "0.11.0"
 jsonpath_lib = "0.3.0"
 jsonpath-rust = "0.3.2"
@@ -171,8 +171,8 @@ proteus = "0.5.0"
 rand = "0.8.5"
 rand_core = "0.6.4"
 rhai = { version = "1.16.2", features = ["sync", "serde", "internals"] }
-regex = "1.9.5"
-reqwest = { version = "0.11.20", default-features = false, features = [
+regex = "1.9.6"
+reqwest = { version = "0.11.22", default-features = false, features = [
     "rustls-tls",
     "rustls-native-certs",
     "json",
@@ -237,8 +237,8 @@ tokio-rustls = "0.24.1"
 http-serde = "1.1.3"
 hmac = "0.12.1"
 parking_lot = "0.12.1"
-memchr = "2.6.3"
-brotli = "3.3.4"
+memchr = "2.6.4"
+brotli = "3.4.0"
 zstd = "0.12.4"
 zstd-safe = "6.0.6"
 # note: AWS dependencies should always use the same version
@@ -269,7 +269,7 @@ fred = { version = "6.3.2", features = ["enable-rustls", "no-client-setname"] }
 futures-test = "0.3.28"
 insta = { version = "1.33.0", features = ["json", "redactions", "yaml"] }
 maplit = "1.0.2"
-memchr = { version = "2.6.3", default-features = false }
+memchr = { version = "2.6.4", default-features = false }
 mockall = "0.11.4"
 num-traits = "0.2.16"
 once_cell = "1.18.0"
@@ -277,7 +277,7 @@ opentelemetry-stdout = { version = "0.1.0", features = ["trace"] }
 p256 = "0.12.0"
 rand_core = "0.6.4"
 redis = { version = "0.21.7", features = ["tokio-comp"] }
-reqwest = { version = "0.11.20", default-features = false, features = [
+reqwest = { version = "0.11.22", default-features = false, features = [
     "json",
     "stream",
 ] }

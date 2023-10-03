@@ -3,5 +3,6 @@ supergraph:
 telemetry:
   tracing:
     jaeger:
+      enabled: true
       collector:
         endpoint: http://example.com
