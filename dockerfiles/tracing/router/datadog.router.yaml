@@ -9,6 +9,7 @@ telemetry:
     trace_config:
       service_name: router
     datadog:
+      enabled: true
       endpoint: datadog-agent:8126
     propagation:
       datadog: true
