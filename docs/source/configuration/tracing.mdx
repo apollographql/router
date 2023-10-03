@@ -215,6 +215,8 @@ Instead when `enable_span_mapping` is set to `true` the following trace will be 
 
 The Apollo Router can be configured to export tracing data to Jaeger either via an agent or http collector.
 
+Unless explicitly configured to use a collector, Jaeger will use an agent by default.
+
 ### Agent config
 
 ```yaml title="router.yaml"
@@ -222,9 +224,10 @@ telemetry:
   tracing:
     jaeger:
       enabled: true
+      # Optional agent configuration,
       agent:
-        # Either 'default' or a URL
-        endpoint: docker_jaeger:14268
+        # Optional endpoint, either 'default' or a socket address (Defaults to 127.0.0.1:6831)
+        endpoint: docker_jaeger:14268  
 ```
 
 ### Collector config
@@ -236,8 +239,10 @@ telemetry:
   tracing:
     jaeger:
       enabled: true
+      # Optional collector configuration,
       collector:
-        endpoint: "http://my-jaeger-collector"
+        # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:14268/api/traces)
+        endpoint: "http://my-jaeger-collector" 
         username: "${env.JAEGER_USERNAME}"
         password: "${env.JAEGER_PASSWORD}"
 ```
@@ -254,7 +259,7 @@ telemetry:
     otlp:
       enabled: true
       
-      # Either 'default' or a URL
+      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317 for gRPC and http://127.0.0.1:4318 for HTTP)
       endpoint: default
 
       # Optional protocol (Defaults to grpc)
@@ -286,7 +291,7 @@ telemetry:
   tracing:
     zipkin:
       enabled: true
-      
-      # Either 'default' or a URL
-      endpoint: http://my_zipkin_collector.dev
+
+      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:9411/api/v2/spans)
+      endpoint: http://my_zipkin_collector.dev   
 ```

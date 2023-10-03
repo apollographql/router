@@ -143,8 +143,8 @@ telemetry:
     otlp:
       # Enable the OpenTelemetry exporter
       enabled: true
-      
-      # Either 'default' or a URL
+
+      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317 for gRPC and http://127.0.0.1:4318 for HTTP)
       endpoint: default
 
       # Optional protocol. Only grpc is supported currently.
