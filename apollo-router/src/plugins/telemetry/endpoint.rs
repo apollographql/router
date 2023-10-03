@@ -14,6 +14,7 @@ use serde::Deserializer;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub(crate) struct UriEndpoint {
+    // None means that the value `default` was specified. We may remove the use of `default` in the future.
     uri: Option<Uri>,
 }
 
@@ -119,6 +120,7 @@ impl From<Uri> for UriEndpoint {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub(crate) struct SocketEndpoint {
+    // None means that the value `default` was specified. We may remove the use of `default` in the future.
     socket: Option<SocketAddr>,
 }
 
