@@ -148,20 +148,20 @@ impl AuthorizationPlugin {
 
         // TODO: @policy is out of scope for preview, this will be reactivated later
         if false {
-            let mut visitor = PolicyExtractionVisitor::new(&compiler, file_id);
+            if let Some(mut visitor) = PolicyExtractionVisitor::new(&compiler, file_id) {
+                // if this fails, the query is invalid and will fail at the query planning phase.
+                // We do not return validation errors here for now because that would imply a huge
+                // refactoring of telemetry and tests
+                if traverse::document(&mut visitor, file_id).is_ok() {
+                    let policies: HashMap<String, Option<bool>> = visitor
+                        .extracted_policies
+                        .into_iter()
+                        .map(|policy| (policy, None))
+                        .collect();
 
-            // if this fails, the query is invalid and will fail at the query planning phase.
-            // We do not return validation errors here for now because that would imply a huge
-            // refactoring of telemetry and tests
-            if traverse::document(&mut visitor, file_id).is_ok() {
-                let policies: HashMap<String, Option<bool>> = visitor
-                    .extracted_policies
-                    .into_iter()
-                    .map(|policy| (policy, None))
-                    .collect();
-
-                if !policies.is_empty() {
-                    context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
+                    if !policies.is_empty() {
+                        context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
+                    }
                 }
             }
         }
@@ -400,24 +400,28 @@ impl AuthorizationPlugin {
             .pop()
             .expect("the query was added to the compiler earlier");
 
-        let mut visitor =
-            PolicyFilteringVisitor::new(compiler, id, policies.iter().cloned().collect());
+        if let Some(mut visitor) =
+            PolicyFilteringVisitor::new(compiler, id, policies.iter().cloned().collect())
+        {
+            let modified_query = transform::document(&mut visitor, id)
+                .map_err(|e| SpecError::ParsingError(e.to_string()))?
+                .to_string();
 
-        let modified_query = transform::document(&mut visitor, id)
-            .map_err(|e| SpecError::ParsingError(e.to_string()))?
-            .to_string();
-
-        if visitor.query_requires_policies {
-            tracing::debug!("the query required policies, the requests present policies: {policies:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
+            if visitor.query_requires_policies {
+                tracing::debug!("the query required policies, the requests present policies: {policies:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
                 visitor
                     .unauthorized_paths
                     .iter()
                     .map(|path| path.to_string())
                     .collect::<Vec<_>>()
             );
-            Ok(Some((modified_query, visitor.unauthorized_paths)))
+                Ok(Some((modified_query, visitor.unauthorized_paths)))
+            } else {
+                tracing::debug!("the query does not require policies");
+                Ok(None)
+            }
         } else {
-            tracing::debug!("the query does not require policies");
+            tracing::debug!("the schema does not contain @policy");
             Ok(None)
         }
     }

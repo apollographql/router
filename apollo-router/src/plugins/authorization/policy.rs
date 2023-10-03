@@ -21,11 +21,13 @@ use crate::json_ext::PathElement;
 use crate::spec::query::transform;
 use crate::spec::query::transform::get_field_type;
 use crate::spec::query::traverse;
+use crate::spec::Schema;
 
 pub(crate) struct PolicyExtractionVisitor<'a> {
     compiler: &'a ApolloCompiler,
     file_id: FileId,
     pub(crate) extracted_policies: HashSet<String>,
+    policy_directive_name: String,
 }
 
 pub(crate) const POLICY_DIRECTIVE_NAME: &str = "policy";
@@ -33,17 +35,22 @@ pub(crate) const POLICY_SPEC_URL: &str = "https://specs.apollo.dev/policy/v0.1";
 
 impl<'a> PolicyExtractionVisitor<'a> {
     #[allow(dead_code)]
-    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Self {
-        Self {
+    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Option<Self> {
+        Some(Self {
             compiler,
             file_id,
             extracted_policies: HashSet::new(),
-        }
+            policy_directive_name: Schema::directive_name(
+                compiler,
+                POLICY_SPEC_URL,
+                POLICY_DIRECTIVE_NAME,
+            )?,
+        })
     }
 
     fn get_policies_from_field(&mut self, field: &FieldDefinition) {
         self.extracted_policies
-            .extend(policy_argument(field.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned());
+            .extend(policy_argument(field.directive_by_name(&self.policy_directive_name)).cloned());
 
         if let Some(ty) = field.ty().type_def(&self.compiler.db) {
             self.get_policies_from_type(&ty)
@@ -52,7 +59,7 @@ impl<'a> PolicyExtractionVisitor<'a> {
 
     fn get_policies_from_type(&mut self, ty: &TypeDefinition) {
         self.extracted_policies
-            .extend(policy_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned());
+            .extend(policy_argument(ty.directive_by_name(&self.policy_directive_name)).cloned());
     }
 }
 
@@ -78,8 +85,9 @@ impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
 
     fn operation(&mut self, node: &hir::OperationDefinition) -> Result<(), BoxError> {
         if let Some(ty) = node.object_type(&self.compiler.db) {
-            self.extracted_policies
-                .extend(policy_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME)).cloned());
+            self.extracted_policies.extend(
+                policy_argument(ty.directive_by_name(&self.policy_directive_name)).cloned(),
+            );
         }
 
         traverse::operation(self, node)
@@ -157,6 +165,7 @@ pub(crate) struct PolicyFilteringVisitor<'a> {
     pub(crate) query_requires_policies: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
     current_path: Path,
+    policy_directive_name: String,
 }
 
 impl<'a> PolicyFilteringVisitor<'a> {
@@ -164,19 +173,24 @@ impl<'a> PolicyFilteringVisitor<'a> {
         compiler: &'a ApolloCompiler,
         file_id: FileId,
         successful_policies: HashSet<String>,
-    ) -> Self {
-        Self {
+    ) -> Option<Self> {
+        Some(Self {
             compiler,
             file_id,
             request_policies: successful_policies,
             query_requires_policies: false,
             unauthorized_paths: vec![],
             current_path: Path::default(),
-        }
+            policy_directive_name: Schema::directive_name(
+                compiler,
+                POLICY_SPEC_URL,
+                POLICY_DIRECTIVE_NAME,
+            )?,
+        })
     }
 
     fn is_field_authorized(&mut self, field: &FieldDefinition) -> bool {
-        let field_policies = policy_argument(field.directive_by_name(POLICY_DIRECTIVE_NAME))
+        let field_policies = policy_argument(field.directive_by_name(&self.policy_directive_name))
             .cloned()
             .collect::<HashSet<_>>();
 
@@ -199,7 +213,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
     }
 
     fn is_type_authorized(&self, ty: &TypeDefinition) -> bool {
-        let type_policies = policy_argument(ty.directive_by_name(POLICY_DIRECTIVE_NAME))
+        let type_policies = policy_argument(ty.directive_by_name(&self.policy_directive_name))
             .cloned()
             .collect::<HashSet<_>>();
         // The field is authorized if any of the policies succeeds
@@ -250,7 +264,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
                 // we transform to a common representation of sorted vectors because the element order
                 // of hashsets is not stable
                 let field_policies = ty
-                    .directive_by_name(POLICY_DIRECTIVE_NAME)
+                    .directive_by_name(&self.policy_directive_name)
                     .map(|directive| {
                         let mut v = policy_argument(Some(directive))
                             .cloned()
@@ -302,7 +316,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
                         // we transform to a common representation of sorted vectors because the element order
                         // of hashsets is not stable
                         let field_policies = f
-                            .directive_by_name(POLICY_DIRECTIVE_NAME)
+                            .directive_by_name(&self.policy_directive_name)
                             .map(|directive| {
                                 let mut v = policy_argument(Some(directive))
                                     .cloned()
@@ -338,7 +352,7 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
         node: &hir::OperationDefinition,
     ) -> Result<Option<apollo_encoder::OperationDefinition>, BoxError> {
         let is_authorized = if let Some(ty) = node.object_type(&self.compiler.db) {
-            match ty.directive_by_name(POLICY_DIRECTIVE_NAME) {
+            match ty.directive_by_name(&self.policy_directive_name) {
                 None => true,
                 Some(directive) => {
                     let type_policies = policy_argument(Some(directive))
@@ -600,7 +614,7 @@ mod tests {
             .next()
             .is_none());
 
-        let mut visitor = PolicyExtractionVisitor::new(&compiler, id);
+        let mut visitor = PolicyExtractionVisitor::new(&compiler, id).unwrap();
         traverse::document(&mut visitor, id).unwrap();
 
         visitor.extracted_policies.into_iter().collect()
@@ -632,13 +646,17 @@ mod tests {
         let _schema_id = compiler.add_type_system(schema, "schema.graphql");
         let file_id = compiler.add_executable(query, "query.graphql");
 
-        let diagnostics = compiler.validate();
+        let diagnostics = compiler
+            .validate()
+            .into_iter()
+            .filter(|err| err.data.is_error())
+            .collect::<Vec<_>>();
         for diagnostic in &diagnostics {
             println!("{diagnostic}");
         }
         assert!(diagnostics.is_empty());
 
-        let mut visitor = PolicyFilteringVisitor::new(&compiler, file_id, policies);
+        let mut visitor = PolicyFilteringVisitor::new(&compiler, file_id, policies).unwrap();
         (
             transform::document(&mut visitor, file_id).unwrap(),
             visitor.unauthorized_paths,
@@ -1244,8 +1262,7 @@ mod tests {
         });
     }
 
-    /*
-      static RENAMED_SCHEMA: &str = r#"
+    static RENAMED_SCHEMA: &str = r#"
       schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
         @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
@@ -1300,9 +1317,9 @@ mod tests {
       }
       "#;
 
-      #[test]
-      fn renamed_directive() {
-          static QUERY: &str = r#"
+    #[test]
+    fn renamed_directive() {
+        static QUERY: &str = r#"
           query {
               topProducts {
                   type
@@ -1313,15 +1330,15 @@ mod tests {
           }
           "#;
 
-          let extracted_scopes = extract(RENAMED_SCHEMA, QUERY);
-          let (doc, paths) = filter(RENAMED_SCHEMA, QUERY, HashSet::new());
+        let extracted_scopes = extract(RENAMED_SCHEMA, QUERY);
+        let (doc, paths) = filter(RENAMED_SCHEMA, QUERY, HashSet::new());
 
-          insta::assert_display_snapshot!(TestResult {
-              query: QUERY,
-              extracted_policies: &extracted_policies,
-              successful_policies: Vec::new(),
-              result: doc,
-              paths
-          });
-      }*/
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
+            result: doc,
+            paths
+        });
+    }
 }
