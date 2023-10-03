@@ -245,13 +245,11 @@ impl Schema {
             .definitions
             .schema
             .directives_by_name("link")
-            .filter(|link| {
+            .any(|link| {
                 link.argument_by_name("url")
                     .and_then(|value| value.as_str())
                     == Some(url)
             })
-            .next()
-            .is_some()
     }
 
     pub(crate) fn directive_name(
@@ -259,25 +257,20 @@ impl Schema {
         url: &str,
         default: &str,
     ) -> Option<String> {
-        if let Some(link) = compiler
+        compiler
             .db
             .schema()
             .directives_by_name("link")
-            .filter(|link| {
+            .find(|link| {
                 link.argument_by_name("url")
                     .and_then(|value| value.as_str())
                     == Some(url)
             })
-            .next()
-        {
-            Some(
+            .map(|link| {
                 link.argument_by_name("as")
                     .and_then(|value| value.as_str().map(|s| s.to_string()))
-                    .unwrap_or_else(|| default.to_string()),
-            )
-        } else {
-            return None;
-        }
+                    .unwrap_or_else(|| default.to_string())
+            })
     }
 }
 

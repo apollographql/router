@@ -539,11 +539,7 @@ mod tests {
         for diagnostic in &diagnostics {
             println!("{diagnostic}");
         }
-        assert!(diagnostics
-            .into_iter()
-            .filter(|err| err.data.is_error())
-            .next()
-            .is_none());
+        assert!(!diagnostics.into_iter().any(|err| err.data.is_error()));
 
         let mut visitor = AuthenticatedVisitor::new(&compiler, file_id).unwrap();
 
