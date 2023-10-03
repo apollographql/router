@@ -1330,7 +1330,7 @@ mod tests {
           }
           "#;
 
-        let extracted_scopes = extract(RENAMED_SCHEMA, QUERY);
+        let extracted_policies = extract(RENAMED_SCHEMA, QUERY);
         let (doc, paths) = filter(RENAMED_SCHEMA, QUERY, HashSet::new());
 
         insta::assert_display_snapshot!(TestResult {
