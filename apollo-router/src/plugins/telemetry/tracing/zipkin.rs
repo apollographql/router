@@ -15,7 +15,7 @@ use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 lazy_static! {
-    static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://localhost:9411/api/v2/spans");
+    static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:9411/api/v2/spans");
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]

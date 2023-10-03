@@ -19,7 +19,7 @@ use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 lazy_static! {
-    static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://localhost:14268/api/traces");
+    static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:14268/api/traces");
 }
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, untagged)]
@@ -76,7 +76,7 @@ impl TracingConfigurator for Config {
                 agent,
                 batch_processor,
             } if *enabled => {
-                tracing::info!("Configuring Jaeger tracing: {}", batch_processor);
+                tracing::info!("Configuring Jaeger tracing: {} (agent)", batch_processor);
                 let exporter = opentelemetry_jaeger::new_agent_pipeline()
                     .with_trace_config(trace_config.into())
                     .with_service_name(trace_config.service_name.clone())
@@ -94,7 +94,10 @@ impl TracingConfigurator for Config {
                 collector,
                 batch_processor,
             } if *enabled => {
-                tracing::info!("Configuring Jaeger tracing: {}", batch_processor);
+                tracing::info!(
+                    "Configuring Jaeger tracing: {} (collector)",
+                    batch_processor
+                );
 
                 let exporter = opentelemetry_jaeger::new_collector_pipeline()
                     .with_trace_config(trace_config.into())
