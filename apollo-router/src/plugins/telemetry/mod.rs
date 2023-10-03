@@ -28,7 +28,6 @@ use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::sdk::metrics::controllers::BasicController;
 use opentelemetry::sdk::propagation::TextMapCompositePropagator;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::SpanContext;
@@ -37,7 +36,6 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry::Context as OtelContext;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use rand::Rng;
@@ -68,11 +66,9 @@ use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use self::reload::reload_fmt;
-use self::reload::reload_metrics;
 use self::reload::LayeredTracer;
 use self::reload::NullFieldFormatter;
 use self::reload::SamplingFilter;
-use self::reload::OPENTELEMETRY_TRACER_HANDLE;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use super::traffic_shaping::cache::hash_request;
 use super::traffic_shaping::cache::hash_vary_headers;
@@ -80,6 +76,9 @@ use super::traffic_shaping::cache::REPRESENTATIONS;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::OPERATION_NAME;
 use crate::layers::ServiceBuilderExt;
+use crate::metrics::aggregation::MeterProviderType;
+use crate::metrics::filter::FilterMeterProvider;
+use crate::metrics::meter_provider;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
@@ -92,17 +91,16 @@ use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::config::Tracing;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
-use crate::plugins::telemetry::metrics::aggregation::AggregateMeterProvider;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SinglePathErrorStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
-use crate::plugins::telemetry::metrics::layer::MetricsLayer;
-use crate::plugins::telemetry::metrics::BasicMetrics;
+use crate::plugins::telemetry::metrics::prometheus::commit_prometheus;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
-use crate::plugins::telemetry::metrics::MetricsExporterHandle;
+use crate::plugins::telemetry::reload::metrics_layer;
+use crate::plugins::telemetry::reload::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
@@ -129,6 +127,7 @@ use crate::ListenAddr;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
+mod endpoint;
 pub(crate) mod formatters;
 pub(crate) mod metrics;
 mod otlp;
@@ -148,7 +147,6 @@ pub(crate) const OPERATION_KIND: &str = "apollo_telemetry::operation_kind";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
-const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 static DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
@@ -159,18 +157,16 @@ static FTV1_HEADER_VALUE: HeaderValue = HeaderValue::from_static("ftv1");
 #[doc(hidden)] // Only public for integration tests
 pub(crate) struct Telemetry {
     config: Arc<config::Conf>,
-    metrics: BasicMetrics,
-    // Do not remove metrics_exporters. Metrics will not be exported if it is removed.
-    // Typically the handles are a PushController but may be something else. Dropping the handle will
-    // shutdown exporter.
-    metrics_exporters: Vec<MetricsExporterHandle>,
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
     sampling_filter_ratio: SamplerOption,
 
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
-    meter_provider: AggregateMeterProvider,
+    // We have to have separate meter providers for prometheus metrics so that they don't get zapped on router reload.
+    public_meter_provider: Option<FilterMeterProvider>,
+    public_prometheus_meter_provider: Option<FilterMeterProvider>,
+    private_meter_provider: Option<FilterMeterProvider>,
     counter: Option<Arc<Mutex<CacheCounter>>>,
 }
 
@@ -209,36 +205,10 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
 
 impl Drop for Telemetry {
     fn drop(&mut self) {
-        // If we can downcast the metrics exporter to be a `BasicController`, then we
-        // should stop it to ensure metrics are transmitted before the exporter is dropped.
-        for exporter in self.metrics_exporters.drain(..) {
-            if let Ok(controller) = MetricsExporterHandle::downcast::<BasicController>(exporter) {
-                ::tracing::debug!("stopping basic controller: {controller:?}");
-                let cx = OtelContext::current();
-
-                thread::spawn(move || {
-                    if let Err(e) = controller.stop(&cx) {
-                        ::tracing::error!("error during basic controller stop: {e}");
-                    }
-                    ::tracing::debug!("stopped basic controller: {controller:?}");
-                });
-            }
-        }
-        // If for some reason we didn't use the trace provider then safely discard it e.g. some other plugin failed `new`
-        // To ensure we don't hang tracing providers are dropped in a blocking task.
-        // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
-        // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
-        if let Some(tracer_provider) = self.tracer_provider.take() {
-            // If we have no runtime then we don't need to spawn a task as we are already in a blocking context.
-            if Handle::try_current().is_ok() {
-                // This is a thread for a reason!
-                // Tokio doesn't finish executing tasks before termination https://github.com/tokio-rs/tokio/issues/1156.
-                // This means that if the runtime is shutdown there is potentially a race where the provider may not be flushed.
-                // By using a thread it doesn't matter if the tokio runtime is shut down.
-                // This is likely to happen in tests due to the tokio runtime being destroyed when the test method exits.
-                thread::spawn(move || drop(tracer_provider));
-            }
-        }
+        Self::safe_shutdown_meter_provider(&mut self.private_meter_provider);
+        Self::safe_shutdown_meter_provider(&mut self.public_meter_provider);
+        Self::safe_shutdown_meter_provider(&mut self.public_prometheus_meter_provider);
+        self.safe_shutown_tracer();
     }
 }
 
@@ -247,13 +217,16 @@ impl Plugin for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        opentelemetry::global::set_error_handler(handle_error)
+            .expect("otel error handler lock poisoned, fatal");
+
         let config = init.config;
         config.logging.validate()?;
 
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
-        let mut metrics_builder = Self::create_metrics_builder(&config)?;
-        let meter_provider = metrics_builder.meter_provider();
+        let metrics_builder = Self::create_metrics_builder(&config)?;
+
         let counter = config
             .metrics
             .as_ref()
@@ -270,13 +243,17 @@ impl Plugin for Telemetry {
         let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
 
         Ok(Telemetry {
-            custom_endpoints: metrics_builder.custom_endpoints(),
-            metrics_exporters: metrics_builder.exporters(),
-            metrics: BasicMetrics::new(&meter_provider),
-            apollo_metrics_sender: metrics_builder.apollo_metrics_provider(),
+            custom_endpoints: metrics_builder.custom_endpoints,
+            apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
             field_level_instrumentation_ratio,
             tracer_provider: Some(tracer_provider),
-            meter_provider,
+            public_meter_provider: Some(metrics_builder.public_meter_provider_builder.build())
+                .map(FilterMeterProvider::public_metrics),
+            private_meter_provider: Some(metrics_builder.apollo_meter_provider_builder.build())
+                .map(FilterMeterProvider::private_metrics),
+            public_prometheus_meter_provider: metrics_builder
+                .prometheus_meter_provider
+                .map(FilterMeterProvider::public_metrics),
             sampling_filter_ratio,
             config: Arc::new(config),
             counter,
@@ -388,7 +365,6 @@ impl Plugin for Telemetry {
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let metrics_sender = self.apollo_metrics_sender.clone();
-        let metrics = self.metrics.clone();
         let config = self.config.clone();
         let config_map_res_first = config.clone();
         let config_map_res = config.clone();
@@ -443,7 +419,6 @@ impl Plugin for Telemetry {
                 },
                 move |ctx: Context, fut| {
                     let config = config_map_res.clone();
-                    let metrics = metrics.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
 
@@ -452,13 +427,12 @@ impl Plugin for Telemetry {
                         result = Self::update_otel_metrics(
                             config.clone(),
                             ctx.clone(),
-                            metrics.clone(),
                             result,
                             start.elapsed(),
                         )
                         .await;
                         Self::update_metrics_on_response_events(
-                            &ctx, config, field_level_instrumentation_ratio, metrics, sender, start, result,
+                            &ctx, config, field_level_instrumentation_ratio, sender, start, result,
                         )
                     }
                 },
@@ -497,7 +471,6 @@ impl Plugin for Telemetry {
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        let metrics = self.metrics.clone();
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
@@ -553,7 +526,6 @@ impl Plugin for Telemetry {
                 },
                 move |(context, cache_attributes): (Context, Option<CacheAttributes>),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
-                    let metrics = metrics.clone();
                     let subgraph_attribute = subgraph_attribute.clone();
                     let subgraph_metrics_conf = subgraph_metrics_conf_resp.clone();
                     let counter = counter.clone();
@@ -562,7 +534,6 @@ impl Plugin for Telemetry {
                     f.map(move |result: Result<SubgraphResponse, BoxError>| {
                         Self::store_subgraph_response_attributes(
                             &context,
-                            metrics,
                             subgraph_attribute,
                             subgraph_metrics_conf,
                             now,
@@ -602,6 +573,7 @@ impl Telemetry {
             let tracer = tracer_provider.versioned_tracer(
                 GLOBAL_TRACER_NAME,
                 Some(env!("CARGO_PKG_VERSION")),
+                None::<String>,
                 None,
             );
             hot_tracer.reload(tracer);
@@ -611,13 +583,12 @@ impl Telemetry {
             // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
             // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
             tokio::task::spawn_blocking(move || drop(last_provider));
-            opentelemetry::global::set_error_handler(handle_error)
-                .expect("otel error handler lock poisoned, fatal");
 
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
         }
 
-        reload_metrics(MetricsLayer::new(&self.meter_provider));
+        self.reload_metrics();
+
         reload_fmt(Self::create_fmt_layer(&self.config));
     }
 
@@ -696,37 +667,12 @@ impl Telemetry {
 
     fn create_metrics_builder(config: &config::Conf) -> Result<MetricsBuilder, BoxError> {
         let metrics_config = config.metrics.clone().unwrap_or_default();
-        let metrics_common_config = &mut metrics_config.common.unwrap_or_default();
-        // Set default service name for metrics
-        if metrics_common_config
-            .resources
-            .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.as_str())
-            .is_none()
-        {
-            metrics_common_config.resources.insert(
-                String::from(opentelemetry_semantic_conventions::resource::SERVICE_NAME.as_str()),
-                String::from(
-                    metrics_common_config
-                        .service_name
-                        .as_deref()
-                        .unwrap_or(DEFAULT_SERVICE_NAME),
-                ),
-            );
-        }
-        if let Some(service_namespace) = &metrics_common_config.service_namespace {
-            metrics_common_config.resources.insert(
-                String::from(
-                    opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE.as_str(),
-                ),
-                service_namespace.clone(),
-            );
-        }
-
-        let mut builder = MetricsBuilder::default();
-        builder = setup_metrics_exporter(builder, &config.apollo, metrics_common_config)?;
+        let metrics_common_config = metrics_config.common.unwrap_or_default().clone();
+        let mut builder = MetricsBuilder::new(config);
+        builder = setup_metrics_exporter(builder, &config.apollo, &metrics_common_config)?;
         builder =
-            setup_metrics_exporter(builder, &metrics_config.prometheus, metrics_common_config)?;
-        builder = setup_metrics_exporter(builder, &metrics_config.otlp, metrics_common_config)?;
+            setup_metrics_exporter(builder, &metrics_config.prometheus, &metrics_common_config)?;
+        builder = setup_metrics_exporter(builder, &metrics_config.otlp, &metrics_common_config)?;
         Ok(builder)
     }
 
@@ -838,7 +784,6 @@ impl Telemetry {
     async fn update_otel_metrics(
         config: Arc<Conf>,
         context: Context,
-        metrics: BasicMetrics,
         result: Result<SupergraphResponse, BoxError>,
         request_duration: Duration,
     ) -> Result<SupergraphResponse, BoxError> {
@@ -889,10 +834,6 @@ impl Telemetry {
                 if !parts.status.is_success() {
                     metric_attrs.push(KeyValue::new("error", parts.status.to_string()));
                 }
-                ::tracing::info!(
-                    monotonic_counter.apollo.router.operations = 1u64,
-                    http.response.status_code = parts.status.as_u16() as i64,
-                );
                 let response = http::Response::from_parts(
                     parts,
                     once(ready(first_response.unwrap_or_default()))
@@ -904,26 +845,24 @@ impl Telemetry {
             }
             Err(err) => {
                 metric_attrs.push(KeyValue::new("status", "500"));
-
-                ::tracing::info!(
-                    monotonic_counter.apollo.router.operations = 1u64,
-                    http.response.status_code = 500i64,
-                );
                 Err(err)
             }
         };
 
         // http_requests_total - the total number of HTTP requests received
-        metrics
-            .http_requests_total
-            .add(&opentelemetry::Context::current(), 1, &metric_attrs);
-
-        metrics.http_requests_duration.record(
-            &opentelemetry::Context::current(),
-            request_duration.as_secs_f64(),
-            &metric_attrs,
+        u64_counter!(
+            "apollo_router_http_requests_total",
+            "Total number of HTTP requests made.",
+            1,
+            metric_attrs
         );
 
+        f64_histogram!(
+            "apollo_router_http_request_duration_seconds",
+            "Duration of HTTP requests.",
+            request_duration.as_secs_f64(),
+            metric_attrs
+        );
         res
     }
 
@@ -1146,7 +1085,6 @@ impl Telemetry {
     #[allow(clippy::too_many_arguments)]
     fn store_subgraph_response_attributes(
         context: &Context,
-        metrics: BasicMetrics,
         subgraph_attribute: KeyValue,
         attribute_forward_config: Arc<Option<AttributesForwardConf>>,
         now: Instant,
@@ -1215,10 +1153,11 @@ impl Telemetry {
                     );
                 }
 
-                metrics.http_requests_total.add(
-                    &opentelemetry::Context::current(),
+                u64_counter!(
+                    "apollo_router_http_requests_total",
+                    "Total number of HTTP requests made.",
                     1,
-                    &metric_attrs,
+                    metric_attrs
                 );
             }
             Err(err) => {
@@ -1233,17 +1172,19 @@ impl Telemetry {
                     );
                 }
 
-                metrics.http_requests_total.add(
-                    &opentelemetry::Context::current(),
+                u64_counter!(
+                    "apollo_router_http_requests_total",
+                    "Total number of HTTP requests made.",
                     1,
-                    &metric_attrs,
+                    metric_attrs
                 );
             }
         }
-        metrics.http_requests_duration.record(
-            &opentelemetry::Context::current(),
+        f64_histogram!(
+            "apollo_router_http_request_duration_seconds",
+            "Duration of HTTP requests.",
             now.elapsed().as_secs_f64(),
-            &metric_attrs,
+            metric_attrs
         );
     }
 
@@ -1252,7 +1193,6 @@ impl Telemetry {
         ctx: &Context,
         config: Arc<Conf>,
         field_level_instrumentation_ratio: f64,
-        metrics: BasicMetrics,
         sender: Sender,
         start: Instant,
         result: Result<supergraph::Response, BoxError>,
@@ -1292,10 +1232,11 @@ impl Telemetry {
                     );
                 }
 
-                metrics.http_requests_total.add(
-                    &opentelemetry::Context::current(),
+                u64_counter!(
+                    "apollo_router_http_requests_total",
+                    "Total number of HTTP requests made.",
                     1,
-                    &metric_attrs,
+                    metric_attrs
                 );
 
                 Err(e)
@@ -1661,6 +1602,77 @@ impl Telemetry {
             );
         }
     }
+    fn reload_metrics(&mut self) {
+        let meter_provider = meter_provider();
+        if self.public_prometheus_meter_provider.is_some() {
+            commit_prometheus();
+        }
+        let mut old_meter_providers = Vec::new();
+        if let Some(old_provider) = meter_provider.set(
+            MeterProviderType::PublicPrometheus,
+            self.public_prometheus_meter_provider.take(),
+        ) {
+            old_meter_providers.push((MeterProviderType::PublicPrometheus, old_provider));
+        }
+
+        if let Some(old_provider) = meter_provider.set(
+            MeterProviderType::Apollo,
+            self.private_meter_provider.take(),
+        ) {
+            old_meter_providers.push((MeterProviderType::Apollo, old_provider));
+        }
+        if let Some(old_provider) =
+            meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take())
+        {
+            old_meter_providers.push((MeterProviderType::Public, old_provider));
+        }
+
+        metrics_layer().clear();
+
+        // Old providers MUST be shut down in a blocking thread.
+        tokio::task::spawn_blocking(move || {
+            for (meter_provider_type, meter_provider) in old_meter_providers {
+                if let Err(e) = meter_provider.shutdown() {
+                    ::tracing::error!(error = %e, meter_provider_type = ?meter_provider_type, "failed to shutdown meter provider")
+                }
+            }
+        });
+    }
+
+    fn safe_shutdown_meter_provider(meter_provider: &mut Option<FilterMeterProvider>) {
+        if Handle::try_current().is_ok() {
+            if let Some(meter_provider) = meter_provider.take() {
+                // This is a thread for a reason!
+                // Tokio doesn't finish executing tasks before termination https://github.com/tokio-rs/tokio/issues/1156.
+                // This means that if the runtime is shutdown there is potentially a race where the provider may not be flushed.
+                // By using a thread it doesn't matter if the tokio runtime is shut down.
+                // This is likely to happen in tests due to the tokio runtime being destroyed when the test method exits.
+                thread::spawn(move || {
+                    if let Err(e) = meter_provider.shutdown() {
+                        ::tracing::error!(error = %e, "failed to shutdown meter provider")
+                    }
+                });
+            }
+        }
+    }
+
+    fn safe_shutown_tracer(&mut self) {
+        // If for some reason we didn't use the trace provider then safely discard it e.g. some other plugin failed `new`
+        // To ensure we don't hang tracing providers are dropped in a blocking task.
+        // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
+        // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
+        if let Some(tracer_provider) = self.tracer_provider.take() {
+            // If we have no runtime then we don't need to spawn a task as we are already in a blocking context.
+            if Handle::try_current().is_ok() {
+                // This is a thread for a reason!
+                // Tokio doesn't finish executing tasks before termination https://github.com/tokio-rs/tokio/issues/1156.
+                // This means that if the runtime is shutdown there is potentially a race where the provider may not be flushed.
+                // By using a thread it doesn't matter if the tokio runtime is shut down.
+                // This is likely to happen in tests due to the tokio runtime being destroyed when the test method exits.
+                thread::spawn(move || drop(tracer_provider));
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1836,6 +1848,14 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
     // We have to rate limit these errors because when they happen they are very frequent.
     // Use a dashmap to store the message type with the last time it was logged.
     let last_logged_map = OTEL_ERROR_LAST_LOGGED.get_or_init(DashMap::new);
+
+    handle_error_internal(err, last_logged_map);
+}
+
+fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
+    err: T,
+    last_logged_map: &DashMap<ErrorType, Instant>,
+) {
     let err = err.into();
 
     // We don't want the dashmap to get big, so we key the error messages by type.
@@ -1866,7 +1886,9 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
                 ::tracing::error!("OpenTelemetry trace error occurred: {}", err)
             }
             opentelemetry::global::Error::Metric(err) => {
-                ::tracing::error!("OpenTelemetry metric error occurred: {}", err)
+                if err.to_string() != "Metrics error: reader is shut down or not registered" {
+                    ::tracing::error!("OpenTelemetry metric error occurred: {}", err)
+                }
             }
             opentelemetry::global::Error::Other(err) => {
                 ::tracing::error!("OpenTelemetry error occurred: {}", err)
@@ -2003,12 +2025,12 @@ struct EnableSubgraphFtv1;
 mod tests {
     use std::fmt::Debug;
     use std::ops::DerefMut;
-    use std::str::FromStr;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
 
     use axum::headers::HeaderName;
+    use dashmap::DashMap;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::StatusCode;
@@ -2030,19 +2052,100 @@ mod tests {
     use tracing_subscriber::Layer;
 
     use super::apollo::ForwardHeaders;
+    use super::Telemetry;
     use crate::error::FetchError;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::json_ext::Object;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
-    use crate::plugins::telemetry::handle_error;
+    use crate::plugins::telemetry::handle_error_internal;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
+
+    async fn create_plugin_with_config(config: &str) -> Box<dyn DynPlugin> {
+        let prometheus_support = config.contains("prometheus");
+        let config: Value = serde_yaml::from_str(config).expect("yaml must be valid");
+        let telemetry_config = config
+            .as_object()
+            .expect("must be an object")
+            .get("telemetry")
+            .expect("root key must be telemetry");
+        let mut plugin = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.telemetry")
+            .expect("Plugin not found")
+            .create_instance(telemetry_config, Default::default(), Default::default())
+            .await
+            .unwrap();
+
+        if prometheus_support {
+            plugin
+                .as_any_mut()
+                .downcast_mut::<Telemetry>()
+                .unwrap()
+                .reload_metrics();
+        }
+        plugin
+    }
+
+    async fn get_prometheus_metrics(plugin: &dyn DynPlugin) -> String {
+        let web_endpoint = plugin
+            .web_endpoints()
+            .into_iter()
+            .next()
+            .unwrap()
+            .1
+            .into_iter()
+            .next()
+            .unwrap()
+            .into_router();
+
+        let http_req_prom = http::Request::get("http://localhost:9090/metrics")
+            .body(Default::default())
+            .unwrap();
+        let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
+        String::from_utf8_lossy(&body)
+            .to_string()
+            .split('\n')
+            .filter(|l| l.contains("bucket") && !l.contains("apollo_router_span_count"))
+            .sorted()
+            .join("\n")
+    }
+
+    async fn make_supergraph_request(plugin: &dyn DynPlugin) {
+        let mut mock_service = MockSupergraphService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: SupergraphRequest| {
+                Ok(SupergraphResponse::fake_builder()
+                    .context(req.context)
+                    .header("x-custom", "coming_from_header")
+                    .data(json!({"data": {"my_value": 2usize}}))
+                    .build()
+                    .unwrap())
+            });
+
+        let mut supergraph_service = plugin.supergraph_service(BoxService::new(mock_service));
+        let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
+        let _router_response = supergraph_service
+            .ready()
+            .await
+            .unwrap()
+            .call(router_req.build().unwrap())
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
@@ -2058,716 +2161,340 @@ mod tests {
             .unwrap();
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn attribute_serialization() {
-        crate::plugin::plugins()
-            .find(|factory| factory.name == "apollo.telemetry")
-            .expect("Plugin not found")
-            .create_instance(
-                &serde_json::json!({
-                    "apollo": {"schema_id":"abc"},
-                    "tracing": {
-                        "trace_config": {
-                            "service_name": "router",
-                            "attributes": {
-                                "str": "a",
-                                "int": 1,
-                                "float": 1.0,
-                                "bool": true,
-                                "str_arr": ["a", "b"],
-                                "int_arr": [1, 2],
-                                "float_arr": [1.0, 2.0],
-                                "bool_arr": [true, false]
-                            }
-                        }
-                    },
-                    "metrics": {
-                        "common": {
-                            "attributes": {
-                                "supergraph": {
-                                    "static": [
-                                        {
-                                            "name": "myname",
-                                            "value": "label_value"
-                                        }
-                                    ],
-                                    "request": {
-                                        "header": [{
-                                            "named": "test",
-                                            "default": "default_value",
-                                            "rename": "renamed_value"
-                                        }],
-                                        "body": [{
-                                            "path": ".data.test",
-                                            "name": "my_new_name",
-                                            "default": "default_value"
-                                        }]
-                                    },
-                                    "response": {
-                                        "header": [{
-                                            "named": "test",
-                                            "default": "default_value",
-                                            "rename": "renamed_value",
-                                        }, {
-                                            "named": "test",
-                                            "default": "default_value",
-                                            "rename": "renamed_value",
-                                        }],
-                                        "body": [{
-                                            "path": ".data.test",
-                                            "name": "my_new_name",
-                                            "default": "default_value"
-                                        }]
-                                    }
-                                },
-                                "subgraph": {
-                                    "all": {
-                                        "static": [
-                                            {
-                                                "name": "myname",
-                                                "value": "label_value"
-                                            }
-                                        ],
-                                        "request": {
-                                            "header": [{
-                                                "named": "test",
-                                                "default": "default_value",
-                                                "rename": "renamed_value",
-                                            }],
-                                            "body": [{
-                                                "path": ".data.test",
-                                                "name": "my_new_name",
-                                                "default": "default_value"
-                                            }]
-                                        },
-                                        "response": {
-                                            "header": [{
-                                                "named": "test",
-                                                "default": "default_value",
-                                                "rename": "renamed_value",
-                                            }, {
-                                                "named": "test",
-                                                "default": "default_value",
-                                                "rename": "renamed_value",
-                                            }],
-                                            "body": [{
-                                                "path": ".data.test",
-                                                "name": "my_new_name",
-                                                "default": "default_value"
-                                            }]
-                                        }
-                                    },
-                                    "subgraphs": {
-                                        "subgraph_name_test": {
-                                             "static": [
-                                                {
-                                                    "name": "myname",
-                                                    "value": "label_value"
-                                                }
-                                            ],
-                                            "request": {
-                                                "header": [{
-                                                    "named": "test",
-                                                    "default": "default_value",
-                                                    "rename": "renamed_value",
-                                                }],
-                                                "body": [{
-                                                    "path": ".data.test",
-                                                    "name": "my_new_name",
-                                                    "default": "default_value"
-                                                }]
-                                            },
-                                            "response": {
-                                                "header": [{
-                                                    "named": "test",
-                                                    "default": "default_value",
-                                                    "rename": "renamed_value",
-                                                }, {
-                                                    "named": "test",
-                                                    "default": "default_value",
-                                                    "rename": "renamed_value",
-                                                }],
-                                                "body": [{
-                                                    "path": ".data.test",
-                                                    "name": "my_new_name",
-                                                    "default": "default_value"
-                                                }]
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }),
-                Default::default(),
-                Default::default(),
-            )
-            .await
-            .unwrap();
+    #[tokio::test]
+    async fn config_serialization() {
+        create_plugin_with_config(include_str!("testdata/config.router.yaml")).await;
+    }
+
+    #[tokio::test]
+    async fn test_supergraph_metrics_ok() {
+        async {
+            let plugin =
+                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
+                    .await;
+            make_supergraph_request(plugin.as_ref()).await;
+
+            assert_counter!(
+                "apollo_router_http_requests_total",
+                1,
+                "another_test" = "my_default_value",
+                "my_value" = 2,
+                "myname" = "label_value",
+                "renamed_value" = "my_value_set",
+                "status" = "200",
+                "x-custom" = "coming_from_header"
+            );
+            assert_histogram!(
+                "apollo_router_http_request_duration_seconds",
+                1,
+                "another_test" = "my_default_value",
+                "my_value" = 2,
+                "myname" = "label_value",
+                "renamed_value" = "my_value_set",
+                "status" = "200",
+                "x-custom" = "coming_from_header"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_supergraph_metrics_bad_request() {
+        async {
+            let plugin =
+                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
+                    .await;
+
+            let mut mock_bad_request_service = MockSupergraphService::new();
+            mock_bad_request_service.expect_call().times(1).returning(
+                move |req: SupergraphRequest| {
+                    Ok(SupergraphResponse::fake_builder()
+                        .context(req.context)
+                        .status_code(StatusCode::BAD_REQUEST)
+                        .data(json!({"errors": [{"message": "nope"}]}))
+                        .build()
+                        .unwrap())
+                },
+            );
+            let mut bad_request_supergraph_service =
+                plugin.supergraph_service(BoxService::new(mock_bad_request_service));
+            let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
+            let _router_response = bad_request_supergraph_service
+                .ready()
+                .await
+                .unwrap()
+                .call(router_req.build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+
+            assert_counter!(
+                "apollo_router_http_requests_total",
+                1,
+                "another_test" = "my_default_value",
+                "error" = "400 Bad Request",
+                "myname" = "label_value",
+                "renamed_value" = "my_value_set",
+                "status" = "400"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_subgraph_metrics_ok() {
+        async {
+            let plugin =
+                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
+                    .await;
+
+            let mut mock_subgraph_service = MockSubgraphService::new();
+            mock_subgraph_service
+                .expect_call()
+                .times(1)
+                .returning(move |req: SubgraphRequest| {
+                    let mut extension = Object::new();
+                    extension.insert(
+                        serde_json_bytes::ByteString::from("status"),
+                        serde_json_bytes::Value::String(ByteString::from(
+                            "custom_error_for_propagation",
+                        )),
+                    );
+                    let _ = req
+                        .context
+                        .insert("my_key", "my_custom_attribute_from_context".to_string())
+                        .unwrap();
+                    Ok(SubgraphResponse::fake_builder()
+                        .context(req.context)
+                        .error(
+                            Error::builder()
+                                .message(String::from("an error occured"))
+                                .extensions(extension)
+                                .extension_code("FETCH_ERROR")
+                                .build(),
+                        )
+                        .build())
+                });
+
+            let mut subgraph_service =
+                plugin.subgraph_service("my_subgraph_name", BoxService::new(mock_subgraph_service));
+            let subgraph_req = SubgraphRequest::fake_builder()
+                .subgraph_request(
+                    http_ext::Request::fake_builder()
+                        .header("test", "my_value_set")
+                        .body(
+                            Request::fake_builder()
+                                .query(String::from("query { test }"))
+                                .build(),
+                        )
+                        .build()
+                        .unwrap(),
+                )
+                .build();
+            let _subgraph_response = subgraph_service
+                .ready()
+                .await
+                .unwrap()
+                .call(subgraph_req)
+                .await
+                .unwrap();
+
+            assert_counter!(
+                "apollo_router_http_requests_total",
+                1,
+                "error" = "custom_error_for_propagation",
+                "my_key" = "my_custom_attribute_from_context",
+                "query_from_request" = "query { test }",
+                "status" = "200",
+                "subgraph" = "my_subgraph_name",
+                "unknown_data" = "default_value"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_subgraph_metrics_http_error() {
+        async {
+            let plugin =
+                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
+                    .await;
+
+            let mut mock_subgraph_service_in_error = MockSubgraphService::new();
+            mock_subgraph_service_in_error
+                .expect_call()
+                .times(1)
+                .returning(move |_req: SubgraphRequest| {
+                    Err(Box::new(FetchError::SubrequestHttpError {
+                        status_code: None,
+                        service: String::from("my_subgraph_name_error"),
+                        reason: String::from("cannot contact the subgraph"),
+                    }))
+                });
+
+            let mut subgraph_service = plugin.subgraph_service(
+                "my_subgraph_name_error",
+                BoxService::new(mock_subgraph_service_in_error),
+            );
+
+            let subgraph_req = SubgraphRequest::fake_builder()
+                .subgraph_request(
+                    http_ext::Request::fake_builder()
+                        .header("test", "my_value_set")
+                        .body(
+                            Request::fake_builder()
+                                .query(String::from("query { test }"))
+                                .build(),
+                        )
+                        .build()
+                        .unwrap(),
+                )
+                .build();
+            let _subgraph_response = subgraph_service
+                .ready()
+                .await
+                .unwrap()
+                .call(subgraph_req)
+                .await
+                .expect_err("should be an error");
+
+            assert_counter!(
+                "apollo_router_http_requests_total",
+                1,
+                "message" = "cannot contact the subgraph",
+                "status" = "500",
+                "subgraph" = "my_subgraph_name_error",
+                "subgraph_error_extended_code" = "SUBREQUEST_HTTP_ERROR"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_subgraph_metrics_bad_request() {
+        async {
+            let plugin =
+                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
+                    .await;
+
+            let mut mock_bad_request_service = MockSupergraphService::new();
+            mock_bad_request_service.expect_call().times(1).returning(
+                move |req: SupergraphRequest| {
+                    Ok(SupergraphResponse::fake_builder()
+                        .context(req.context)
+                        .status_code(StatusCode::BAD_REQUEST)
+                        .data(json!({"errors": [{"message": "nope"}]}))
+                        .build()
+                        .unwrap())
+                },
+            );
+
+            let mut bad_request_supergraph_service =
+                plugin.supergraph_service(BoxService::new(mock_bad_request_service));
+
+            let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
+
+            let _router_response = bad_request_supergraph_service
+                .ready()
+                .await
+                .unwrap()
+                .call(router_req.build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap();
+
+            assert_counter!(
+                "apollo_router_http_requests_total",
+                1,
+                "another_test" = "my_default_value",
+                "error" = "400 Bad Request",
+                "myname" = "label_value",
+                "renamed_value" = "my_value_set",
+                "status" = "400"
+            );
+            assert_histogram!(
+                "apollo_router_http_request_duration_seconds",
+                1,
+                "another_test" = "my_default_value",
+                "error" = "400 Bad Request",
+                "myname" = "label_value",
+                "renamed_value" = "my_value_set",
+                "status" = "400"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn it_test_prometheus_wrong_endpoint() {
+        async {
+            let plugin =
+                create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
+
+            let mut web_endpoint = plugin
+                .web_endpoints()
+                .into_iter()
+                .next()
+                .unwrap()
+                .1
+                .into_iter()
+                .next()
+                .unwrap()
+                .into_router();
+
+            let http_req_prom = http::Request::get("http://localhost:9090/WRONG/URL/metrics")
+                .body(Default::default())
+                .unwrap();
+
+            let resp = web_endpoint
+                .ready()
+                .await
+                .unwrap()
+                .call(http_req_prom)
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics() {
-        let mut mock_service = MockSupergraphService::new();
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |req: SupergraphRequest| {
-                Ok(SupergraphResponse::fake_builder()
-                    .context(req.context)
-                    .header("x-custom", "coming_from_header")
-                    .data(json!({"data": {"my_value": 2usize}}))
-                    .build()
-                    .unwrap())
-            });
-
-        let mut mock_bad_request_service = MockSupergraphService::new();
-        mock_bad_request_service
-            .expect_call()
-            .times(1)
-            .returning(move |req: SupergraphRequest| {
-                Ok(SupergraphResponse::fake_builder()
-                    .context(req.context)
-                    .status_code(StatusCode::BAD_REQUEST)
-                    .data(json!({"errors": [{"message": "nope"}]}))
-                    .build()
-                    .unwrap())
-            });
-
-        let mut mock_subgraph_service = MockSubgraphService::new();
-        mock_subgraph_service
-            .expect_call()
-            .times(1)
-            .returning(move |req: SubgraphRequest| {
-                let mut extension = Object::new();
-                extension.insert(
-                    serde_json_bytes::ByteString::from("status"),
-                    serde_json_bytes::Value::String(ByteString::from("INTERNAL_SERVER_ERROR")),
-                );
-                let _ = req
-                    .context
-                    .insert("my_key", "my_custom_attribute_from_context".to_string())
-                    .unwrap();
-                Ok(SubgraphResponse::fake_builder()
-                    .context(req.context)
-                    .error(
-                        Error::builder()
-                            .message(String::from("an error occured"))
-                            .extensions(extension)
-                            .extension_code("FETCH_ERROR")
-                            .build(),
-                    )
-                    .build())
-            });
-
-        let mut mock_subgraph_service_in_error = MockSubgraphService::new();
-        mock_subgraph_service_in_error
-            .expect_call()
-            .times(1)
-            .returning(move |_req: SubgraphRequest| {
-                Err(Box::new(FetchError::SubrequestHttpError {
-                    status_code: None,
-                    service: String::from("my_subgraph_name_error"),
-                    reason: String::from("cannot contact the subgraph"),
-                }))
-            });
-
-        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .find(|factory| factory.name == "apollo.telemetry")
-            .expect("Plugin not found")
-            .create_instance(
-                &Value::from_str(
-                    r#"{
-                "apollo": {
-                    "client_name_header": "name_header",
-                    "client_version_header": "version_header",
-                    "schema_id": "schema_sha"
-                },
-                "metrics": {
-                    "common": {
-                        "service_name": "apollo-router",
-                        "attributes": {
-                            "supergraph": {
-                                "static": [
-                                    {
-                                        "name": "myname",
-                                        "value": "label_value"
-                                    }
-                                ],
-                                "request": {
-                                    "header": [
-                                        {
-                                            "named": "test",
-                                            "default": "default_value",
-                                            "rename": "renamed_value"
-                                        },
-                                        {
-                                            "named": "another_test",
-                                            "default": "my_default_value"
-                                        }
-                                    ]
-                                },
-                                "response": {
-                                    "header": [{
-                                        "named": "x-custom"
-                                    }],
-                                    "body": [{
-                                        "path": ".data.data.my_value",
-                                        "name": "my_value"
-                                    }]
-                                }
-                            },
-                            "subgraph": {
-                                "all": {
-                                    "errors": {
-                                        "include_messages": true,
-                                        "extensions": [{
-                                            "name": "subgraph_error_extended_code",
-                                            "path": ".code"
-                                        }, {
-                                            "name": "message",
-                                            "path": ".reason"
-                                        }]
-                                    }
-                                },
-                                "subgraphs": {
-                                    "my_subgraph_name": {
-                                        "request": {
-                                            "body": [{
-                                                "path": ".query",
-                                                "name": "query_from_request"
-                                            }, {
-                                                "path": ".data",
-                                                "name": "unknown_data",
-                                                "default": "default_value"
-                                            }, {
-                                                "path": ".data2",
-                                                "name": "unknown_data_bis"
-                                            }]
-                                        },
-                                        "response": {
-                                            "body": [{
-                                                "path": ".errors[0].extensions.status",
-                                                "name": "error"
-                                            }]
-                                        },
-                                        "context": [
-                                            {
-                                                "named": "my_key"
-                                            }
-                                        ]
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    "prometheus": {
-                        "enabled": true
-                    }
-                }
-            }"#,
-                )
-                .unwrap(),
-                Default::default(),
-                Default::default(),
-            )
-            .await
-            .unwrap();
-        let mut supergraph_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
-        let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
-
-        let _router_response = supergraph_service
-            .ready()
-            .await
-            .unwrap()
-            .call(router_req.build().unwrap())
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap();
-
-        let mut bad_request_supergraph_service =
-            dyn_plugin.supergraph_service(BoxService::new(mock_bad_request_service));
-        let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
-
-        let _router_response = bad_request_supergraph_service
-            .ready()
-            .await
-            .unwrap()
-            .call(router_req.build().unwrap())
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap();
-
-        let mut subgraph_service =
-            dyn_plugin.subgraph_service("my_subgraph_name", BoxService::new(mock_subgraph_service));
-        let subgraph_req = SubgraphRequest::fake_builder()
-            .subgraph_request(
-                http_ext::Request::fake_builder()
-                    .header("test", "my_value_set")
-                    .body(
-                        Request::fake_builder()
-                            .query(String::from("query { test }"))
-                            .build(),
-                    )
-                    .build()
-                    .unwrap(),
-            )
-            .build();
-        let _subgraph_response = subgraph_service
-            .ready()
-            .await
-            .unwrap()
-            .call(subgraph_req)
-            .await
-            .unwrap();
-        // Another subgraph
-        let mut subgraph_service = dyn_plugin.subgraph_service(
-            "my_subgraph_name_error",
-            BoxService::new(mock_subgraph_service_in_error),
-        );
-        let subgraph_req = SubgraphRequest::fake_builder()
-            .subgraph_request(
-                http_ext::Request::fake_builder()
-                    .header("test", "my_value_set")
-                    .body(
-                        Request::fake_builder()
-                            .query(String::from("query { test }"))
-                            .build(),
-                    )
-                    .build()
-                    .unwrap(),
-            )
-            .build();
-        let _subgraph_response = subgraph_service
-            .ready()
-            .await
-            .unwrap()
-            .call(subgraph_req)
-            .await
-            .expect_err("Must be in error");
-
-        let http_req_prom = http::Request::get("http://localhost:9090/WRONG/URL/metrics")
-            .body(Default::default())
-            .unwrap();
-        let mut web_endpoint = dyn_plugin
-            .web_endpoints()
-            .into_iter()
-            .next()
-            .unwrap()
-            .1
-            .into_iter()
-            .next()
-            .unwrap()
-            .into_router();
-        let resp = web_endpoint
-            .ready()
-            .await
-            .unwrap()
-            .call(http_req_prom)
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-
-        let http_req_prom = http::Request::get("http://localhost:9090/metrics")
-            .body(Default::default())
-            .unwrap();
-        let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
-        let prom_metrics = String::from_utf8_lossy(&body)
-            .to_string()
-            .split('\n')
-            .filter(|l| l.contains("_count") && !l.contains("apollo_router_span_count"))
-            .sorted()
-            .join("\n");
-        assert_snapshot!(prom_metrics);
+        async {
+            let plugin =
+                create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
+            make_supergraph_request(plugin.as_ref()).await;
+            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
+            assert_snapshot!(prometheus_metrics);
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_custom_buckets() {
-        let mut mock_service = MockSupergraphService::new();
-        mock_service
-            .expect_call()
-            .times(1)
-            .returning(move |req: SupergraphRequest| {
-                Ok(SupergraphResponse::fake_builder()
-                    .context(req.context)
-                    .header("x-custom", "coming_from_header")
-                    .data(json!({"data": {"my_value": 2usize}}))
-                    .build()
-                    .unwrap())
-            });
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/prometheus_custom_buckets.router.yaml"
+            ))
+            .await;
+            make_supergraph_request(plugin.as_ref()).await;
+            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
 
-        let mut mock_bad_request_service = MockSupergraphService::new();
-        mock_bad_request_service
-            .expect_call()
-            .times(1)
-            .returning(move |req: SupergraphRequest| {
-                Ok(SupergraphResponse::fake_builder()
-                    .context(req.context)
-                    .status_code(StatusCode::BAD_REQUEST)
-                    .data(json!({"errors": [{"message": "nope"}]}))
-                    .build()
-                    .unwrap())
-            });
-
-        let mut mock_subgraph_service = MockSubgraphService::new();
-        mock_subgraph_service
-            .expect_call()
-            .times(1)
-            .returning(move |req: SubgraphRequest| {
-                let mut extension = Object::new();
-                extension.insert(
-                    serde_json_bytes::ByteString::from("status"),
-                    serde_json_bytes::Value::String(ByteString::from("INTERNAL_SERVER_ERROR")),
-                );
-                let _ = req
-                    .context
-                    .insert("my_key", "my_custom_attribute_from_context".to_string())
-                    .unwrap();
-                Ok(SubgraphResponse::fake_builder()
-                    .context(req.context)
-                    .error(
-                        Error::builder()
-                            .message(String::from("an error occured"))
-                            .extensions(extension)
-                            .extension_code("FETCH_ERROR")
-                            .build(),
-                    )
-                    .build())
-            });
-
-        let mut mock_subgraph_service_in_error = MockSubgraphService::new();
-        mock_subgraph_service_in_error
-            .expect_call()
-            .times(1)
-            .returning(move |_req: SubgraphRequest| {
-                Err(Box::new(FetchError::SubrequestHttpError {
-                    status_code: None,
-                    service: String::from("my_subgraph_name_error"),
-                    reason: String::from("cannot contact the subgraph"),
-                }))
-            });
-
-        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .find(|factory| factory.name == "apollo.telemetry")
-            .expect("Plugin not found")
-            .create_instance(
-                &Value::from_str(
-                    r#"{
-                "apollo": {
-                    "client_name_header": "name_header",
-                    "client_version_header": "version_header",
-                    "schema_id": "schema_sha"
-                },
-                "metrics": {
-                    "common": {
-                        "service_name": "apollo-router",
-                        "buckets": [5.0, 10.0, 20.0],
-                        "attributes": {
-                            "supergraph": {
-                                "static": [
-                                    {
-                                        "name": "myname",
-                                        "value": "label_value"
-                                    }
-                                ],
-                                "request": {
-                                    "header": [
-                                        {
-                                            "named": "test",
-                                            "default": "default_value",
-                                            "rename": "renamed_value"
-                                        },
-                                        {
-                                            "named": "another_test",
-                                            "default": "my_default_value"
-                                        }
-                                    ]
-                                },
-                                "response": {
-                                    "header": [{
-                                        "named": "x-custom"
-                                    }],
-                                    "body": [{
-                                        "path": ".data.data.my_value",
-                                        "name": "my_value"
-                                    }]
-                                }
-                            },
-                            "subgraph": {
-                                "all": {
-                                    "errors": {
-                                        "include_messages": true,
-                                        "extensions": [{
-                                            "name": "subgraph_error_extended_code",
-                                            "path": ".code"
-                                        }, {
-                                            "name": "message",
-                                            "path": ".reason"
-                                        }]
-                                    }
-                                },
-                                "subgraphs": {
-                                    "my_subgraph_name": {
-                                        "request": {
-                                            "body": [{
-                                                "path": ".query",
-                                                "name": "query_from_request"
-                                            }, {
-                                                "path": ".data",
-                                                "name": "unknown_data",
-                                                "default": "default_value"
-                                            }, {
-                                                "path": ".data2",
-                                                "name": "unknown_data_bis"
-                                            }]
-                                        },
-                                        "response": {
-                                            "body": [{
-                                                "path": ".errors[0].extensions.status",
-                                                "name": "error"
-                                            }]
-                                        },
-                                        "context": [
-                                            {
-                                                "named": "my_key"
-                                            }
-                                        ]
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    "prometheus": {
-                        "enabled": true
-                    }
-                }
-            }"#,
-                )
-                .unwrap(),
-                Default::default(),
-                Default::default(),
-            )
-            .await
-            .unwrap();
-        let mut supergraph_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
-        let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
-
-        let _router_response = supergraph_service
-            .ready()
-            .await
-            .unwrap()
-            .call(router_req.build().unwrap())
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap();
-
-        let mut bad_request_supergraph_service =
-            dyn_plugin.supergraph_service(BoxService::new(mock_bad_request_service));
-        let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
-
-        let _router_response = bad_request_supergraph_service
-            .ready()
-            .await
-            .unwrap()
-            .call(router_req.build().unwrap())
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap();
-
-        let mut subgraph_service =
-            dyn_plugin.subgraph_service("my_subgraph_name", BoxService::new(mock_subgraph_service));
-        let subgraph_req = SubgraphRequest::fake_builder()
-            .subgraph_request(
-                http_ext::Request::fake_builder()
-                    .header("test", "my_value_set")
-                    .body(
-                        Request::fake_builder()
-                            .query(String::from("query { test }"))
-                            .build(),
-                    )
-                    .build()
-                    .unwrap(),
-            )
-            .build();
-        let _subgraph_response = subgraph_service
-            .ready()
-            .await
-            .unwrap()
-            .call(subgraph_req)
-            .await
-            .unwrap();
-        // Another subgraph
-        let mut subgraph_service = dyn_plugin.subgraph_service(
-            "my_subgraph_name_error",
-            BoxService::new(mock_subgraph_service_in_error),
-        );
-        let subgraph_req = SubgraphRequest::fake_builder()
-            .subgraph_request(
-                http_ext::Request::fake_builder()
-                    .header("test", "my_value_set")
-                    .body(
-                        Request::fake_builder()
-                            .query(String::from("query { test }"))
-                            .build(),
-                    )
-                    .build()
-                    .unwrap(),
-            )
-            .build();
-        let _subgraph_response = subgraph_service
-            .ready()
-            .await
-            .unwrap()
-            .call(subgraph_req)
-            .await
-            .expect_err("Must be in error");
-
-        let http_req_prom = http::Request::get("http://localhost:9090/WRONG/URL/metrics")
-            .body(Default::default())
-            .unwrap();
-        let mut web_endpoint = dyn_plugin
-            .web_endpoints()
-            .into_iter()
-            .next()
-            .unwrap()
-            .1
-            .into_iter()
-            .next()
-            .unwrap()
-            .into_router();
-        let resp = web_endpoint
-            .ready()
-            .await
-            .unwrap()
-            .call(http_req_prom)
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-
-        let http_req_prom = http::Request::get("http://localhost:9090/metrics")
-            .body(Default::default())
-            .unwrap();
-        let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
-        let prom_metrics = String::from_utf8_lossy(&body)
-            .to_string()
-            .split('\n')
-            .filter(|l| l.contains("bucket") && !l.contains("apollo_router_span_count"))
-            .sorted()
-            .join("\n");
-        assert_snapshot!(prom_metrics);
+            assert_snapshot!(prometheus_metrics);
+        }
+        .with_metrics()
+        .await;
     }
 
     #[test]
@@ -2808,6 +2535,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_error_throttling() {
+        let error_map = DashMap::new();
         // Set up a fake subscriber so we can check log events. If this is useful then maybe it can be factored out into something reusable
         #[derive(Default)]
         struct TestVisitor {
@@ -2846,15 +2574,18 @@ mod tests {
 
         async {
             // Log twice rapidly, they should get deduped
-            handle_error(opentelemetry::global::Error::Other(
-                "other error".to_string(),
-            ));
-            handle_error(opentelemetry::global::Error::Other(
-                "other error".to_string(),
-            ));
-            handle_error(opentelemetry::global::Error::Trace(
-                "trace error".to_string().into(),
-            ));
+            handle_error_internal(
+                opentelemetry::global::Error::Other("other error".to_string()),
+                &error_map,
+            );
+            handle_error_internal(
+                opentelemetry::global::Error::Other("other error".to_string()),
+                &error_map,
+            );
+            handle_error_internal(
+                opentelemetry::global::Error::Trace("trace error".to_string().into()),
+                &error_map,
+            );
         }
         .with_subscriber(tracing_subscriber::registry().with(test_layer.clone()))
         .await;
@@ -2865,9 +2596,10 @@ mod tests {
         // Sleep a bit and then log again, it should get logged
         tokio::time::sleep(Duration::from_millis(200)).await;
         async {
-            handle_error(opentelemetry::global::Error::Other(
-                "other error".to_string(),
-            ));
+            handle_error_internal(
+                opentelemetry::global::Error::Other("other error".to_string()),
+                &error_map,
+            );
         }
         .with_subscriber(tracing_subscriber::registry().with(test_layer.clone()))
         .await;

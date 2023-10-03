@@ -82,6 +82,18 @@ traffic_shaping:
 
 Compression is automatically supported on the client side, depending on the `Accept-Encoding` header provided by the client.
 
+### Query batching
+
+The Apollo Router has _experimental_ support for receiving client query batches:
+
+```yaml title="router.yaml"
+experimental_batching:
+  enabled: true
+  mode: batch_http_link
+```
+
+For details, see [query batching for the router](/executing-operations/query-batching).
+
 ## Subgraph traffic shaping
 
 The Apollo Router supports various options affecting traffic destined for subgraphs, that can either be defined for all subgraphs, or overriden per subgraph:
