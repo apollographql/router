@@ -4771,7 +4771,6 @@ expression: "&schema"
                 },
                 "endpoint": {
                   "description": "The endpoint to send to",
-                  "default": "default",
                   "type": "string"
                 }
               },
@@ -4813,7 +4812,6 @@ expression: "&schema"
                       "properties": {
                         "endpoint": {
                           "description": "The endpoint to send to",
-                          "default": "default",
                           "type": "string"
                         }
                       },
@@ -4949,8 +4947,7 @@ expression: "&schema"
                       "properties": {
                         "endpoint": {
                           "description": "The endpoint to send reports to",
-                          "type": "string",
-                          "format": "uri"
+                          "type": "string"
                         },
                         "password": {
                           "description": "The optional password",
@@ -5336,6 +5333,9 @@ expression: "&schema"
             "zipkin": {
               "description": "Zipkin exporter configuration",
               "type": "object",
+              "required": [
+                "endpoint"
+              ],
               "properties": {
                 "batch_processor": {
                   "description": "Batch processor configuration",
@@ -5395,7 +5395,6 @@ expression: "&schema"
                 },
                 "endpoint": {
                   "description": "The endpoint to send to",
-                  "default": "default",
                   "type": "string"
                 }
               },
