@@ -551,6 +551,8 @@ This value is one of the following:
 
 - `RouterRequest`: The `RouterService` has just received a client request.
 - `RouterResponse`: The `RouterService` is about to send response data to a client.
+- `SupergraphRequest`: The `SupergraphService` is about to send a GraphQL request.
+- `SupergraphResponse`: The `SupergraphService` has just received a GraphQL response.
 - `SubgraphRequest`: The `SubgraphService` is about to send a request to a subgraph.
 - `SubgraphResponse`: The `SubgraphService` has just received a subgraph response.
 
@@ -604,6 +606,7 @@ If your coprocessor [returns a _different_ value](#responding-to-coprocessor-req
 This field's type depends on the coprocessor request's [`stage`](#stage):
 
 - For `SubgraphService` stages, `body` is a JSON _object_.
+- For `SupergraphService` stages, `body` is a JSON _object_.
 - For `RouterService` stages, `body` is a JSON _string_.
   - This is necessary to support handling [deferred queries](#handling-deferred-query-responses).
   - If you modify `body` during the `RouterRequest` stage, the new value must be a valid string serialization of a JSON object. If it isn't, the router detects that the body is malformed and returns an error to the client.
