@@ -149,7 +149,7 @@ telemetry:
 
 You will need to experiment to find the setting that are appropriate for your use case.
 
-## Using Datadog
+## Using Datadog (native)
 
 The Apollo Router can be configured to connect to either the default agent address or a URL.
 
@@ -211,7 +211,9 @@ Instead when `enable_span_mapping` is set to `true` the following trace will be 
 ```
 
 
-## Using Jaeger
+## Using Jaeger (native)
+
+> :warning: [Jaeger native is deprecated](https://opentelemetry.io/blog/2022/jaeger-native-otlp/) and will be removed in a future Router release. Instead, [Open Telemetry Collector](OpenTelemetry Collector via OTLP) should be used.
 
 The Apollo Router can be configured to export tracing data to Jaeger either via an agent or http collector.
 
@@ -247,11 +249,13 @@ telemetry:
         password: "${env.JAEGER_PASSWORD}"
 ```
 
-## OpenTelemetry Collector via OTLP
+## OTLP
 
-[OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) is a horizontally scalable collector that you can use to receive, process, and export your telemetry data in a pluggable way.
-
-If you find that the built-in telemetry features of the Apollo Router are missing some desired functionality (e.g., [exporting to Kafka](https://opentelemetry.io/docs/collector/configuration/#exporters)), then it's worth considering this option.
+OTLP is the native protocol for open telemetry. It can be used to export traces to a variety of backends including:
+* OpenTelemetry Collector
+* Datadog
+* Honeycomb
+* Lightstep
 
 ```yaml title="router.yaml"
 telemetry:
@@ -281,6 +285,45 @@ telemetry:
 ```
 
 Remember that `file.` and `env.` prefixes can be used for expansion in config yaml. e.g. `${file.ca.txt}`.
+
+### Datadog
+
+To use Datadog, you must configure the Datadog agent to accept OTLP traces. This can be done by adding the following to your `datadog.yaml`:
+
+```yaml title="datadog.yaml"
+otlp_config:
+  receiver:
+    protocols:
+      grpc:
+        endpoint: localhost:4317
+```
+
+The router must also be configured to send traces to the Datadog agent:
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    otlp:
+      enabled: true
+
+      # Send to Datagod agent
+      endpoint: http://<datadog-agent>:4317
+```
+
+See [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host) for more details 
+
+### Jaeger via OpenTelemetry Collector
+
+Users wishing to use Jaeger should use [Open Telemetry Collector](https://opentelemetry.io/docs/collector/) via OTLP.
+
+```yaml title="otel-collector.yaml"
+exporters:
+  # Data sources: traces
+  otlp/jaeger:
+    endpoint: jaeger-all-in-one:4317
+```
+
+See [https://opentelemetry.io/docs/collector/configuration/#exporters](https://opentelemetry.io/docs/collector/configuration/#exporters) for more information.
 
 ## Using Zipkin
 

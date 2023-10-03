@@ -56,11 +56,38 @@ apollo_router_http_request_duration_seconds_bucket{le="0.9"} 1
 
 > Note that if you haven't run a query against the router yet, you'll see a blank page because no metrics have been generated!
 
-### Available metrics
+## Datadog vas OTLP
+
+To use Datadog, you must configure the Datadog agent to accept OTLP metrics. This can be done by adding the following to your `datadog.yaml`:
+
+```yaml title="datadog.yaml"
+otlp_config:
+  receiver:
+    protocols:
+      grpc:
+        endpoint: localhost:4317
+```
+
+The router must also be configured to send traces to the Datadog agent:
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    otlp:
+      enabled: true
+      # Temporality MUST be set to delta. Failure to do this will result in incorrect metrics.
+      temporality: delta
+      # Set the endpoint of the Datadog agent
+      endpoint: http://<datadog-agent>:4317
+```
+
+See [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host) for more details
+
+## Available metrics
 
 The following metrics are available for Prometheus and OpenTelemetry. Attributes are listed where applicable.
 
-#### HTTP
+### HTTP
 
 - `apollo_router_http_request_duration_seconds_bucket` - HTTP router request duration
 - `apollo_router_http_request_duration_seconds_bucket` - HTTP subgraph request duration, attributes:
@@ -71,12 +98,12 @@ The following metrics are available for Prometheus and OpenTelemetry. Attributes
   - `subgraph`: The subgraph being queried
   - `status` : If the retry was aborted (`aborted`)
 
-#### Session
+### Session
 
 - `apollo_router_session_count_total` - Number of currently connected clients
 - `apollo_router_session_count_active` - Number of in-flight GraphQL requests
 
-#### Cache
+### Cache
 
 - `apollo_router_cache_size` — Number of entries in the cache
 - `apollo_router_cache_hit_count` - Number of cache hits
@@ -89,7 +116,7 @@ All cache metrics listed above have the following attributes:
 - `kind`: the cache being queried (`apq`, `query planner`, `introspection`)
 - `storage`: The backend storage of the cache (`memory`, `redis`)
 
-#### Coprocessor
+### Coprocessor
 
 - `apollo_router_operations_coprocessor_total` - Total operations with coprocessors enabled.
 - `apollo_router_operations_coprocessor.duration` - Time spent waiting for the coprocessor to answer, in seconds.
@@ -99,14 +126,14 @@ The coprocessor operations metric has the following attributes:
 - `coprocessor.stage`: string (`RouterRequest`, `RouterResponse`, `SubgraphRequest`, `SubgraphResponse`)
 - `coprocessor.succeeded`: bool
 
-#### Performance
+### Performance
 
 - `apollo_router_processing_time` - Time spent processing a request (outside of waiting for external or subgraph requests) in seconds.
 - `apollo_router_query_planning_time` - Time spent planning queries in seconds.
 - `apollo_router_query_planning_warmup_duration` - Time spent planning queries in seconds.
 - `apollo_router_schema_load_duration` - Time spent loading the schema in seconds.
 
-#### Uplink
+### Uplink
 
 - `apollo_router_uplink_fetch_duration_seconds_bucket` - Uplink request duration, attributes:
 
@@ -122,13 +149,13 @@ The coprocessor operations metric has the following attributes:
 
 Note that the initial call to uplink during router startup will not be reflected in metrics.
 
-#### Subscription
+### Subscription
 
 - `apollo_router_opened_subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated)
 - `apollo_router_deduplicated_subscriptions_total` - Number of subscriptions that has been deduplicated
 - `apollo_router_skipped_event_count` - Number of subscription events that has been skipped because too many events have been received from the subgraph but not yet sent to the client.
 
-#### Batching
+### Batching
 
 - `apollo_router.operations.batching` - A counter of the number of query batches received by the router.
 - `apollo_router.operations.batching.size` - A histogram tracking the number of queries contained within a query batch.
