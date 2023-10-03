@@ -7,6 +7,8 @@ use apollo_compiler::InputDatabase;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use sha2::Digest;
@@ -22,9 +24,11 @@ use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::Compiler;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::query_planner;
@@ -90,8 +94,9 @@ where
         }
     }
 
-    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<WarmUpCachingQueryKey> {
+    pub(crate) async fn cache_keys(&self, count: Option<usize>) -> Vec<WarmUpCachingQueryKey> {
         let keys = self.cache.in_memory_keys().await;
+        let count = count.unwrap_or(keys.len() / 3);
         keys.into_iter()
             .take(count)
             .map(|key| WarmUpCachingQueryKey {
@@ -105,8 +110,14 @@ where
     pub(crate) async fn warm_up(
         &mut self,
         query_analysis: &QueryAnalysisLayer,
-        cache_keys: Vec<WarmUpCachingQueryKey>,
+        persisted_query_layer: &PersistedQueryLayer,
+        mut cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
+        let _timer = Timer::new(|duration| {
+            ::tracing::info!(
+                histogram.apollo.router.query.planning.warmup.duration = duration.as_secs_f64()
+            );
+        });
         let schema_id = self.schema.schema_id.clone();
 
         let mut service = ServiceBuilder::new().service(
@@ -118,12 +129,41 @@ where
                 }),
         );
 
+        cache_keys.shuffle(&mut thread_rng());
+
+        let persisted_queries_operations = persisted_query_layer.all_operations();
+
+        let capacity = cache_keys.len()
+            + persisted_queries_operations
+                .as_ref()
+                .map(|ops| ops.len())
+                .unwrap_or(0);
+        tracing::info!(
+            "warming up the query plan cache with {} queries, this might take a while",
+            capacity
+        );
+
+        // persisted queries are added first because they should get a lower priority in the LRU cache,
+        // since a lot of them may be there to support old clients
+        let mut all_cache_keys = Vec::with_capacity(capacity);
+        if let Some(queries) = persisted_queries_operations {
+            for query in queries {
+                all_cache_keys.push(WarmUpCachingQueryKey {
+                    query,
+                    operation: None,
+                    metadata: CacheKeyMetadata::default(),
+                });
+            }
+        }
+
+        all_cache_keys.extend(cache_keys.into_iter());
+
         let mut count = 0usize;
         for WarmUpCachingQueryKey {
             mut query,
             operation,
             metadata,
-        } in cache_keys
+        } in all_cache_keys
         {
             let caching_key = CachingQueryKey {
                 schema_id: schema_id.clone(),

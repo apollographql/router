@@ -78,7 +78,7 @@ flowchart LR;
 
 2. When your router receives a subscription, it executes that _same_ subscription against whichever subgraph defines the requested field (`stockPricesChanged` in the example above).
 
-   - This communication usually _does_ use [a WebSocket subprotocol](#subscription-modes), for compatibility with most subgraph libraries.
+   - This communication usually _does_ use [a WebSocket subprotocol](#websocket-setup), for compatibility with most subgraph libraries.
    - An HTTP-callback-based protocol is also available in preview. See [HTTP callback setup](#http-callback-setup-preview).
 
 3. The subgraph periodically sends new data to your router. Whenever it does, the router returns that data to the client in an additional HTTP response "chunk".
@@ -98,11 +98,12 @@ flowchart LR;
 
 1. Update your Apollo Router instances to version `1.22.0` or later. [Download the latest version.](../quickstart/)
     - Previous versions of the Apollo Router don't support subscription operations.
-2. Make sure your router is [connected to a GraphOS Enterprise organization](../enterprise-features/#enabling-enterprise-features).
+1. Make sure your router is [connected to a GraphOS Enterprise organization](../enterprise-features/#enabling-enterprise-features).
     - Subscription support is an Enterprise feature of self-hosted routers.
-3. **If you compose your router's supergraph schema with GraphOS** (instead of with the Rover CLI), [update your build pipeline](/graphos/graphs/updating#2-update-your-build-pipeline) to use Apollo Federation 2.4 or later.
+1. **If you compose your router's supergraph schema with GraphOS** (instead of with the Rover CLI), [update your build pipeline](/graphos/graphs/updating#2-update-your-build-pipeline) to use Apollo Federation 2.4 or later.
     - Previous versions of Apollo Federation don't support subscription operations.
-4. Modify your subgraph schemas to use Apollo Federation 2.4 or later:
+
+1. Modify your subgraph schemas to use Apollo Federation 2.4 or later:
     ```graphql title="stocks.graphql"
     extend schema
     @link(url: "https://specs.apollo.dev/federation/v2.4", #highlight-line
@@ -114,6 +115,16 @@ flowchart LR;
     ```
 
     - You can _skip_ modifying subgraph schemas that don't define any `Subscription` fields.
+
+1. If you're using Apollo Server, [update your Apollo Server instances to version 4 or later](/apollo-server/migration).
+    - Follow the Apollo Server 4 [guide for enabling subscriptions](/apollo-server/data/subscriptions#enabling-subscriptions). 
+    - Update each `npm` package that makes up Apollo Federation to version 2.4 or later:
+        - `@apollo/gateway`
+        - `@apollo/query-planner`
+        - `@apollo/subgraph`
+        - `@apollo/federation-internals`
+        - `@apollo/query-graphs`
+        - `@apollo/composition`
 
 After you complete these prerequisites, you can safely [configure your router](#router-setup) for subscriptions.
 
@@ -172,7 +183,7 @@ Callback mode requires your subgraph library to support the router's [HTTP callb
 
 **This [HTTP callback protocol](./subscription-callback-protocol/) is in [preview](/resources/product-launch-stages#preview)!** Breaking changes to the protocol might occur during the preview period.
 
-Currently, no subgraph libraries support this protocol (Apollo Server support is forthcoming). If you're implementing support in a subgraph library, please [create a GitHub discussion](https://github.com/apollographql/router/discussions/).
+Currently, [Apollo Server 4.9](https://github.com/apollographql/apollo-server/releases/tag/%40apollo%2Fserver%404.9.0) supports a *preview* of this protocol. If you're implementing support in a subgraph library, please [create a GitHub discussion](https://github.com/apollographql/router/discussions/).
 
 </blockquote>
 
