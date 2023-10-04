@@ -65,7 +65,7 @@ otlp_config:
   receiver:
     protocols:
       grpc:
-        endpoint: localhost:4317
+        endpoint: 127.0.0.1:4317
 ```
 
 The router must also be configured to send traces to the Datadog agent:
@@ -77,8 +77,8 @@ telemetry:
       enabled: true
       # Temporality MUST be set to delta. Failure to do this will result in incorrect metrics.
       temporality: delta
-      # Set the endpoint of the Datadog agent
-      endpoint: http://<datadog-agent>:4317
+      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
+      endpoint: default
 ```
 
 See [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host) for more details

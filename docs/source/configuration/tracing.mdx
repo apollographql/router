@@ -158,7 +158,7 @@ telemetry:
   tracing:
     datadog:
       enabled: true
-      # Either 'default' or a URL (example: 'http://127.0.0.1:8126')
+      # Optional endpoint, either 'default' or a URL (Defaults to http://localhost:8126/v0.4/traces)
       endpoint: default
 ```
 
@@ -228,13 +228,11 @@ telemetry:
       enabled: true
       # Optional agent configuration,
       agent:
-        # Optional endpoint, either 'default' or a socket address (Defaults to 127.0.0.1:6831)
-        endpoint: docker_jaeger:14268  
+        # Optional endpoint, either 'default' or a socket address (Defaults to 127.0.0.1:6832)
+        endpoint: default  
 ```
 
 ### Collector config
-
-If you're using Kubernetes, you can inject your secrets into configuration via environment variables:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -244,10 +242,12 @@ telemetry:
       # Optional collector configuration,
       collector:
         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:14268/api/traces)
-        endpoint: "http://my-jaeger-collector" 
+        endpoint: default
         username: "${env.JAEGER_USERNAME}"
         password: "${env.JAEGER_PASSWORD}"
 ```
+
+Remember: If you're using Kubernetes, you can inject your secrets into configuration via environment variables.
 
 ## OTLP
 
@@ -295,7 +295,7 @@ otlp_config:
   receiver:
     protocols:
       grpc:
-        endpoint: localhost:4317
+        endpoint: 127.0.0.1:4317
 ```
 
 The router must also be configured to send traces to the Datadog agent:
@@ -306,8 +306,8 @@ telemetry:
     otlp:
       enabled: true
 
-      # Send to Datagod agent
-      endpoint: http://<datadog-agent>:4317
+      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
+      endpoint: default
 ```
 
 See [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host) for more details 
@@ -320,7 +320,7 @@ Users wishing to use Jaeger should use [Open Telemetry Collector](https://opente
 exporters:
   # Data sources: traces
   otlp/jaeger:
-    endpoint: jaeger-all-in-one:4317
+    endpoint: 127.0.0.1:4317
 ```
 
 See [https://opentelemetry.io/docs/collector/configuration/#exporters](https://opentelemetry.io/docs/collector/configuration/#exporters) for more information.
@@ -336,5 +336,5 @@ telemetry:
       enabled: true
 
       # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:9411/api/v2/spans)
-      endpoint: http://my_zipkin_collector.dev   
+      endpoint: default   
 ```
