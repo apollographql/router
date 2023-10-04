@@ -8,12 +8,12 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Move Persisted Queries to General Availability ([PR #3914](https://github.com/apollographql/router/pull/3914))
+### Move persisted queries to general availability ([PR #3914](https://github.com/apollographql/router/pull/3914))
 
 [Persisted Queries](https://www.apollographql.com/docs/graphos/operations/persisted-queries/) (a GraphOS Enterprise feature) is now moving to General Availability, from Preview where it has been since Apollo Router 1.25. In addition to Safelisting, persisted queries can now also be used to [pre-warm the query plan cache](https://github.com/apollographql/router/releases/tag/v1.31.0) to speed up schema updates. 
 
 
-The feature is now configured with a `persisted_queries` top-level key in the YAML configuration instead of with `preview_persisted_queries`. Existing configuration files will keep working as before, only with a warning. To fix that warning, rename the configuration section like so:
+The feature is now configured with a `persisted_queries` top-level key in the YAML configuration instead of with `preview_persisted_queries`. Existing configuration files will keep working as before, but with a warning that can be resolved by renaming the configuration section from `preview_persisted_queries` to `persisted_queries`:
 
 ```diff
 -preview_persisted_queries:
@@ -25,9 +25,9 @@ By [@glasser](https://github.com/glasser) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 
-### Coprocessors: Allow to return with an error message ([PR #3806](https://github.com/apollographql/router/pull/3806))
+### Allow coprocessor to return error message ([PR #3806](https://github.com/apollographql/router/pull/3806))
 
-As mentionned in the [Coprocessors documentation](https://www.apollographql.com/docs/router/customizations/coprocessor#terminating-a-client-request) you can (again) return an error message string in the body of a coprocessor request:
+Previously, a regression prevented an error message string from being returned in the body of a coprocessor request. That regression has been fixed, and a coprocessor can once again [return with an error message](https://www.apollographql.com/docs/router/customizations/coprocessor#terminating-a-client-request):
 
 ```json
 {
@@ -41,6 +41,7 @@ As mentionned in the [Coprocessors documentation](https://www.apollographql.com/
 ```
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3806
+
 
 
 ## 🛠 Maintenance
@@ -66,11 +67,9 @@ In particular metrics have some significant changes:
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3649
 
-### fix(telemetry): support more types for metric counters ([Issue #3865](https://github.com/apollographql/router/issues/3865))
+### Fix type handling for telemetry metric counter ([Issue #3865](https://github.com/apollographql/router/issues/3865))
 
-Add more supported types for metric counters in `MetricsLayer`.
-
-Now it's not mandatory and won't panic in debug mode if you don't specify `1u64` in this example:
+Previously, the assignment of some telemetry metric counters may not have succeeded because the assignment type wasn't accounted for. For example, the following panicked in debug mode because `1` wasn't `1u64`:
 
 ```rust
 tracing::info!(
@@ -84,17 +83,20 @@ tracing::info!(
 )
 ```
 
+This issue has been fixed by adding more supported types for metric counters.
+
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3868
+
 
 ## 🧪 Experimental
 
-### query batching prototype ([Issue #126](https://github.com/apollographql/router/issues/126))
+### Support for query batching ([Issue #126](https://github.com/apollographql/router/issues/126))
 
-An experimental implementation of query batching which adds support for client request batching to the Apollo Router.
+An experimental implementation of query batching has been added to support client request batching in the Apollo Router.
 
-If you’re using Apollo Client, you can leverage the in-built support for batching to reduce the number of individual requests sent to the Apollo Router.
+If you’re using Apollo Client, you can leverage its built-in support for batching to reduce the number of individual requests sent to the Apollo Router.
 
-Once [configured](https://www.apollographql.com/docs/react/api/link/apollo-link-batch-http/), Apollo Client will automatically combine multiple operations into a single HTTP request. The number of operations within a batch is client configurable, including the maximum number of operations in a batch and the maximum duration to wait for operations to accumulate before sending the batch request. 
+Once [configured](https://www.apollographql.com/docs/react/api/link/apollo-link-batch-http/), Apollo Client  automatically combines multiple operations into a single HTTP request. The number of operations within a batch is client configurable, including the maximum number of operations in a batch and the maximum duration to wait for operations to accumulate before sending the batch request. 
 
 The Apollo Router must be configured to receive batch requests, otherwise it rejects them. When processing a batch request, the router deserializes and processes each operation of a batch independently, and it responds to the client only after all operations of the batch have been completed.
 
@@ -104,9 +106,11 @@ experimental_batching:
   mode: batch_http_link
 ```
 
-All operations within a batch will execute concurrently with respect to each other.
+All operations within a batch execute concurrently with respect to each other.
 
-Do not attempt to use subscriptions or `@defer` queries within a batch as they are not supported.
+Don't use subscriptions or `@defer` queries within a batch, as they are unsupported.
+
+For details, see the documentation for [query batching](https://www.apollographql.com/docs/router/executing-operations/query-batching).
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3837
 
