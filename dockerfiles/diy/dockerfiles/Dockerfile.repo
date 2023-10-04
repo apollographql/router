@@ -8,8 +8,6 @@ WORKDIR /usr/src/router
 # Update our build image and install required packages
 RUN apt-get update
 RUN apt-get -y install \
-    npm \
-    nodejs \
     protobuf-compiler \
     cmake
 
@@ -31,9 +29,12 @@ RUN mkdir -p /dist/config && \
 COPY dockerfiles/router.yaml /dist/config
 
 # Build our final image
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 ARG DEBUG_IMAGE=false
+
+# Add a user to run the router as
+RUN useradd -m router
 
 WORKDIR /dist
 
@@ -76,6 +77,8 @@ RUN \
 
 # Make sure we can run our wrapper
 RUN chmod 755 /dist/router_wrapper.sh
+
+USER router
 
 # Default executable is the wrapper script
 ENTRYPOINT ["/dist/router_wrapper.sh"]

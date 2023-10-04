@@ -8,7 +8,7 @@ replicaCount: 1
 router:
   configuration:
     supergraph:
-      listen: 0.0.0.0:80
+      listen: 0.0.0.0:4000
     health_check:
       listen: 0.0.0.0:8088
     telemetry:
@@ -71,7 +71,7 @@ image:
 
 containerPorts:
   # -- If you override the port in `router.configuration.server.listen` then make sure to match the listen port here
-  http: 80
+  http: 4000
   # -- For exposing the metrics port when running a serviceMonitor for example
   metrics: 9090
   # -- For exposing the health check endpoint
