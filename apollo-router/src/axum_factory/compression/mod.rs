@@ -79,7 +79,7 @@ where {
                         }
                     }
                     Ok(data) => {
-                        let mut buf = BytesMut::zeroed(std::cmp::max(10, data.len()));
+                        let mut buf = BytesMut::zeroed(10 + data.len());
 
                         let mut partial_input = PartialBuffer::new(&*data);
                         let mut partial_output = PartialBuffer::new(&mut buf);
