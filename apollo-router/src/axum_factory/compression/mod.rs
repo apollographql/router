@@ -231,6 +231,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn small_input() {
+        let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
+
+        let body: Body = vec![0u8, 1, 2, 3].into();
+
+        let mut stream = compressor.process(body);
+        let mut decoder = GzipDecoder::new(Vec::new());
+
+        while let Some(buf) = stream.next().await {
+            let b = buf.unwrap();
+            decoder.write_all(&b).await.unwrap();
+        }
+
+        decoder.shutdown().await.unwrap();
+        let response = decoder.into_inner();
+        assert_eq!(response, [0u8, 1, 2, 3]);
+
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
     async fn gzip_header_writing() {
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
         let body: Body = r#"{"data":{"me":{"id":"1","name":"Ada Lovelace"}}}"#.into();
