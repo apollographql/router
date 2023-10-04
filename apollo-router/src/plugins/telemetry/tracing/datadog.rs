@@ -35,10 +35,14 @@ lazy_static! {
     static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://localhost:8126/v0.4/traces");
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// Enable datadog
+    pub(crate) enabled: bool,
+
     /// The endpoint to send to
+    #[serde(default)]
     pub(crate) endpoint: UriEndpoint,
 
     /// batch processor configuration
@@ -52,6 +56,9 @@ pub(crate) struct Config {
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace: &Trace) -> Result<Builder, BoxError> {
+        if !self.enabled {
+            return Ok(builder);
+        }
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
         let enable_span_mapping = self.enable_span_mapping.then_some(true);
         let trace_config: sdk::trace::Config = trace.into();

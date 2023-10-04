@@ -13,7 +13,6 @@ use opentelemetry::Context;
 use opentelemetry::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::Trace;
@@ -96,7 +95,7 @@ where
 }
 
 /// Batch processor configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(default)]
 pub(crate) struct BatchProcessorConfig {
     #[serde(deserialize_with = "humantime_serde::deserialize")]

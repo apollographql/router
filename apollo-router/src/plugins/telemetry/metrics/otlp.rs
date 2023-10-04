@@ -38,7 +38,9 @@ impl MetricsConfigurator for super::super::otlp::Config {
         metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         let exporter: MetricExporterBuilder = self.exporter()?;
-
+        if !self.enabled {
+            return Ok(builder);
+        }
         match exporter.exporter {
             Some(exporter) => {
                 let exporter = MetricsExporterBuilder::Tonic(exporter).build_metrics_exporter(
