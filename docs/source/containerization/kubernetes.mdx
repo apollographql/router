@@ -9,11 +9,11 @@ import HelmShowOutput from '../../shared/helm-show-router-output.mdx';
 import K8SManualConfig from '../../shared/k8s-manual-config.mdx';
 import RouterCommonConfig from '../../shared/router-common-config.mdx';
 
-Learn how to deploy the Apollo Router, for a self-hosted supergraph with GraphOS, on Kubernetes by using Helm: 
+Learn how to deploy the Apollo Router, for a self-hosted supergraph with GraphOS, on Kubernetes by using Helm charts: 
 
 * Get a router Helm chart from the Apollo container repository.
 * Deploy a router with a basic Helm chart.
-* Configure chart values to export metrics, enable Rhai scripting, and set up a coprocessor.
+* Configure chart values to export metrics, enable Rhai scripting, and deploy a coprocessor.
 * Choose chart values that best migrate from a gateway to the router.
 
 <ElasticNotice />
@@ -24,7 +24,7 @@ Learn how to deploy the Apollo Router, for a self-hosted supergraph with GraphOS
 
 > The path to the OCI router chart is `oci://ghcr.io/apollographql/helm-charts/router`.
 
-You customize a router deployment by both setting command-line options and editing YAML configuration files.
+You customize a router deployment with the same [command-line options and YAML configuration for router](../../configuration/overview) but under different Helm CLI options and YAML keys.  
 
 ## Basic deployment
 
@@ -85,17 +85,17 @@ Set up the router by following the [first six steps of the self-hosted router qu
 To deploy the router, run the `helm install` command with an argument for the OCI image in the container repository, an argument for the `values.yaml` configuration file, and additional arguments to override specific configuration values.
 
 ```bash
-helm install --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml --namespace <router-namespace>
+helm install --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml
 ```
 The necessary arguments for specific configuration values:
 
 * **Graph ref**. The reference to your managed graph (`id@variant`), the same value as the [`APOLLO_GRAPH_REF` environment variable](../../configuration/overview/#apollo_graph_ref). Used by `helm install` to set `managedFederation.graphRef`.
 * **Graph API key**. The API key to your managed graph, the same value as the [`APOLLO_KEY` environment variable](../../configuration/overview/#apollo_key). Used by `helm install` to set `managedFederation.apiKey`.
 
-Some optional arguments:
+Some optional but recommended arguments:
 
-* **Router version**. The version of the router to deploy. If not specified by `helm install`, the latest version is installed.
 * **Namespace**. The namespace scope for this deployment.
+* **Router version**. The version of the router to deploy. If not specified by `helm install`, the latest version is installed.
 
 ### Verify deployment
 
@@ -136,7 +136,7 @@ To enable metrics endpoints in your deployed router through a YAML configuration
 * Deploy the router with the additional YAML configuration file. For example, starting with the `helm install` command from the basic deployment step, append `--values my_values.yaml`:
 
   ```bash
-  helm install --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml --namespace <router-namespace> --values my_values.yaml
+  helm install --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml --values my_values.yaml
   ```
 
 ## Deploy with Rhai scripts
@@ -159,7 +159,7 @@ To enable Rhai scripts in your deployed router through a YAML configuration file
 * Deploy the router with the additional YAML configuration file. For example, starting with the `helm install` command from the basic deployment step, append `--values my_values.yaml`:
 
   ```bash
-  helm install --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml --namespace <router-namespace> --values my_values.yaml
+  helm install  --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml --values my_values.yaml
   ```
 
 ## Deploy with a coprocessor
@@ -197,7 +197,7 @@ extraContainers:
 * Deploy the router with the additional YAML configuration file. For example, starting with the `helm install` command from the basic deployment step, append `--values my_values.yaml`:
 
   ```bash
-  helm install --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml --namespace <router-namespace> --values my_values.yaml
+  helm install --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml --values my_values.yaml
   ```
 
 ## Separate configurations per environment
@@ -207,17 +207,19 @@ To support your different deployment configurations for different environments (
 - A **common** file, which contains values that apply across all environments.
 - A unique **environment** file per environment, which includes and overrides the values from the common chart while adding new environment-specific values.
 
-An environment file should include the common file. 
+In a `helm install` command, each `--values <values-file>` option is applied in the order within the command. Therefore, a common file must be set before an environment file in the `helm install` command, so that the environment file's values are applied last and override the commond file's values as intended. 
 
 For example, deploy with a `common_values.yaml` file applied first and then a `prod_values.yaml` file:
 
 ```bash
-helm install --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml --namespace <router-namespace> --values common_values.yaml --values prod_values.yaml
+helm install --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml  --values common_values.yaml --values prod_values.yaml
 ```
 
 ## Configure for migration from gateway
 
-* The gateway's maximum supported request size is 20MB, which is different than the router's default maximum request size, so it needs to be configured.
+When [migrating from `@apollo/gateway` to the Apollo Router](../migrating-from-gateway), consider the following tips to maximize the compatibility of your router deployment.
+
+* The gateway's maximum supported request size is 20MB, while the router's default maximum request size is less. For compatibility, set the deployed router's maximium request size to 20MB:
 
   ```yaml title="values.yaml"
   router:
@@ -239,7 +241,7 @@ router:
         timeout: 5min
 ```
 
-* The gateway propagates subgraph errors to clients, but the router doesn't by default, so it needs to be configured to propagate subgraph errors.
+* The gateway propagates subgraph errors to clients, but the router doesn't by default, so it needs to be configured to propagate them.
 
 ```yaml title="values.yaml"
 router:

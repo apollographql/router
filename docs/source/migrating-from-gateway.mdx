@@ -1,6 +1,6 @@
 ---
 title: Gateway migration guide
-decription: Migrating to the Apollo Router from `@apollo/gateway`
+description: Migrating to the Apollo Router from @apollo/gateway
 ---
 
 If you have a federated supergraph that currently uses the Node.js `@apollo/gateway` library, this article describes how to move that supergraph to the Rust-based Apollo Router. We recommend the Apollo Router over `@apollo/gateway` for all supergraphs, because it provides significant performance improvements.
@@ -129,6 +129,10 @@ The Apollo Router currently supports two types of customizations that hook into 
 * [External coprocessing](./customizations/coprocessor/)
 
 Examples for each are provided in their respective documentation, and in the [Router repo](https://github.com/apollographql/router/tree/main/examples).
+
+## Kubernetes deployment
+
+For migrating to the Apollo Router deployed on Kubernetes, see some tips for [configuring your router deployment](./containerization/kubernetes/#configure-for-migration-from-gateway).
 
 ## Reporting migration issues
 
