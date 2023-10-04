@@ -26,6 +26,7 @@ pub(crate) mod reload;
 pub(crate) mod zipkin;
 
 pub(crate) trait TracingConfigurator {
+    fn enabled(&self) -> bool;
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError>;
 }
 

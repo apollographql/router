@@ -82,6 +82,11 @@ pub(crate) fn commit_prometheus() {
 }
 
 impl MetricsConfigurator for Config {
+    fn enabled(&self) -> bool {
+        // Because prometheus has special lifecycle apply must always be run.
+        true
+    }
+
     fn apply(
         &self,
         mut builder: MetricsBuilder,

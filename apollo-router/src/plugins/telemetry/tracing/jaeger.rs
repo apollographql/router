@@ -50,6 +50,16 @@ pub(crate) enum Config {
     },
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Config::Agent {
+            enabled: false,
+            agent: Default::default(),
+            batch_processor: Default::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct AgentConfig {
@@ -69,6 +79,13 @@ pub(crate) struct CollectorConfig {
 }
 
 impl TracingConfigurator for Config {
+    fn enabled(&self) -> bool {
+        matches!(
+            self,
+            Config::Agent { enabled: true, .. } | Config::Collector { enabled: true, .. }
+        )
+    }
+
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
         match &self {
             Config::Agent {
