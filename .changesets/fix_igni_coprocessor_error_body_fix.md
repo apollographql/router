@@ -1,6 +1,6 @@
-### Coprocessors: Allow to return with an error message ([PR #3806](https://github.com/apollographql/router/pull/3806))
+### Allow coprocessor to return error message ([PR #3806](https://github.com/apollographql/router/pull/3806))
 
-As mentionned in the [Coprocessors documentation](https://www.apollographql.com/docs/router/customizations/coprocessor#terminating-a-client-request) you can (again) return an error message string in the body of a coprocessor request:
+Previously, a regression prevented an error message string from being returned in the body of a coprocessor request. That regression has been fixed, and a coprocessor can once again [return with an error message](https://www.apollographql.com/docs/router/customizations/coprocessor#terminating-a-client-request):
 
 ```json
 {
