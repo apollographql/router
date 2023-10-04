@@ -1,0 +1,22 @@
+description: Telemetry exporters now have an enabled field
+actions:
+  - type: add
+    path: telemetry.tracing.jaeger
+    name: enabled
+    value: true
+  - type: add
+    path: telemetry.tracing.otlp
+    name: enabled
+    value: true
+  - type: add
+    path: telemetry.tracing.zipkin
+    name: enabled
+    value: true
+  - type: add
+    path: telemetry.tracing.datadog
+    name: enabled
+    value: true
+  - type: add
+    path: telemetry.metrics.otlp
+    name: enabled
+    value: true
