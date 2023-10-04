@@ -206,7 +206,7 @@ impl Metrics {
         );
         log_usage_metrics!(
             value.apollo.router.config.persisted_queries,
-            "$.preview_persisted_queries[?(@.enabled == true)]",
+            "$.persisted_queries[?(@.enabled == true)]",
             opt.log_unknown,
             "$[?(@.log_unknown == true)]",
             opt.safelist.require_id,
@@ -312,6 +312,12 @@ impl Metrics {
             "$.tracing.jaeger[?(@..endpoint)]",
             opt.tracing.zipkin,
             "$.tracing.zipkin[?(@.endpoint)]"
+        );
+        log_usage_metrics!(
+            value.apollo.router.config.batching,
+            "$.experimental_batching[?(@.enabled == true)]",
+            opt.mode,
+            "$.mode"
         );
     }
 }
