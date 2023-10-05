@@ -1,4 +1,4 @@
-### only exclude defer/subscriptions if actually part of a batch ([Issue #3956](https://github.com/apollographql/router/issues/3956))
+### Only reject defer/subscriptions if actually part of a batch ([Issue #3956](https://github.com/apollographql/router/issues/3956))
 
 Fix the checking logic so that deferred queries or subscriptions will only be rejected when experimental batching is enabled and the operations are part of a batch.
 
