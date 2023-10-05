@@ -9,7 +9,26 @@ import HelmShowOutput from '../../shared/helm-show-router-output.mdx';
 import K8SManualConfig from '../../shared/k8s-manual-config.mdx';
 import RouterCommonConfig from '../../shared/router-common-config.mdx';
 
-Learn how to deploy the Apollo Router, for a self-hosted supergraph with GraphOS, on Kubernetes by using Helm charts: 
+Learn how to deploy the Apollo Router, for a self-hosted supergraph with GraphOS, on Kubernetes by using Helm charts.
+
+```mermaid
+flowchart LR;
+  clients(Clients);
+  subgraph "Kubernetes cluster";
+  proxy(["<b>Proxy</b>"])
+  router_a(["<b>Apollo Router</b>"]);
+  coproc_a(["<b>Coprocessor</b>"]);
+  router_b(["<b>Apollo Router</b>"]);
+  coproc_b(["<b>Coprocessor</b>"]);
+  router_a <-.-> coproc_a;
+  router_b <-.-> coproc_b;
+  end;
+  clients -.->|Query| proxy;
+  proxy -.-> router_a & router_b;
+  class clients secondary;
+```
+
+The following guides provide you the steps to:
 
 * Get a router Helm chart from the Apollo container repository.
 * Deploy a router with a basic Helm chart.
@@ -24,7 +43,7 @@ Learn how to deploy the Apollo Router, for a self-hosted supergraph with GraphOS
 
 > The path to the OCI router chart is `oci://ghcr.io/apollographql/helm-charts/router`.
 
-You customize a router deployment with the same [command-line options and YAML configuration for router](../../configuration/overview) but under different Helm CLI options and YAML keys.  
+You customize a deployed router with the same [command-line options and YAML configuration](../../configuration/overview) but under different Helm CLI options and YAML keys.  
 
 ## Basic deployment
 

@@ -1,18 +1,49 @@
 ---
-title: Docker and the router
-description: Using docker to run router images
+title: Run on Docker
+description: Run the Apollo Router on Docker
 ---
 
 import { Link } from "gatsby";
 import ElasticNotice from '../../shared/elastic-notice.mdx';
 
+Follow examples in this guide to learn how to run an Apollo Router container image on Docker:
+
+* Run with default configuration.
+* Customize your configuration to override the default configuration.
+* Debug your containerized router.
+* Build your own router Docker image.
+
 <ElasticNotice />
 
-The default behaviour of the router images is suitable for a quickstart or development scenario. You'll need to know how to customize this default behaviour if you wish to do any of the following.
+> **Notes**
+> * The [documentation](https://docs.docker.com/engine/reference/run/) for the `docker run` command is a helpful reference for the examples in this guide.
+> * The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace `<image version>` with your chosen version, for example `v1.32.0`
 
-The [docker documentation](https://docs.docker.com/engine/reference/run/) for the run command may be helpful when reading through the examples.
+## Basic example running router with Docker
 
-The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace `<image version>` with your chosen version. e.g.: `v1.30.1`
+To run the router, your Docker container must have the `APOLLO_GRAPH_REF` and `APOLLO_KEY` environment variables set to your graph's reference and ID, respectively.
+
+- The reference of your graph in Apollo's registry (`<your-graph-ref>`).
+-  The [graph API key](https://www.apollographql.com/docs/studio/api-keys/#graph-api-keys) that Apollo Server should use to authenticate with Apollo Studio. You can set this with the `APOLLO_KEY` environment variable. (`<your-graph-id>`).
+
+- `graphRef`: A reference of your graph in Apollo's registry, such as `graph-id@my-variant` or just `graph-id`. You can set this with the `APOLLO_GRAPH_REF` environment variable.
+- `graphId`: The ID of your graph in Apollo's registry. You can set this with the `APOLLO_GRAPH_ID` environment variable. You may not specify this if you specify the graph ref.
+
+- Set your `APOLLO_GRAPH_REF` and `APOLLO_KEY` 
+
+Here's a basic example of running a router image with Docker (make sure to replace `<image version>` with whichever version you want to use, such as `v1.4.0`):
+
+```bash title="Docker"
+docker run -p 4000:4000 \
+  --env APOLLO_GRAPH_REF="<your graph>" \
+  --env APOLLO_KEY="<your key>" \
+  --rm \
+  ghcr.io/apollographql/router:<image version>
+```
+
+This command downloads your supergraph schema from Apollo and uses a default configuration that listens for connections on port `4000`.
+
+For more complex configuration (such as overriding subgraph URLs or propagating headers), see [Configuring the Apollo Router](../configuration/overview/).
 
 ## Override the configuration
 
@@ -82,11 +113,11 @@ docker run -p 4000:4000 \
   ghcr.io/apollographql/router:<image version>-debug
 ```
 
-The router will run under the control of heaptrack. The heaptrack output will be saved to the /data directory. The output can be analyzed directly using `heaptrack_gui` or `heaptrack_print` or shared with Apollo support staff.
+The router will run under the control of heaptrack. The heaptrack output will be saved to the `/data` directory. The output can be analyzed directly using `heaptrack_gui` or `heaptrack_print` or shared with Apollo support.
 
 ## Specifying the supergraph
 
-If we don't want to use uplink to retrieve our subgraph, we can manually specify the details.
+If we don't want to use [Apollo Uplink](/federation/managed-federation/uplink/) to retrieve our subgraph, we can manually specify the details.
 
 ```bash
 docker run -p 4000:4000 \
@@ -95,11 +126,11 @@ docker run -p 4000:4000 \
   ghcr.io/apollographql/router:<image version> -c config/router.yaml -s schema/local.graphql
 ```
 
-Note: In this example we have to mount the local definition of the supergraph into our image AND specify the location of the file. It doesn't have to be mounted in the /dist/schema directory, but it's a reasonable location to use. We must specify the configuration file location as well, since overriding the default params will override our default config file location. In this case, since we don't want to change our router configuration but want to make sure it's used, we just specify the default location of the default configuration.
+In this example, we have to mount the local definition of the supergraph into our image, _and_ specify the location of the file. It doesn't have to be mounted in the `/dist/schema` directory, but it's a reasonable location to use. We must specify the configuration file location as well, since overriding the default params will override our default config file location. In this case, since we don't want to change our router configuration but want to make sure it's used, we just specify the default location of the default configuration.
 
 ## Building your own container
 
-> This section is aimed at developers familiar with tooling such as `docker` and `git` who wish to make their own DIY container images. The script documented here is not a part of the router product, but an illustrative example of what's involved in making your own images.
+> **Note:** This section is aimed at developers familiar with tooling such as `docker` and `git` who wish to make their own DIY container images. The script documented here is not a part of the router product, but an illustrative example of what's involved in making your own images.
 
 In the `dockerfiles/diy` directory, we now provide a script, `build_docker_image.sh` which illustrates how to build your own docker images from either our released tarballs or from a git commit hash or tag. Here's how to use it:
 
@@ -124,4 +155,4 @@ Usage: build_docker_image.sh [-b [-r <repo>]] [-d] [<release>]
 		build_docker_image.sh -d v0.9.1
 ```
 
-Note: The script has to be run from the `dockerfiles/diy` directory because it makes assumptions about the relative availability of various files. The example uses [debian:bullseye-slim image](https://hub.docker.com/_/debian/) for the final image build. Feel free to modify the script to use images which better suit your own needs, but be careful if using the [-d] flag since it makes the assumption that there is a `heaptrack` package available to install.
+The script has to be run from the `dockerfiles/diy` directory because it makes assumptions about the relative availability of various files. The example uses [debian:bullseye-slim image](https://hub.docker.com/_/debian/) for the final image build. Feel free to modify the script to use images which better suit your own needs, but be careful if using the [-d] flag since it makes the assumption that there is a `heaptrack` package available to install.
