@@ -810,3 +810,124 @@ async fn alias_renaming() {
     let response = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(serde_json::to_value(&response).unwrap());*/
 }
+
+#[tokio::test]
+async fn missing_fields_in_requires() {
+    let schema = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  {
+    query: Query
+  }
+  
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+  
+  directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+  
+  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+  
+  directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+  
+  directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+  
+  directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+  
+  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+  
+  type Details
+    @join__type(graph: SUB1)
+    @join__type(graph: SUB2)
+  {
+    enabled: Boolean
+  }
+  
+  scalar join__FieldSet
+  
+  enum join__Graph {
+    SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
+    SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
+  }
+  
+  scalar link__Import
+  
+  enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
+  
+  type Query
+    @join__type(graph: SUB1)
+    @join__type(graph: SUB2)
+  {
+    stuff: Stuff @join__field(graph: SUB1)
+  }
+  
+  type Stuff
+    @join__type(graph: SUB1, key: "id")
+    @join__type(graph: SUB2, key: "id", extension: true)
+  {
+    id: ID
+    details: [Details] @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
+    aDetailsIsEnabled: Boolean @join__field(graph: SUB2, requires: "details { enabled }")
+  }"#;
+
+    let query = "query {
+        stuff {
+          id
+          aDetailsIsEnabled
+        }
+      }";
+
+    let subgraphs = MockedSubgraphs([
+        ("S1", MockSubgraph::builder().with_json(
+            serde_json::json!{{"query":
+            "query test__S1__0($tId:String!){testQuery(id:$tId){__typename ...on T1{__typename id}...on T2{__typename id}}}",
+            "operationName": "test__S1__0", "variables":{"tId":"1"}}},
+            serde_json::json!{{"data": {
+                "__typename": "T1",
+                "id": "T1",
+            } }}
+        ).with_json(
+            serde_json::json!{{"query":
+            "query test__S1__0($tId:String!){testQuery(id:$tId){__typename ...on T1{__typename id}...on T2{__typename id}}}",
+            "operationName": "test__S1__0", "variables":{"tId":"2"}}},
+            serde_json::json!{{"data": {
+                "__typename": "T2",
+                "id": "T2",
+            } }}
+        ).build()),
+        ("S2", MockSubgraph::builder().build()),
+        ].into_iter().collect());
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::new())
+        .query(query)
+        .variables(
+            serde_json_bytes::json! {{ "tId": "1"}}
+                .as_object()
+                .unwrap()
+                .clone(),
+        )
+        .build()
+        .unwrap();
+
+    let mut stream = service.clone().oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(serde_json::to_value(&response).unwrap());
+}
