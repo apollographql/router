@@ -20,7 +20,4 @@ try {
 
 The default when the alphabet argument is not specified is STANDARD.
 
-<!-- start metadata -->
----
-
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3885
