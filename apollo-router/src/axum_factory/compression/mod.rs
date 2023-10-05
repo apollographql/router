@@ -19,6 +19,8 @@ pub(crate) mod codec;
 pub(crate) mod unshared;
 pub(crate) mod util;
 
+const GZIP_HEADER_LEN: usize = 10;
+
 pub(crate) enum Compressor {
     Deflate(DeflateEncoder),
     Gzip(GzipEncoder),
@@ -81,7 +83,7 @@ where {
                     Ok(data) => {
                         // the buffer needs at least 10 bytes for a gzip header if we use gzip, then more
                         // room to store the data itself
-                        let mut buf = BytesMut::zeroed(10 + data.len());
+                        let mut buf = BytesMut::zeroed(GZIP_HEADER_LEN + data.len());
 
                         let mut partial_input = PartialBuffer::new(&*data);
                         let mut partial_output = PartialBuffer::new(&mut buf);
