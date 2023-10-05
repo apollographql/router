@@ -15,6 +15,7 @@ pub(crate) use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
 use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
+use crate::graphql::Location as ErrorLocation;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
@@ -547,14 +548,43 @@ pub(crate) struct ValidationErrors {
     pub(crate) errors: Vec<apollo_compiler::ApolloDiagnostic>,
 }
 
+impl IntoGraphQLErrors for ValidationErrors {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        let errors = self
+            .errors
+            .iter()
+            .map(|error| {
+                let error = error.to_json();
+                Error {
+                    message: error.message,
+                    locations: error
+                        .locations
+                        .into_iter()
+                        .map(|location| ErrorLocation {
+                            line: location.line as u32,
+                            column: location.column as u32,
+                        })
+                        .collect(),
+                    path: Default::default(),
+                    extensions: Default::default(),
+                }
+            })
+            .collect::<Vec<_>>();
+        Ok(errors)
+    }
+}
+
 impl std::fmt::Display for ValidationErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut errors = self.errors.iter();
-        if let Some(error) = errors.next() {
-            write!(f, "at index {}: {}", error.location.offset(), error.data)?;
-        }
-        for error in errors {
-            write!(f, "\nat index {}: {}", error.location.offset(), error.data)?;
+        for (index, error) in self.errors.iter().enumerate() {
+            if index > 0 {
+                f.write_str("\n")?;
+            }
+            if let Some(location) = error.get_line_column() {
+                write!(f, "[{}:{}] {}", location.line, location.column, error.data)?;
+            } else {
+                write!(f, "{}", error.data)?;
+            }
         }
         Ok(())
     }
