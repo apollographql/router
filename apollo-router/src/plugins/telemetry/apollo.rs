@@ -91,6 +91,7 @@ pub(crate) struct Config {
     // This'll get overridden if a user tries to set it.
     // The purpose is to allow is to pass this in to the plugin.
     #[schemars(skip)]
+    #[serde(skip)]
     pub(crate) schema_id: String,
 
     /// Configuration for batch processing.
@@ -122,8 +123,10 @@ pub(crate) struct SubgraphErrorConfig {
 #[serde(deny_unknown_fields)]
 pub(crate) struct ErrorConfiguration {
     /// Send subgraph errors to Apollo Studio
+    #[serde(default = "default_send_errors")]
     pub(crate) send: bool,
     /// Redact subgraph errors to Apollo Studio
+    #[serde(default = "default_redact_errors")]
     pub(crate) redact: bool,
 }
 

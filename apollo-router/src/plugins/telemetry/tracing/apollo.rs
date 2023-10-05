@@ -25,7 +25,7 @@ impl TracingConfigurator for Config {
                     .expect("apollo_key is checked in the enabled function, qed"),
             )
             .apollo_graph_ref(
-                self.apollo_key
+                self.apollo_graph_ref
                     .as_ref()
                     .expect("apollo_graph_ref is checked in the enabled function, qed"),
             )
