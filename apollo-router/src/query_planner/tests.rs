@@ -918,24 +918,48 @@ async fn missing_fields_in_requires() {
       }";
 
     let subgraphs = MockedSubgraphs([
-        ("S1", MockSubgraph::builder().with_json(
-            serde_json::json!{{"query":
-            "query test__S1__0($tId:String!){testQuery(id:$tId){__typename ...on T1{__typename id}...on T2{__typename id}}}",
-            "operationName": "test__S1__0", "variables":{"tId":"1"}}},
+        ("sub1", MockSubgraph::builder().with_json(
+            serde_json::json!{{"query": "{stuff{__typename id details{enabled}}}",}},
             serde_json::json!{{"data": {
-                "__typename": "T1",
-                "id": "T1",
-            } }}
-        ).with_json(
-            serde_json::json!{{"query":
-            "query test__S1__0($tId:String!){testQuery(id:$tId){__typename ...on T1{__typename id}...on T2{__typename id}}}",
-            "operationName": "test__S1__0", "variables":{"tId":"2"}}},
-            serde_json::json!{{"data": {
-                "__typename": "T2",
-                "id": "T2",
+                "stuff": {
+                  "__typename": "Stuff",
+                  "id": "1",
+                  "details": [{
+                    "enabled": true
+                  },
+                  null,
+                  {
+                    "enabled": false
+                  }]
+
+                  
+                }
             } }}
         ).build()),
-        ("S2", MockSubgraph::builder().build()),
+        ("sub2", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Stuff{aDetailsIsEnabled}}}",
+                "variables":{"representations": [
+                    {
+                        "__typename": "Stuff",
+                        "id": "1",
+                        "details": [
+                            {
+                                "enabled": true
+                            },
+                            null,
+                            {
+                                "enabled": false
+                            }
+                        ]
+                    }
+                ]}}},
+            serde_json::json!{{"data": {
+                "_entities": [{
+                    "aDetailsIsEnabled": true
+                }]
+            } }}
+        ).build()),
         ].into_iter().collect());
 
     let service = TestHarness::builder()
