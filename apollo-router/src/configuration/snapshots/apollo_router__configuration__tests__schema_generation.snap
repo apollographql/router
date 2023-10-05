@@ -2181,8 +2181,7 @@ expression: "&schema"
                           }
                         },
                         "additionalProperties": false
-                      },
-                      "nullable": true
+                      }
                     }
                   },
                   "additionalProperties": false
