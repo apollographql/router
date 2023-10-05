@@ -8,6 +8,7 @@ import ElasticNotice from '../../shared/elastic-notice.mdx';
 import HelmShowOutput from '../../shared/helm-show-router-output.mdx';
 import K8SManualConfig from '../../shared/k8s-manual-config.mdx';
 import RouterCommonConfig from '../../shared/router-common-config.mdx';
+import CoprocTypicalConfig from '../../shared/coproc-typical-config.mdx';
 
 Learn how to deploy the Apollo Router, for a self-hosted supergraph with GraphOS, on Kubernetes by using Helm charts.
 
@@ -190,17 +191,9 @@ A deployed coprocessor has its own application image and container in the router
 To configure a coprocessor and its container for your deployed router through a YAML configuration file:
 
 * Create a YAML file, `my_values.yaml`, to contain additional values that override default values.
-* Edit the file to configure a coprocessor for the router. For reference, follow the [typical](../../customizations/coprocessor#typical-configuration) and [minimal](../../customizations/coprocessor#minimal-configuration)  configuration examples, and apply them to `router.configuration.coprocessor`. 
+* Edit the file to configure a coprocessor for the router. For reference, follow the [typical](../../customizations/coprocessor#typical-configuration) and [minimal](../../customizations/coprocessor#minimal-configuration)  configuration examples, and apply them to `router.configuration.coprocessor`. For example, a typical configuration for a coprocessor: 
 
-```yaml title="my_values.yaml"
-router:
-  configuration:
-    # minimal coprocessor configuration
-    coprocessor:
-    url: http://127.0.0.1:8081 # Replace with the URL of your coprocessor's HTTP endpoint.
-    router:
-      request:
-        headers: false
+  <CoprocTypicalConfig/>
 
 * Edit the file to add a container for the coprocessor.
 
