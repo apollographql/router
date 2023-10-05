@@ -4605,12 +4605,10 @@ expression: "&schema"
             "prometheus": {
               "description": "Prometheus exporter configuration",
               "type": "object",
-              "required": [
-                "enabled"
-              ],
               "properties": {
                 "enabled": {
                   "description": "Set to true to enable",
+                  "default": false,
                   "type": "boolean"
                 },
                 "listen": {

@@ -1512,9 +1512,7 @@ impl Telemetry {
     }
     fn reload_metrics(&mut self) {
         let meter_provider = meter_provider();
-        if self.public_prometheus_meter_provider.is_some() {
-            commit_prometheus();
-        }
+        commit_prometheus();
         let mut old_meter_providers = Vec::new();
         if let Some(old_provider) = meter_provider.set(
             MeterProviderType::PublicPrometheus,
