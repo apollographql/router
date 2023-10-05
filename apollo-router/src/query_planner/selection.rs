@@ -127,8 +127,11 @@ fn select_value(
         (Value::Object(child), Some(selections)) => select_object(child, selections, schema),
         (Value::Array(elements), Some(_)) => elements
             .iter()
-            .map(|element| select_value(element, field, schema))
-            .collect(),
+            .map(|element| {
+                select_value(element, field, schema).map(|opt| opt.unwrap_or(Value::Null))
+            })
+            .collect::<Result<Vec<Value>, FetchError>>()
+            .map(|v| Some(Value::Array(v))),
         (value, None) => Ok(Some(value.to_owned())),
         _ => Ok(None),
     }
