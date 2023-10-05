@@ -1,12 +1,12 @@
 ---
-title: Run on Docker
-description: Run the Apollo Router on Docker
+title: Run in Docker
+description: Run the Apollo Router in Docker
 ---
 
 import { Link } from "gatsby";
 import ElasticNotice from '../../shared/elastic-notice.mdx';
 
-Follow examples in this guide to learn how to run an Apollo Router container image on Docker:
+Follow examples in this guide to learn how to run an Apollo Router container image in Docker:
 
 * Run with default configuration.
 * Customize your configuration to override the default configuration.
@@ -19,7 +19,7 @@ Follow examples in this guide to learn how to run an Apollo Router container ima
 > * The [documentation](https://docs.docker.com/engine/reference/run/) for the `docker run` command is a helpful reference for the examples in this guide.
 > * The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace `<image version>` with your chosen version, for example `v1.32.0`
 
-## Basic example running router with Docker
+## Basic example running router in Docker
 
 To run the router, your Docker container must have the `APOLLO_GRAPH_REF` and `APOLLO_KEY` environment variables set to your graph's reference and ID, respectively.
 
@@ -31,7 +31,7 @@ To run the router, your Docker container must have the `APOLLO_GRAPH_REF` and `A
 
 - Set your `APOLLO_GRAPH_REF` and `APOLLO_KEY` 
 
-Here's a basic example of running a router image with Docker (make sure to replace `<image version>` with whichever version you want to use, such as `v1.4.0`):
+Here's a basic example of running a router image in Docker (make sure to replace `<image version>` with whichever version you want to use, such as `v1.4.0`):
 
 ```bash title="Docker"
 docker run -p 4000:4000 \

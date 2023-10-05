@@ -1,6 +1,6 @@
 ---
-title: Deploy on Kubernetes
-description: Self-hosted deployment of Apollo Router on Kubernetes
+title: Deploy in Kubernetes
+description: Self-hosted deployment of Apollo Router in Kubernetes
 ---
 
 import { Link } from 'gatsby';
@@ -10,7 +10,7 @@ import K8SManualConfig from '../../shared/k8s-manual-config.mdx';
 import RouterCommonConfig from '../../shared/router-common-config.mdx';
 import CoprocTypicalConfig from '../../shared/coproc-typical-config.mdx';
 
-Learn how to deploy the Apollo Router, for a self-hosted supergraph with GraphOS, on Kubernetes by using Helm charts.
+Learn how to deploy the Apollo Router, for a self-hosted supergraph with GraphOS, in Kubernetes by using Helm charts.
 
 ```mermaid
 flowchart LR;
@@ -96,9 +96,11 @@ Install the tools and provision the infrastructure for your Kubernetes cluster.
 
 > For example, see the [Setup from Apollo's Build a Supergraph tutorial](https://github.com/apollosolutions/build-a-supergraph/tree/main/01-setup#01---setup). It provides steps you can reference for gathering accounts and credentials for your cloud platform (GCP or AWS), provisioning resources, and deploying your subgraphs.
 
-### Set up router
+### Set up graph
 
-Set up the router by following the [first six steps of the self-hosted router quickstart](/graphos/quickstart/self-hosted) (stopping when you reach step [7. Deploy your router and connect clients](https://www.apollographql.com/docs/graphos/quickstart/self-hosted/#7-deploy-your-router-and-connect-clients)).
+Set up your self-hosted graph and get its [graph ref](../../configuration/overview/#apollo_graph_ref) and [API key](../../configuration/overview/#apollo_graph_ref).
+
+> If you need a guide to set up your graph, you can follow [the self-hosted router quickstart](/graphos/quickstart/self-hosted) and complete [step 1 (Set up Apollo tools)](/graphos/quickstart/self-hosted/#1-set-up-apollo-tools), [step 4 (Obtain your subgraph schemas)](/graphos/quickstart/self-hosted/#4-obtain-your-subgraph-schemas), and [step 5 (Publish your subgraph schemas)](/graphos/quickstart/self-hosted/#5-publish-your-subgraph-schemas).
 
 ### Deploy router
 
@@ -150,8 +152,11 @@ To enable metrics endpoints in your deployed router through a YAML configuration
             endpoint: <otlp-endpoint-addr>
   ```
 
-  * `router.telemetry.metrics.prometheus` was already configured but disabled (`enabled: false`) by default. This configuration sets `enabled: true`.
-  * `router.telemetry.metrics.otlp` is enabled by inclusion.
+  > ⚠️ **Note**: Although this example enables both Prometheus and OTLP, in practice it's common to enable only one endpoint.
+
+  * `router.configuration.telemetry.metrics.prometheus` was already configured but disabled (`enabled: false`) by default. This configuration sets `enabled: true`.
+  * `router.configuration.telemetry.metrics.otlp` is enabled by inclusion.
+  * `router.configuration.telemetry.temporality` by default is `temporality: cumulative` and is a good choice for most metrics consumers. For DataDog, use `temporality: delta`.
 
 * Deploy the router with the additional YAML configuration file. For example, starting with the `helm install` command from the basic deployment step, append `--values my_values.yaml`:
 
@@ -163,24 +168,7 @@ To enable metrics endpoints in your deployed router through a YAML configuration
 
 The router supports [Rhai scripting](../../customizations/rhai) to add custom functionality.
 
-To enable Rhai scripts in your deployed router through a YAML configuration file:
-
-* Create a YAML file, `my_values.yaml`, to contain additional values that override default values.
-* Edit the file with values to enable Rhai scripts:
-
-  ```yaml title="my_values.yaml"
-  router:
-    configuration:
-      rhai:
-        scripts: <rhai-scripts-path>
-        main: <rhai-main-script>
-  ```
-
-* Deploy the router with the additional YAML configuration file. For example, starting with the `helm install` command from the basic deployment step, append `--values my_values.yaml`:
-
-  ```bash
-  helm install  --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml --values my_values.yaml
-  ```
+Enabling Rhai scripts in your deployed router requires mounting an extra volume for your Rhai scripts and getting your scripts onto the volume. That can be done by following steps in [a separate example for creating a custom in-house router chart](https://github.com/apollographql/in-house-router-example). The example creates a new (in-house) chart that wraps (depends on) the released router chart, and the new chart has templates that add the necessary configuration to allow Rhai scripts for a deployed router.
 
 ## Deploy with a coprocessor
 
@@ -231,7 +219,7 @@ helm install --namespace <router-namespace> --set managedFederation.apiKey="<gra
 
 When [migrating from `@apollo/gateway` to the Apollo Router](../migrating-from-gateway), consider the following tips to maximize the compatibility of your router deployment.
 
-* The gateway's maximum supported request size is 20MB, while the router's default maximum request size is less. For compatibility, set the deployed router's maximium request size to 20MB:
+* By default the router sets its maximum supported request size at 2MB, while the gateway sets its maximum supported request size at 20MB. If your gateway accepts requests larger than 2MB, which it does by default, you can use the following configuration to ensure that the router is compatible with your gateway deployment.
 
   ```yaml title="values.yaml"
   router:
