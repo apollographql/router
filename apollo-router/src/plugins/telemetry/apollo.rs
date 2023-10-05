@@ -91,7 +91,7 @@ pub(crate) struct Config {
     // This'll get overridden if a user tries to set it.
     // The purpose is to allow is to pass this in to the plugin.
     #[schemars(skip)]
-    #[serde(skip)]
+    #[serde(default)]
     pub(crate) schema_id: String,
 
     /// Configuration for batch processing.
