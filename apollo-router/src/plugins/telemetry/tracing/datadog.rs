@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use http::Uri;
 use lazy_static::lazy_static;
 use opentelemetry::sdk;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
@@ -12,14 +13,11 @@ use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tower::BoxError;
 
-use super::agent_endpoint;
-use super::deser_endpoint;
-use super::AgentEndpoint;
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
@@ -34,15 +32,18 @@ lazy_static! {
         map.insert("subgraph_request", "graphql.operation.name");
         map
     };
+    static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://localhost:8126/v0.4/traces");
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// Enable datadog
+    pub(crate) enabled: bool,
+
     /// The endpoint to send to
-    #[serde(deserialize_with = "deser_endpoint")]
-    #[schemars(schema_with = "agent_endpoint")]
-    pub(crate) endpoint: AgentEndpoint,
+    #[serde(default)]
+    pub(crate) endpoint: UriEndpoint,
 
     /// batch processor configuration
     #[serde(default)]
@@ -55,15 +56,14 @@ pub(crate) struct Config {
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace: &Trace) -> Result<Builder, BoxError> {
+        if !self.enabled {
+            return Ok(builder);
+        }
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
-        let url = match &self.endpoint {
-            AgentEndpoint::Default(_) => None,
-            AgentEndpoint::Url(s) => Some(s),
-        };
         let enable_span_mapping = self.enable_span_mapping.then_some(true);
         let trace_config: sdk::trace::Config = trace.into();
         let exporter = opentelemetry_datadog::new_pipeline()
-            .with(&url, |builder, e| {
+            .with(&self.endpoint.to_uri(&DEFAULT_ENDPOINT), |builder, e| {
                 builder.with_agent_endpoint(e.to_string().trim_end_matches('/'))
             })
             .with(&enable_span_mapping, |builder, _e| {
@@ -103,34 +103,5 @@ impl TracingConfigurator for Config {
                 .build()
                 .filtered(),
         ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use reqwest::Url;
-
-    use super::*;
-    use crate::plugins::telemetry::tracing::AgentDefault;
-
-    #[test]
-    fn endpoint_configuration() {
-        let config: Config = serde_yaml::from_str("endpoint: default").unwrap();
-        assert_eq!(
-            AgentEndpoint::Default(AgentDefault::Default),
-            config.endpoint
-        );
-
-        let config: Config = serde_yaml::from_str("endpoint: collector:1234").unwrap();
-        assert_eq!(
-            AgentEndpoint::Url(Url::parse("http://collector:1234").unwrap()),
-            config.endpoint
-        );
-
-        let config: Config = serde_yaml::from_str("endpoint: https://collector:1234").unwrap();
-        assert_eq!(
-            AgentEndpoint::Url(Url::parse("https://collector:1234").unwrap()),
-            config.endpoint
-        );
     }
 }
