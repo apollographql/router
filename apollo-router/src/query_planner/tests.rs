@@ -754,19 +754,51 @@ async fn alias_renaming() {
             "query test__S1__0($tId:String!){testQuery(id:$tId){__typename ...on T1{__typename id}...on T2{__typename id}}}",
             "operationName": "test__S1__0", "variables":{"tId":"1"}}},
             serde_json::json!{{"data": {
-                "__typename": "T1",
-                "id": "T1",
+                "testQuery": {
+                    "__typename": "T1",
+                    "id": "T1",
+                }
             } }}
         ).with_json(
             serde_json::json!{{"query":
             "query test__S1__0($tId:String!){testQuery(id:$tId){__typename ...on T1{__typename id}...on T2{__typename id}}}",
             "operationName": "test__S1__0", "variables":{"tId":"2"}}},
             serde_json::json!{{"data": {
-                "__typename": "T2",
-                "id": "T2",
+                "testQuery": {
+                    "__typename": "T2",
+                    "id": "T2",
+                }
             } }}
         ).build()),
-        ("S2", MockSubgraph::builder().build()),
+        ("S2", MockSubgraph::builder().with_json(
+            serde_json::json!{{"query":
+            "query test__S2__1($representations:[_Any!]!){_entities(representations:$representations){...on T1{foo{field}}...on T2{foo__alias_0:bar{field}}}}",
+            "operationName": "test__S2__1", "variables":{"representations":[{
+                "__typename": "T1",
+                "id": "T1",
+            }]}}},
+            serde_json::json!{{"data": {
+                "_entities": [{
+                    "foo": {
+                        "field": "aaa"
+                    }
+                }]
+            } }}
+        ).with_json(
+            serde_json::json!{{"query":
+            "query test__S2__1($representations:[_Any!]!){_entities(representations:$representations){...on T1{foo{field}}...on T2{foo__alias_0:bar{field}}}}",
+            "operationName": "test__S2__1", "variables":{"representations":[{
+                "__typename": "T2",
+                "id": "T2",
+            }]}}},
+            serde_json::json!{{"data": {
+                "_entities": [{
+                    "foo__alias_0": {
+                        "field": "bbb"
+                    }
+                }]
+            } }}
+        ).build()),
         ].into_iter().collect());
 
     let service = TestHarness::builder()
@@ -794,7 +826,7 @@ async fn alias_renaming() {
     let response = stream.next_response().await.unwrap();
     insta::assert_json_snapshot!(serde_json::to_value(&response).unwrap());
 
-    /*let request = supergraph::Request::fake_builder()
+    let request = supergraph::Request::fake_builder()
         .context(Context::new())
         .query(query)
         .variables(
@@ -808,7 +840,7 @@ async fn alias_renaming() {
 
     let mut stream = service.clone().oneshot(request).await.unwrap();
     let response = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(serde_json::to_value(&response).unwrap());*/
+    insta::assert_json_snapshot!(serde_json::to_value(&response).unwrap());
 }
 
 #[tokio::test]
