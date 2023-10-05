@@ -853,3 +853,145 @@ fn test_subgraph_override_json() {
     // since products did not set the `a` field, it should take the override value from `all`
     assert!(!data.subgraph.subgraphs.get("products").unwrap().a);
 }
+
+#[test]
+fn redis_cache_enabled_attribute_must_be_true_when_not_set() {
+    let config = validate_yaml_configuration(
+        r#"
+supergraph:
+    query_planning:
+        experimental_cache:
+            in_memory:
+                limit: 1024
+            redis:
+                urls: 
+                    - "redis://127.0.0.1"
+
+apq:
+    router:
+        cache:
+            in_memory:
+                limit: 1024
+            redis:
+                urls:
+                    - "redis://127.0.0.1"
+        "#,
+        Expansion::default().unwrap(),
+        Mode::NoUpgrade,
+    )
+    .expect("should have resulted in a configuration");
+    assert!(
+        config
+            .supergraph
+            .query_planning
+            .experimental_cache
+            .redis
+            .expect("redis must be set")
+            .enabled
+    );
+    assert!(
+        config
+            .apq
+            .router
+            .cache
+            .redis
+            .expect("redis must be set")
+            .enabled
+    );
+}
+
+#[test]
+fn redis_cache_enabled_attribute_must_be_true_when_set_to_true() {
+    let config = validate_yaml_configuration(
+        r#"
+supergraph:
+    query_planning:
+        experimental_cache:
+            in_memory:
+                limit: 1024
+            redis:
+                enabled: true
+                urls: 
+                    - "redis://127.0.0.1"
+
+apq:
+    router:
+        cache:
+            in_memory:
+                limit: 1024
+            redis:
+                enabled: true
+                urls:
+                    - "redis://127.0.0.1"
+        "#,
+        Expansion::default().unwrap(),
+        Mode::NoUpgrade,
+    )
+    .expect("should have resulted in a configuration");
+    assert!(
+        config
+            .supergraph
+            .query_planning
+            .experimental_cache
+            .redis
+            .expect("redis must be set")
+            .enabled
+    );
+    assert!(
+        config
+            .apq
+            .router
+            .cache
+            .redis
+            .expect("redis must be set")
+            .enabled
+    );
+}
+
+#[test]
+fn redis_cache_enabled_attribute_must_be_false_when_set_to_false() {
+    let config = validate_yaml_configuration(
+        r#"
+supergraph:
+    query_planning:
+        experimental_cache:
+            in_memory:
+                limit: 1024
+            redis:
+                enabled: false
+                urls: 
+                    - "redis://127.0.0.1"
+
+apq:
+    router:
+        cache:
+            in_memory:
+                limit: 1024
+            redis:
+                enabled: false
+                urls:
+                    - "redis://127.0.0.1"
+        "#,
+        Expansion::default().unwrap(),
+        Mode::NoUpgrade,
+    )
+    .expect("should have resulted in a configuration");
+    assert!(
+        !config
+            .supergraph
+            .query_planning
+            .experimental_cache
+            .redis
+            .expect("redis must be set")
+            .enabled
+    );
+    assert!(
+        !config
+            .apq
+            .router
+            .cache
+            .redis
+            .expect("redis must be set")
+            .enabled
+    );
+}

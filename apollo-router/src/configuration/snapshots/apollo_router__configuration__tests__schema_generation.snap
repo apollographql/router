@@ -83,6 +83,11 @@ expression: "&schema"
                     "urls"
                   ],
                   "properties": {
+                    "enabled": {
+                      "description": "Set to false to disable the Redis cache",
+                      "default": true,
+                      "type": "boolean"
+                    },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
                       "default": null,
@@ -2028,6 +2033,11 @@ expression: "&schema"
                     "urls"
                   ],
                   "properties": {
+                    "enabled": {
+                      "description": "Set to false to disable the Redis cache",
+                      "default": true,
+                      "type": "boolean"
+                    },
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
                       "default": null,
@@ -5635,6 +5645,11 @@ expression: "&schema"
             "urls"
           ],
           "properties": {
+            "enabled": {
+              "description": "Set to false to disable the Redis cache",
+              "default": true,
+              "type": "boolean"
+            },
             "timeout": {
               "description": "Redis request timeout (default: 2ms)",
               "default": null,

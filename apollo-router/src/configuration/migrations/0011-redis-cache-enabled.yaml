@@ -1,0 +1,10 @@
+description: Add enabled field in `supergraph.query_planning.experimental_cache.redis` and `apq.router.cache.redis`
+actions:
+  - type: add
+    path: supergraph.query_planning.experimental_cache.redis
+    name: enabled
+    value: true
+  - type: add
+    path: apq.router.cache.redis
+    name: enabled
+    value: true

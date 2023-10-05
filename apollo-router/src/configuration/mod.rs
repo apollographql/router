@@ -868,10 +868,17 @@ impl Default for InMemoryCache {
     }
 }
 
+fn default_redis_cache() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration
 pub(crate) struct RedisCache {
+    /// Set to false to disable the Redis cache
+    #[serde(default = "default_redis_cache")]
+    pub(crate) enabled: bool,
     /// List of URLs to the Redis cluster
     pub(crate) urls: Vec<url::Url>,
 

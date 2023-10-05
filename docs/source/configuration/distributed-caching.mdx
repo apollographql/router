@@ -87,6 +87,7 @@ supergraph:
   query_planning:
     experimental_cache:
       redis: #highlight-line
+        enabled: true #highlight-line
         urls: ["redis://..."] #highlight-line
         timeout: 5ms # Optional, by default: 2ms
 ```
@@ -104,6 +105,7 @@ apq:
   router:
     cache:
       redis: #highlight-line
+        enabled: true #highlight-line
         urls: ["redis://..."] #highlight-line
         timeout: 5ms # Optional, by default: 2ms
 ```

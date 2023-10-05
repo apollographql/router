@@ -13,10 +13,10 @@ Configuration yaml:
   .coprocessor
 
 * Query plan caching
-  .supergraph.query_planning.experimental_cache.redis
+  .supergraph.query_planning.experimental_cache.redis.enabled
 
 * APQ caching
-  .apq.router.cache.redis
+  .apq.router.cache.redis.enabled
 
 * Subgraph caching
   .traffic_shaping.experimental_cache
