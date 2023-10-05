@@ -103,7 +103,7 @@ deny = [
   # exception.
   { name = "openssl-sys", wrappers = ["git2", "libssh2-sys", "libgit2-sys"] },
   # Note! This line is required to support the above exception.
-  { name = "git2", wrappers = ["cargo-scaffold"] },
+  { name = "git2", wrappers = ["auth-git2", "cargo-scaffold"] },
   # Note! This line is required to support the above exception.
   { name = "libgit2-sys", wrappers = ["git2"] },
   # Note! This line is required to support the above exception.

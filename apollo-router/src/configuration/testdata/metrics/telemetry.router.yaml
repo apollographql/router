@@ -3,15 +3,20 @@ telemetry:
     prometheus:
       enabled: true
     otlp:
+      enabled: true
       endpoint: default
   tracing:
     otlp:
+      enabled: true
       endpoint: default
     zipkin:
+      enabled: true
       endpoint: default
     datadog:
+      enabled: true
       endpoint: default
     jaeger:
+      enabled: true
       agent:
         endpoint: default
 

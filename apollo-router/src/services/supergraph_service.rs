@@ -37,6 +37,7 @@ use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
+use crate::configuration::Batching;
 use crate::context::OPERATION_NAME;
 use crate::error::CacheResolverError;
 use crate::graphql;
@@ -228,6 +229,29 @@ async fn service_call(
             let operation_name = body.operation_name.clone();
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
             let is_subscription = plan.is_subscription(operation_name.as_deref());
+
+            if let Some(batching) = context.private_entries.clone().lock().get::<Batching>() {
+                if batching.enabled && (is_deferred || is_subscription) {
+                    let message = if is_deferred {
+                        "BATCHING_DEFER_UNSUPPORTED"
+                    } else {
+                        "BATCHING_SUBSCRIPTION_UNSUPPORTED"
+                    };
+                    let mut response = SupergraphResponse::new_from_graphql_response(
+                            graphql::Response::builder()
+                                .errors(vec![crate::error::Error::builder()
+                                    .message(String::from(
+                                        "Deferred responses and subscriptions aren't supported in batches",
+                                    ))
+                                    .extension_code(message)
+                                    .build()])
+                                .build(),
+                            context,
+                        );
+                    *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
+                    return Ok(response);
+                }
+            }
 
             let ClientRequestAccepts {
                 multipart_defer: accepts_multipart_defer,
@@ -778,8 +802,11 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
+    use tower::ServiceExt;
+
     use super::*;
     use crate::plugin::test::MockSubgraph;
+    use crate::services::subgraph;
     use crate::services::supergraph;
     use crate::test_harness::MockedSubgraphs;
     use crate::Notify;
@@ -3307,5 +3334,59 @@ mod tests {
         let mut stream = service.clone().oneshot(request).await.unwrap();
         let response = stream.next_response().await.unwrap();
         assert_eq!(serde_json_bytes::Value::Null, response.data.unwrap());
+    }
+
+    #[tokio::test]
+    async fn id_scalar_can_overflow_i32() {
+        // Hack to let the first subgraph fetch contain an ID variable:
+        // ```
+        // type Query {
+        //     user(id: ID!): User @join__field(graph: USER)
+        // }
+        // ```
+        assert!(SCHEMA.contains("currentUser:"));
+        let schema = SCHEMA.replace("currentUser:", "user(id: ID!):");
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(&schema)
+            .subgraph_hook(|_subgraph_name, _service| {
+                tower::service_fn(|request: subgraph::Request| async move {
+                    let id = &request.subgraph_request.body().variables["id"];
+                    Err(format!("$id = {id}").into())
+                })
+                .boxed()
+            })
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let large: i64 = 1 << 53;
+        let large_plus_one = large + 1;
+        // f64 rounds since it doesn’t have enough mantissa bits
+        assert!(large_plus_one as f64 as i64 == large);
+        // i64 of course doesn’t round
+        assert!(large_plus_one != large);
+
+        let request = supergraph::Request::fake_builder()
+            .query("query($id: ID!) { user(id: $id) { name }}")
+            .variable("id", large_plus_one)
+            .build()
+            .unwrap();
+        let response = service
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+        // The router did not panic or respond with an early validation error.
+        // Instead it did a subgraph fetch, which recieved the correct ID variable without rounding:
+        assert_eq!(
+            response.errors[0].extensions["reason"].as_str().unwrap(),
+            "$id = 9007199254740993"
+        );
+        assert_eq!(large_plus_one.to_string(), "9007199254740993");
     }
 }

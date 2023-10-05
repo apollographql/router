@@ -9,6 +9,7 @@ telemetry:
       service_name: router
       sampler: always_on
     jaeger:
+      enabled: true
       batch_processor:
         scheduled_delay: 100ms
       agent:

@@ -334,7 +334,7 @@ impl IntegrationTest {
     pub fn execute_default_query(
         &self,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
-        self.execute_query_internal(None)
+        self.execute_query_internal(&json!({"query":"query {topProducts{name}}","variables":{}}))
     }
 
     #[allow(dead_code)]
@@ -342,21 +342,26 @@ impl IntegrationTest {
         &self,
         query: &Value,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
-        self.execute_query_internal(Some(query))
+        self.execute_query_internal(query)
+    }
+
+    #[allow(dead_code)]
+    pub fn execute_bad_query(
+        &self,
+    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+        self.execute_query_internal(&json!({"garbage":{}}))
     }
 
     fn execute_query_internal(
         &self,
-        query: Option<&Value>,
+        query: &Value,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
-        let default_query = &json!({"query":"query {topProducts{name}}","variables":{}});
-        let query = query.unwrap_or(default_query).clone();
         let dispatch = self.subscriber.clone();
-
+        let query = query.clone();
         async move {
             let span = info_span!("client_request");
             let span_id = span.context().span().span_context().trace_id().to_string();

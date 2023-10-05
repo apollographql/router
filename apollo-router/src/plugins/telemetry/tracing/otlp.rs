@@ -12,6 +12,9 @@ use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 impl TracingConfigurator for super::super::otlp::Config {
     fn apply(&self, builder: Builder, _trace_config: &Trace) -> Result<Builder, BoxError> {
+        if !self.enabled {
+            return Ok(builder);
+        }
         tracing::info!("Configuring Otlp tracing: {}", self.batch_processor);
         let exporter: SpanExporterBuilder = self.exporter()?;
         Ok(builder.with_span_processor(
