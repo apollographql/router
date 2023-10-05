@@ -8,9 +8,6 @@ RUN \
   && apt-get install -y \
     curl
 
-# Add a user to run the router as
-RUN useradd -m router
-
 WORKDIR /dist
 
 # Run the Router downloader which puts Router into current working directory
@@ -24,6 +21,9 @@ RUN if [ -z "${ARTIFACT_URL}"]; then \
 
 FROM debian:bookworm-slim AS distro
 ARG DEBUG_IMAGE=false
+
+# Add a user to run the router as
+RUN useradd -m router
 
 WORKDIR /dist
 
