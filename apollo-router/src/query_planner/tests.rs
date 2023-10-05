@@ -931,8 +931,6 @@ async fn missing_fields_in_requires() {
                   {
                     "enabled": false
                   }]
-
-                  
                 }
             } }}
         ).build()),
