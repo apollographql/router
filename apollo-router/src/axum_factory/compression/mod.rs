@@ -79,6 +79,8 @@ where {
                         }
                     }
                     Ok(data) => {
+                        // the buffer needs at least 10 bytes for a gzip header if we use gzip, then more
+                        // room to store the data itself
                         let mut buf = BytesMut::zeroed(10 + data.len());
 
                         let mut partial_input = PartialBuffer::new(&*data);
