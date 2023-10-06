@@ -7,6 +7,7 @@ use futures::StreamExt;
 use http::Method;
 use router_bridge::planner::UsageReporting;
 use serde_json_bytes::json;
+use tower::ServiceExt;
 
 use super::DeferredNode;
 use super::Depends;
@@ -23,12 +24,15 @@ use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
 use crate::request;
 use crate::services::subgraph_service::MakeSubgraphService;
+use crate::services::supergraph;
 use crate::services::SubgraphResponse;
 use crate::services::SubgraphServiceFactory;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
+use crate::MockedSubgraphs;
+use crate::TestHarness;
 
 macro_rules! test_query_plan {
     () => {
@@ -643,4 +647,215 @@ async fn dependent_mutations() {
             None,
         )
         .await;
+}
+
+#[tokio::test]
+async fn typename_propagation() {
+    let schema = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  {
+    query: Query
+  }
+  
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+  
+  directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+  
+  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+  
+  directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+  
+  directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+  
+  directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+  
+  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+  
+  type Author implements Node
+    @join__implements(graph: NODE_RELAY_SUBGRAPH, interface: "Node")
+    @join__type(graph: AUTHOR_SUBGRAPH, key: "authorId")
+    @join__type(graph: BOOK_SUBGRAPH, key: "authorId")
+    @join__type(graph: NODE_RELAY_SUBGRAPH, key: "authorId")
+  {
+    authorId: String!
+    fullName: String! @join__field(graph: AUTHOR_SUBGRAPH) @join__field(graph: BOOK_SUBGRAPH, external: true) @join__field(graph: NODE_RELAY_SUBGRAPH, external: true)
+    id: ID! @join__field(graph: NODE_RELAY_SUBGRAPH)
+  }
+  
+  type Book implements Node
+    @join__implements(graph: NODE_RELAY_SUBGRAPH, interface: "Node")
+    @join__type(graph: BOOK_SUBGRAPH, key: "bookId author { fullName }")
+    @join__type(graph: NODE_RELAY_SUBGRAPH, key: "bookId author { fullName }")
+  {
+    bookId: String!
+    author: Author!
+    id: ID! @join__field(graph: NODE_RELAY_SUBGRAPH)
+  }
+  
+  scalar join__FieldSet
+  
+  enum join__Graph {
+    AUTHOR_SUBGRAPH @join__graph(name: "author_subgraph", url: "https://films.example.com")
+    BOOK_SUBGRAPH @join__graph(name: "book_subgraph", url: "https://films.example.com")
+    NODE_RELAY_SUBGRAPH @join__graph(name: "node_relay_subgraph", url: "https://films.example.com")
+  }
+  
+  scalar link__Import
+  
+  enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
+  
+  interface Node
+    @join__type(graph: NODE_RELAY_SUBGRAPH)
+  {
+    id: ID!
+  }
+  
+  type Query
+    @join__type(graph: AUTHOR_SUBGRAPH)
+    @join__type(graph: BOOK_SUBGRAPH)
+    @join__type(graph: NODE_RELAY_SUBGRAPH)
+  {
+    b: Boolean @join__field(graph: AUTHOR_SUBGRAPH)
+    book: Book @join__field(graph: BOOK_SUBGRAPH)
+    node(id: ID): Node @join__field(graph: NODE_RELAY_SUBGRAPH)
+  }"#;
+
+    let query = "query Query {
+        node {
+          __typename
+          ... on Book {
+            id
+            author {
+              __typename
+            }
+          }
+        }
+      }";
+
+    let subgraphs = MockedSubgraphs(
+        [
+            ("author_subgraph", MockSubgraph::builder().with_json(
+                serde_json::json! {{
+                    "query": "query QueryBook__author_subgraph__1($representations:[_Any!]!){_entities(representations:$representations){...on Author{fullName}}}",
+                    "operationName": "QueryBook__author_subgraph__1",
+                    "variables": {
+                        "representations": [{
+                            "__typename": "Author",
+                            "authorId": "Author1"
+                        }]
+                    }
+                }},
+                serde_json::json! {{"data": {
+                    "_entities": [{
+                        "fullName": "Ada"
+                    }]
+                } }},
+            ).build()),
+            ("book_subgraph", MockSubgraph::builder().with_json(
+                serde_json::json! {{
+                    "query": "query QueryBook__book_subgraph__0{book{__typename bookId author{__typename authorId}}}",
+                    "operationName": "QueryBook__book_subgraph__0"
+                }},
+                serde_json::json! {{"data": {
+                    "book": {
+                      "__typename": "Book",
+                      "bookId": "book1",
+                      "author": {
+                        "__typename": "Author",
+                        "authorId": "Author1"
+                      }
+                    }
+                } }},
+            ).build()),
+            ("node_relay_subgraph", MockSubgraph::builder().with_json(
+                serde_json::json! {{
+                    "query": "query Query__node_relay_subgraph__0{node{__typename ...on Book{id author{__typename}}}}",
+                    "operationName": "Query__node_relay_subgraph__0"
+                }},
+                serde_json::json! {{"data": {
+                    "node": {
+                      "__typename": "Book",
+                      "id": "1",
+                      "author": {
+                        "__typename": "Author"
+                      }
+                    }
+                } }},
+            ).with_json(
+                serde_json::json! {{
+                    "query": "query QueryBook__node_relay_subgraph__2($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename id}}}",
+                    "operationName": "QueryBook__node_relay_subgraph__2",
+                    "variables": {
+                        "representations": [{
+                            "__typename": "Book",
+                            "bookId": "book1",
+                            "author": {
+                                "fullName": "Ada"
+                            }
+                        }]
+                    }
+                }},
+                serde_json::json! {{"data": {
+                    "_entities": [{
+                        "__typename": "Book",
+                        "id": "1"
+                    }]
+                } }},
+            ).build()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::new())
+        .query(query)
+        .build()
+        .unwrap();
+
+    let mut stream = service.clone().oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(serde_json::to_value(&response).unwrap());
+
+    let query = "query QueryBook {
+        book {
+          __typename
+          ... on Book {
+            id
+            author {
+              __typename
+            }
+          }
+        }
+      }";
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::new())
+        .query(query)
+        .build()
+        .unwrap();
+
+    let mut stream = service.clone().oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(serde_json::to_value(&response).unwrap());
 }
