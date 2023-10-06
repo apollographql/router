@@ -761,11 +761,42 @@ async fn typename_propagation() {
                         "fullName": "Ada"
                     }]
                 } }},
+            ).with_json(
+                serde_json::json! {{
+                    "query": "query QueryBook2__author_subgraph__1($representations:[_Any!]!){_entities(representations:$representations){...on Author{fullName}}}",
+                    "operationName": "QueryBook2__author_subgraph__1",
+                    "variables": {
+                        "representations": [{
+                            "__typename": "Author",
+                            "authorId": "Author1"
+                        }]
+                    }
+                }},
+                serde_json::json! {{"data": {
+                    "_entities": [{
+                        "fullName": "Ada"
+                    }]
+                } }},
             ).build()),
             ("book_subgraph", MockSubgraph::builder().with_json(
                 serde_json::json! {{
                     "query": "query QueryBook__book_subgraph__0{book{__typename bookId author{__typename authorId}}}",
                     "operationName": "QueryBook__book_subgraph__0"
+                }},
+                serde_json::json! {{"data": {
+                    "book": {
+                      "__typename": "Book",
+                      "bookId": "book1",
+                      "author": {
+                        "__typename": null,
+                        "authorId": "Author1"
+                      }
+                    }
+                } }},
+            ).with_json(
+                serde_json::json! {{
+                    "query": "query QueryBook2__book_subgraph__0{book{__typename bookId author{__typename authorId}}}",
+                    "operationName": "QueryBook2__book_subgraph__0"
                 }},
                 serde_json::json! {{"data": {
                     "book": {
@@ -812,6 +843,29 @@ async fn typename_propagation() {
                         "id": "1"
                     }]
                 } }},
+            ).with_json(
+                serde_json::json! {{
+                    "query": "query QueryBook2__node_relay_subgraph__2($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename id author{id}}}}",
+                    "operationName": "QueryBook2__node_relay_subgraph__2",
+                    "variables": {
+                        "representations": [{
+                            "__typename": "Book",
+                            "bookId": "book1",
+                            "author": {
+                                "fullName": "Ada"
+                            }
+                        }]
+                    }
+                }},
+                serde_json::json! {{"data": {
+                    "_entities": [{
+                        "__typename": "Book",
+                        "id": "1",
+                        "author": {
+                            "id": "2"
+                        }
+                    }]
+                } }},
             ).build()),
         ]
         .into_iter()
@@ -844,6 +898,28 @@ async fn typename_propagation() {
             id
             author {
               __typename
+            }
+          }
+        }
+      }";
+
+    let request = supergraph::Request::fake_builder()
+        .context(Context::new())
+        .query(query)
+        .build()
+        .unwrap();
+
+    let mut stream = service.clone().oneshot(request).await.unwrap();
+    let response = stream.next_response().await.unwrap();
+    insta::assert_json_snapshot!(serde_json::to_value(&response).unwrap());
+
+    let query = "query QueryBook2 {
+        book {
+          __typename
+          ... on Book {
+            id
+            author {
+              id
             }
           }
         }
