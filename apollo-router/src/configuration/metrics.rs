@@ -305,13 +305,13 @@ impl Metrics {
             opt.metrics.prometheus,
             "$.metrics.prometheus[?(@.enabled==true)]",
             opt.tracing.otlp,
-            "$.tracing.otlp[?(@.endpoint)]",
+            "$.tracing.otlp[?(@.enabled==true)]",
             opt.tracing.datadog,
-            "$.tracing.datadog[?(@.endpoint)]",
+            "$.tracing.datadog[?(@.enabled==true)]",
             opt.tracing.jaeger,
-            "$.tracing.jaeger[?(@..endpoint)]",
+            "$.tracing.jaeger[?(@.enabled==true)]",
             opt.tracing.zipkin,
-            "$.tracing.zipkin[?(@.endpoint)]"
+            "$.tracing.zipkin[?(@.enabled==true)]"
         );
         log_usage_metrics!(
             value.apollo.router.config.batching,

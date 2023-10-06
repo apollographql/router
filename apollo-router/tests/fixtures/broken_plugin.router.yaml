@@ -13,6 +13,7 @@ telemetry:
     trace_config:
       service_name: router
     jaeger:
+      enabled: true
       batch_processor:
         scheduled_delay: 100ms
       agent:

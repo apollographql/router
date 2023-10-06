@@ -2073,19 +2073,6 @@ expression: "&schema"
           "properties": {
             "batch_processor": {
               "description": "Configuration for batch processing.",
-              "default": {
-                "scheduled_delay": {
-                  "secs": 5,
-                  "nanos": 0
-                },
-                "max_queue_size": 2048,
-                "max_export_batch_size": 512,
-                "max_export_timeout": {
-                  "secs": 30,
-                  "nanos": 0
-                },
-                "max_concurrent_exports": 1
-              },
               "type": "object",
               "properties": {
                 "max_concurrent_exports": {
@@ -2194,8 +2181,7 @@ expression: "&schema"
                           }
                         },
                         "additionalProperties": false
-                      },
-                      "nullable": true
+                      }
                     }
                   },
                   "additionalProperties": false
@@ -2343,8 +2329,7 @@ expression: "&schema"
               ]
             }
           },
-          "additionalProperties": false,
-          "nullable": true
+          "additionalProperties": false
         },
         "experimental_logging": {
           "description": "Logging configuration",
@@ -2553,8 +2538,7 @@ expression: "&schema"
                                   }
                                 },
                                 "additionalProperties": false
-                              },
-                              "nullable": true
+                              }
                             },
                             "errors": {
                               "description": "Configuration to forward values from the error to custom attributes/labels in metrics",
@@ -2640,17 +2624,16 @@ expression: "&schema"
                                       }
                                     },
                                     "additionalProperties": false
-                                  },
-                                  "nullable": true
+                                  }
                                 },
                                 "include_messages": {
                                   "description": "Will include the error message in a \"message\" attribute",
-                                  "default": false,
-                                  "type": "boolean"
+                                  "default": null,
+                                  "type": "boolean",
+                                  "nullable": true
                                 }
                               },
-                              "additionalProperties": false,
-                              "nullable": true
+                              "additionalProperties": false
                             },
                             "request": {
                               "description": "Configuration to forward headers or body values from the request to custom attributes/labels in metrics",
@@ -2736,8 +2719,7 @@ expression: "&schema"
                                       }
                                     },
                                     "additionalProperties": false
-                                  },
-                                  "nullable": true
+                                  }
                                 },
                                 "header": {
                                   "description": "Forward header values as custom attributes/labels in metrics",
@@ -2838,12 +2820,10 @@ expression: "&schema"
                                         "additionalProperties": false
                                       }
                                     ]
-                                  },
-                                  "nullable": true
+                                  }
                                 }
                               },
-                              "additionalProperties": false,
-                              "nullable": true
+                              "additionalProperties": false
                             },
                             "response": {
                               "description": "Configuration to forward headers or body values from the response to custom attributes/labels in metrics",
@@ -2929,8 +2909,7 @@ expression: "&schema"
                                       }
                                     },
                                     "additionalProperties": false
-                                  },
-                                  "nullable": true
+                                  }
                                 },
                                 "header": {
                                   "description": "Forward header values as custom attributes/labels in metrics",
@@ -3031,12 +3010,10 @@ expression: "&schema"
                                         "additionalProperties": false
                                       }
                                     ]
-                                  },
-                                  "nullable": true
+                                  }
                                 }
                               },
-                              "additionalProperties": false,
-                              "nullable": true
+                              "additionalProperties": false
                             },
                             "static": {
                               "description": "Configuration to insert custom attributes/labels in metrics",
@@ -3113,12 +3090,10 @@ expression: "&schema"
                                   }
                                 },
                                 "additionalProperties": false
-                              },
-                              "nullable": true
+                              }
                             }
                           },
-                          "additionalProperties": false,
-                          "nullable": true
+                          "additionalProperties": false
                         },
                         "subgraphs": {
                           "description": "Attributes per subgraph",
@@ -3207,8 +3182,7 @@ expression: "&schema"
                                     }
                                   },
                                   "additionalProperties": false
-                                },
-                                "nullable": true
+                                }
                               },
                               "errors": {
                                 "description": "Configuration to forward values from the error to custom attributes/labels in metrics",
@@ -3294,17 +3268,16 @@ expression: "&schema"
                                         }
                                       },
                                       "additionalProperties": false
-                                    },
-                                    "nullable": true
+                                    }
                                   },
                                   "include_messages": {
                                     "description": "Will include the error message in a \"message\" attribute",
-                                    "default": false,
-                                    "type": "boolean"
+                                    "default": null,
+                                    "type": "boolean",
+                                    "nullable": true
                                   }
                                 },
-                                "additionalProperties": false,
-                                "nullable": true
+                                "additionalProperties": false
                               },
                               "request": {
                                 "description": "Configuration to forward headers or body values from the request to custom attributes/labels in metrics",
@@ -3390,8 +3363,7 @@ expression: "&schema"
                                         }
                                       },
                                       "additionalProperties": false
-                                    },
-                                    "nullable": true
+                                    }
                                   },
                                   "header": {
                                     "description": "Forward header values as custom attributes/labels in metrics",
@@ -3492,12 +3464,10 @@ expression: "&schema"
                                           "additionalProperties": false
                                         }
                                       ]
-                                    },
-                                    "nullable": true
+                                    }
                                   }
                                 },
-                                "additionalProperties": false,
-                                "nullable": true
+                                "additionalProperties": false
                               },
                               "response": {
                                 "description": "Configuration to forward headers or body values from the response to custom attributes/labels in metrics",
@@ -3583,8 +3553,7 @@ expression: "&schema"
                                         }
                                       },
                                       "additionalProperties": false
-                                    },
-                                    "nullable": true
+                                    }
                                   },
                                   "header": {
                                     "description": "Forward header values as custom attributes/labels in metrics",
@@ -3685,12 +3654,10 @@ expression: "&schema"
                                           "additionalProperties": false
                                         }
                                       ]
-                                    },
-                                    "nullable": true
+                                    }
                                   }
                                 },
-                                "additionalProperties": false,
-                                "nullable": true
+                                "additionalProperties": false
                               },
                               "static": {
                                 "description": "Configuration to insert custom attributes/labels in metrics",
@@ -3767,17 +3734,14 @@ expression: "&schema"
                                     }
                                   },
                                   "additionalProperties": false
-                                },
-                                "nullable": true
+                                }
                               }
                             },
                             "additionalProperties": false
-                          },
-                          "nullable": true
+                          }
                         }
                       },
-                      "additionalProperties": false,
-                      "nullable": true
+                      "additionalProperties": false
                     },
                     "supergraph": {
                       "description": "Configuration to forward header values or body values from router request/response in metric attributes/labels",
@@ -3863,8 +3827,7 @@ expression: "&schema"
                               }
                             },
                             "additionalProperties": false
-                          },
-                          "nullable": true
+                          }
                         },
                         "errors": {
                           "description": "Configuration to forward values from the error to custom attributes/labels in metrics",
@@ -3950,17 +3913,16 @@ expression: "&schema"
                                   }
                                 },
                                 "additionalProperties": false
-                              },
-                              "nullable": true
+                              }
                             },
                             "include_messages": {
                               "description": "Will include the error message in a \"message\" attribute",
-                              "default": false,
-                              "type": "boolean"
+                              "default": null,
+                              "type": "boolean",
+                              "nullable": true
                             }
                           },
-                          "additionalProperties": false,
-                          "nullable": true
+                          "additionalProperties": false
                         },
                         "request": {
                           "description": "Configuration to forward headers or body values from the request to custom attributes/labels in metrics",
@@ -4046,8 +4008,7 @@ expression: "&schema"
                                   }
                                 },
                                 "additionalProperties": false
-                              },
-                              "nullable": true
+                              }
                             },
                             "header": {
                               "description": "Forward header values as custom attributes/labels in metrics",
@@ -4148,12 +4109,10 @@ expression: "&schema"
                                     "additionalProperties": false
                                   }
                                 ]
-                              },
-                              "nullable": true
+                              }
                             }
                           },
-                          "additionalProperties": false,
-                          "nullable": true
+                          "additionalProperties": false
                         },
                         "response": {
                           "description": "Configuration to forward headers or body values from the response to custom attributes/labels in metrics",
@@ -4239,8 +4198,7 @@ expression: "&schema"
                                   }
                                 },
                                 "additionalProperties": false
-                              },
-                              "nullable": true
+                              }
                             },
                             "header": {
                               "description": "Forward header values as custom attributes/labels in metrics",
@@ -4341,12 +4299,10 @@ expression: "&schema"
                                     "additionalProperties": false
                                   }
                                 ]
-                              },
-                              "nullable": true
+                              }
                             }
                           },
-                          "additionalProperties": false,
-                          "nullable": true
+                          "additionalProperties": false
                         },
                         "static": {
                           "description": "Configuration to insert custom attributes/labels in metrics",
@@ -4423,16 +4379,13 @@ expression: "&schema"
                               }
                             },
                             "additionalProperties": false
-                          },
-                          "nullable": true
+                          }
                         }
                       },
-                      "additionalProperties": false,
-                      "nullable": true
+                      "additionalProperties": false
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "buckets": {
                   "description": "Custom buckets for histograms",
@@ -4494,31 +4447,17 @@ expression: "&schema"
                   "nullable": true
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             },
             "otlp": {
               "description": "Open Telemetry native exporter configuration",
               "type": "object",
               "required": [
-                "endpoint"
+                "enabled"
               ],
               "properties": {
                 "batch_processor": {
                   "description": "Batch processor settings",
-                  "default": {
-                    "scheduled_delay": {
-                      "secs": 5,
-                      "nanos": 0
-                    },
-                    "max_queue_size": 2048,
-                    "max_export_batch_size": 512,
-                    "max_export_timeout": {
-                      "secs": 30,
-                      "nanos": 0
-                    },
-                    "max_concurrent_exports": 1
-                  },
                   "type": "object",
                   "properties": {
                     "max_concurrent_exports": {
@@ -4559,6 +4498,10 @@ expression: "&schema"
                       "type": "string"
                     }
                   }
+                },
+                "enabled": {
+                  "description": "Enable otlp",
+                  "type": "boolean"
                 },
                 "endpoint": {
                   "description": "The endpoint to send data to",
@@ -4656,18 +4599,15 @@ expression: "&schema"
                   ]
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             },
             "prometheus": {
               "description": "Prometheus exporter configuration",
               "type": "object",
-              "required": [
-                "enabled"
-              ],
               "properties": {
                 "enabled": {
                   "description": "Set to true to enable",
+                  "default": false,
                   "type": "boolean"
                 },
                 "listen": {
@@ -4690,12 +4630,10 @@ expression: "&schema"
                   "type": "string"
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             }
           },
-          "additionalProperties": false,
-          "nullable": true
+          "additionalProperties": false
         },
         "tracing": {
           "description": "Tracing configuration",
@@ -4705,24 +4643,11 @@ expression: "&schema"
               "description": "Datadog exporter configuration",
               "type": "object",
               "required": [
-                "endpoint"
+                "enabled"
               ],
               "properties": {
                 "batch_processor": {
                   "description": "batch processor configuration",
-                  "default": {
-                    "scheduled_delay": {
-                      "secs": 5,
-                      "nanos": 0
-                    },
-                    "max_queue_size": 2048,
-                    "max_export_batch_size": 512,
-                    "max_export_timeout": {
-                      "secs": 30,
-                      "nanos": 0
-                    },
-                    "max_concurrent_exports": 1
-                  },
                   "type": "object",
                   "properties": {
                     "max_concurrent_exports": {
@@ -4769,14 +4694,16 @@ expression: "&schema"
                   "default": false,
                   "type": "boolean"
                 },
+                "enabled": {
+                  "description": "Enable datadog",
+                  "type": "boolean"
+                },
                 "endpoint": {
                   "description": "The endpoint to send to",
-                  "default": "default",
                   "type": "string"
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             },
             "experimental_response_trace_id": {
               "description": "A way to expose trace id in response headers",
@@ -4801,19 +4728,15 @@ expression: "&schema"
                 {
                   "type": "object",
                   "required": [
-                    "agent"
+                    "enabled"
                   ],
                   "properties": {
                     "agent": {
                       "description": "Agent configuration",
                       "type": "object",
-                      "required": [
-                        "endpoint"
-                      ],
                       "properties": {
                         "endpoint": {
                           "description": "The endpoint to send to",
-                          "default": "default",
                           "type": "string"
                         }
                       },
@@ -4821,19 +4744,6 @@ expression: "&schema"
                     },
                     "batch_processor": {
                       "description": "Batch processor configuration",
-                      "default": {
-                        "scheduled_delay": {
-                          "secs": 5,
-                          "nanos": 0
-                        },
-                        "max_queue_size": 2048,
-                        "max_export_batch_size": 512,
-                        "max_export_timeout": {
-                          "secs": 30,
-                          "nanos": 0
-                        },
-                        "max_concurrent_exports": 1
-                      },
                       "type": "object",
                       "properties": {
                         "max_concurrent_exports": {
@@ -4874,6 +4784,10 @@ expression: "&schema"
                           "type": "string"
                         }
                       }
+                    },
+                    "enabled": {
+                      "description": "Enable Jaeger",
+                      "type": "boolean"
                     }
                   },
                   "additionalProperties": false
@@ -4881,24 +4795,11 @@ expression: "&schema"
                 {
                   "type": "object",
                   "required": [
-                    "collector"
+                    "enabled"
                   ],
                   "properties": {
                     "batch_processor": {
                       "description": "Batch processor configuration",
-                      "default": {
-                        "scheduled_delay": {
-                          "secs": 5,
-                          "nanos": 0
-                        },
-                        "max_queue_size": 2048,
-                        "max_export_batch_size": 512,
-                        "max_export_timeout": {
-                          "secs": 30,
-                          "nanos": 0
-                        },
-                        "max_concurrent_exports": 1
-                      },
                       "type": "object",
                       "properties": {
                         "max_concurrent_exports": {
@@ -4943,56 +4844,44 @@ expression: "&schema"
                     "collector": {
                       "description": "Collector configuration",
                       "type": "object",
-                      "required": [
-                        "endpoint"
-                      ],
                       "properties": {
                         "endpoint": {
                           "description": "The endpoint to send reports to",
-                          "type": "string",
-                          "format": "uri"
+                          "type": "string"
                         },
                         "password": {
                           "description": "The optional password",
+                          "default": null,
                           "type": "string",
                           "nullable": true
                         },
                         "username": {
                           "description": "The optional username",
+                          "default": null,
                           "type": "string",
                           "nullable": true
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "enabled": {
+                      "description": "Enable Jaeger",
+                      "type": "boolean"
                     }
                   },
                   "additionalProperties": false
                 }
-              ],
-              "nullable": true
+              ]
             },
             "otlp": {
               "description": "OpenTelemetry native exporter configuration",
               "type": "object",
               "required": [
-                "endpoint"
+                "enabled"
               ],
               "properties": {
                 "batch_processor": {
                   "description": "Batch processor settings",
-                  "default": {
-                    "scheduled_delay": {
-                      "secs": 5,
-                      "nanos": 0
-                    },
-                    "max_queue_size": 2048,
-                    "max_export_batch_size": 512,
-                    "max_export_timeout": {
-                      "secs": 30,
-                      "nanos": 0
-                    },
-                    "max_concurrent_exports": 1
-                  },
                   "type": "object",
                   "properties": {
                     "max_concurrent_exports": {
@@ -5033,6 +4922,10 @@ expression: "&schema"
                       "type": "string"
                     }
                   }
+                },
+                "enabled": {
+                  "description": "Enable otlp",
+                  "type": "boolean"
                 },
                 "endpoint": {
                   "description": "The endpoint to send data to",
@@ -5130,8 +5023,7 @@ expression: "&schema"
                   ]
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             },
             "propagation": {
               "description": "Propagation configuration",
@@ -5182,8 +5074,7 @@ expression: "&schema"
                   "type": "boolean"
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             },
             "trace_config": {
               "description": "Common configuration",
@@ -5330,28 +5221,17 @@ expression: "&schema"
                   "type": "string"
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             },
             "zipkin": {
               "description": "Zipkin exporter configuration",
               "type": "object",
+              "required": [
+                "enabled"
+              ],
               "properties": {
                 "batch_processor": {
                   "description": "Batch processor configuration",
-                  "default": {
-                    "scheduled_delay": {
-                      "secs": 5,
-                      "nanos": 0
-                    },
-                    "max_queue_size": 2048,
-                    "max_export_batch_size": 512,
-                    "max_export_timeout": {
-                      "secs": 30,
-                      "nanos": 0
-                    },
-                    "max_concurrent_exports": 1
-                  },
                   "type": "object",
                   "properties": {
                     "max_concurrent_exports": {
@@ -5393,18 +5273,19 @@ expression: "&schema"
                     }
                   }
                 },
+                "enabled": {
+                  "description": "Enable zipkin",
+                  "type": "boolean"
+                },
                 "endpoint": {
                   "description": "The endpoint to send to",
-                  "default": "default",
                   "type": "string"
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             }
           },
-          "additionalProperties": false,
-          "nullable": true
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

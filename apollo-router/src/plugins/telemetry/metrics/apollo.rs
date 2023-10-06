@@ -39,6 +39,10 @@ fn default_buckets() -> Vec<f64> {
 static ROUTER_ID: OnceLock<Uuid> = OnceLock::new();
 
 impl MetricsConfigurator for Config {
+    fn enabled(&self) -> bool {
+        self.apollo_key.is_some() && self.apollo_graph_ref.is_some()
+    }
+
     fn apply(
         &self,
         mut builder: MetricsBuilder,
@@ -406,10 +410,8 @@ mod test {
     ) -> Result<Telemetry, BoxError> {
         Telemetry::new(PluginInit::fake_new(
             config::Conf {
-                logging: Default::default(),
-                metrics: None,
-                tracing: None,
-                apollo: Some(apollo_config),
+                apollo: apollo_config,
+                ..Default::default()
             },
             Default::default(),
         ))

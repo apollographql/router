@@ -179,25 +179,25 @@ enum TreeData {
 #[buildstructor::buildstructor]
 impl Exporter {
     #[builder]
-    pub(crate) fn new(
-        endpoint: Url,
-        apollo_key: String,
-        apollo_graph_ref: String,
-        schema_id: String,
+    pub(crate) fn new<'a>(
+        endpoint: &'a Url,
+        apollo_key: &'a str,
+        apollo_graph_ref: &'a str,
+        schema_id: &'a str,
         buffer_size: NonZeroUsize,
-        field_execution_sampler: SamplerOption,
-        errors_configuration: Option<ErrorsConfiguration>,
-        batch_config: BatchProcessorConfig,
+        field_execution_sampler: &'a SamplerOption,
+        errors_configuration: &'a ErrorsConfiguration,
+        batch_config: &'a BatchProcessorConfig,
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");
         Ok(Self {
             spans_by_parent_id: LruCache::new(buffer_size),
             report_exporter: Arc::new(ApolloExporter::new(
-                &endpoint,
-                &batch_config,
-                &apollo_key,
-                &apollo_graph_ref,
-                &schema_id,
+                endpoint,
+                batch_config,
+                apollo_key,
+                apollo_graph_ref,
+                schema_id,
             )?),
 
             field_execution_weight: match field_execution_sampler {
@@ -205,7 +205,7 @@ impl Exporter {
                 SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
                 SamplerOption::TraceIdRatioBased(ratio) => 1.0 / ratio,
             },
-            errors_configuration: errors_configuration.unwrap_or_default(),
+            errors_configuration: errors_configuration.clone(),
         })
     }
 
