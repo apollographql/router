@@ -425,20 +425,14 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
             let start = Instant::now();
 
             let compiler = match context.private_entries.lock().get::<Compiler>() {
-                None => {
-                    return Err(QueryPlannerError::SpecError(SpecError::ParsingError(
-                        "missing compiler".to_string(),
-                    )))
-                }
+                None => return Err(QueryPlannerError::SpecError(SpecError::UnknownFileId)),
                 Some(c) => c.0.clone(),
             };
             let mut compiler_guard = compiler.lock().await;
             let file_id = compiler_guard
                 .db
                 .source_file(QUERY_EXECUTABLE.into())
-                .ok_or(QueryPlannerError::SpecError(SpecError::ParsingError(
-                    "missing input file for query".to_string(),
-                )))?;
+                .ok_or(QueryPlannerError::SpecError(SpecError::UnknownFileId))?;
 
             match add_defer_labels(file_id, &compiler_guard) {
                 Err(e) => {
