@@ -1,6 +1,7 @@
 //! Router errors.
 use std::sync::Arc;
 
+use apollo_compiler::ApolloDiagnostic;
 use displaydoc::Display;
 use lazy_static::__Deref;
 use router_bridge::introspect::IntrospectionError;
@@ -267,6 +268,9 @@ pub(crate) enum QueryPlannerError {
     /// couldn't instantiate query planner; invalid schema: {0}
     SchemaValidationErrors(PlannerErrors),
 
+    /// invalid query
+    OperationValidationErrors(Vec<apollo_compiler::GraphQLError>),
+
     /// couldn't plan query: {0}
     PlanningErrors(PlanErrors),
 
@@ -298,6 +302,29 @@ pub(crate) enum QueryPlannerError {
     Unauthorized(Vec<Path>),
 }
 
+impl IntoGraphQLErrors for Vec<apollo_compiler::GraphQLError> {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        Ok(self
+            .into_iter()
+            .map(|err| {
+                Error::builder()
+                    .message(err.message)
+                    .locations(
+                        err.locations
+                            .into_iter()
+                            .map(|location| ErrorLocation {
+                                line: location.line as u32,
+                                column: location.column as u32,
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .extension_code("GRAPHQL_VALIDATION_FAILED")
+                    .build()
+            })
+            .collect())
+    }
+}
+
 impl IntoGraphQLErrors for QueryPlannerError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
@@ -319,6 +346,9 @@ impl IntoGraphQLErrors for QueryPlannerError {
             QueryPlannerError::SchemaValidationErrors(errs) => errs
                 .into_graphql_errors()
                 .map_err(QueryPlannerError::SchemaValidationErrors),
+            QueryPlannerError::OperationValidationErrors(errs) => errs
+                .into_graphql_errors()
+                .map_err(QueryPlannerError::OperationValidationErrors),
             QueryPlannerError::PlanningErrors(planning_errors) => Ok(planning_errors
                 .errors
                 .iter()
@@ -433,15 +463,20 @@ impl From<CacheResolverError> for QueryPlannerError {
 
 impl From<SpecError> for QueryPlannerError {
     fn from(err: SpecError) -> Self {
-        QueryPlannerError::SpecError(err)
+        match err {
+            SpecError::ValidationError(errors) => {
+                QueryPlannerError::OperationValidationErrors(errors)
+            }
+            _ => QueryPlannerError::SpecError(err),
+        }
     }
 }
 
 impl From<ValidationErrors> for QueryPlannerError {
     fn from(err: ValidationErrors) -> Self {
-        // This needs to be serializable, so eagerly stringify the non-serializable
-        // ApolloDiagnostics.
-        QueryPlannerError::SpecError(SpecError::ValidationError(err.to_string()))
+        QueryPlannerError::OperationValidationErrors(
+            err.errors.iter().map(ApolloDiagnostic::to_json).collect(),
+        )
     }
 }
 
@@ -550,27 +585,27 @@ pub(crate) struct ValidationErrors {
 
 impl IntoGraphQLErrors for ValidationErrors {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
-        let errors = self
+        Ok(self
             .errors
-            .iter()
-            .map(|error| {
-                let error = error.to_json();
-                Error {
-                    message: error.message,
-                    locations: error
-                        .locations
-                        .into_iter()
-                        .map(|location| ErrorLocation {
-                            line: location.line as u32,
-                            column: location.column as u32,
-                        })
-                        .collect(),
-                    path: Default::default(),
-                    extensions: Default::default(),
-                }
+            .into_iter()
+            .map(|diagnostic| {
+                Error::builder()
+                    .message(diagnostic.data.to_string())
+                    .locations(
+                        diagnostic
+                            .get_line_column()
+                            .map(|location| {
+                                vec![ErrorLocation {
+                                    line: location.line as u32,
+                                    column: location.column as u32,
+                                }]
+                            })
+                            .unwrap_or_default(),
+                    )
+                    .extension_code("GRAPHQL_VALIDATION_FAILED")
+                    .build()
             })
-            .collect::<Vec<_>>();
-        Ok(errors)
+            .collect())
     }
 }
 

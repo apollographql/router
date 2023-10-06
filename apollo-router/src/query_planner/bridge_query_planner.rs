@@ -212,11 +212,7 @@ impl BridgeQueryPlanner {
         let file_id = compiler_guard
             .db
             .source_file(QUERY_EXECUTABLE.into())
-            .ok_or_else(|| {
-                QueryPlannerError::SpecError(SpecError::ValidationError(
-                    "missing input file for query".to_string(),
-                ))
-            })?;
+            .ok_or_else(|| QueryPlannerError::SpecError(SpecError::UnknownFileId))?;
 
         Query::check_errors(&compiler_guard, file_id)?;
         let validation_error = match self.configuration.experimental_graphql_validation_mode {
