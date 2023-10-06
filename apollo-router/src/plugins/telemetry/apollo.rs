@@ -6,7 +6,6 @@ use std::ops::AddAssign;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use derivative::Derivative;
 use http::header::HeaderName;
 use itertools::Itertools;
 use schemars::JsonSchema;
@@ -36,59 +35,72 @@ pub(crate) const ENDPOINT_DEFAULT: &str =
 
 pub(crate) const OTLP_ENDPOINT_DEFAULT: &str = "https://usage-reporting.api.apollographql.com";
 
-#[derive(Derivative)]
-#[derivative(Debug)]
-#[derive(Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "String", default = "endpoint_default")]
+    #[serde(default = "endpoint_default")]
     pub(crate) endpoint: Url,
 
     /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "String", default = "otlp_endpoint_default")]
+    #[serde(default = "otlp_endpoint_default")]
     pub(crate) experimental_otlp_endpoint: Url,
 
     /// The Apollo Studio API key.
     #[schemars(skip)]
-    #[serde(skip)]
+    #[serde(default = "apollo_key")]
     pub(crate) apollo_key: Option<String>,
 
     /// The Apollo Studio graph reference.
     #[schemars(skip)]
-    #[serde(skip)]
+    #[serde(default = "apollo_graph_reference")]
     pub(crate) apollo_graph_ref: Option<String>,
 
     /// The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.
     #[schemars(with = "Option<String>", default = "client_name_header_default_str")]
-    #[serde(deserialize_with = "deserialize_header_name")]
+    #[serde(
+        deserialize_with = "deserialize_header_name",
+        default = "client_name_header_default"
+    )]
     pub(crate) client_name_header: HeaderName,
 
     /// The name of the header to extract from requests when populating 'client version' for traces and metrics in Apollo Studio.
     #[schemars(with = "Option<String>", default = "client_version_header_default_str")]
-    #[serde(deserialize_with = "deserialize_header_name")]
+    #[serde(
+        deserialize_with = "deserialize_header_name",
+        default = "client_version_header_default"
+    )]
     pub(crate) client_version_header: HeaderName,
 
     /// The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.
+    #[serde(default = "default_buffer_size")]
     pub(crate) buffer_size: NonZeroUsize,
 
     /// Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
+    #[serde(default = "default_field_level_instrumentation_sampler")]
     pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
+    #[serde(default)]
     pub(crate) send_headers: ForwardHeaders,
     /// To configure which GraphQL variable values are included in trace data that's sent to Apollo Studio
+    #[serde(default)]
     pub(crate) send_variable_values: ForwardValues,
 
     // This'll get overridden if a user tries to set it.
     // The purpose is to allow is to pass this in to the plugin.
     #[schemars(skip)]
+    #[serde(default)]
     pub(crate) schema_id: String,
 
     /// Configuration for batch processing.
+    #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
 
     /// Configure the way errors are transmitted to Apollo Studio
+    #[serde(default)]
     pub(crate) errors: ErrorsConfiguration,
 }
 
@@ -105,15 +117,17 @@ pub(crate) struct SubgraphErrorConfig {
     /// Handling of errors coming from all subgraphs
     pub(crate) all: ErrorConfiguration,
     /// Handling of errors coming from specified subgraphs
-    pub(crate) subgraphs: Option<HashMap<String, ErrorConfiguration>>,
+    pub(crate) subgraphs: HashMap<String, ErrorConfiguration>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ErrorConfiguration {
     /// Send subgraph errors to Apollo Studio
+    #[serde(default = "default_send_errors")]
     pub(crate) send: bool,
     /// Redact subgraph errors to Apollo Studio
+    #[serde(default = "default_redact_errors")]
     pub(crate) redact: bool,
 }
 
@@ -128,7 +142,7 @@ impl Default for ErrorConfiguration {
 
 impl SubgraphErrorConfig {
     pub(crate) fn get_error_config(&self, subgraph: &str) -> &ErrorConfiguration {
-        if let Some(subgraph_conf) = self.subgraphs.as_ref().and_then(|s| s.get(subgraph)) {
+        if let Some(subgraph_conf) = self.subgraphs.get(subgraph) {
             subgraph_conf
         } else {
             &self.all
