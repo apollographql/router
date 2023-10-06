@@ -55,10 +55,11 @@ pub(crate) struct Config {
 }
 
 impl TracingConfigurator for Config {
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
+
     fn apply(&self, builder: Builder, trace: &Trace) -> Result<Builder, BoxError> {
-        if !self.enabled {
-            return Ok(builder);
-        }
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
         let enable_span_mapping = self.enable_span_mapping.then_some(true);
         let trace_config: sdk::trace::Config = trace.into();

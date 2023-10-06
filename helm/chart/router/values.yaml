@@ -232,3 +232,6 @@ probes:
   # -- Configure liveness probe
   liveness:
     initialDelaySeconds: 0
+
+# -- Sets the [topology spread constraints](https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/) for Deployment pods
+topologySpreadConstraints: []
