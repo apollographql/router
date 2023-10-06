@@ -3,17 +3,17 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-# Anything we set here applies to the in-house-router chart, and 
-# all configuration that we set here is pushed to all sub-charts
-# (because of the way Helm works:
-#  https://helm.sh/docs/chart_template_guide/subcharts_and_globals/)
+# Anything set here applies to the in-house-router chart, and 
+# all configuration that set here is pushed to all sub-charts
+# because of the way Helm works:
+#  https://helm.sh/docs/chart_template_guide/subcharts_and_globals/
 
 # Set fullnameOverride here for virtualservice to use
 fullnameOverride: router
 
 router:
   serviceAccount:
-    # We do that ourselves in permissions.yaml
+    # The service account is created permissions.yaml
     create: false
     name: router
   fullnameOverride: router
@@ -30,12 +30,12 @@ router:
           timeout: 5min
       supergraph:
         introspection: true
-        # We are intentionally DISABLING DEFER SUPPORT in the Router until
-        # we are out of our transition period from the Gateway to the Router.
+        #  this intentionally disables `@defer` support in the router until
+        # until the transition from the gateway to the router is complete.
         defer_support: false
         listen: 0.0.0.0:80
         path: /graphql
-      # We keep subgraph errors on in our own environment, always.
+      # We recommend keeping subgraph errors on in your own environment, always.
       include_subgraph_errors:
         all: true
       cors:
@@ -101,7 +101,7 @@ router:
             endpoint: "${env.NODE_IP}:4317"
         # Enabling this both includes the `apollo-trace-id` value on the HTTP response,
         # but also creates "Response Header" nodes in the trace that we send to Studio.
-        # This should allow us to correlate traces from Studio to logs:
+        # This allows us to correlate traces from Studio to logs:
         # https://www.apollographql.com/docs/router/configuration/tracing/#trace-id
         tracing:
           propagation:
@@ -166,7 +166,7 @@ router:
   extraVolumes:
     - name: rhai-volume
       configMap:
-        # Provide the name of the ConfigMap containing the files you want
+        # Provide the name of the ConfigMap containing the files
         # to add to the container
         name: rhai-config
   probes:

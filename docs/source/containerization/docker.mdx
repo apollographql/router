@@ -1,23 +1,23 @@
 ---
 title: Run in Docker
-description: Run the Apollo Router in Docker
+description: Run the Apollo Router container image in Docker
 ---
 
 import { Link } from "gatsby";
 import ElasticNotice from '../../shared/elastic-notice.mdx';
 
-Follow examples in this guide to learn how to run an Apollo Router container image in Docker:
+This guide provides the following examples of running an Apollo Router container image in Docker:
 
 * Run with default configuration.
-* Customize your configuration to override the default configuration.
+* Customizing your configuration to override the default configuration.
 * Debug your containerized router.
-* Build your own router Docker image.
+* Building your own router Docker image.
 
 <ElasticNotice />
 
 > **Notes**
 > * The [documentation](https://docs.docker.com/engine/reference/run/) for the `docker run` command is a helpful reference for the examples in this guide.
-> * The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace `<image version>` with your chosen version, for example `v1.32.0`
+> * The exact image version to use depends on which release you wish to use. In the following examples, replace `<image version>` with your chosen version, for example `v1.32.0`.
 
 ## Basic example running router in Docker
 
@@ -31,7 +31,7 @@ To run the router, your Docker container must have the `APOLLO_GRAPH_REF` and `A
 
 - Set your `APOLLO_GRAPH_REF` and `APOLLO_KEY` 
 
-Here's a basic example of running a router image in Docker (make sure to replace `<image version>` with whichever version you want to use, such as `v1.4.0`):
+Here's a basic example of running a router image in Docker. Make sure to replace `<image version>` with whichever version you want to use, such as `v1.4.0`.
 
 ```bash title="Docker"
 docker run -p 4000:4000 \
@@ -43,7 +43,7 @@ docker run -p 4000:4000 \
 
 This command downloads your supergraph schema from Apollo and uses a default configuration that listens for connections on port `4000`.
 
-For more complex configuration (such as overriding subgraph URLs or propagating headers), see [Configuring the Apollo Router](../configuration/overview/).
+For more complex configurations, such as overriding subgraph URLs or propagating headers, see [Configuring the Apollo Router](../configuration/overview/).
 
 ## Override the configuration
 
@@ -113,7 +113,7 @@ docker run -p 4000:4000 \
   ghcr.io/apollographql/router:<image version>-debug
 ```
 
-The router will run under the control of heaptrack. The heaptrack output will be saved to the `/data` directory. The output can be analyzed directly using `heaptrack_gui` or `heaptrack_print` or shared with Apollo support.
+The router runs under the control of [heaptrack](https://github.com/KDE/heaptrack). The heaptrack output is saved to the `/data` directory. The output can be analyzed directly using `heaptrack_gui` or `heaptrack_print` or shared with Apollo support.
 
 ## Specifying the supergraph
 
