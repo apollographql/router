@@ -216,16 +216,17 @@ dependencies = [
 
 [[package]]
 name = "apollo-compiler"
-version = "0.11.2"
+version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9c5a0aa9cc4b5f9fc4aec3ecd76f4acc4407922c3c0e862b87f1c761c96a9bf"
+checksum = "bb2436eb22464134efc641e508b33229361b27a3d5b6f03242b66b170ab8786c"
 dependencies = [
- "apollo-parser 0.6.2",
+ "apollo-parser 0.6.3",
  "ariadne",
  "indexmap 2.0.2",
- "ordered-float 3.9.0",
+ "ordered-float 4.1.0",
  "rowan",
  "salsa",
+ "serde",
  "thiserror",
  "uuid",
 ]
@@ -236,8 +237,8 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b323dfc43b95a8806a401aed913e84db297162c6295bca620c0f57956cdb52cf"
 dependencies = [
- "apollo-compiler 0.11.2",
- "apollo-parser 0.6.2",
+ "apollo-compiler 0.11.3",
+ "apollo-parser 0.6.3",
  "thiserror",
 ]
 
@@ -253,9 +254,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-parser"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e565c10133fbefa3cc9ac6c940bbfc2ed6086def9ec39b0f87a86cf9499aadd2"
+checksum = "4b3cd0ce63c32c83e035757af12e3ae30566ce5d1ae183c02a2dd089a0df65aa"
 dependencies = [
  "memchr",
  "rowan",
@@ -268,9 +269,9 @@ version = "1.32.0"
 dependencies = [
  "access-json",
  "anyhow",
- "apollo-compiler 0.11.2",
+ "apollo-compiler 0.11.3",
  "apollo-encoder",
- "apollo-parser 0.6.2",
+ "apollo-parser 0.6.3",
  "arc-swap",
  "askama",
  "async-compression",
@@ -415,7 +416,7 @@ dependencies = [
 name = "apollo-router-benchmarks"
 version = "1.32.0"
 dependencies = [
- "apollo-parser 0.6.2",
+ "apollo-parser 0.6.3",
  "apollo-router",
  "apollo-smith",
  "arbitrary",
@@ -448,7 +449,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13ed94bb9de9f24da12ca2122b8eeaa7484d17b090dc84daaaba6b6ac2bee89b"
 dependencies = [
  "apollo-encoder",
- "apollo-parser 0.6.2",
+ "apollo-parser 0.6.3",
  "arbitrary",
  "once_cell",
  "thiserror",
@@ -4498,6 +4499,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ordered-float"
+version = "4.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a540f3e3b3d7929c884e46d093d344e4e5bdeed54d08bf007df50c93cc85d5"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "outref"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5447,7 +5457,7 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
- "apollo-parser 0.6.2",
+ "apollo-parser 0.6.3",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",
