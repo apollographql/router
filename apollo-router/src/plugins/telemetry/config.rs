@@ -139,7 +139,7 @@ impl Default for MetricsCommon {
 
 /// Tracing configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Tracing {
     // TODO: when deleting the `experimental_` prefix, check the usage when enabling dev mode
     // When deleting, put a #[serde(alias = "experimental_response_trace_id")] if we don't want to break things
@@ -309,7 +309,7 @@ impl Default for LoggingFormat {
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct ExposeTraceId {
     /// Expose the trace_id in response headers
     pub(crate) enabled: bool,
@@ -341,7 +341,7 @@ pub(crate) struct Propagation {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RequestPropagation {
     /// Choose the header name to expose trace_id (default: apollo-trace-id)
     #[schemars(with = "String")]
