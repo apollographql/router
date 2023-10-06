@@ -335,7 +335,7 @@ For more information, refer to [the coprocessor documentation](../customizations
 ⚠️ **Note**:
 
 - **Most third-party IdP services create and host a JSON Web Key Set (JWKS) for you.** Read this section only if you use a _custom_ IdP that doesn't publish its JWKS at a router-accessible URL.
-- To be compatible with Apollo Router supported JWT authentication, your IdP (or whatever service issues JWTs to authenticated clients) must use one of the signature algorithms supported by the [jsonwebtoken Rust library](https://crates.io/crates/jsonwebtoken). Most popular signing algorithms are supported.
+- To be compatible with Apollo Router supported JWT authentication, your IdP (or whatever service issues JWTs to authenticated clients) must use one of the [signature algorithms](https://crates.io/crates/jsonwebtoken#algorithms) supported by the router. Most popular signing algorithms are supported.
 
 </blockquote>
 
