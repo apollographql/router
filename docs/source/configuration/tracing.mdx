@@ -159,7 +159,7 @@ telemetry:
     datadog:
       enabled: true
       # Optional endpoint, either 'default' or a URL (Defaults to http://localhost:8126/v0.4/traces)
-      endpoint: default
+      endpoint: "http://${env.DATADOG_AGENT_HOST}:8126/v0.4/traces"
 ```
 
 [Given that there are some incompatibilities](https://docs.rs/opentelemetry-datadog/latest/opentelemetry_datadog/#quirks)
@@ -171,7 +171,6 @@ telemetry:
   tracing:
     datadog:
       enabled: true
-      endpoint: default
       enable_span_mapping: true
 ```
 
@@ -229,7 +228,7 @@ telemetry:
       # Optional agent configuration,
       agent:
         # Optional endpoint, either 'default' or a socket address (Defaults to 127.0.0.1:6832)
-        endpoint: default  
+        endpoint: "${env.JAEGER_HOST}:6832"  
 ```
 
 ### Collector config
@@ -242,7 +241,7 @@ telemetry:
       # Optional collector configuration,
       collector:
         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:14268/api/traces)
-        endpoint: default
+        endpoint: "http://${env.JAEGER_HOST}:14268/api/traces"
         username: "${env.JAEGER_USERNAME}"
         password: "${env.JAEGER_PASSWORD}"
 ```
@@ -295,7 +294,7 @@ otlp_config:
   receiver:
     protocols:
       grpc:
-        endpoint: 127.0.0.1:4317
+        endpoint: <dd-agent-ip>:4317
 ```
 
 The router must also be configured to send traces to the Datadog agent:
@@ -307,7 +306,7 @@ telemetry:
       enabled: true
 
       # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
-      endpoint: default
+      endpoint: "${env.DATADOG_AGENT_HOST}:4317"
 ```
 
 See [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host) for more details 
@@ -334,7 +333,7 @@ telemetry:
       enabled: true
 
       # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
-      endpoint: default
+      endpoint: "http://${env.JAEGER_HOST}:4317"
 ```
 
 ## Using Zipkin
@@ -348,5 +347,5 @@ telemetry:
       enabled: true
 
       # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:9411/api/v2/spans)
-      endpoint: default   
+      endpoint: "http://${env.ZIPKIN_HOST}:9411/api/v2/spans}"   
 ```
