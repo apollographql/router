@@ -177,20 +177,24 @@ A deployed coprocessor has its own application image and container in the router
 To configure a coprocessor and its container for your deployed router through a YAML configuration file:
 
 * Create a YAML file, `my_values.yaml`, to contain additional values that override default values.
-* Edit the file to configure a coprocessor for the router. For reference, follow the [typical](../../customizations/coprocessor#typical-configuration) and [minimal](../../customizations/coprocessor#minimal-configuration)  configuration examples, and apply them to `router.configuration.coprocessor`. For example, a typical configuration for a coprocessor: 
+* Edit the file to configure a coprocessor for the router. For reference, follow the [typical](../../customizations/coprocessor#typical-configuration) and [minimal](../../customizations/coprocessor#minimal-configuration)  configuration examples, and apply them to `router.configuration.coprocessor`. 
+
+  <ExpansionPanel title="Example of typical configuration for a coprocessor">
 
   <CoprocTypicalConfig/>
 
+  </ExpansionPanel>
+
 * Edit the file to add a container for the coprocessor.
 
-```yaml title="my_values.yaml"
-extraContainers:
-  - name: <coprocessor-deployed-name> # name of deployed container
-    image: <coprocessor-app-image> # name of application image
-    ports:
-      - containerPort: <coprocessor-container-port> # must match port of router.configuration.coprocessor.url
-    env: [] # array of environment variables
-```
+  ```yaml title="my_values.yaml"
+  extraContainers:
+    - name: <coprocessor-deployed-name> # name of deployed container
+      image: <coprocessor-app-image> # name of application image
+      ports:
+        - containerPort: <coprocessor-container-port> # must match port of router.configuration.coprocessor.url
+      env: [] # array of environment variables
+  ```
 
 * Deploy the router with the additional YAML configuration file. For example, starting with the `helm install` command from the basic deployment step, append `--values my_values.yaml`:
 
@@ -228,21 +232,21 @@ When [migrating from `@apollo/gateway` to the Apollo Router](../migrating-from-g
 
 * The router's timeout is increased to accommodate subgraph operations with high latency.
 
-```yaml title="values.yaml"
-router:
-  configuration:
-    traffic_shaping:
-      router:
-        timeout: 6min
-      all:
-        timeout: 5min
-```
+  ```yaml title="values.yaml"
+  router:
+    configuration:
+      traffic_shaping:
+        router:
+          timeout: 6min
+        all:
+          timeout: 5min
+  ```
 
 * The gateway propagates subgraph errors to clients, but the router doesn't by default, so it needs to be configured to propagate them.
 
-```yaml title="values.yaml"
-router:
-  configuration:
-    include_subgraph_errors:
-      all: true
-```
+  ```yaml title="values.yaml"
+  router:
+    configuration:
+      include_subgraph_errors:
+        all: true
+  ```

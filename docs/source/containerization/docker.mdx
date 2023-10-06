@@ -8,9 +8,10 @@ import ElasticNotice from '../../shared/elastic-notice.mdx';
 
 This guide provides the following examples of running an Apollo Router container image in Docker:
 
-* Running with default configuration.
+* Running a basic example with default configuration.
 * Customizing your configuration to override the default configuration.
 * Debugging your containerized router.
+* Manually specifying a supergraph for your router.
 * Building your own router Docker image.
 
 The [documentation](https://docs.docker.com/engine/reference/run/) for the `docker run` command is a helpful reference for the examples in this guide.
@@ -60,9 +61,9 @@ In this example we are mounting a file from the host system (`/home/user/router.
 
 ## Passing command-line arguments to the router binary
 
-By default, the `router` command invoked inside the published container doesn't set any of the [available command-line options](../configuration/overview#command-line-options). If you want to set any of the available options, pass the desired options at end of the `docker run` command. 
+By default, the `router` command invoked inside the published container doesn't set any of the [available command-line options](../configuration/overview#command-line-options). To set them, append the desired option(s) to the `docker run` command. 
 
-For example, to start the router using the `--log debug` argument, you can use the following `docker run` command:
+For example, to start the router using the `--log debug` option, use the following `docker run` command with the option added at the end:
 
 ```bash {5}
 docker run -p 4000:4000 \
@@ -96,7 +97,7 @@ exit
 
 In this example, we've added both interactive and tty flags, and we've changed the entrypoint of the image to be a bash shell.
 
-## Running the debug container to investigate memory issues
+### Running the debug container to investigate memory issues
 
 ```bash
 docker run -p 4000:4000 \
