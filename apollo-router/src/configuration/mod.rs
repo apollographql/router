@@ -151,11 +151,9 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) apq: Apq,
 
-    // NOTE: when renaming this to move out of preview, also update paths
-    // in `uplink/license.rs`.
     /// Configures managed persisted queries
     #[serde(default)]
-    pub preview_persisted_queries: PersistedQueries,
+    pub persisted_queries: PersistedQueries,
 
     /// Configuration for operation limits, parser limits, HTTP limits, etc.
     #[serde(default)]
@@ -185,6 +183,10 @@ pub struct Configuration {
 
     #[serde(default, skip_serializing, skip_deserializing)]
     pub(crate) notify: Notify<String, graphql::Response>,
+
+    /// Batching configuration.
+    #[serde(default)]
+    pub(crate) experimental_batching: Batching,
 }
 
 impl PartialEq for Configuration {
@@ -228,12 +230,13 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apollo_plugins: ApolloPlugins,
             tls: Tls,
             apq: Apq,
-            preview_persisted_queries: PersistedQueries,
+            persisted_queries: PersistedQueries,
             #[serde(skip)]
             uplink: UplinkConfig,
             limits: Limits,
             experimental_chaos: Chaos,
             experimental_graphql_validation_mode: GraphQLValidationMode,
+            experimental_batching: Batching,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -247,11 +250,12 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .apollo_plugins(ad_hoc.apollo_plugins.plugins)
             .tls(ad_hoc.tls)
             .apq(ad_hoc.apq)
-            .persisted_query(ad_hoc.preview_persisted_queries)
+            .persisted_query(ad_hoc.persisted_queries)
             .operation_limits(ad_hoc.limits)
             .chaos(ad_hoc.experimental_chaos)
             .uplink(ad_hoc.uplink)
             .graphql_validation_mode(ad_hoc.experimental_graphql_validation_mode)
+            .experimental_batching(ad_hoc.experimental_batching)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -288,6 +292,7 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
+        experimental_batching: Option<Batching>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
         let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
@@ -310,7 +315,7 @@ impl Configuration {
             homepage: homepage.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
-            preview_persisted_queries: persisted_query.unwrap_or_default(),
+            persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
             experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
@@ -322,6 +327,7 @@ impl Configuration {
             },
             tls: tls.unwrap_or_default(),
             uplink,
+            experimental_batching: experimental_batching.unwrap_or_default(),
             #[cfg(test)]
             notify: notify.unwrap_or_default(),
             #[cfg(not(test))]
@@ -360,6 +366,7 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
+        experimental_batching: Option<Batching>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -380,8 +387,9 @@ impl Configuration {
             tls: tls.unwrap_or_default(),
             notify: notify.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
-            preview_persisted_queries: persisted_query.unwrap_or_default(),
+            persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
+            experimental_batching: experimental_batching.unwrap_or_default(),
         };
 
         configuration.validate()
@@ -439,31 +447,31 @@ impl Configuration {
         }
 
         // PQs.
-        if self.preview_persisted_queries.enabled {
-            if self.preview_persisted_queries.safelist.enabled && self.apq.enabled {
+        if self.persisted_queries.enabled {
+            if self.persisted_queries.safelist.enabled && self.apq.enabled {
                 return Err(ConfigurationError::InvalidConfiguration {
                     message: "apqs must be disabled to enable safelisting",
-                    error: "either set preview_persisted_queries.safelist.enabled: false or apq.enabled: false in your router yaml configuration".into()
+                    error: "either set persisted_queries.safelist.enabled: false or apq.enabled: false in your router yaml configuration".into()
                 });
-            } else if !self.preview_persisted_queries.safelist.enabled
-                && self.preview_persisted_queries.safelist.require_id
+            } else if !self.persisted_queries.safelist.enabled
+                && self.persisted_queries.safelist.require_id
             {
                 return Err(ConfigurationError::InvalidConfiguration {
                     message: "safelist must be enabled to require IDs",
-                    error: "either set preview_persisted_queries.safelist.enabled: true or preview_persisted_queries.safelist.require_id: false in your router yaml configuration".into()
+                    error: "either set persisted_queries.safelist.enabled: true or persisted_queries.safelist.require_id: false in your router yaml configuration".into()
                 });
             }
         } else {
             // If the feature isn't enabled, sub-features shouldn't be.
-            if self.preview_persisted_queries.safelist.enabled {
+            if self.persisted_queries.safelist.enabled {
                 return Err(ConfigurationError::InvalidConfiguration {
                     message: "persisted queries must be enabled to enable safelisting",
-                    error: "either set preview_persisted_queries.safelist.enabled: false or preview_persisted_queries.enabled: true in your router yaml configuration".into()
+                    error: "either set persisted_queries.safelist.enabled: false or persisted_queries.enabled: true in your router yaml configuration".into()
                 });
-            } else if self.preview_persisted_queries.log_unknown {
+            } else if self.persisted_queries.log_unknown {
                 return Err(ConfigurationError::InvalidConfiguration {
                     message: "persisted queries must be enabled to enable logging unknown operations",
-                    error: "either set preview_persisted_queries.log_unknown: false or preview_persisted_queries.enabled: true in your router yaml configuration".into()
+                    error: "either set persisted_queries.log_unknown: false or persisted_queries.enabled: true in your router yaml configuration".into()
                 });
             }
         }
@@ -1272,4 +1280,24 @@ fn default_graphql_path() -> String {
 
 fn default_graphql_introspection() -> bool {
     false
+}
+
+#[derive(Clone, Debug, Default, Error, Display, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum BatchingMode {
+    /// batch_http_link
+    #[default]
+    BatchHttpLink,
+}
+
+/// Configuration for Batching
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Batching {
+    /// Activates Batching (disabled by default)
+    #[serde(default)]
+    pub(crate) enabled: bool,
+
+    /// Batching mode
+    pub(crate) mode: BatchingMode,
 }

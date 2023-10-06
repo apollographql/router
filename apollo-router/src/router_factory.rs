@@ -34,6 +34,8 @@ use crate::plugins::traffic_shaping::RetryPolicy;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
+use crate::services::apollo_graph_reference;
+use crate::services::apollo_key;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
@@ -553,11 +555,14 @@ pub(crate) async fn create_plugins(
 
 fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
     if configuration.get("apollo").is_none() {
-        /*FIXME: do we really need to set a default configuration for telemetry.apollo ?
-        if let Some(telemetry) = configuration.as_object_mut() {
-            telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
-        }*/
-        return;
+        // Warning: this must be done here, otherwise studio reporting will not work
+        if apollo_key().is_some() && apollo_graph_reference().is_some() {
+            if let Some(telemetry) = configuration.as_object_mut() {
+                telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
+            }
+        } else {
+            return;
+        }
     }
     if let (Some(schema_id), Some(apollo)) = (
         &schema.api_schema().schema_id,
@@ -717,7 +722,7 @@ mod test {
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
         assert_eq!(
-            &config.apollo.unwrap().schema_id,
+            &config.apollo.schema_id,
             "ba573b479c8b3fa273f439b26b9eda700152341d897f18090d52cd073b15f909"
         );
     }

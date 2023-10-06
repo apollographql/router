@@ -533,7 +533,7 @@ async fn persisted_queries() {
     .await;
 
     let config = serde_json::json!({
-        "preview_persisted_queries": {
+        "persisted_queries": {
             "enabled": true
         },
         "apq": {
@@ -1482,7 +1482,7 @@ async fn all_stock_router_example_yamls_are_valid() {
                         let mut configuration: Configuration = serde_yaml::from_str(&raw_yaml)
                             .unwrap_or_else(|e| panic!("unable to parse YAML {display_path}: {e}"));
                         let (_mock_guard, configuration) =
-                            if configuration.preview_persisted_queries.enabled {
+                            if configuration.persisted_queries.enabled {
                                 let (_mock_guard, uplink_config) = mock_empty_pq_uplink().await;
                                 configuration.uplink = Some(uplink_config);
                                 (Some(_mock_guard), configuration)

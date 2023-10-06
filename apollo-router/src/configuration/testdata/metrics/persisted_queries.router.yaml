@@ -1,6 +1,6 @@
 apq:
   enabled: false
-preview_persisted_queries:
+persisted_queries:
   enabled: true
   log_unknown: true
   safelist:

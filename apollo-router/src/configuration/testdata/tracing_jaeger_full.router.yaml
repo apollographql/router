@@ -3,6 +3,7 @@ supergraph:
 telemetry:
   tracing:
     jaeger:
+      enabled: true
       collector:
         endpoint: "http://foo"
         password: ""
