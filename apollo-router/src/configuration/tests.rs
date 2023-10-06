@@ -392,8 +392,11 @@ cors:
 
 #[test]
 fn validate_project_config_files() {
+    std::env::set_var("DATADOG_AGENT_HOST", "http://example.com");
+    std::env::set_var("JAEGER_HOST", "http://example.com");
     std::env::set_var("JAEGER_USERNAME", "username");
     std::env::set_var("JAEGER_PASSWORD", "pass");
+    std::env::set_var("ZIPKIN_HOST", "http://example.com");
     std::env::set_var("TEST_CONFIG_ENDPOINT", "http://example.com");
     std::env::set_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com");
 
