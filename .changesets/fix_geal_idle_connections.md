@@ -1,8 +1,8 @@
 ### Fix router hang when opening the explorer, prometheus or health check page ([Issue #3941](https://github.com/apollographql/router/issues/3941))
 
-The router's graceful shutdown was not handling idle connections well, and waiting indefinitely for them to close instead of shutting them down directly, which resulted in the router hanging on CTRL+C.
+The Router did not gracefully shutdown when an idle connections are made by a client, and would instead hang. In particular, web browsers make such connection in anticipation of future traffic.
 
-This tends to happen in particular when a browser opens the explorer or prometheus page provided by the router, because browsers eagerly open new connectionsi in anticipation of future traffic, while those pages only need a single request to the router.
+This is now fixed, and the Router will now gracefully shut down in a timely fashion.
 
 ---
 
