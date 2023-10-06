@@ -276,6 +276,14 @@ pub(crate) fn get_field_type(
     })
 }
 
+pub(crate) fn is_list(ty: &hir::Type) -> bool {
+    match ty {
+        hir::Type::NonNull { ty, .. } => is_list(ty),
+        hir::Type::List { .. } => true,
+        hir::Type::Named { .. } => false,
+    }
+}
+
 pub(crate) fn selection_set(
     visitor: &mut impl Visitor,
     hir: &hir::SelectionSet,

@@ -1,0 +1,23 @@
+---
+source: apollo-router/src/plugins/authorization/authenticated.rs
+expression: "TestResult { query: QUERY, result: doc, paths }"
+---
+query:
+
+        query {
+            me {
+                id
+                addresses {
+                    city
+                }
+            }
+        }
+        
+filtered:
+query {
+  me {
+    id
+  }
+}
+
+paths: ["/me/addresses/@"]
