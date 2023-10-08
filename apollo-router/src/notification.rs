@@ -32,14 +32,19 @@ use crate::Configuration;
 static NOTIFY_CHANNEL_SIZE: usize = 1024;
 static DEFAULT_MSG_CHANNEL_SIZE: usize = 128;
 
+/// Error that can happen when using the pubsub
 #[derive(Error, Debug)]
-pub(crate) enum NotifyError<V> {
+pub enum NotifyError<V> {
+    /// Error when sending data to the pubsub
     #[error("cannot send data to pubsub")]
     SendError(#[from] SendError),
+    /// Error sending data to response stream
     #[error("cannot send data to response stream")]
     BroadcastSendError(#[from] broadcast::error::SendError<V>),
+    /// Channel has been closed
     #[error("cannot send data to pubsub because channel has been closed")]
     Canceled(#[from] Canceled),
+    /// Topic doesn't exist
     #[error("this topic doesn't exist")]
     UnknownTopic,
 }
@@ -116,8 +121,9 @@ where
     K: Send + Hash + Eq + Clone + 'static,
     V: Send + Sync + Clone + 'static,
 {
+    /// Create a new pubsub
     #[builder]
-    pub(crate) fn new(
+    pub fn new(
         ttl: Option<Duration>,
         heartbeat_error_message: Option<V>,
         queue_size: Option<usize>,
@@ -175,8 +181,9 @@ where
         self
     }
 
-    // boolean in the tuple means `created`
-    pub(crate) async fn create_or_subscribe(
+    /// Create a new topic if it doesn't exist or subscribe to an existing one
+    /// The boolean in the result tuple means `created`
+    pub async fn create_or_subscribe(
         &mut self,
         topic: K,
         heartbeat_enabled: bool,
@@ -205,7 +212,8 @@ where
         Ok((handle, created))
     }
 
-    pub(crate) async fn subscribe(&mut self, topic: K) -> Result<Handle<K, V>, NotifyError<V>> {
+    /// Subscribe to an existing topic
+    pub async fn subscribe(&mut self, topic: K) -> Result<Handle<K, V>, NotifyError<V>> {
         let (sender, receiver) = oneshot::channel();
 
         self.sender
@@ -228,7 +236,8 @@ where
         Ok(handle)
     }
 
-    pub(crate) async fn subscribe_if_exist(
+    /// Subscribe to an existing topic if it exists
+    pub async fn subscribe_if_exist(
         &mut self,
         topic: K,
     ) -> Result<Option<Handle<K, V>>, NotifyError<V>> {
@@ -254,7 +263,8 @@ where
         Ok(handle.into())
     }
 
-    pub(crate) async fn exist(&mut self, topic: K) -> Result<bool, NotifyError<V>> {
+    /// Check if the topic exists
+    pub async fn exist(&mut self, topic: K) -> Result<bool, NotifyError<V>> {
         // Channel to check if the topic still exists or not
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -270,7 +280,8 @@ where
         Ok(resp)
     }
 
-    pub(crate) async fn invalid_ids(
+    /// Check if topics exist for the given ids
+    pub async fn invalid_ids(
         &mut self,
         topics: Vec<K>,
     ) -> Result<(Vec<K>, Vec<K>), NotifyError<V>> {
@@ -290,7 +301,7 @@ where
     }
 
     /// Delete the topic even if several subscribers are still listening
-    pub(crate) async fn force_delete(&mut self, topic: K) -> Result<(), NotifyError<V>> {
+    pub async fn force_delete(&mut self, topic: K) -> Result<(), NotifyError<V>> {
         // if disconnected, we don't care (the task was stopped)
         self.sender
             .send(Notification::ForceDelete { topic })
@@ -428,14 +439,14 @@ where
         }
     }
 
-    pub(crate) fn into_stream(self) -> HandleStream<K, V> {
+    pub fn into_stream(self) -> HandleStream<K, V> {
         HandleStream {
             handle_guard: self.handle_guard,
             msg_receiver: self.msg_receiver,
         }
     }
 
-    pub(crate) fn into_sink(self) -> HandleSink<K, V> {
+    pub fn into_sink(self) -> HandleSink<K, V> {
         HandleSink {
             handle_guard: self.handle_guard,
             msg_sender: self.msg_sender,
@@ -458,6 +469,7 @@ where
 }
 
 pin_project! {
+/// Stream of data from the pubsub
 pub struct HandleStream<K, V>
 where
     K: Clone,
@@ -508,7 +520,7 @@ where
     V: Clone + 'static + Send,
 {
     /// Send data to the subscribed topic
-    pub(crate) fn send_sync(&mut self, data: V) -> Result<(), NotifyError<V>> {
+    pub fn send_sync(&mut self, data: V) -> Result<(), NotifyError<V>> {
         self.msg_sender.send(data.into()).map_err(|err| {
             NotifyError::BroadcastSendError(broadcast::error::SendError(err.0.unwrap()))
         })?;
@@ -874,7 +886,7 @@ where
     }
 }
 
-pub(crate) struct RouterBroadcasts {
+pub struct RouterBroadcasts {
     configuration: (
         broadcast::Sender<Weak<Configuration>>,
         broadcast::Receiver<Weak<Configuration>>,
