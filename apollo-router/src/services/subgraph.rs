@@ -20,7 +20,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::notification::HandleStream;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
-use crate::query_planner::fetch::OperationKind;
+pub use crate::query_planner::fetch::OperationKind;
 use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
@@ -40,7 +40,7 @@ pub struct Request {
     pub context: Context,
 
     /// Channel to send the subscription stream to listen on events coming from subgraph in a task
-    pub(crate) subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
+    pub subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
     /// Channel triggered when the client connection has been dropped
     pub(crate) connection_closed_signal: Option<broadcast::Receiver<()>>,
 }
