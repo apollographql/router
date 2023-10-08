@@ -91,7 +91,7 @@ impl QueryPlan {
     }
 }
 
-// holds the query plan executon arguments that do not change between calls
+// holds the query plan execution arguments that do not change between calls
 pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
     pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,

@@ -435,7 +435,7 @@ impl Service<router::Request> for CallbackService {
                                         return Ok(router::Response {
                                             response: http::Response::builder()
                                                 .status(StatusCode::NOT_FOUND)
-                                                .body("suscription doesn't exist".into())
+                                                .body("subscription doesn't exist".into())
                                                 .map_err(BoxError::from)?,
                                             context: req.context,
                                         });
@@ -506,7 +506,7 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
-                                            .body("suscriptions don't exist".into())
+                                            .body("subscriptions don't exist".into())
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
