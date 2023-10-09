@@ -34,10 +34,11 @@ pub(crate) struct Config {
 }
 
 impl TracingConfigurator for Config {
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
+
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
-        if !self.enabled {
-            return Ok(builder);
-        }
         tracing::info!("configuring Zipkin tracing: {}", self.batch_processor);
 
         let exporter = opentelemetry_zipkin::new_pipeline()
