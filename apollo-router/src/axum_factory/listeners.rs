@@ -268,6 +268,8 @@ pub(super) fn serve_router_on_listen_addr(
                                     }
                                     #[cfg(unix)]
                                     NetworkStream::Unix(stream) => {
+                                        let received_first_request = Arc::new(AtomicBool::new(false));
+                                        let app = IdleConnectionChecker::new(received_first_request.clone(), app);
                                         let connection = Http::new()
                                         .http1_keep_alive(true)
                                         .serve_connection(stream, app);
@@ -284,7 +286,12 @@ pub(super) fn serve_router_on_listen_addr(
                                                 let c = connection.as_mut();
                                                 c.graceful_shutdown();
 
-                                                let _= connection.await;
+                                                // if the connection was idle and we never received the first request,
+                                                // hyper's graceful shutdown would wait indefinitely, so instead we
+                                                // close the connection right away
+                                                if received_first_request.load(Ordering::Relaxed) {
+                                                    let _= connection.await;
+                                                }
                                             }
                                         }
                                     },
