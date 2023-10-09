@@ -276,7 +276,7 @@ flowchart LR;
 
 Additionally, some requests and responses may happen multiple times for the same operation. With subscriptions, for example, a subgraph sends a new `SubgraphResponse` whenever data is updated. Each response object travels through all the services in the response path and interacts with any customizations you've created.
 
-### Request and Response Buffering
+### Request and Response buffering
 
 The router expects to execute on a stream of data. In order to work correctly and provide high performance, the following expectations must be met:
 
