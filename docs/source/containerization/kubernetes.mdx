@@ -209,9 +209,9 @@ To support your different deployment configurations for different environments (
 - A **common** file, which contains values that apply across all environments.
 - A unique **environment** file per environment, which includes and overrides the values from the common file while adding new environment-specific values.
 
-In a `helm install` command, each `--values <values-file>` option is applied in the order within the command. Therefore, a common file must be set before an environment file in the `helm install` command, so that the environment file's values are applied last and override the commond file's values as intended. 
+The `helm install` command applies each `--values <values-file>` option in the order you set them within the command. Therefore, a common file must be set before an environment file so that the environment file's values are applied last and override the common file's values. 
 
-For example, deploy with a `common_values.yaml` file applied first and then a `prod_values.yaml` file:
+For example, this command deploys with a `common_values.yaml` file applied first and then a `prod_values.yaml` file:
 
 ```bash
 helm install --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml  --values common_values.yaml --values prod_values.yaml
