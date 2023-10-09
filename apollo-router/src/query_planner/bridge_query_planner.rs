@@ -271,6 +271,10 @@ impl BridgeQueryPlanner {
         operation: Option<String>,
         selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
+        fn is_validation_error(errors: &router_bridge::planner::PlanErrors) -> bool {
+            errors.errors.iter().all(|err| err.validation_error)
+        }
+
         /// Compare errors from graphql-js and apollo-rs validation, and produce metrics on
         /// whether they had the same result.
         ///
@@ -279,9 +283,10 @@ impl BridgeQueryPlanner {
             js_validation_error: Option<&router_bridge::planner::PlanErrors>,
             rs_validation_error: Option<&crate::error::ValidationErrors>,
         ) {
-            let is_validation_error = js_validation_error
-                .map_or(false, |js| js.errors.iter().all(|err| err.validation_error));
-            match (is_validation_error, rs_validation_error) {
+            match (
+                js_validation_error.map_or(false, is_validation_error),
+                rs_validation_error,
+            ) {
                 (false, Some(validation_error)) => {
                     tracing::warn!(
                         monotonic_counter.apollo.router.validation = 1u64,
@@ -327,6 +332,11 @@ impl BridgeQueryPlanner {
                     GraphQLValidationMode::Both
                 ) {
                     compare_validation_errors(Some(&err), selections.validation_error.as_ref());
+
+                    // If we had a validation error from apollo-rs, return it now.
+                    if let Some(validation_error) = &selections.validation_error {
+                        return QueryPlannerError::from(validation_error.clone());
+                    }
                 }
 
                 QueryPlannerError::from(err)
@@ -659,12 +669,8 @@ mod tests {
         .unwrap_err();
 
         match err {
-            // XXX(@goto-bus-stop): will be a SpecError in the Rust-based validation implementation
-            QueryPlannerError::PlanningErrors(plan_errors) => {
-                insta::with_settings!({sort_maps => true}, {
-                    insta::assert_json_snapshot!("plan_invalid_query_usage_reporting", plan_errors.usage_reporting);
-                });
-                insta::assert_debug_snapshot!("plan_invalid_query_errors", plan_errors.errors);
+            QueryPlannerError::OperationValidationErrors(errors) => {
+                insta::assert_debug_snapshot!("plan_invalid_query_errors", errors);
             }
             _ => {
                 panic!("invalid query planning should have failed");
