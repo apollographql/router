@@ -13,7 +13,7 @@ use tower_http::cors;
 use tower_http::cors::CorsLayer;
 
 /// Cross origin request configuration.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct Cors {
@@ -44,6 +44,7 @@ pub(crate) struct Cors {
 
     /// The origin(s) to allow requests from.
     /// Defaults to `https://studio.apollographql.com/` for Apollo Studio.
+    #[serde(default = "default_origins")]
     pub(crate) origins: Vec<String>,
 
     /// `Regex`es you want to match the origins against to determine if they're allowed.
@@ -52,18 +53,13 @@ pub(crate) struct Cors {
     pub(crate) match_origins: Option<Vec<String>>,
 
     /// Allowed request methods. Defaults to GET, POST, OPTIONS.
+    #[serde(default = "default_cors_methods")]
     pub(crate) methods: Vec<String>,
 
     /// The `Access-Control-Max-Age` header value in time units
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     pub(crate) max_age: Option<Duration>,
-}
-
-impl Default for Cors {
-    fn default() -> Self {
-        Self::builder().build()
-    }
 }
 
 fn default_origins() -> Vec<String> {
@@ -74,6 +70,7 @@ fn default_cors_methods() -> Vec<String> {
     vec!["GET".into(), "POST".into(), "OPTIONS".into()]
 }
 
+#[cfg(test)]
 #[buildstructor::buildstructor]
 impl Cors {
     #[builder]

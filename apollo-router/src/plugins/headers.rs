@@ -178,7 +178,7 @@ enum Propagate {
 }
 
 /// Configuration for header propagation
-#[derive(Clone, JsonSchema, Default, Deserialize)]
+#[derive(Clone, JsonSchema, serde_derive_default::Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct Config {
     /// Rules to apply to all subgraphs

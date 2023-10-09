@@ -41,7 +41,7 @@ pub type ResponseStream = Pin<Box<dyn Stream<Item = Response> + Send>>;
 /// as may be found in the `errors` field of a GraphQL [`Response`].
 ///
 /// Converted to (or from) JSON with serde.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, std::default::Default)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct Error {

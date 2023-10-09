@@ -55,7 +55,7 @@ pub(crate) struct Subscription {
 }
 
 /// Subscriptions configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubscriptionConfig {
     /// Enable subscription
@@ -76,19 +76,7 @@ fn enable_deduplication_default() -> bool {
     true
 }
 
-impl Default for SubscriptionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            mode: Default::default(),
-            enable_deduplication: enable_deduplication_default(),
-            max_opened_subscriptions: None,
-            queue_capacity: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, serde_derive_default::Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SubscriptionModeConfig {
     #[serde(rename = "preview_callback")]
@@ -125,7 +113,7 @@ impl SubscriptionModeConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, serde_derive_default::Default, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphPassthroughMode {
     /// Configuration for all subgraphs
@@ -143,7 +131,7 @@ pub(crate) enum SubscriptionMode {
 }
 
 /// Using a callback url
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CallbackMode {
     #[schemars(with = "String")]
@@ -165,14 +153,14 @@ pub(crate) struct CallbackMode {
 }
 
 /// Using websocket to directly connect to subgraph
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct PassthroughMode {
     /// WebSocket configuration for specific subgraphs
     subgraph: SubgraphPassthroughMode,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 /// WebSocket configuration for a specific subgraph
 pub(crate) struct WebSocketConfiguration {
@@ -272,7 +260,9 @@ impl CallbackPayload {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde_derive_default::Default, Deserialize, Serialize, JsonSchema,
+)]
 #[serde(deny_unknown_fields, default)]
 /// Callback payload when a subscription id is incorrect
 pub(crate) struct InvalidIdsPayload {

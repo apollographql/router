@@ -30,7 +30,7 @@ lazy_static! {
     static ref DEFAULT_HTTP_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:4318");
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     /// Enable otlp
@@ -103,14 +103,14 @@ impl Config {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, serde_derive_default::Default, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct HttpExporter {
     /// Headers to send on report requests
     pub(crate) headers: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, serde_derive_default::Default, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct GrpcExporter {
     /// The optional domain name for tls config.

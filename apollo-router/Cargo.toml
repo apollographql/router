@@ -187,6 +187,7 @@ schemars = { version = "0.8.15", features = ["url"] }
 shellexpand = "3.1.0"
 sha2 = "0.10.8"
 serde = { version = "1.0.188", features = ["derive", "rc"] }
+serde_derive_default = "0.1.0"
 serde_json_bytes = { version = "0.2.2", features = ["preserve_order"] }
 serde_json = { version = "1.0.107", features = [
     "preserve_order",

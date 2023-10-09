@@ -237,7 +237,7 @@ impl Drop for BusyTimerGuard {
     }
 }
 
-impl Default for Context {
+impl std::default::Default for Context {
     fn default() -> Self {
         Self::new()
     }

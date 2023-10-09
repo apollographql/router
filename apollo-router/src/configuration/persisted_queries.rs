@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 /// Persisted Queries (PQ) configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedQueries {
     /// Activates Persisted Queries (disabled by default)
@@ -37,7 +37,7 @@ impl PersistedQueries {
 }
 
 /// Persisted Queries (PQ) Safelisting configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedQueriesSafelist {
     /// Enables using the persisted query list as a safelist (disabled by default)
@@ -57,25 +57,6 @@ impl PersistedQueriesSafelist {
         Self {
             enabled: enabled.unwrap_or_else(default_safelist),
             require_id: require_id.unwrap_or_else(default_require_id),
-        }
-    }
-}
-
-impl Default for PersistedQueries {
-    fn default() -> Self {
-        Self {
-            enabled: default_pq(),
-            safelist: PersistedQueriesSafelist::default(),
-            log_unknown: default_log_unknown(),
-        }
-    }
-}
-
-impl Default for PersistedQueriesSafelist {
-    fn default() -> Self {
-        Self {
-            enabled: default_safelist(),
-            require_id: default_require_id(),
         }
     }
 }

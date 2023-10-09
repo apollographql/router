@@ -614,7 +614,7 @@ mod test {
     struct AlwaysStartsAndStopsPlugin {}
 
     /// Configuration for the test plugin
-    #[derive(Debug, Default, Deserialize, JsonSchema)]
+    #[derive(Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
     struct Conf {
         /// The name of the test
         name: String,

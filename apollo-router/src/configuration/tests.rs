@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 
 use http::Uri;
@@ -773,7 +774,7 @@ struct TestSubgraphOverride {
     subgraph: SubgraphConfiguration<PluginConfig>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, serde_derive_default::Default, Deserialize, Serialize, JsonSchema)]
 struct PluginConfig {
     #[serde(default = "set_true")]
     a: bool,
@@ -852,4 +853,86 @@ fn test_subgraph_override_json() {
     assert!(!data.subgraph.all.a);
     // since products did not set the `a` field, it should take the override value from `all`
     assert!(!data.subgraph.subgraphs.get("products").unwrap().a);
+}
+
+#[test]
+fn test_deserialize_derive_default() {
+    // There are two types of serde defaulting:
+    //
+    // * container
+    // * field
+    //
+    // Container level defaulting will use an instance of the default implementation and take missing fields from it.
+    // Field level defaulting uses either the default implementation or optionally user supplied function to initialize missing fields.
+    //
+    // When using field level defaulting it it essential that the Default implementation of a struct exactly match the serde annotations.
+    //
+    // This test checks to ensure that serde_derive_default::Default is used instead of the std::default::Default.
+    // You can opt out of this by specifying std::default::Default, but have a good reason, e.g it's nothing to do with config and there will definitely never be any field level serde defaulting.
+
+    // Walk every source file and check that #[derive(Default)] is not used.
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("src");
+    fn it(path: &Path) -> impl Iterator<Item = DirEntry> {
+        WalkDir::new(path).into_iter().filter_map(|e| e.ok())
+    }
+
+    // Check for derive where Deserialize is used
+    let deserialize_regex =
+        Regex::new(r"^\s*#[\s\n]*\[derive\s*\((.*,)?\s*Deserialize\s*(,.*)?\)\s*\]\s*$").unwrap();
+    let default_regex =
+        Regex::new(r"^\s*#[\s\n]*\[derive\s*\((.*,)?\s*Default\s*(,.*)?\)\s*\]\s*$").unwrap();
+
+    let mut errors = Vec::new();
+    for source_file in it(&path).filter(|e| e.file_name().to_string_lossy().ends_with(".rs")) {
+        // Read the source file into a vec of lines
+        let source = fs::read_to_string(source_file.path()).expect("failed to read file");
+        let lines: Vec<&str> = source.lines().collect();
+        for (line_number, line) in lines.iter().enumerate() {
+            if deserialize_regex.is_match(line) {
+                // Get the struct name
+                if let Some(struct_name) = find_struct_name(&lines, line_number) {
+                    let manual_implementation = format!("impl Default for {} ", struct_name);
+                    // Check for derivation of Default
+                    if default_regex.is_match(line)
+                        || lines.iter().any(|f| f.contains(&manual_implementation))
+                    {
+                        errors.push(format!(
+                            "struct {} in {}:{} implements Default. It must implement serde_derive_default::Default instead",
+                            struct_name,
+                            source_file
+                                .path()
+                                .strip_prefix(path.parent().unwrap().parent().unwrap())
+                                .unwrap()
+                                .to_string_lossy(),
+                            line_number + 1));
+                    }
+                }
+            }
+        }
+    }
+
+    if !errors.is_empty() {
+        panic!("Serde errors found:\n{}", errors.join("\n"));
+    }
+}
+
+fn find_struct_name(lines: &Vec<&str>, line_number: usize) -> Option<String> {
+    let struct_enum_union_regex =
+        Regex::new(r"^.*(struct|enum|union)\s([a-zA-Z0-9_]+).*$").unwrap();
+
+    lines
+        .iter()
+        .skip(line_number + 1)
+        .take(5)
+        .filter_map(|line| {
+            struct_enum_union_regex.captures(line).and_then(|c| {
+                if c.get(1).unwrap().as_str() == "struct" {
+                    Some(c.get(2).unwrap().as_str().to_string())
+                } else {
+                    None
+                }
+            })
+        })
+        .next()
 }

@@ -674,7 +674,7 @@ where
 /// A path into the result document.
 ///
 /// This can be composed of strings and numbers
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Default, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, std::default::Default, Hash)]
 #[serde(transparent)]
 pub struct Path(pub Vec<PathElement>);
 

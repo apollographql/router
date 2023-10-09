@@ -217,7 +217,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
     {
         // This intermediate structure will allow us to deserialize a Configuration
         // yet still exercise the Configuration validation function
-        #[derive(Deserialize, Default)]
+        #[derive(Deserialize, serde_derive_default::Default)]
         #[serde(default)]
         struct AdHocConfiguration {
             health_check: HealthCheck,
@@ -507,7 +507,7 @@ fn gen_schema(plugins: schemars::Map<String, Schema>) -> Schema {
 /// These plugins are processed prior to user plugins. Also, their configuration
 /// is "hoisted" to the top level of the config rather than being processed
 /// under "plugins" as for user plugins.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, Serialize)]
 #[serde(transparent)]
 pub(crate) struct ApolloPlugins {
     pub(crate) plugins: Map<String, Value>,
@@ -540,7 +540,7 @@ impl JsonSchema for ApolloPlugins {
 ///
 /// These plugins are compiled into a router by and their configuration is performed
 /// under the "plugins" section.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, Serialize)]
 #[serde(transparent)]
 pub(crate) struct UserPlugins {
     pub(crate) plugins: Option<Map<String, Value>>,
@@ -565,20 +565,23 @@ impl JsonSchema for UserPlugins {
 }
 
 /// Configuration options pertaining to the supergraph server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct Supergraph {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:4000
+    #[serde(default = "default_graphql_listen")]
     pub(crate) listen: ListenAddr,
 
     /// The HTTP path on which GraphQL requests will be served.
     /// default: "/"
+    #[serde(default = "default_graphql_path")]
     pub(crate) path: String,
 
     /// Enable introspection
     /// Default: false
+    #[serde(default = "default_graphql_introspection")]
     pub(crate) introspection: bool,
 
     /// Enable reuse of query fragments
@@ -587,6 +590,7 @@ pub(crate) struct Supergraph {
     pub(crate) reuse_query_fragments: Option<bool>,
 
     /// Set to false to disable defer support
+    #[serde(default = "default_defer_support")]
     pub(crate) defer_support: bool,
 
     /// Query planning options
@@ -642,12 +646,6 @@ impl Supergraph {
     }
 }
 
-impl Default for Supergraph {
-    fn default() -> Self {
-        Self::builder().build()
-    }
-}
-
 impl Supergraph {
     /// To sanitize the path for axum router
     pub(crate) fn sanitized_path(&self) -> String {
@@ -666,7 +664,7 @@ impl Supergraph {
 }
 
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct Limits {
@@ -736,38 +734,33 @@ pub(crate) struct Limits {
 
     /// Limit recursion in the GraphQL parser to protect against stack overflow.
     /// default: 4096
+    #[serde(default = "parser_max_recursion_default")]
     pub(crate) parser_max_recursion: usize,
 
     /// Limit the number of tokens the GraphQL parser processes before aborting.
+    #[serde(default = "parser_max_tokens_default")]
     pub(crate) parser_max_tokens: usize,
 
     /// Limit the size of incoming HTTP requests read from the network,
     /// to protect against running out of memory. Default: 2000000 (2 MB)
+    #[serde(default = "experimental_http_max_request_bytes_default")]
     pub(crate) experimental_http_max_request_bytes: usize,
 }
 
-impl Default for Limits {
-    fn default() -> Self {
-        Self {
-            // These limits are opt-in
-            max_depth: None,
-            max_height: None,
-            max_root_fields: None,
-            max_aliases: None,
-            warn_only: false,
-            experimental_http_max_request_bytes: 2_000_000,
-            parser_max_tokens: 15_000,
+fn parser_max_tokens_default() -> usize {
+    15_000
+}
 
-            // This is `apollo-parser`’s default, which protects against stack overflow
-            // but is still very high for "reasonable" queries.
-            // https://docs.rs/apollo-parser/0.2.8/src/apollo_parser/parser/mod.rs.html#368
-            parser_max_recursion: 4096,
-        }
-    }
+fn parser_max_recursion_default() -> usize {
+    4096
+}
+
+fn experimental_http_max_request_bytes_default() -> usize {
+    2_000_000
 }
 
 /// Router level (APQ) configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Router {
     #[serde(default)]
@@ -775,7 +768,7 @@ pub(crate) struct Router {
 }
 
 /// Automatic Persisted Queries (APQ) configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Apq {
     /// Activates Automatic Persisted Queries (enabled by default)
@@ -802,7 +795,7 @@ impl Apq {
 }
 
 /// Subgraph level Automatic Persisted Queries (APQ) configuration
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, serde_derive_default::Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SubgraphApq {
     /// Enable
@@ -818,18 +811,8 @@ fn default_apq() -> bool {
     true
 }
 
-impl Default for Apq {
-    fn default() -> Self {
-        Self {
-            enabled: default_apq(),
-            router: Default::default(),
-            subgraph: Default::default(),
-        }
-    }
-}
-
 /// Query planning cache configuration
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, serde_derive_default::Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
@@ -843,7 +826,7 @@ pub(crate) struct QueryPlanning {
 }
 
 /// Cache configuration
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, serde_derive_default::Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Cache {
     /// Configures the in memory cache (always active)
@@ -852,22 +835,18 @@ pub(crate) struct Cache {
     pub(crate) redis: Option<RedisCache>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 /// In memory cache configuration
 pub(crate) struct InMemoryCache {
     /// Number of entries in the Least Recently Used cache
+    #[serde(default = "default_cache_capacity")]
     pub(crate) limit: NonZeroUsize,
 }
 
-impl Default for InMemoryCache {
-    fn default() -> Self {
-        Self {
-            limit: DEFAULT_CACHE_CAPACITY,
-        }
-    }
+fn default_cache_capacity() -> NonZeroUsize {
+    DEFAULT_CACHE_CAPACITY
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration
@@ -882,7 +861,7 @@ pub(crate) struct RedisCache {
 }
 
 /// TLS related configuration options.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, serde_derive_default::Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct Tls {
@@ -1008,7 +987,7 @@ pub(crate) fn load_key(data: &str) -> io::Result<PrivateKey> {
 }
 
 /// Configuration options pertaining to the subgraph server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct TlsSubgraph {
@@ -1016,26 +995,6 @@ pub(crate) struct TlsSubgraph {
     pub(crate) certificate_authorities: Option<String>,
     /// client certificate authentication
     pub(crate) client_authentication: Option<TlsClientAuth>,
-}
-
-#[buildstructor::buildstructor]
-impl TlsSubgraph {
-    #[builder]
-    pub(crate) fn new(
-        certificate_authorities: Option<String>,
-        client_authentication: Option<TlsClientAuth>,
-    ) -> Self {
-        Self {
-            certificate_authorities,
-            client_authentication,
-        }
-    }
-}
-
-impl Default for TlsSubgraph {
-    fn default() -> Self {
-        Self::builder().build()
-    }
 }
 
 /// TLS client authentication
@@ -1053,26 +1012,17 @@ pub(crate) struct TlsClientAuth {
 }
 
 /// Configuration options pertaining to the sandbox page.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct Sandbox {
     /// Set to true to enable sandbox
+    #[serde(default = "default_sandbox")]
     pub(crate) enabled: bool,
 }
 
 fn default_sandbox() -> bool {
     false
-}
-
-#[buildstructor::buildstructor]
-impl Sandbox {
-    #[builder]
-    pub(crate) fn new(enabled: Option<bool>) -> Self {
-        Self {
-            enabled: enabled.unwrap_or_else(default_sandbox),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1086,18 +1036,13 @@ impl Sandbox {
     }
 }
 
-impl Default for Sandbox {
-    fn default() -> Self {
-        Self::builder().build()
-    }
-}
-
 /// Configuration options pertaining to the home page.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct Homepage {
     /// Set to false to disable the homepage
+    #[serde(default = "default_homepage")]
     pub(crate) enabled: bool,
     /// Graph reference
     /// This will allow you to redirect from the Apollo Router landing page back to Apollo Studio Explorer
@@ -1131,22 +1076,18 @@ impl Homepage {
     }
 }
 
-impl Default for Homepage {
-    fn default() -> Self {
-        Self::builder().enabled(default_homepage()).build()
-    }
-}
-
 /// Configuration options pertaining to the http server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct HealthCheck {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:8088
+    #[serde(default = "default_health_check_listen")]
     pub(crate) listen: ListenAddr,
 
     /// Set to false to disable the health check endpoint
+    #[serde(default = "default_health_check")]
     pub(crate) enabled: bool,
 }
 
@@ -1156,17 +1097,6 @@ fn default_health_check_listen() -> ListenAddr {
 
 fn default_health_check() -> bool {
     true
-}
-
-#[buildstructor::buildstructor]
-impl HealthCheck {
-    #[builder]
-    pub(crate) fn new(listen: Option<ListenAddr>, enabled: Option<bool>) -> Self {
-        Self {
-            listen: listen.unwrap_or_else(default_health_check_listen),
-            enabled: enabled.unwrap_or_else(default_health_check),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1181,15 +1111,9 @@ impl HealthCheck {
     }
 }
 
-impl Default for HealthCheck {
-    fn default() -> Self {
-        Self::builder().build()
-    }
-}
-
 /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
 /// You probably don’t want this in production!
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, serde_derive_default::Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct Chaos {
@@ -1291,7 +1215,7 @@ pub(crate) enum BatchingMode {
 }
 
 /// Configuration for Batching
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, serde_derive_default::Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Batching {
     /// Activates Batching (disabled by default)

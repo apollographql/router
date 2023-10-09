@@ -15,7 +15,7 @@ use crate::json_ext::Value;
 
 /// A graphql primary response.
 /// Used for federated and subgraph queries.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, std::default::Default)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct Response {
@@ -187,7 +187,7 @@ impl Response {
 
 /// A graphql incremental response.
 /// Used with `@defer`
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, serde_derive_default::Default)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct IncrementalResponse {

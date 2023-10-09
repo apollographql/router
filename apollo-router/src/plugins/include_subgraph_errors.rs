@@ -17,7 +17,7 @@ static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
 
 /// Configuration for exposing errors that originate from subgraphs
-#[derive(Clone, Debug, JsonSchema, Default, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, serde_derive_default::Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct Config {
     /// Include errors from all subgraphs

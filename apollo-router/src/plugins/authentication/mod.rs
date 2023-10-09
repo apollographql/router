@@ -110,7 +110,7 @@ struct AuthenticationPlugin {
     subgraph: Option<SubgraphAuth>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 struct JWTConf {
     /// List of JWKS used to verify tokens
@@ -123,7 +123,7 @@ struct JWTConf {
     header_value_prefix: String,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 struct JwksConf {
     /// Retrieve the JWK Set
@@ -136,18 +136,8 @@ struct JwksConf {
     algorithms: Option<Vec<Algorithm>>,
 }
 
-impl Default for JWTConf {
-    fn default() -> Self {
-        Self {
-            jwks: Default::default(),
-            header_name: default_header_name(),
-            header_value_prefix: default_header_value_prefix(),
-        }
-    }
-}
-
 /// Authentication
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Conf {
     /// Router configuration
@@ -159,7 +149,7 @@ struct Conf {
 // We may support additional authentication mechanisms in future, so all
 // configuration (which is currently JWT specific) is isolated to the
 // JWTConf structure.
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RouterConf {
     /// The JWT configuration

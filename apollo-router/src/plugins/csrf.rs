@@ -18,7 +18,7 @@ use crate::services::supergraph;
 use crate::services::SupergraphResponse;
 
 /// CSRF Configuration.
-#[derive(Deserialize, Debug, Clone, JsonSchema)]
+#[derive(Deserialize, Debug, Clone, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct CSRFConfig {
@@ -35,6 +35,7 @@ pub(crate) struct CSRFConfig {
     /// - did not set any `allow_headers` list (so it defaults to `mirror_request`)
     /// - added your required headers to the allow_headers list, as shown in the
     /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
+    #[serde(default = "apollo_custom_preflight_headers")]
     required_headers: Vec<String>,
 }
 
@@ -43,15 +44,6 @@ fn apollo_custom_preflight_headers() -> Vec<String> {
         "x-apollo-operation-name".to_string(),
         "apollo-require-preflight".to_string(),
     ]
-}
-
-impl Default for CSRFConfig {
-    fn default() -> Self {
-        Self {
-            unsafe_disabled: false,
-            required_headers: apollo_custom_preflight_headers(),
-        }
-    }
 }
 
 static NON_PREFLIGHTED_CONTENT_TYPES: &[&str] = &[

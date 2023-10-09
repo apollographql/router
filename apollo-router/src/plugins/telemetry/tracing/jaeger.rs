@@ -60,14 +60,14 @@ impl Default for Config {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct AgentConfig {
     /// The endpoint to send to
     endpoint: SocketEndpoint,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct CollectorConfig {
     /// The endpoint to send reports to

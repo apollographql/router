@@ -34,7 +34,7 @@ pub(crate) const ENDPOINT_DEFAULT: &str =
 
 pub(crate) const OTLP_ENDPOINT_DEFAULT: &str = "https://usage-reporting.api.apollographql.com";
 
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[derive(Clone, Deserialize, JsonSchema, Debug, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     /// The Apollo Studio endpoint for exporting traces and metrics.
@@ -103,14 +103,14 @@ pub(crate) struct Config {
     pub(crate) errors: ErrorsConfiguration,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ErrorsConfiguration {
     /// Handling of errors coming from subgraph
     pub(crate) subgraph: SubgraphErrorConfig,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphErrorConfig {
     /// Handling of errors coming from all subgraphs
@@ -119,7 +119,7 @@ pub(crate) struct SubgraphErrorConfig {
     pub(crate) subgraphs: HashMap<String, ErrorConfiguration>,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ErrorConfiguration {
     /// Send subgraph errors to Apollo Studio
@@ -128,15 +128,6 @@ pub(crate) struct ErrorConfiguration {
     /// Redact subgraph errors to Apollo Studio
     #[serde(default = "default_redact_errors")]
     pub(crate) redact: bool,
-}
-
-impl Default for ErrorConfiguration {
-    fn default() -> Self {
-        Self {
-            send: default_send_errors(),
-            redact: default_redact_errors(),
-        }
-    }
 }
 
 impl SubgraphErrorConfig {
@@ -187,26 +178,6 @@ const fn client_version_header_default() -> HeaderName {
 
 pub(crate) const fn default_buffer_size() -> NonZeroUsize {
     unsafe { NonZeroUsize::new_unchecked(10000) }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            endpoint: endpoint_default(),
-            experimental_otlp_endpoint: otlp_endpoint_default(),
-            apollo_key: apollo_key(),
-            apollo_graph_ref: apollo_graph_reference(),
-            client_name_header: client_name_header_default(),
-            client_version_header: client_version_header_default(),
-            schema_id: "<no_schema_id>".to_string(),
-            buffer_size: default_buffer_size(),
-            field_level_instrumentation_sampler: default_field_level_instrumentation_sampler(),
-            send_headers: ForwardHeaders::None,
-            send_variable_values: ForwardValues::None,
-            batch_processor: BatchProcessorConfig::default(),
-            errors: ErrorsConfiguration::default(),
-        }
-    }
 }
 
 schemar_fn!(

@@ -25,7 +25,7 @@ use crate::services::router;
 use crate::ListenAddr;
 
 /// Prometheus configuration
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Config {
     /// Set to true to enable
@@ -44,16 +44,6 @@ fn prometheus_default_listen_addr() -> ListenAddr {
 
 fn prometheus_default_path() -> String {
     "/metrics".to_string()
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            listen: prometheus_default_listen_addr(),
-            path: prometheus_default_path(),
-        }
-    }
 }
 
 // Prometheus metrics are special. We want them to persist between restarts if possible.

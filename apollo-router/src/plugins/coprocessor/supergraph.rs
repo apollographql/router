@@ -20,7 +20,9 @@ use crate::response;
 use crate::services::supergraph;
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(
+    Clone, Debug, serde_derive_default::Default, Deserialize, PartialEq, Serialize, JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SupergraphRequestConf {
     /// Send the headers
@@ -36,7 +38,9 @@ pub(super) struct SupergraphRequestConf {
 }
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(
+    Clone, Debug, serde_derive_default::Default, Deserialize, PartialEq, Serialize, JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SupergraphResponseConf {
     /// Send the headers
@@ -51,8 +55,10 @@ pub(super) struct SupergraphResponseConf {
     pub(super) status_code: bool,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
-#[serde(default)]
+#[derive(
+    Clone, Debug, serde_derive_default::Default, Deserialize, PartialEq, Serialize, JsonSchema,
+)]
+#[serde(default, deny_unknown_fields)]
 pub(super) struct SupergraphStage {
     /// The request configuration
     pub(super) request: SupergraphRequestConf,

@@ -39,7 +39,7 @@ pub(crate) mod prometheus;
 pub(crate) mod span_metrics_exporter;
 static UNKNOWN_SERVICE: &str = "unknown_service";
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 /// Configuration to add custom attributes/labels on metrics
 pub(crate) struct MetricsAttributesConf {
@@ -50,7 +50,7 @@ pub(crate) struct MetricsAttributesConf {
 }
 
 /// Configuration to add custom attributes/labels on metrics to subgraphs
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphAttributesConf {
     /// Attributes for all subgraphs
@@ -60,7 +60,7 @@ pub(crate) struct SubgraphAttributesConf {
 }
 
 /// Configuration to add custom attributes/labels on metrics to subgraphs
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct AttributesForwardConf {
     /// Configuration to insert custom attributes/labels in metrics
@@ -87,7 +87,7 @@ pub(crate) struct Insert {
 }
 
 /// Configuration to forward from headers/body
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Forward {
     /// Forward header values as custom attributes/labels in metrics
@@ -96,7 +96,7 @@ pub(crate) struct Forward {
     pub(crate) body: Vec<BodyForward>,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ErrorsForward {
     /// Will include the error message in a "message" attribute

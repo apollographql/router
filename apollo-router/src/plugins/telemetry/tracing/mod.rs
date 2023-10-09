@@ -96,7 +96,7 @@ where
 }
 
 /// Batch processor configuration
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 pub(crate) struct BatchProcessorConfig {
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
@@ -178,17 +178,5 @@ impl Display for BatchProcessorConfig {
                              self.max_export_batch_size,
                              humantime::format_duration(self.max_export_timeout),
                              self.max_concurrent_exports))
-    }
-}
-
-impl Default for BatchProcessorConfig {
-    fn default() -> Self {
-        BatchProcessorConfig {
-            scheduled_delay: scheduled_delay_default(),
-            max_queue_size: max_queue_size_default(),
-            max_export_batch_size: max_export_batch_size_default(),
-            max_export_timeout: max_export_timeout_default(),
-            max_concurrent_exports: max_concurrent_exports_default(),
-        }
     }
 }

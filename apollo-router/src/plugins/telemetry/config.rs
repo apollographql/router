@@ -54,7 +54,7 @@ where
 impl<T> GenericWith<T> for T where Self: Sized {}
 
 /// Telemetry configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, serde_derive_default::Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Conf {
     /// Logging configuration
@@ -69,7 +69,7 @@ pub(crate) struct Conf {
 }
 
 /// Metrics configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, serde_derive_default::Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Metrics {
     /// Common metrics configuration across all exporters
@@ -80,7 +80,7 @@ pub(crate) struct Metrics {
     pub(crate) prometheus: metrics::prometheus::Config,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct MetricsCommon {
     /// Configuration to add custom labels/attributes to metrics
@@ -98,24 +98,19 @@ pub(crate) struct MetricsCommon {
     pub(crate) experimental_cache_metrics: ExperimentalCacheMetricsConf,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ExperimentalCacheMetricsConf {
     /// Enable experimental metrics
     pub(crate) enabled: bool,
-    #[serde(with = "humantime_serde")]
+    #[serde(with = "humantime_serde", default = "default_ttl")]
     #[schemars(with = "String")]
     /// Potential TTL for a cache if we had one (default: 5secs)
     pub(crate) ttl: Duration,
 }
 
-impl Default for ExperimentalCacheMetricsConf {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            ttl: Duration::from_secs(5),
-        }
-    }
+fn default_ttl() -> Duration {
+    Duration::from_secs(5)
 }
 
 fn default_buckets() -> Vec<f64> {
@@ -124,21 +119,8 @@ fn default_buckets() -> Vec<f64> {
     ]
 }
 
-impl Default for MetricsCommon {
-    fn default() -> Self {
-        Self {
-            attributes: Default::default(),
-            service_name: None,
-            service_namespace: None,
-            resources: HashMap::new(),
-            buckets: default_buckets(),
-            experimental_cache_metrics: ExperimentalCacheMetricsConf::default(),
-        }
-    }
-}
-
 /// Tracing configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Tracing {
     // TODO: when deleting the `experimental_` prefix, check the usage when enabling dev mode
@@ -160,7 +142,7 @@ pub(crate) struct Tracing {
     pub(crate) datadog: tracing::datadog::Config,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Logging {
     /// Log format
@@ -308,7 +290,7 @@ impl Default for LoggingFormat {
     }
 }
 
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, serde_derive_default::Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ExposeTraceId {
     /// Expose the trace_id in response headers
@@ -321,7 +303,7 @@ pub(crate) struct ExposeTraceId {
 
 /// Configure propagation of traces. In general you won't have to do this as these are automatically configured
 /// along with any exporter you configure.
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, serde_derive_default::Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Propagation {
     /// Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)
@@ -340,7 +322,7 @@ pub(crate) struct Propagation {
     pub(crate) awsxray: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RequestPropagation {
     /// Choose the header name to expose trace_id (default: apollo-trace-id)
@@ -349,27 +331,35 @@ pub(crate) struct RequestPropagation {
     pub(crate) header_name: Option<HeaderName>,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 #[non_exhaustive]
 pub(crate) struct Trace {
     /// The trace service name
+    #[serde(default = "default_service_name")]
     pub(crate) service_name: String,
     /// The trace service namespace
     pub(crate) service_namespace: String,
     /// The sampler, always_on, always_off or a decimal between 0.0 and 1.0
+    #[serde(default = "default_sampler")]
     pub(crate) sampler: SamplerOption,
     /// Whether to use parent based sampling
+    #[serde(default = "default_parent_based_sampler")]
     pub(crate) parent_based_sampler: bool,
     /// The maximum events per span before discarding
+    #[serde(default = "default_max_events_per_span")]
     pub(crate) max_events_per_span: u32,
     /// The maximum attributes per span before discarding
+    #[serde(default = "default_max_attributes_per_span")]
     pub(crate) max_attributes_per_span: u32,
     /// The maximum links per span before discarding
+    #[serde(default = "default_max_links_per_span")]
     pub(crate) max_links_per_span: u32,
     /// The maximum attributes per event before discarding
+    #[serde(default = "default_max_attributes_per_event")]
     pub(crate) max_attributes_per_event: u32,
     /// The maximum attributes per link before discarding
+    #[serde(default = "default_max_attributes_per_link")]
     pub(crate) max_attributes_per_link: u32,
     /// Default attributes
     pub(crate) attributes: BTreeMap<String, AttributeValue>,
@@ -382,24 +372,10 @@ fn default_parent_based_sampler() -> bool {
 fn default_sampler() -> SamplerOption {
     SamplerOption::Always(Sampler::AlwaysOn)
 }
-
-impl Default for Trace {
-    fn default() -> Self {
-        Self {
-            service_name: "router".to_string(),
-            service_namespace: Default::default(),
-            sampler: default_sampler(),
-            parent_based_sampler: default_parent_based_sampler(),
-            max_events_per_span: default_max_events_per_span(),
-            max_attributes_per_span: default_max_attributes_per_span(),
-            max_links_per_span: default_max_links_per_span(),
-            max_attributes_per_event: default_max_attributes_per_event(),
-            max_attributes_per_link: default_max_attributes_per_link(),
-            attributes: Default::default(),
-        }
-    }
+fn default_service_name() -> String {
+    // TODO change this in a follow up to `unknown_service` as per the spec https://opentelemetry.io/docs/concepts/sdk-configuration/general-sdk-configuration/#otel_service_name
+    "router".to_string()
 }
-
 fn default_max_events_per_span() -> u32 {
     SpanLimits::default().max_events_per_span
 }

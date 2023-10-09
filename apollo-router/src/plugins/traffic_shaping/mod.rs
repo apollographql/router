@@ -207,11 +207,11 @@ struct RouterShaping {
     timeout: Option<Duration>,
 }
 
-#[derive(PartialEq, Debug, Clone, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
 // FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
 // Remove this once the configuration yml changes.
 /// Configuration for the experimental traffic shaping plugin
+#[derive(PartialEq, Debug, Clone, serde_derive_default::Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Config {
     /// Applied at the router level
     router: Option<RouterShaping>,

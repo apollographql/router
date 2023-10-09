@@ -187,7 +187,9 @@ where
     }
 }
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(
+    Clone, Debug, serde_derive_default::Default, Deserialize, PartialEq, Serialize, JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct RouterRequestConf {
     /// Send the headers
@@ -205,7 +207,9 @@ pub(super) struct RouterRequestConf {
 }
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(
+    Clone, Debug, serde_derive_default::Default, Deserialize, PartialEq, Serialize, JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct RouterResponseConf {
     /// Send the headers
@@ -220,7 +224,9 @@ pub(super) struct RouterResponseConf {
     pub(super) status_code: bool,
 }
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(
+    Clone, Debug, serde_derive_default::Default, Deserialize, PartialEq, Serialize, JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphRequestConf {
     /// Send the headers
@@ -238,7 +244,9 @@ pub(super) struct SubgraphRequestConf {
 }
 
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(
+    Clone, Debug, serde_derive_default::Default, Deserialize, PartialEq, Serialize, JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphResponseConf {
     /// Send the headers
@@ -254,7 +262,7 @@ pub(super) struct SubgraphResponseConf {
 }
 
 /// Configures the externalization plugin
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Conf {
     /// The url you'd like to offload processing to
@@ -279,7 +287,9 @@ fn default_timeout() -> Duration {
     DEFAULT_EXTERNALIZATION_TIMEOUT
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(
+    Clone, Debug, serde_derive_default::Default, Deserialize, PartialEq, Serialize, JsonSchema,
+)]
 #[serde(default)]
 pub(super) struct RouterStage {
     /// The request configuration
@@ -404,7 +414,9 @@ impl RouterStage {
 // -----------------------------------------------------------------------------------------
 
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(
+    Clone, Debug, serde_derive_default::Default, Deserialize, PartialEq, Serialize, JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphStages {
     #[serde(default)]
@@ -412,7 +424,9 @@ pub(super) struct SubgraphStages {
 }
 
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(
+    Clone, Debug, serde_derive_default::Default, Deserialize, PartialEq, Serialize, JsonSchema,
+)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphStage {
     #[serde(default)]
