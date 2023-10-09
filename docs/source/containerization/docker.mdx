@@ -150,4 +150,4 @@ Usage: build_docker_image.sh [-b [-r <repo>]] [-d] [<release>]
 		build_docker_image.sh -d v0.9.1
 ```
 
-The script has to be run from the `dockerfiles/diy` directory because it makes assumptions about the relative availability of various files. The example uses [debian:bullseye-slim image](https://hub.docker.com/_/debian/) for the final image build. Feel free to modify the script to use images which better suit your own needs, but be careful if using the [-d] flag since it makes the assumption that there is a `heaptrack` package available to install.
+The example uses [debian:bullseye-slim image](https://hub.docker.com/_/debian/) for the final image build. Feel free to modify the script to use images which better suit your own needs, but be careful if using the `-d` flag because it makes the assumption that there is a `heaptrack` package available to install.
