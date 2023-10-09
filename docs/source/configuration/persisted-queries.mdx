@@ -6,13 +6,11 @@ minVersion: 1.25.0
 
 <GraphOSEnterpriseRequired />
 
-<PreviewFeature discordLink="https://discordapp.com/channels/1022972389463687228/1143901714173407342"/>
-
 <PQIntro />
 
 ## Differences from automatic persisted queries
 
-The Apollo Router also supports a related feature called [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQ). With APQ, clients can execute a GraphQL operation by sending the SHA256 hash of its operation string instead of the entire string. **APQ doesn't support safelisting** because the router dynamically populates its APQ cache over time with _any_ operations it receives.
+The Apollo Router also supports a related feature called [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQ). With APQ, clients can execute a GraphQL operation by sending the SHA256 hash of its operation string instead of the entire string. **APQ doesn't support safelisting** because the router updates its APQ cache over time with _any_ operations it receives.
 
 For more details on differences between APQ and this feature, see the [GraphOS persisted queries documentation](/graphos/operations/persisted-queries#differences-from-automatic-persisted-queries).
 
@@ -22,7 +20,7 @@ Enabling operation safelisting has a few steps:
 
 1. PQL creation and linking
 1. Router configuration
-1. Preregistering trusted operations
+1. Operation registration
 1. Client updates
 
 This article details the router configuration step.
@@ -40,33 +38,35 @@ For more information on other configuration aspects, see the [GraphOS persisted 
 
 The router provides four configuration options that you can combine to create the recommended [security levels](#router-security-levels). This section details each configuration option. Refer to the [security levels](#router-security-levels) section for recommended combinations.
 
-#### `preview_persisted_queries`
+> From version `1.25.0` to `1.32.0`, the `persisted_queries` configuration option was named `preview_persisted_queries`. Upgrade your router to version `1.32.0` or later to use the [generally available](/resources/product-launch-stages/#general-availability) version of the feature and the example configuration snippets below.
+
+#### `persisted_queries`
 
 This base configuration enables the feature. All other configuration options build off this one.
 
 ```yaml title="router.yaml"
-preview_persisted_queries:
+persisted_queries:
   enabled: true
 ```
 
 #### `log_unknown`
 
-Adding `log_unknown: true` to `preview_persisted_queries` configures the router to log any incoming operations not preregistered to the PQL.
+Adding `log_unknown: true` to `persisted_queries` configures the router to log any incoming operations not registered to the PQL.
 
 ```yaml title="router.yaml"
-preview_persisted_queries:
+persisted_queries:
   enabled: true
   log_unknown: true
 ```
 
-If used with the [`safelist`](#safelist) option, the router logs unregistered and rejected operations. With [`safelist.required_id`](#require_id) off, the only rejected operations are unregistered ones. If [`safelist.required_id`](#require_id) is turned on, operations can be rejected even when preregistered because they use operation IDs rather than operation strings.
+If used with the [`safelist`](#safelist) option, the router logs unregistered and rejected operations. With [`safelist.required_id`](#require_id) off, the only rejected operations are unregistered ones. If [`safelist.required_id`](#require_id) is turned on, operations can be rejected even when registered because they use operation IDs rather than operation strings.
 
 #### `safelist`
 
-Adding `safelist: true` to `preview_persisted_queries` causes the router to reject any operations that haven't been preregistered to your PQL.
+Adding `safelist: true` to `persisted_queries` causes the router to reject any operations that haven't been registered to your PQL.
 
 ```yaml title="router.yaml"
-preview_persisted_queries:
+persisted_queries:
   enabled: true
   safelist:
     enabled: true
@@ -74,18 +74,18 @@ apq:
   enabled: false
 ```
 
-> **Note:** To enable safelisting, you _must_ turn off [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly preregistered.
+> **Note:** To enable safelisting, you _must_ turn off [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly registered.
 
-By default, the [`require_id`](#required_id) suboption is `false`, meaning the router accepts both operation IDs and operation strings as long as the operation is preregistered.
+By default, the [`require_id`](#required_id) suboption is `false`, meaning the router accepts both operation IDs and operation strings as long as the operation is registered.
 
 #### `require_id`
 
 Adding `require_id: true` to the `safelist` option causes the router to reject any operations that either:
-- haven't been preregistered to your PQL
+- haven't been registered to your PQL
 - use a full operation string rather than the operation ID
 
 ```yaml title="router.yaml"
-preview_persisted_queries:
+persisted_queries:
   enabled: true
   safelist:
     enabled: true
@@ -94,4 +94,4 @@ apq:
   enabled: false
 ```
 
-> **Note:** To enable safelisting, you _must_ turn off [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly preregistered.
+> **Note:** To enable safelisting, you _must_ turn off [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly registered.

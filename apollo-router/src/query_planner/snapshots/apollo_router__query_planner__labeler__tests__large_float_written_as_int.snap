@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/query_planner/labeler.rs
+expression: result
+---
+query {
+  field(id: 1234567890123)
+}
+

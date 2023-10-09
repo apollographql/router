@@ -19,6 +19,8 @@ pub(crate) mod codec;
 pub(crate) mod unshared;
 pub(crate) mod util;
 
+const GZIP_HEADER_LEN: usize = 10;
+
 pub(crate) enum Compressor {
     Deflate(DeflateEncoder),
     Gzip(GzipEncoder),
@@ -79,7 +81,9 @@ where {
                         }
                     }
                     Ok(data) => {
-                        let mut buf = BytesMut::zeroed(data.len());
+                        // the buffer needs at least 10 bytes for a gzip header if we use gzip, then more
+                        // room to store the data itself
+                        let mut buf = BytesMut::zeroed(GZIP_HEADER_LEN + data.len());
 
                         let mut partial_input = PartialBuffer::new(&*data);
                         let mut partial_output = PartialBuffer::new(&mut buf);
@@ -226,6 +230,27 @@ mod tests {
         decoder.shutdown().await.unwrap();
         let response = decoder.into_inner();
         assert_eq!(response.len(), 5000);
+
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn small_input() {
+        let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
+
+        let body: Body = vec![0u8, 1, 2, 3].into();
+
+        let mut stream = compressor.process(body);
+        let mut decoder = GzipDecoder::new(Vec::new());
+
+        while let Some(buf) = stream.next().await {
+            let b = buf.unwrap();
+            decoder.write_all(&b).await.unwrap();
+        }
+
+        decoder.shutdown().await.unwrap();
+        let response = decoder.into_inner();
+        assert_eq!(response, [0u8, 1, 2, 3]);
 
         assert!(stream.next().await.is_none());
     }

@@ -13,10 +13,10 @@ use bytes::Bytes;
 use http::header;
 use http::header::HeaderName;
 use http::HeaderValue;
-use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 
 use crate::graphql;
+use crate::services::APPLICATION_JSON_HEADER_VALUE;
 
 /// Delayed-fallibility wrapper for conversion to [`http::header::HeaderName`].
 ///
@@ -441,10 +441,9 @@ impl IntoResponse for Response<graphql::Response> {
         let (mut parts, body) = http::Response::from(self).into_parts();
         let json_body_bytes =
             Bytes::from(serde_json::to_vec(&body).expect("body should be serializable; qed"));
-        parts.headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static(APPLICATION_JSON.essence_str()),
-        );
+        parts
+            .headers
+            .insert(header::CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
 
         axum::response::Response::from_parts(parts, boxed(http_body::Full::new(json_body_bytes)))
     }

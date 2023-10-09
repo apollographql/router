@@ -3,4 +3,5 @@ telemetry:
     trace_config:
       service_name: router
     otlp:
+      enabled: true
       endpoint: default

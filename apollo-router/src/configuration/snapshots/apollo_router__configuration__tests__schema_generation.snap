@@ -84,6 +84,12 @@ expression: "&schema"
                     "urls"
                   ],
                   "properties": {
+                    "timeout": {
+                      "description": "Redis request timeout (default: 2ms)",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
                     "urls": {
                       "description": "List of URLs to the Redis cluster",
                       "type": "array",
@@ -780,6 +786,106 @@ expression: "&schema"
           },
           "additionalProperties": false
         },
+        "supergraph": {
+          "description": "The supergraph stage request/response configuration",
+          "default": {
+            "request": {
+              "headers": false,
+              "context": false,
+              "body": false,
+              "sdl": false,
+              "method": false
+            },
+            "response": {
+              "headers": false,
+              "context": false,
+              "body": false,
+              "sdl": false,
+              "status_code": false
+            }
+          },
+          "type": "object",
+          "properties": {
+            "request": {
+              "description": "The request configuration",
+              "default": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "sdl": false,
+                "method": false
+              },
+              "type": "object",
+              "properties": {
+                "body": {
+                  "description": "Send the body",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "context": {
+                  "description": "Send the context",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "headers": {
+                  "description": "Send the headers",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "method": {
+                  "description": "Send the method",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "sdl": {
+                  "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "response": {
+              "description": "What information is passed to a router request/response stage",
+              "default": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "sdl": false,
+                "status_code": false
+              },
+              "type": "object",
+              "properties": {
+                "body": {
+                  "description": "Send the body",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "context": {
+                  "description": "Send the context",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "headers": {
+                  "description": "Send the headers",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "sdl": {
+                  "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "status_code": {
+                  "description": "Send the HTTP status",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
         "timeout": {
           "description": "The timeout for external requests",
           "default": {
@@ -900,6 +1006,37 @@ expression: "&schema"
           "description": "The CSRF plugin is enabled by default; set unsafe_disabled = true to disable the plugin behavior Note that setting this to true is deemed unsafe. See <https://developer.mozilla.org/en-US/docs/Glossary/CSRF>.",
           "default": false,
           "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "experimental_batching": {
+      "description": "Batching configuration.",
+      "default": {
+        "enabled": false,
+        "mode": "batch_http_link"
+      },
+      "type": "object",
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "enabled": {
+          "description": "Activates Batching (disabled by default)",
+          "default": false,
+          "type": "boolean"
+        },
+        "mode": {
+          "description": "Batching mode",
+          "oneOf": [
+            {
+              "description": "batch_http_link",
+              "type": "string",
+              "enum": [
+                "batch_http_link"
+              ]
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -1498,6 +1635,52 @@ expression: "&schema"
         }
       ]
     },
+    "persisted_queries": {
+      "description": "Configures managed persisted queries",
+      "default": {
+        "enabled": false,
+        "log_unknown": false,
+        "safelist": {
+          "enabled": false,
+          "require_id": false
+        }
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Activates Persisted Queries (disabled by default)",
+          "default": false,
+          "type": "boolean"
+        },
+        "log_unknown": {
+          "description": "Enabling this field configures the router to log any freeform GraphQL request that is not in the persisted query list",
+          "default": false,
+          "type": "boolean"
+        },
+        "safelist": {
+          "description": "Restricts execution of operations that are not found in the Persisted Query List",
+          "default": {
+            "enabled": false,
+            "require_id": false
+          },
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "Enables using the persisted query list as a safelist (disabled by default)",
+              "default": false,
+              "type": "boolean"
+            },
+            "require_id": {
+              "description": "Enabling this field configures the router to reject any request that does not include the persisted query ID",
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "plugins": {
       "description": "Plugin configuration",
       "default": null,
@@ -1557,52 +1740,6 @@ expression: "&schema"
               "type": "string"
             }
           }
-        }
-      },
-      "additionalProperties": false
-    },
-    "preview_persisted_queries": {
-      "description": "Configures managed persisted queries",
-      "default": {
-        "enabled": false,
-        "log_unknown": false,
-        "safelist": {
-          "enabled": false,
-          "require_id": false
-        }
-      },
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "description": "Activates Persisted Queries (disabled by default)",
-          "default": false,
-          "type": "boolean"
-        },
-        "log_unknown": {
-          "description": "Enabling this field configures the router to log any freeform GraphQL request that is not in the persisted query list",
-          "default": false,
-          "type": "boolean"
-        },
-        "safelist": {
-          "description": "Restricts execution of operations that are not found in the Persisted Query List",
-          "default": {
-            "enabled": false,
-            "require_id": false
-          },
-          "type": "object",
-          "properties": {
-            "enabled": {
-              "description": "Enables using the persisted query list as a safelist (disabled by default)",
-              "default": false,
-              "type": "boolean"
-            },
-            "require_id": {
-              "description": "Enabling this field configures the router to reject any request that does not include the persisted query ID",
-              "default": false,
-              "type": "boolean"
-            }
-          },
-          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -1935,7 +2072,7 @@ expression: "&schema"
             },
             "redis": null
           },
-          "warmed_up_queries": 0
+          "warmed_up_queries": null
         }
       },
       "type": "object",
@@ -1984,7 +2121,7 @@ expression: "&schema"
               },
               "redis": null
             },
-            "warmed_up_queries": 0
+            "warmed_up_queries": null
           },
           "type": "object",
           "properties": {
@@ -2025,6 +2162,12 @@ expression: "&schema"
                     "urls"
                   ],
                   "properties": {
+                    "timeout": {
+                      "description": "Redis request timeout (default: 2ms)",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
                     "urls": {
                       "description": "List of URLs to the Redis cluster",
                       "type": "array",
@@ -2041,11 +2184,12 @@ expression: "&schema"
               "additionalProperties": false
             },
             "warmed_up_queries": {
-              "description": "Warm up the cache on reloads by running the query plan over a list of the most used queries Defaults to 0 (do not warm up the cache)",
-              "default": 0,
+              "description": "Warms up the cache on reloads by running the query plan over a list of the most used queries (from the in memory cache) Configures the number of queries warmed up. Defaults to 1/3 of the in memory cache",
+              "default": null,
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "nullable": true
             }
           },
           "additionalProperties": false
@@ -2063,19 +2207,6 @@ expression: "&schema"
           "properties": {
             "batch_processor": {
               "description": "Configuration for batch processing.",
-              "default": {
-                "scheduled_delay": {
-                  "secs": 5,
-                  "nanos": 0
-                },
-                "max_queue_size": 2048,
-                "max_export_batch_size": 512,
-                "max_export_timeout": {
-                  "secs": 30,
-                  "nanos": 0
-                },
-                "max_concurrent_exports": 1
-              },
               "type": "object",
               "properties": {
                 "max_concurrent_exports": {
@@ -2184,8 +2315,7 @@ expression: "&schema"
                           }
                         },
                         "additionalProperties": false
-                      },
-                      "nullable": true
+                      }
                     }
                   },
                   "additionalProperties": false
@@ -2333,8 +2463,7 @@ expression: "&schema"
               ]
             }
           },
-          "additionalProperties": false,
-          "nullable": true
+          "additionalProperties": false
         },
         "experimental_logging": {
           "description": "Logging configuration",
@@ -2543,8 +2672,7 @@ expression: "&schema"
                                   }
                                 },
                                 "additionalProperties": false
-                              },
-                              "nullable": true
+                              }
                             },
                             "errors": {
                               "description": "Configuration to forward values from the error to custom attributes/labels in metrics",
@@ -2630,17 +2758,16 @@ expression: "&schema"
                                       }
                                     },
                                     "additionalProperties": false
-                                  },
-                                  "nullable": true
+                                  }
                                 },
                                 "include_messages": {
                                   "description": "Will include the error message in a \"message\" attribute",
-                                  "default": false,
-                                  "type": "boolean"
+                                  "default": null,
+                                  "type": "boolean",
+                                  "nullable": true
                                 }
                               },
-                              "additionalProperties": false,
-                              "nullable": true
+                              "additionalProperties": false
                             },
                             "request": {
                               "description": "Configuration to forward headers or body values from the request to custom attributes/labels in metrics",
@@ -2726,8 +2853,7 @@ expression: "&schema"
                                       }
                                     },
                                     "additionalProperties": false
-                                  },
-                                  "nullable": true
+                                  }
                                 },
                                 "header": {
                                   "description": "Forward header values as custom attributes/labels in metrics",
@@ -2828,12 +2954,10 @@ expression: "&schema"
                                         "additionalProperties": false
                                       }
                                     ]
-                                  },
-                                  "nullable": true
+                                  }
                                 }
                               },
-                              "additionalProperties": false,
-                              "nullable": true
+                              "additionalProperties": false
                             },
                             "response": {
                               "description": "Configuration to forward headers or body values from the response to custom attributes/labels in metrics",
@@ -2919,8 +3043,7 @@ expression: "&schema"
                                       }
                                     },
                                     "additionalProperties": false
-                                  },
-                                  "nullable": true
+                                  }
                                 },
                                 "header": {
                                   "description": "Forward header values as custom attributes/labels in metrics",
@@ -3021,12 +3144,10 @@ expression: "&schema"
                                         "additionalProperties": false
                                       }
                                     ]
-                                  },
-                                  "nullable": true
+                                  }
                                 }
                               },
-                              "additionalProperties": false,
-                              "nullable": true
+                              "additionalProperties": false
                             },
                             "static": {
                               "description": "Configuration to insert custom attributes/labels in metrics",
@@ -3103,12 +3224,10 @@ expression: "&schema"
                                   }
                                 },
                                 "additionalProperties": false
-                              },
-                              "nullable": true
+                              }
                             }
                           },
-                          "additionalProperties": false,
-                          "nullable": true
+                          "additionalProperties": false
                         },
                         "subgraphs": {
                           "description": "Attributes per subgraph",
@@ -3197,8 +3316,7 @@ expression: "&schema"
                                     }
                                   },
                                   "additionalProperties": false
-                                },
-                                "nullable": true
+                                }
                               },
                               "errors": {
                                 "description": "Configuration to forward values from the error to custom attributes/labels in metrics",
@@ -3284,17 +3402,16 @@ expression: "&schema"
                                         }
                                       },
                                       "additionalProperties": false
-                                    },
-                                    "nullable": true
+                                    }
                                   },
                                   "include_messages": {
                                     "description": "Will include the error message in a \"message\" attribute",
-                                    "default": false,
-                                    "type": "boolean"
+                                    "default": null,
+                                    "type": "boolean",
+                                    "nullable": true
                                   }
                                 },
-                                "additionalProperties": false,
-                                "nullable": true
+                                "additionalProperties": false
                               },
                               "request": {
                                 "description": "Configuration to forward headers or body values from the request to custom attributes/labels in metrics",
@@ -3380,8 +3497,7 @@ expression: "&schema"
                                         }
                                       },
                                       "additionalProperties": false
-                                    },
-                                    "nullable": true
+                                    }
                                   },
                                   "header": {
                                     "description": "Forward header values as custom attributes/labels in metrics",
@@ -3482,12 +3598,10 @@ expression: "&schema"
                                           "additionalProperties": false
                                         }
                                       ]
-                                    },
-                                    "nullable": true
+                                    }
                                   }
                                 },
-                                "additionalProperties": false,
-                                "nullable": true
+                                "additionalProperties": false
                               },
                               "response": {
                                 "description": "Configuration to forward headers or body values from the response to custom attributes/labels in metrics",
@@ -3573,8 +3687,7 @@ expression: "&schema"
                                         }
                                       },
                                       "additionalProperties": false
-                                    },
-                                    "nullable": true
+                                    }
                                   },
                                   "header": {
                                     "description": "Forward header values as custom attributes/labels in metrics",
@@ -3675,12 +3788,10 @@ expression: "&schema"
                                           "additionalProperties": false
                                         }
                                       ]
-                                    },
-                                    "nullable": true
+                                    }
                                   }
                                 },
-                                "additionalProperties": false,
-                                "nullable": true
+                                "additionalProperties": false
                               },
                               "static": {
                                 "description": "Configuration to insert custom attributes/labels in metrics",
@@ -3757,17 +3868,14 @@ expression: "&schema"
                                     }
                                   },
                                   "additionalProperties": false
-                                },
-                                "nullable": true
+                                }
                               }
                             },
                             "additionalProperties": false
-                          },
-                          "nullable": true
+                          }
                         }
                       },
-                      "additionalProperties": false,
-                      "nullable": true
+                      "additionalProperties": false
                     },
                     "supergraph": {
                       "description": "Configuration to forward header values or body values from router request/response in metric attributes/labels",
@@ -3853,8 +3961,7 @@ expression: "&schema"
                               }
                             },
                             "additionalProperties": false
-                          },
-                          "nullable": true
+                          }
                         },
                         "errors": {
                           "description": "Configuration to forward values from the error to custom attributes/labels in metrics",
@@ -3940,17 +4047,16 @@ expression: "&schema"
                                   }
                                 },
                                 "additionalProperties": false
-                              },
-                              "nullable": true
+                              }
                             },
                             "include_messages": {
                               "description": "Will include the error message in a \"message\" attribute",
-                              "default": false,
-                              "type": "boolean"
+                              "default": null,
+                              "type": "boolean",
+                              "nullable": true
                             }
                           },
-                          "additionalProperties": false,
-                          "nullable": true
+                          "additionalProperties": false
                         },
                         "request": {
                           "description": "Configuration to forward headers or body values from the request to custom attributes/labels in metrics",
@@ -4036,8 +4142,7 @@ expression: "&schema"
                                   }
                                 },
                                 "additionalProperties": false
-                              },
-                              "nullable": true
+                              }
                             },
                             "header": {
                               "description": "Forward header values as custom attributes/labels in metrics",
@@ -4138,12 +4243,10 @@ expression: "&schema"
                                     "additionalProperties": false
                                   }
                                 ]
-                              },
-                              "nullable": true
+                              }
                             }
                           },
-                          "additionalProperties": false,
-                          "nullable": true
+                          "additionalProperties": false
                         },
                         "response": {
                           "description": "Configuration to forward headers or body values from the response to custom attributes/labels in metrics",
@@ -4229,8 +4332,7 @@ expression: "&schema"
                                   }
                                 },
                                 "additionalProperties": false
-                              },
-                              "nullable": true
+                              }
                             },
                             "header": {
                               "description": "Forward header values as custom attributes/labels in metrics",
@@ -4331,12 +4433,10 @@ expression: "&schema"
                                     "additionalProperties": false
                                   }
                                 ]
-                              },
-                              "nullable": true
+                              }
                             }
                           },
-                          "additionalProperties": false,
-                          "nullable": true
+                          "additionalProperties": false
                         },
                         "static": {
                           "description": "Configuration to insert custom attributes/labels in metrics",
@@ -4413,16 +4513,13 @@ expression: "&schema"
                               }
                             },
                             "additionalProperties": false
-                          },
-                          "nullable": true
+                          }
                         }
                       },
-                      "additionalProperties": false,
-                      "nullable": true
+                      "additionalProperties": false
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "buckets": {
                   "description": "Custom buckets for histograms",
@@ -4484,31 +4581,17 @@ expression: "&schema"
                   "nullable": true
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             },
             "otlp": {
               "description": "Open Telemetry native exporter configuration",
               "type": "object",
               "required": [
-                "endpoint"
+                "enabled"
               ],
               "properties": {
                 "batch_processor": {
                   "description": "Batch processor settings",
-                  "default": {
-                    "scheduled_delay": {
-                      "secs": 5,
-                      "nanos": 0
-                    },
-                    "max_queue_size": 2048,
-                    "max_export_batch_size": 512,
-                    "max_export_timeout": {
-                      "secs": 30,
-                      "nanos": 0
-                    },
-                    "max_concurrent_exports": 1
-                  },
                   "type": "object",
                   "properties": {
                     "max_concurrent_exports": {
@@ -4549,6 +4632,10 @@ expression: "&schema"
                       "type": "string"
                     }
                   }
+                },
+                "enabled": {
+                  "description": "Enable otlp",
+                  "type": "boolean"
                 },
                 "endpoint": {
                   "description": "The endpoint to send data to",
@@ -4646,18 +4733,15 @@ expression: "&schema"
                   ]
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             },
             "prometheus": {
               "description": "Prometheus exporter configuration",
               "type": "object",
-              "required": [
-                "enabled"
-              ],
               "properties": {
                 "enabled": {
                   "description": "Set to true to enable",
+                  "default": false,
                   "type": "boolean"
                 },
                 "listen": {
@@ -4680,12 +4764,10 @@ expression: "&schema"
                   "type": "string"
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             }
           },
-          "additionalProperties": false,
-          "nullable": true
+          "additionalProperties": false
         },
         "tracing": {
           "description": "Tracing configuration",
@@ -4695,24 +4777,11 @@ expression: "&schema"
               "description": "Datadog exporter configuration",
               "type": "object",
               "required": [
-                "endpoint"
+                "enabled"
               ],
               "properties": {
                 "batch_processor": {
                   "description": "batch processor configuration",
-                  "default": {
-                    "scheduled_delay": {
-                      "secs": 5,
-                      "nanos": 0
-                    },
-                    "max_queue_size": 2048,
-                    "max_export_batch_size": 512,
-                    "max_export_timeout": {
-                      "secs": 30,
-                      "nanos": 0
-                    },
-                    "max_concurrent_exports": 1
-                  },
                   "type": "object",
                   "properties": {
                     "max_concurrent_exports": {
@@ -4759,14 +4828,16 @@ expression: "&schema"
                   "default": false,
                   "type": "boolean"
                 },
+                "enabled": {
+                  "description": "Enable datadog",
+                  "type": "boolean"
+                },
                 "endpoint": {
                   "description": "The endpoint to send to",
-                  "default": "default",
                   "type": "string"
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             },
             "experimental_response_trace_id": {
               "description": "A way to expose trace id in response headers",
@@ -4791,19 +4862,15 @@ expression: "&schema"
                 {
                   "type": "object",
                   "required": [
-                    "agent"
+                    "enabled"
                   ],
                   "properties": {
                     "agent": {
                       "description": "Agent configuration",
                       "type": "object",
-                      "required": [
-                        "endpoint"
-                      ],
                       "properties": {
                         "endpoint": {
                           "description": "The endpoint to send to",
-                          "default": "default",
                           "type": "string"
                         }
                       },
@@ -4811,19 +4878,6 @@ expression: "&schema"
                     },
                     "batch_processor": {
                       "description": "Batch processor configuration",
-                      "default": {
-                        "scheduled_delay": {
-                          "secs": 5,
-                          "nanos": 0
-                        },
-                        "max_queue_size": 2048,
-                        "max_export_batch_size": 512,
-                        "max_export_timeout": {
-                          "secs": 30,
-                          "nanos": 0
-                        },
-                        "max_concurrent_exports": 1
-                      },
                       "type": "object",
                       "properties": {
                         "max_concurrent_exports": {
@@ -4864,6 +4918,10 @@ expression: "&schema"
                           "type": "string"
                         }
                       }
+                    },
+                    "enabled": {
+                      "description": "Enable Jaeger",
+                      "type": "boolean"
                     }
                   },
                   "additionalProperties": false
@@ -4871,24 +4929,11 @@ expression: "&schema"
                 {
                   "type": "object",
                   "required": [
-                    "collector"
+                    "enabled"
                   ],
                   "properties": {
                     "batch_processor": {
                       "description": "Batch processor configuration",
-                      "default": {
-                        "scheduled_delay": {
-                          "secs": 5,
-                          "nanos": 0
-                        },
-                        "max_queue_size": 2048,
-                        "max_export_batch_size": 512,
-                        "max_export_timeout": {
-                          "secs": 30,
-                          "nanos": 0
-                        },
-                        "max_concurrent_exports": 1
-                      },
                       "type": "object",
                       "properties": {
                         "max_concurrent_exports": {
@@ -4933,56 +4978,44 @@ expression: "&schema"
                     "collector": {
                       "description": "Collector configuration",
                       "type": "object",
-                      "required": [
-                        "endpoint"
-                      ],
                       "properties": {
                         "endpoint": {
                           "description": "The endpoint to send reports to",
-                          "type": "string",
-                          "format": "uri"
+                          "type": "string"
                         },
                         "password": {
                           "description": "The optional password",
+                          "default": null,
                           "type": "string",
                           "nullable": true
                         },
                         "username": {
                           "description": "The optional username",
+                          "default": null,
                           "type": "string",
                           "nullable": true
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "enabled": {
+                      "description": "Enable Jaeger",
+                      "type": "boolean"
                     }
                   },
                   "additionalProperties": false
                 }
-              ],
-              "nullable": true
+              ]
             },
             "otlp": {
               "description": "OpenTelemetry native exporter configuration",
               "type": "object",
               "required": [
-                "endpoint"
+                "enabled"
               ],
               "properties": {
                 "batch_processor": {
                   "description": "Batch processor settings",
-                  "default": {
-                    "scheduled_delay": {
-                      "secs": 5,
-                      "nanos": 0
-                    },
-                    "max_queue_size": 2048,
-                    "max_export_batch_size": 512,
-                    "max_export_timeout": {
-                      "secs": 30,
-                      "nanos": 0
-                    },
-                    "max_concurrent_exports": 1
-                  },
                   "type": "object",
                   "properties": {
                     "max_concurrent_exports": {
@@ -5023,6 +5056,10 @@ expression: "&schema"
                       "type": "string"
                     }
                   }
+                },
+                "enabled": {
+                  "description": "Enable otlp",
+                  "type": "boolean"
                 },
                 "endpoint": {
                   "description": "The endpoint to send data to",
@@ -5120,13 +5157,17 @@ expression: "&schema"
                   ]
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             },
             "propagation": {
               "description": "Propagation configuration",
               "type": "object",
               "properties": {
+                "awsxray": {
+                  "description": "Propagate AWS X-Ray",
+                  "default": false,
+                  "type": "boolean"
+                },
                 "baggage": {
                   "description": "Propagate baggage https://www.w3.org/TR/baggage/",
                   "default": false,
@@ -5167,8 +5208,7 @@ expression: "&schema"
                   "type": "boolean"
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             },
             "trace_config": {
               "description": "Common configuration",
@@ -5315,28 +5355,17 @@ expression: "&schema"
                   "type": "string"
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             },
             "zipkin": {
               "description": "Zipkin exporter configuration",
               "type": "object",
+              "required": [
+                "enabled"
+              ],
               "properties": {
                 "batch_processor": {
                   "description": "Batch processor configuration",
-                  "default": {
-                    "scheduled_delay": {
-                      "secs": 5,
-                      "nanos": 0
-                    },
-                    "max_queue_size": 2048,
-                    "max_export_batch_size": 512,
-                    "max_export_timeout": {
-                      "secs": 30,
-                      "nanos": 0
-                    },
-                    "max_concurrent_exports": 1
-                  },
                   "type": "object",
                   "properties": {
                     "max_concurrent_exports": {
@@ -5378,18 +5407,19 @@ expression: "&schema"
                     }
                   }
                 },
+                "enabled": {
+                  "description": "Enable zipkin",
+                  "type": "boolean"
+                },
                 "endpoint": {
                   "description": "The endpoint to send to",
-                  "default": "default",
                   "type": "string"
                 }
               },
-              "additionalProperties": false,
-              "nullable": true
+              "additionalProperties": false
             }
           },
-          "additionalProperties": false,
-          "nullable": true
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -5400,7 +5430,8 @@ expression: "&schema"
         "supergraph": null,
         "subgraph": {
           "all": {
-            "certificate_authorities": null
+            "certificate_authorities": null,
+            "client_authentication": null
           },
           "subgraphs": {}
         }
@@ -5411,7 +5442,8 @@ expression: "&schema"
           "description": "Configuration options pertaining to the subgraph server component.",
           "default": {
             "all": {
-              "certificate_authorities": null
+              "certificate_authorities": null,
+              "client_authentication": null
             },
             "subgraphs": {}
           },
@@ -5420,7 +5452,8 @@ expression: "&schema"
             "all": {
               "description": "options applying to all subgraphs",
               "default": {
-                "certificate_authorities": null
+                "certificate_authorities": null,
+                "client_authentication": null
               },
               "type": "object",
               "properties": {
@@ -5428,6 +5461,29 @@ expression: "&schema"
                   "description": "list of certificate authorities in PEM format",
                   "default": null,
                   "type": "string",
+                  "nullable": true
+                },
+                "client_authentication": {
+                  "description": "client certificate authentication",
+                  "default": null,
+                  "type": "object",
+                  "required": [
+                    "certificate_chain",
+                    "key"
+                  ],
+                  "properties": {
+                    "certificate_chain": {
+                      "description": "list of certificates in PEM format",
+                      "writeOnly": true,
+                      "type": "string"
+                    },
+                    "key": {
+                      "description": "key in PEM format",
+                      "writeOnly": true,
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false,
                   "nullable": true
                 }
               },
@@ -5445,6 +5501,29 @@ expression: "&schema"
                     "description": "list of certificate authorities in PEM format",
                     "default": null,
                     "type": "string",
+                    "nullable": true
+                  },
+                  "client_authentication": {
+                    "description": "client certificate authentication",
+                    "default": null,
+                    "type": "object",
+                    "required": [
+                      "certificate_chain",
+                      "key"
+                    ],
+                    "properties": {
+                      "certificate_chain": {
+                        "description": "list of certificates in PEM format",
+                        "writeOnly": true,
+                        "type": "string"
+                      },
+                      "key": {
+                        "description": "key in PEM format",
+                        "writeOnly": true,
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false,
                     "nullable": true
                   }
                 },
@@ -5525,11 +5604,6 @@ expression: "&schema"
               "type": "boolean",
               "nullable": true
             },
-            "experimental_enable_http2": {
-              "description": "Enable HTTP2 for subgraphs",
-              "type": "boolean",
-              "nullable": true
-            },
             "experimental_entity_caching": {
               "description": "Enable entity caching",
               "type": "object",
@@ -5543,6 +5617,33 @@ expression: "&schema"
                 }
               },
               "additionalProperties": false,
+              "nullable": true
+            },
+            "experimental_http2": {
+              "description": "Enable HTTP2 for subgraphs",
+              "oneOf": [
+                {
+                  "description": "Enable HTTP2 for subgraphs",
+                  "type": "string",
+                  "enum": [
+                    "enable"
+                  ]
+                },
+                {
+                  "description": "Disable HTTP2 for subgraphs",
+                  "type": "string",
+                  "enum": [
+                    "disable"
+                  ]
+                },
+                {
+                  "description": "Only HTTP2 is active",
+                  "type": "string",
+                  "enum": [
+                    "http2only"
+                  ]
+                }
+              ],
               "nullable": true
             },
             "experimental_retry": {
@@ -5621,6 +5722,12 @@ expression: "&schema"
             "urls"
           ],
           "properties": {
+            "timeout": {
+              "description": "Redis request timeout (default: 2ms)",
+              "default": null,
+              "type": "string",
+              "nullable": true
+            },
             "urls": {
               "description": "List of URLs to the Redis cluster",
               "type": "array",
@@ -5707,11 +5814,6 @@ expression: "&schema"
                 "type": "boolean",
                 "nullable": true
               },
-              "experimental_enable_http2": {
-                "description": "Enable HTTP2 for subgraphs",
-                "type": "boolean",
-                "nullable": true
-              },
               "experimental_entity_caching": {
                 "description": "Enable entity caching",
                 "type": "object",
@@ -5725,6 +5827,33 @@ expression: "&schema"
                   }
                 },
                 "additionalProperties": false,
+                "nullable": true
+              },
+              "experimental_http2": {
+                "description": "Enable HTTP2 for subgraphs",
+                "oneOf": [
+                  {
+                    "description": "Enable HTTP2 for subgraphs",
+                    "type": "string",
+                    "enum": [
+                      "enable"
+                    ]
+                  },
+                  {
+                    "description": "Disable HTTP2 for subgraphs",
+                    "type": "string",
+                    "enum": [
+                      "disable"
+                    ]
+                  },
+                  {
+                    "description": "Only HTTP2 is active",
+                    "type": "string",
+                    "enum": [
+                      "http2only"
+                    ]
+                  }
+                ],
                 "nullable": true
               },
               "experimental_retry": {
