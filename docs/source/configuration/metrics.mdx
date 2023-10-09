@@ -141,10 +141,7 @@ You can send metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/
 telemetry:
   metrics:
     otlp:
-      # Enable the OpenTelemetry exporter
-      enabled: true
-
-      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317 for gRPC and http://127.0.0.1:4318 for HTTP)
+      # Either 'default' or a URL
       endpoint: default
 
       # Optional protocol. Only grpc is supported currently.

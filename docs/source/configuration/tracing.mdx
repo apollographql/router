@@ -134,7 +134,6 @@ telemetry:
   tracing:
     # Datadog
     datadog:
-      enabled: true
       batch_processor:
         scheduled_delay: 100ms
         max_concurrent_exports: 1000
@@ -157,7 +156,6 @@ The Apollo Router can be configured to connect to either the default agent addre
 telemetry:
   tracing:
     datadog:
-      enabled: true
       # Either 'default' or a URL (example: 'http://127.0.0.1:8126')
       endpoint: default
 ```
@@ -170,7 +168,6 @@ To fix this, you can configure the Apollo Router to perform a mapping for the sp
 telemetry:
   tracing:
     datadog:
-      enabled: true
       endpoint: default
       enable_span_mapping: true
 ```
@@ -215,19 +212,15 @@ Instead when `enable_span_mapping` is set to `true` the following trace will be 
 
 The Apollo Router can be configured to export tracing data to Jaeger either via an agent or http collector.
 
-Unless explicitly configured to use a collector, Jaeger will use an agent by default.
-
 ### Agent config
 
 ```yaml title="router.yaml"
 telemetry:
   tracing:
     jaeger:
-      enabled: true
-      # Optional agent configuration,
       agent:
-        # Optional endpoint, either 'default' or a socket address (Defaults to 127.0.0.1:6831)
-        endpoint: docker_jaeger:14268  
+        # Either 'default' or a URL
+        endpoint: docker_jaeger:14268
 ```
 
 ### Collector config
@@ -238,11 +231,8 @@ If you're using Kubernetes, you can inject your secrets into configuration via e
 telemetry:
   tracing:
     jaeger:
-      enabled: true
-      # Optional collector configuration,
       collector:
-        # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:14268/api/traces)
-        endpoint: "http://my-jaeger-collector" 
+        endpoint: "http://my-jaeger-collector"
         username: "${env.JAEGER_USERNAME}"
         password: "${env.JAEGER_PASSWORD}"
 ```
@@ -257,9 +247,7 @@ If you find that the built-in telemetry features of the Apollo Router are missin
 telemetry:
   tracing:
     otlp:
-      enabled: true
-      
-      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317 for gRPC and http://127.0.0.1:4318 for HTTP)
+      # Either 'default' or a URL
       endpoint: default
 
       # Optional protocol (Defaults to grpc)
@@ -290,8 +278,6 @@ The Apollo Router can be configured to export tracing data to either the default
 telemetry:
   tracing:
     zipkin:
-      enabled: true
-
-      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:9411/api/v2/spans)
-      endpoint: http://my_zipkin_collector.dev   
+      # Either 'default' or a URL
+      endpoint: http://my_zipkin_collector.dev
 ```
