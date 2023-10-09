@@ -230,7 +230,7 @@ async fn service_call(
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
             let is_subscription = plan.is_subscription(operation_name.as_deref());
 
-            if let Some(batching) = context.private_entries.clone().lock().get::<Batching>() {
+            if let Some(batching) = context.private_entries.lock().get::<Batching>() {
                 if batching.enabled && (is_deferred || is_subscription) {
                     let message = if is_deferred {
                         "BATCHING_DEFER_UNSUPPORTED"
@@ -246,7 +246,7 @@ async fn service_call(
                                     .extension_code(message)
                                     .build()])
                                 .build(),
-                            context,
+                            context.clone(),
                         );
                     *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
                     return Ok(response);
