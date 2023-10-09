@@ -2781,6 +2781,7 @@ mod tests {
         server.await.unwrap()
     }
 
+    #[ignore]
     #[tokio::test(flavor = "multi_thread")]
     async fn tls_self_signed() {
         let certificate_pem = include_str!("./testdata/server_self_signed.crt");

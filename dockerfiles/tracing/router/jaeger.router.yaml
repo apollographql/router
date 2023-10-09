@@ -9,6 +9,7 @@ telemetry:
     trace_config:
       service_name: router
     jaeger:
+      enabled: true
       agent:
         endpoint: jaeger:6831
     propagation:

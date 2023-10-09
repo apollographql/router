@@ -722,7 +722,7 @@ mod test {
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
         assert_eq!(
-            &config.apollo.unwrap().schema_id,
+            &config.apollo.schema_id,
             "ba573b479c8b3fa273f439b26b9eda700152341d897f18090d52cd073b15f909"
         );
     }
