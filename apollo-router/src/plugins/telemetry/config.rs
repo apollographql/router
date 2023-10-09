@@ -55,37 +55,36 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 
 /// Telemetry configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Conf {
     /// Logging configuration
     #[serde(rename = "experimental_logging", default)]
     pub(crate) logging: Logging,
     /// Metrics configuration
-    pub(crate) metrics: Option<Metrics>,
+    pub(crate) metrics: Metrics,
     /// Tracing configuration
-    pub(crate) tracing: Option<Tracing>,
+    pub(crate) tracing: Tracing,
     /// Apollo reporting configuration
-    pub(crate) apollo: Option<apollo::Config>,
+    pub(crate) apollo: apollo::Config,
 }
 
 /// Metrics configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-#[allow(dead_code)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Metrics {
     /// Common metrics configuration across all exporters
-    pub(crate) common: Option<MetricsCommon>,
+    pub(crate) common: MetricsCommon,
     /// Open Telemetry native exporter configuration
-    pub(crate) otlp: Option<otlp::Config>,
+    pub(crate) otlp: otlp::Config,
     /// Prometheus exporter configuration
-    pub(crate) prometheus: Option<metrics::prometheus::Config>,
+    pub(crate) prometheus: metrics::prometheus::Config,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct MetricsCommon {
     /// Configuration to add custom labels/attributes to metrics
-    pub(crate) attributes: Option<MetricsAttributesConf>,
+    pub(crate) attributes: MetricsAttributesConf,
     /// Set a service.name resource in your metrics
     pub(crate) service_name: Option<String>,
     /// Set a service.namespace attribute in your metrics
@@ -100,7 +99,7 @@ pub(crate) struct MetricsCommon {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct ExperimentalCacheMetricsConf {
     /// Enable experimental metrics
     pub(crate) enabled: bool,
@@ -128,7 +127,7 @@ fn default_buckets() -> Vec<f64> {
 impl Default for MetricsCommon {
     fn default() -> Self {
         Self {
-            attributes: None,
+            attributes: Default::default(),
             service_name: None,
             service_namespace: None,
             resources: HashMap::new(),
@@ -140,7 +139,7 @@ impl Default for MetricsCommon {
 
 /// Tracing configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Tracing {
     // TODO: when deleting the `experimental_` prefix, check the usage when enabling dev mode
     // When deleting, put a #[serde(alias = "experimental_response_trace_id")] if we don't want to break things
@@ -148,17 +147,17 @@ pub(crate) struct Tracing {
     #[serde(default, rename = "experimental_response_trace_id")]
     pub(crate) response_trace_id: ExposeTraceId,
     /// Propagation configuration
-    pub(crate) propagation: Option<Propagation>,
+    pub(crate) propagation: Propagation,
     /// Common configuration
-    pub(crate) trace_config: Option<Trace>,
+    pub(crate) trace_config: Trace,
     /// OpenTelemetry native exporter configuration
-    pub(crate) otlp: Option<otlp::Config>,
+    pub(crate) otlp: otlp::Config,
     /// Jaeger exporter configuration
-    pub(crate) jaeger: Option<tracing::jaeger::Config>,
+    pub(crate) jaeger: tracing::jaeger::Config,
     /// Zipkin exporter configuration
-    pub(crate) zipkin: Option<tracing::zipkin::Config>,
+    pub(crate) zipkin: tracing::zipkin::Config,
     /// Datadog exporter configuration
-    pub(crate) datadog: Option<tracing::datadog::Config>,
+    pub(crate) datadog: tracing::datadog::Config,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
@@ -310,7 +309,7 @@ impl Default for LoggingFormat {
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct ExposeTraceId {
     /// Expose the trace_id in response headers
     pub(crate) enabled: bool,
@@ -323,7 +322,7 @@ pub(crate) struct ExposeTraceId {
 /// Configure propagation of traces. In general you won't have to do this as these are automatically configured
 /// along with any exporter you configure.
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Propagation {
     /// Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)
     pub(crate) request: RequestPropagation,
@@ -342,7 +341,7 @@ pub(crate) struct Propagation {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RequestPropagation {
     /// Choose the header name to expose trace_id (default: apollo-trace-id)
     #[schemars(with = "String")]
@@ -633,16 +632,8 @@ impl Conf {
     pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
         Ok(
             match (
-                self.tracing
-                    .clone()
-                    .unwrap_or_default()
-                    .trace_config
-                    .unwrap_or_default()
-                    .sampler,
-                self.apollo
-                    .clone()
-                    .unwrap_or_default()
-                    .field_level_instrumentation_sampler,
+                &self.tracing.trace_config.sampler,
+                &self.apollo.field_level_instrumentation_sampler,
             ) {
                 // Error conditions
                 (
@@ -658,15 +649,15 @@ impl Conf {
                 (
                     SamplerOption::Always(Sampler::AlwaysOff),
                     SamplerOption::TraceIdRatioBased(ratio),
-                ) if ratio != 0.0 => Err(Error::InvalidFieldLevelInstrumentationSampler)?,
+                ) if *ratio != 0.0 => Err(Error::InvalidFieldLevelInstrumentationSampler)?,
                 (
                     SamplerOption::TraceIdRatioBased(ratio),
                     SamplerOption::Always(Sampler::AlwaysOn),
-                ) if ratio != 1.0 => Err(Error::InvalidFieldLevelInstrumentationSampler)?,
+                ) if *ratio != 1.0 => Err(Error::InvalidFieldLevelInstrumentationSampler)?,
 
                 // Happy paths
-                (_, SamplerOption::TraceIdRatioBased(ratio)) if ratio == 0.0 => 0.0,
-                (SamplerOption::TraceIdRatioBased(ratio), _) if ratio == 0.0 => 0.0,
+                (_, SamplerOption::TraceIdRatioBased(ratio)) if *ratio == 0.0 => 0.0,
+                (SamplerOption::TraceIdRatioBased(ratio), _) if *ratio == 0.0 => 0.0,
                 (_, SamplerOption::Always(Sampler::AlwaysOn)) => 1.0,
                 // the `field_ratio` should be a ratio of the entire set of requests. But FTV1 would only be reported
                 // if a trace was generated with the Apollo exporter, which has its own sampling `global_ratio`.
@@ -684,7 +675,7 @@ impl Conf {
                 (
                     SamplerOption::Always(Sampler::AlwaysOn),
                     SamplerOption::TraceIdRatioBased(field_ratio),
-                ) => field_ratio,
+                ) => *field_ratio,
                 (_, _) => 0.0,
             },
         )
