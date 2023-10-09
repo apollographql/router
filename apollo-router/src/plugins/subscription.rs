@@ -58,7 +58,7 @@ pub(crate) struct Subscription {
 #[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubscriptionConfig {
-    /// Enable subscription
+    /// Enable subscriptions
     pub(crate) enabled: bool,
     /// Select a subscription mode (callback or passthrough)
     pub(crate) mode: SubscriptionModeConfig,
@@ -1261,6 +1261,7 @@ mod tests {
         assert_eq!(subgraph_cfg, None);
 
         let sub_config: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
             "mode": {
                 "preview_callback": {
                     "public_url": "http://localhost:4000",
