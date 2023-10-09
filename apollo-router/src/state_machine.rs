@@ -928,7 +928,7 @@ mod tests {
                     UpdateConfiguration(
                         Configuration::builder()
                             .supergraph(
-                                crate::configuration::Supergraph::builder()
+                                crate::configuration::Supergraph::fake_builder()
                                     .listen(SocketAddr::from_str("127.0.0.1:4001").unwrap())
                                     .build()
                             )
@@ -1077,7 +1077,7 @@ mod tests {
                     UpdateLicense(LicenseState::default()),
                     UpdateConfiguration(
                         Configuration::builder()
-                            .homepage(Homepage::builder().enabled(true).build())
+                            .homepage(Homepage::fake_builder().enabled(true).build())
                             .build()
                             .unwrap()
                     ),

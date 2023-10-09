@@ -601,28 +601,6 @@ fn default_defer_support() -> bool {
     true
 }
 
-#[buildstructor::buildstructor]
-impl Supergraph {
-    #[builder]
-    pub(crate) fn new(
-        listen: Option<ListenAddr>,
-        path: Option<String>,
-        introspection: Option<bool>,
-        defer_support: Option<bool>,
-        query_planning: Option<QueryPlanning>,
-        reuse_query_fragments: Option<bool>,
-    ) -> Self {
-        Self {
-            listen: listen.unwrap_or_else(default_graphql_listen),
-            path: path.unwrap_or_else(default_graphql_path),
-            introspection: introspection.unwrap_or_else(default_graphql_introspection),
-            defer_support: defer_support.unwrap_or_else(default_defer_support),
-            query_planning: query_planning.unwrap_or_default(),
-            reuse_query_fragments,
-        }
-    }
-}
-
 #[cfg(test)]
 #[buildstructor::buildstructor]
 impl Supergraph {
@@ -1051,17 +1029,6 @@ pub(crate) struct Homepage {
 
 fn default_homepage() -> bool {
     true
-}
-
-#[buildstructor::buildstructor]
-impl Homepage {
-    #[builder]
-    pub(crate) fn new(enabled: Option<bool>) -> Self {
-        Self {
-            enabled: enabled.unwrap_or_else(default_homepage),
-            graph_ref: None,
-        }
-    }
 }
 
 #[cfg(test)]

@@ -695,7 +695,7 @@ fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
 #[test]
 fn test_configuration_validate_and_sanitize() {
     let conf = Configuration::builder()
-        .supergraph(Supergraph::builder().path("/g*").build())
+        .supergraph(Supergraph::fake_builder().path("/g*").build())
         .build()
         .unwrap()
         .validate()
@@ -703,7 +703,7 @@ fn test_configuration_validate_and_sanitize() {
     assert_eq!(&conf.supergraph.sanitized_path(), "/g:supergraph_route");
 
     let conf = Configuration::builder()
-        .supergraph(Supergraph::builder().path("/graphql/g*").build())
+        .supergraph(Supergraph::fake_builder().path("/graphql/g*").build())
         .build()
         .unwrap()
         .validate()
@@ -714,7 +714,7 @@ fn test_configuration_validate_and_sanitize() {
     );
 
     let conf = Configuration::builder()
-        .supergraph(Supergraph::builder().path("/*").build())
+        .supergraph(Supergraph::fake_builder().path("/*").build())
         .build()
         .unwrap()
         .validate()
@@ -722,7 +722,7 @@ fn test_configuration_validate_and_sanitize() {
     assert_eq!(&conf.supergraph.sanitized_path(), "/*router_extra_path");
 
     let conf = Configuration::builder()
-        .supergraph(Supergraph::builder().path("/test").build())
+        .supergraph(Supergraph::fake_builder().path("/test").build())
         .build()
         .unwrap()
         .validate()
@@ -730,7 +730,7 @@ fn test_configuration_validate_and_sanitize() {
     assert_eq!(&conf.supergraph.sanitized_path(), "/test");
 
     assert!(Configuration::builder()
-        .supergraph(Supergraph::builder().path("/*/whatever").build())
+        .supergraph(Supergraph::fake_builder().path("/*/whatever").build())
         .build()
         .is_err());
 }
@@ -917,7 +917,7 @@ fn test_deserialize_derive_default() {
     }
 }
 
-fn find_struct_name(lines: &Vec<&str>, line_number: usize) -> Option<String> {
+fn find_struct_name(lines: &[&str], line_number: usize) -> Option<String> {
     let struct_enum_union_regex =
         Regex::new(r"^.*(struct|enum|union)\s([a-zA-Z0-9_]+).*$").unwrap();
 
