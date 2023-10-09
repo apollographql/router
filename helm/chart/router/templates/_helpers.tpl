@@ -82,9 +82,9 @@ https://github.com/bitnami/charts/blob/master/bitnami/common/templates/_tplvalue
 
 Renders a value that contains template.
 Usage:
-{{ include "common.tplvalues.render" ( dict "value" .Values.path.to.the.Value "context" $) }}
+{{ include "apollo.tplvalues.render" ( dict "value" .Values.path.to.the.Value "context" $) }}
 */}}
-{{- define "common.tplvalues.render" -}}
+{{- define "apollo.tplvalues.render" -}}
     {{- if typeIs "string" .value }}
         {{- tpl .value .context }}
     {{- else }}
@@ -111,8 +111,8 @@ extraLabels:
   custom-version: {{ .Chart.AppVersion }}
 ```
 */}}
-{{- define "common.templatizeExtraLabels" -}}
+{{- define "apollo.templatizeExtraLabels" -}}
 {{- range $key, $value := .Values.extraLabels }}
-{{ printf "%s: %s" $key (include  "common.tplvalues.render" ( dict "value" $value "context" $))}}
+{{ printf "%s: %s" $key (include  "apollo.tplvalues.render" ( dict "value" $value "context" $))}}
 {{- end -}}
 {{- end -}}
