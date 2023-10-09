@@ -5,6 +5,7 @@ version: 2.1
 orbs:
   gh: circleci/github-cli@2.2.0
   slack: circleci/slack@4.12.5
+  secops: apollo/circleci-secops-orb@2.0.0
 
 executors:
   amd_linux_build: &amd_linux_build_executor
@@ -973,3 +974,13 @@ workflows:
               ignore: /.*/
             tags:
               only: /v.*/
+
+  security-scans:
+    jobs:
+      - secops/gitleaks:
+          context:
+            - platform-docker-ro
+            - github-orb
+            - secops-oidc
+          git-base-revision: <<#pipeline.git.base_revision>><<pipeline.git.base_revision>><</pipeline.git.base_revision >>
+          git-revision: << pipeline.git.revision >>
