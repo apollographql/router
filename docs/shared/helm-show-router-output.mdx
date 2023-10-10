@@ -1,0 +1,238 @@
+```yaml
+Pulled: ghcr.io/apollographql/helm-charts/router:1.31.0
+Digest: sha256:26fbe98268456935cac5b51d44257bf96c02ee919fde8d47a06602ce2cda66a3
+# Default values for router.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+# -- See https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file for yaml structure
+router:
+  configuration:
+    supergraph: # HTTP server
+      listen: 0.0.0.0:80
+    health_check:
+      listen: 0.0.0.0:8088
+    telemetry:
+      metrics:
+        prometheus:
+          enabled: false
+          listen: 0.0.0.0:9090
+          path: "/metrics"
+
+  args:
+  - --hot-reload
+
+managedFederation:
+  # -- If using managed federation, the graph API key to identify router to Studio
+  apiKey:
+  # -- If using managed federation, use an existing secret which stores the graph API key instead of creating a new one.
+  # If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as name
+  existingSecret:
+  # -- If using managed federation, the variant of which graph to use
+  graphRef: ""
+
+# This should not be specified in values.yaml. It's much simpler to use --set-file from helm command line.
+# e.g.: helm ... --set-file supergraphFile="location of your supergraph file"
+supergraphFile:
+
+# An array of extra environmental variables
+# Example:
+# extraEnvVars:
+#   - name: APOLLO_ROUTER_SUPERGRAPH_PATH
+#     value: /etc/apollo/supergraph.yaml
+#   - name: APOLLO_ROUTER_LOG
+#     value: debug
+#
+extraEnvVars: []
+extraEnvVarsCM: ''
+extraEnvVarsSecret: ''
+
+# An array of extra VolumeMounts
+# Example:
+# extraVolumeMounts:
+#   - name: rhai-volume
+#     mountPath: /dist/rhai
+#     readonly: true
+extraVolumeMounts: []
+
+# An array of extra Volumes
+# Example:
+# extraVolumes:
+#   - name: rhai-volume
+#     configMap:
+#       name: rhai-config
+#
+extraVolumes: []
+
+image:
+  repository: ghcr.io/apollographql/router
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+containerPorts:
+  # -- If you override the port in `router.configuration.server.listen` then make sure to match the listen port here
+  http: 80
+  # -- For exposing the metrics port when running a serviceMonitor for example
+  metrics: 9090
+  # -- For exposing the health check endpoint
+  health: 8088
+
+# -- An array of extra containers to include in the router pod
+# Example:
+# extraContainers:
+#   - name: coprocessor
+#     image: acme/coprocessor:1.0
+#     ports:
+#       - containerPort: 4001
+extraContainers: []
+
+# -- An array of init containers to include in the router pod
+# Example:
+# initContainers:
+#   - name: init-myservice
+#     image: busybox:1.28
+#     command: ["sh"]
+initContainers: []
+
+# -- A map of extra labels to apply to the resources created by this chart
+# Example:
+# extraLabels:
+#   label_one_name: "label_one_value"
+#   label_two_name: "label_two_value"
+extraLabels: {}
+
+lifecycle: {}
+#  preStop:
+#    exec:
+#      command:
+#        - /bin/bash
+#        - -c
+#        - sleep 10
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+serviceMonitor:
+  enabled: false
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+# set to true to enable istio's virtualservice
+virtualservice:
+  enabled: false
+  # namespace: ""
+  # gatewayName: ""
+  # http:
+  #   main:
+  #     # set enabled to true to add
+  #     # the default matcher of `exact: "/" or prefix: "/graphql"`
+  #     # with the <$fullName>.<.Release.Namespace>.svc.cluster.local destination
+  #     enabled: true
+  #   # use additionals to provide your custom virtualservice rules
+  #   additionals: []
+  #   - name: "default-nginx-routes"
+  #       match:
+  #         - uri:
+  #             prefix: "/foo"
+  #       rewrite:
+  #         uri: /
+  #       route:
+  #         - destination:
+  #             host: my.custom.backend.svc.cluster.local
+  #             port:
+  #               number: 80
+
+# set to true and provide configuration details if you want to make external https calls through istio's virtualservice
+serviceentry:
+  enabled: false
+  # hosts:
+  # a list of external hosts you want to be able to make https calls to
+  #   - api.example.com
+
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# -- Sets the [pod disruption budget](https://kubernetes.io/docs/tasks/run-application/configure-pdb/) for Deployment pods
+podDisruptionBudget: {}
+
+# -- Set to existing PriorityClass name to control pod preemption by the scheduler
+priorityClassName: ""
+
+# -- Sets the [termination grace period](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#hook-handler-execution) for Deployment pods
+terminationGracePeriodSeconds: 30
+
+probes:
+  # -- Configure readiness probe
+  readiness:
+    initialDelaySeconds: 0
+  # -- Configure liveness probe
+  liveness:
+    initialDelaySeconds: 0
+```

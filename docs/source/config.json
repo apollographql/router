@@ -106,8 +106,8 @@
     },
     "Containerization": {
       "Overview": "/containerization/overview",
-      "Docker": "/containerization/docker",
-      "Kubernetes": "/containerization/kubernetes"
+      "Deploy on Kubernetes": "/containerization/kubernetes",
+      "Run with Docker": "/containerization/docker"
     },
     "Managed Federation": {
       "Overview": "https://www.apollographql.com/docs/federation/managed-federation/overview",
