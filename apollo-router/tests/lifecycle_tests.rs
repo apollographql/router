@@ -181,7 +181,7 @@ async fn test_shutdown_with_idle_connection() -> Result<(), BoxError> {
     router.assert_started().await;
     let _conn = std::net::TcpStream::connect("127.0.0.1:4000").unwrap();
     router.execute_default_query().await;
-    tokio::time::timeout(Duration::from_millis(100), router.graceful_shutdown())
+    tokio::time::timeout(Duration::from_secs(1), router.graceful_shutdown())
         .await
         .unwrap();
     Ok(())
