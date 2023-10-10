@@ -31,27 +31,17 @@ pub(crate) struct Config {
     /// Set to true to enable
     pub(crate) enabled: bool,
     /// The listen address
-    #[serde(default = "prometheus_default_listen_addr")]
     pub(crate) listen: ListenAddr,
     /// The path where prometheus will be exposed
-    #[serde(default = "prometheus_default_path")]
     pub(crate) path: String,
-}
-
-fn prometheus_default_listen_addr() -> ListenAddr {
-    ListenAddr::SocketAddr("127.0.0.1:9090".parse().expect("valid listenAddr"))
-}
-
-fn prometheus_default_path() -> String {
-    "/metrics".to_string()
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             enabled: false,
-            listen: prometheus_default_listen_addr(),
-            path: prometheus_default_path(),
+            listen: ListenAddr::SocketAddr("127.0.0.1:9090".parse().expect("valid listenAddr")),
+            path: "/metrics".to_string(),
         }
     }
 }
