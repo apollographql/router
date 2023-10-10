@@ -171,7 +171,7 @@ pub(crate) enum AuthConfig {
 }
 
 /// Configure subgraph authentication
-#[derive(Clone, Debug, std::default::Default, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, serde_derive_default::Default, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Config {
     /// Configuration that will apply to all subgraphs.

@@ -62,12 +62,10 @@ expression: "&schema"
                     "limit": 512
                   },
                   "type": "object",
-                  "required": [
-                    "limit"
-                  ],
                   "properties": {
                     "limit": {
                       "description": "Number of entries in the Least Recently Used cache",
+                      "default": 512,
                       "type": "integer",
                       "format": "uint",
                       "minimum": 1.0
@@ -883,7 +881,8 @@ expression: "&schema"
               },
               "additionalProperties": false
             }
-          }
+          },
+          "additionalProperties": false
         },
         "timeout": {
           "description": "The timeout for external requests",
@@ -1785,8 +1784,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "enabled": {
-          "description": "Enable subscription",
-          "default": true,
+          "description": "Enable subscriptions",
+          "default": false,
           "type": "boolean"
         },
         "max_opened_subscriptions": {
@@ -1799,10 +1798,6 @@ expression: "&schema"
         },
         "mode": {
           "description": "Select a subscription mode (callback or passthrough)",
-          "default": {
-            "preview_callback": null,
-            "passthrough": null
-          },
           "type": "object",
           "properties": {
             "passthrough": {
@@ -1811,7 +1806,6 @@ expression: "&schema"
               "properties": {
                 "all": {
                   "description": "Configuration for all subgraphs",
-                  "default": null,
                   "type": "object",
                   "properties": {
                     "path": {
@@ -1835,7 +1829,6 @@ expression: "&schema"
                 },
                 "subgraphs": {
                   "description": "Configuration for specific subgraphs",
-                  "default": {},
                   "type": "object",
                   "additionalProperties": {
                     "description": "WebSocket configuration for a specific subgraph",
@@ -2007,12 +2000,10 @@ expression: "&schema"
                     "limit": 512
                   },
                   "type": "object",
-                  "required": [
-                    "limit"
-                  ],
                   "properties": {
                     "limit": {
                       "description": "Number of entries in the Least Recently Used cache",
+                      "default": 512,
                       "type": "integer",
                       "format": "uint",
                       "minimum": 1.0
