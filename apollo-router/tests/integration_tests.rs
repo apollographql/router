@@ -728,7 +728,11 @@ async fn query_just_at_recursion_limit() {
     .unwrap();
 
     assert_eq!(1, actual.errors.len());
-    assert!(actual.errors[0].message.contains("parser limit(5) reached"));
+    let message = &actual.errors[0].message;
+    assert!(
+        message.contains("parser recursion limit reached"),
+        "{message}"
+    );
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
