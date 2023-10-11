@@ -243,9 +243,11 @@ mod test {
     fn it_will_build_router_externalizable_correctly() {
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::RouterRequest)
+            .id(String::default())
             .build();
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::RouterResponse)
+            .id(String::default())
             .build();
     }
 
@@ -254,9 +256,11 @@ mod test {
     fn it_will_not_build_router_externalizable_incorrectly() {
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::SubgraphRequest)
+            .id(String::default())
             .build();
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::SubgraphResponse)
+            .id(String::default())
             .build();
     }
 
@@ -264,9 +268,11 @@ mod test {
     fn it_will_build_subgraph_externalizable_correctly() {
         Externalizable::<String>::subgraph_builder()
             .stage(PipelineStep::SubgraphRequest)
+            .id(String::default())
             .build();
         Externalizable::<String>::subgraph_builder()
             .stage(PipelineStep::SubgraphResponse)
+            .id(String::default())
             .build();
     }
 
@@ -275,9 +281,11 @@ mod test {
     fn it_will_not_build_subgraph_externalizable_incorrectly() {
         Externalizable::<String>::subgraph_builder()
             .stage(PipelineStep::RouterRequest)
+            .id(String::default())
             .build();
         Externalizable::<String>::subgraph_builder()
             .stage(PipelineStep::RouterResponse)
+            .id(String::default())
             .build();
     }
 }
