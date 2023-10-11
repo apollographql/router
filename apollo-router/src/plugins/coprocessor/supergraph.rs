@@ -211,7 +211,7 @@ where
     let payload = Externalizable::supergraph_builder()
         .stage(PipelineStep::SupergraphRequest)
         .control(Control::default())
-        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .id(request.context.id.clone())
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)
@@ -355,7 +355,7 @@ where
 
     let payload = Externalizable::supergraph_builder()
         .stage(PipelineStep::SupergraphResponse)
-        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .id(response.context.id.clone())
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)
@@ -416,6 +416,7 @@ where
             let generator_coprocessor_url = coprocessor_url.clone();
             let generator_map_context = map_context.clone();
             let generator_sdl_to_send = sdl_to_send.clone();
+            let generator_id = map_context.id.clone();
 
             async move {
                 let body_to_send = response_config.body.then(|| {
@@ -430,7 +431,7 @@ where
                 // providing them will be a source of confusion.
                 let payload = Externalizable::router_builder()
                     .stage(PipelineStep::SupergraphResponse)
-                    .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+                    .id(generator_id)
                     .and_body(body_to_send)
                     .and_context(context_to_send)
                     .and_sdl(generator_sdl_to_send)
