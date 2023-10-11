@@ -67,8 +67,7 @@ pub(crate) struct Externalizable<T> {
     pub(crate) stage: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) control: Option<Control>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) id: Option<String>,
+    pub(crate) id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) headers: Option<HashMap<String, Vec<String>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -101,7 +100,7 @@ where
     fn router_new(
         stage: PipelineStep,
         control: Option<Control>,
-        id: Option<String>,
+        id: String,
         headers: Option<HashMap<String, Vec<String>>>,
         body: Option<T>,
         context: Option<Context>,
@@ -138,7 +137,7 @@ where
     fn supergraph_new(
         stage: PipelineStep,
         control: Option<Control>,
-        id: Option<String>,
+        id: String,
         headers: Option<HashMap<String, Vec<String>>>,
         body: Option<T>,
         context: Option<Context>,
@@ -174,7 +173,7 @@ where
     fn subgraph_new(
         stage: PipelineStep,
         control: Option<Control>,
-        id: Option<String>,
+        id: String,
         headers: Option<HashMap<String, Vec<String>>>,
         body: Option<T>,
         context: Option<Context>,
