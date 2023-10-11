@@ -39,17 +39,17 @@ pub(crate) type Entries = Arc<DashMap<String, Value>>;
 /// plugins should restrict themselves to the [`Context::get`] and [`Context::upsert`]
 /// functions to minimise the possibility of mis-sequenced updates.
 #[derive(Clone, Deserialize, Serialize, Derivative)]
+#[serde(default)]
 #[derivative(Debug)]
 pub struct Context {
     // Allows adding custom entries to the context.
     entries: Entries,
 
-    #[serde(skip, default)]
+    #[serde(skip)]
     pub(crate) private_entries: Arc<parking_lot::Mutex<Extensions>>,
 
     /// Creation time
     #[serde(skip)]
-    #[serde(default = "Instant::now")]
     pub(crate) created_at: Instant,
 
     #[serde(skip)]
