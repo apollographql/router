@@ -113,7 +113,7 @@ async fn api_schema_hides_field() {
     assert!(actual.errors[0]
         .message
         .as_str()
-        .contains(r#"Cannot query field "inStock" on type "Product""#));
+        .contains(r#"cannot query field `inStock` on type `Product`"#));
     assert_eq!(
         actual.errors[0].extensions["code"].as_str(),
         Some("GRAPHQL_VALIDATION_FAILED"),
