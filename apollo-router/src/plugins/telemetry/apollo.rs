@@ -35,71 +35,54 @@ pub(crate) const ENDPOINT_DEFAULT: &str =
 pub(crate) const OTLP_ENDPOINT_DEFAULT: &str = "https://usage-reporting.api.apollographql.com";
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Config {
     /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "String", default = "endpoint_default")]
-    #[serde(default = "endpoint_default")]
     pub(crate) endpoint: Url,
 
     /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "String", default = "otlp_endpoint_default")]
-    #[serde(default = "otlp_endpoint_default")]
     pub(crate) experimental_otlp_endpoint: Url,
 
     /// The Apollo Studio API key.
     #[schemars(skip)]
-    #[serde(default = "apollo_key")]
     pub(crate) apollo_key: Option<String>,
 
     /// The Apollo Studio graph reference.
     #[schemars(skip)]
-    #[serde(default = "apollo_graph_reference")]
     pub(crate) apollo_graph_ref: Option<String>,
 
     /// The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.
     #[schemars(with = "Option<String>", default = "client_name_header_default_str")]
-    #[serde(
-        deserialize_with = "deserialize_header_name",
-        default = "client_name_header_default"
-    )]
+    #[serde(deserialize_with = "deserialize_header_name")]
     pub(crate) client_name_header: HeaderName,
 
     /// The name of the header to extract from requests when populating 'client version' for traces and metrics in Apollo Studio.
     #[schemars(with = "Option<String>", default = "client_version_header_default_str")]
-    #[serde(
-        deserialize_with = "deserialize_header_name",
-        default = "client_version_header_default"
-    )]
+    #[serde(deserialize_with = "deserialize_header_name")]
     pub(crate) client_version_header: HeaderName,
 
     /// The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.
-    #[serde(default = "default_buffer_size")]
     pub(crate) buffer_size: NonZeroUsize,
 
     /// Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
-    #[serde(default = "default_field_level_instrumentation_sampler")]
     pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
-    #[serde(default)]
     pub(crate) send_headers: ForwardHeaders,
     /// To configure which GraphQL variable values are included in trace data that's sent to Apollo Studio
-    #[serde(default)]
     pub(crate) send_variable_values: ForwardValues,
 
     // This'll get overridden if a user tries to set it.
     // The purpose is to allow is to pass this in to the plugin.
     #[schemars(skip)]
-    #[serde(default)]
     pub(crate) schema_id: String,
 
     /// Configuration for batch processing.
-    #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
 
     /// Configure the way errors are transmitted to Apollo Studio
-    #[serde(default)]
     pub(crate) errors: ErrorsConfiguration,
 }
 
@@ -120,21 +103,19 @@ pub(crate) struct SubgraphErrorConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct ErrorConfiguration {
     /// Send subgraph errors to Apollo Studio
-    #[serde(default = "default_send_errors")]
     pub(crate) send: bool,
     /// Redact subgraph errors to Apollo Studio
-    #[serde(default = "default_redact_errors")]
     pub(crate) redact: bool,
 }
 
 impl Default for ErrorConfiguration {
     fn default() -> Self {
         Self {
-            send: default_send_errors(),
-            redact: default_redact_errors(),
+            send: true,
+            redact: true,
         }
     }
 }
@@ -147,14 +128,6 @@ impl SubgraphErrorConfig {
             &self.all
         }
     }
-}
-
-pub(crate) const fn default_send_errors() -> bool {
-    true
-}
-
-pub(crate) const fn default_redact_errors() -> bool {
-    true
 }
 
 const fn default_field_level_instrumentation_sampler() -> SamplerOption {
