@@ -67,7 +67,6 @@ pub(crate) struct Externalizable<T> {
     pub(crate) stage: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) control: Option<Control>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) headers: Option<HashMap<String, Vec<String>>>,
@@ -103,7 +102,7 @@ where
     fn router_new(
         stage: PipelineStep,
         control: Option<Control>,
-        id: Option<String>,
+        id: String,
         headers: Option<HashMap<String, Vec<String>>>,
         body: Option<T>,
         context: Option<Context>,
@@ -120,7 +119,7 @@ where
             version: EXTERNALIZABLE_VERSION,
             stage: stage.to_string(),
             control,
-            id,
+            id: Some(id),
             headers,
             body,
             context,
@@ -141,7 +140,7 @@ where
     fn supergraph_new(
         stage: PipelineStep,
         control: Option<Control>,
-        id: Option<String>,
+        id: String,
         headers: Option<HashMap<String, Vec<String>>>,
         body: Option<T>,
         context: Option<Context>,
@@ -158,7 +157,7 @@ where
             version: EXTERNALIZABLE_VERSION,
             stage: stage.to_string(),
             control,
-            id,
+            id: Some(id),
             headers,
             body,
             context,
@@ -179,7 +178,7 @@ where
     fn subgraph_new(
         stage: PipelineStep,
         control: Option<Control>,
-        id: Option<String>,
+        id: String,
         headers: Option<HashMap<String, Vec<String>>>,
         body: Option<T>,
         context: Option<Context>,
@@ -196,7 +195,7 @@ where
             version: EXTERNALIZABLE_VERSION,
             stage: stage.to_string(),
             control,
-            id,
+            id: Some(id),
             headers,
             body,
             context,
@@ -250,9 +249,11 @@ mod test {
     fn it_will_build_router_externalizable_correctly() {
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::RouterRequest)
+            .id(String::default())
             .build();
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::RouterResponse)
+            .id(String::default())
             .build();
     }
 
@@ -261,9 +262,11 @@ mod test {
     fn it_will_not_build_router_externalizable_incorrectly() {
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::SubgraphRequest)
+            .id(String::default())
             .build();
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::SubgraphResponse)
+            .id(String::default())
             .build();
     }
 
@@ -272,9 +275,11 @@ mod test {
     fn it_will_not_build_router_externalizable_incorrectl_supergraph() {
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::SupergraphRequest)
+            .id(String::default())
             .build();
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::SupergraphResponse)
+            .id(String::default())
             .build();
     }
 
@@ -282,9 +287,11 @@ mod test {
     fn it_will_build_subgraph_externalizable_correctly() {
         Externalizable::<String>::subgraph_builder()
             .stage(PipelineStep::SubgraphRequest)
+            .id(String::default())
             .build();
         Externalizable::<String>::subgraph_builder()
             .stage(PipelineStep::SubgraphResponse)
+            .id(String::default())
             .build();
     }
 
@@ -293,9 +300,11 @@ mod test {
     fn it_will_not_build_subgraph_externalizable_incorrectly() {
         Externalizable::<String>::subgraph_builder()
             .stage(PipelineStep::RouterRequest)
+            .id(String::default())
             .build();
         Externalizable::<String>::subgraph_builder()
             .stage(PipelineStep::RouterResponse)
+            .id(String::default())
             .build();
     }
 }
