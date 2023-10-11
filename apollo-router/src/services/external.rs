@@ -67,7 +67,7 @@ pub(crate) struct Externalizable<T> {
     pub(crate) stage: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) control: Option<Control>,
-    pub(crate) id: String,
+    pub(crate) id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) headers: Option<HashMap<String, Vec<String>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -117,7 +117,7 @@ where
             version: EXTERNALIZABLE_VERSION,
             stage: stage.to_string(),
             control,
-            id,
+            id: Some(id),
             headers,
             body,
             context,
@@ -153,7 +153,7 @@ where
             version: EXTERNALIZABLE_VERSION,
             stage: stage.to_string(),
             control,
-            id,
+            id: Some(id),
             headers,
             body,
             context,
@@ -190,7 +190,7 @@ where
             version: EXTERNALIZABLE_VERSION,
             stage: stage.to_string(),
             control,
-            id,
+            id: Some(id),
             headers,
             body,
             context,
