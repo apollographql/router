@@ -268,8 +268,11 @@ Properties of the JSON body are divided into two high-level categories:
       "46"
     ]
   },
-  "body": {
-    "query": "query GetActiveUser {\n  me {\n  name\n}\n}"
+  body: {
+    "query": "query Long { me { name },
+    "operation_name": "MyQuery",
+    "variables": {},
+    "extensions": {}
   },
   "context": {
     "entries": {
