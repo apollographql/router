@@ -275,9 +275,11 @@ mod test {
     fn it_will_not_build_router_externalizable_incorrectl_supergraph() {
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::SupergraphRequest)
+            .id(String::default())
             .build();
         Externalizable::<String>::router_builder()
             .stage(PipelineStep::SupergraphResponse)
+            .id(String::default())
             .build();
     }
 
