@@ -262,6 +262,17 @@ mod test {
     }
 
     #[test]
+    #[should_panic]
+    fn it_will_not_build_router_externalizable_incorrectl_supergraph() {
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::SupergraphRequest)
+            .build();
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::SupergraphResponse)
+            .build();
+    }
+
+    #[test]
     fn it_will_build_subgraph_externalizable_correctly() {
         Externalizable::<String>::subgraph_builder()
             .stage(PipelineStep::SubgraphRequest)
