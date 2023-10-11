@@ -361,6 +361,7 @@ where
         .and_context(context_to_send)
         .and_status_code(status_to_send)
         .and_sdl(sdl_to_send.clone())
+        .and_has_next(first.has_next)
         .build();
 
     // Second, call our co-processor and get a reply.
@@ -434,6 +435,7 @@ where
                     .and_body(body_to_send)
                     .and_context(context_to_send)
                     .and_sdl(generator_sdl_to_send)
+                    .and_has_next(deferred_response.has_next)
                     .build();
 
                 // Second, call our co-processor and get a reply.
@@ -895,7 +897,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn defer() {
+    async fn multi_part() {
         let supergraph_stage = SupergraphStage {
             response: SupergraphResponseConf {
                 headers: true,
@@ -922,6 +924,12 @@ mod tests {
                     .response(
                         graphql::Response::builder()
                             .data(json!({ "test": 2 }))
+                            .has_next(true)
+                            .build(),
+                    )
+                    .response(
+                        graphql::Response::builder()
+                            .data(json!({ "test": 3 }))
                             .has_next(false)
                             .build(),
                     )
@@ -932,7 +940,7 @@ mod tests {
 
         let mock_http_client = mock_with_deferred_callback(move |res: hyper::Request<Body>| {
             Box::pin(async {
-                let deserialized_response: Externalizable<serde_json::Value> =
+                let mut deserialized_response: Externalizable<serde_json::Value> =
                     serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
                         .unwrap();
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
@@ -941,9 +949,25 @@ mod tests {
                     deserialized_response.stage
                 );
 
+                // Copy the has_next from the body into the data for checking later
+                deserialized_response
+                    .body
+                    .as_mut()
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .get_mut("data")
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .insert(
+                        "has_next".to_string(),
+                        serde_json::Value::from(deserialized_response.has_next.unwrap_or_default()),
+                    );
+
                 Ok(hyper::Response::builder()
                     .body(Body::from(
-                        serde_json::to_string(&deserialized_response).unwrap(),
+                        serde_json::to_string(&deserialized_response).unwrap_or_default(),
                     ))
                     .unwrap())
             })
@@ -964,16 +988,19 @@ mod tests {
         let mut res = service.oneshot(request).await.unwrap();
 
         let body = res.response.body_mut().next().await.unwrap();
-        // the body should have changed:
         assert_eq!(
             serde_json::to_value(&body).unwrap(),
-            json!({ "data": { "test": 1 }, "hasNext": true }),
+            json!({ "data": { "test": 1, "has_next": true }, "hasNext": true }),
         );
         let body = res.response.body_mut().next().await.unwrap();
-        // the body should have changed:
         assert_eq!(
             serde_json::to_value(&body).unwrap(),
-            json!({ "data": { "test": 2 }, "hasNext": false }),
+            json!({ "data": { "test": 2, "has_next": true }, "hasNext": true }),
+        );
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&body).unwrap(),
+            json!({ "data": { "test": 3, "has_next": false }, "hasNext": false }),
         );
     }
 }

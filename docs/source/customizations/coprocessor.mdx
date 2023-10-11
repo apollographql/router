@@ -595,6 +595,21 @@ If your coprocessor [returns a _different_ value](#responding-to-coprocessor-req
 <tr>
 <td>
 
+##### `has_next`
+
+`bool`
+
+</td>
+<td>
+
+When `stage` is `SupergraphRequest`, if present and `true` then there may be subsequent `SupergraphRequest` calls to the co-processor for each multi-part (@defer/subscriptions) response.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 ##### `headers`
 
 `object`
@@ -711,6 +726,7 @@ When `stage` is `SubgraphRequest`, this is the full URI of the subgraph the rout
 
 </tbody>
 </table>
+
 
 ## Responding to coprocessor requests
 

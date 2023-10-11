@@ -87,6 +87,8 @@ pub(crate) struct Externalizable<T> {
     pub(crate) service_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) status_code: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) has_next: Option<bool>,
 }
 
 #[buildstructor::buildstructor]
@@ -128,6 +130,7 @@ where
             path,
             method,
             service_name: None,
+            has_next: None,
         }
     }
 
@@ -145,6 +148,7 @@ where
         status_code: Option<u16>,
         method: Option<String>,
         sdl: Option<String>,
+        has_next: Option<bool>,
     ) -> Self {
         assert!(matches!(
             stage,
@@ -164,6 +168,7 @@ where
             path: None,
             method,
             service_name: None,
+            has_next,
         }
     }
 
@@ -201,6 +206,7 @@ where
             path: None,
             method,
             service_name,
+            has_next: None,
         }
     }
 
