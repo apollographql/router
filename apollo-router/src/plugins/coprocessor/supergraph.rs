@@ -31,6 +31,8 @@ pub(super) struct SupergraphRequestConf {
     pub(super) body: bool,
     /// Send the SDL
     pub(super) sdl: bool,
+    /// Send the path
+    pub(super) path: bool,
     /// Send the method
     pub(super) method: bool,
 }
@@ -207,6 +209,7 @@ where
     let context_to_send = request_config.context.then(|| request.context.clone());
     let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
     let method = request_config.method.then(|| parts.method.to_string());
+    let path = request_config.path.then(|| parts.uri.to_string());
 
     let payload = Externalizable::supergraph_builder()
         .stage(PipelineStep::SupergraphRequest)
@@ -215,6 +218,7 @@ where
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)
+        .and_path(path)
         .and_method(method)
         .and_sdl(sdl_to_send)
         .build();
@@ -570,6 +574,7 @@ mod tests {
                 context: false,
                 body: true,
                 sdl: false,
+                path: true,
                 method: false,
             },
             response: Default::default(),
@@ -616,8 +621,15 @@ mod tests {
                     .unwrap())
             });
 
-        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
             Box::pin(async {
+                let deserialized_response: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+                        .unwrap();
+                assert_eq!(
+                    deserialized_response.path,
+                    Some("http://default/".to_string())
+                );
                 Ok(hyper::Response::builder()
                     .body(Body::from(
                         r#"{
@@ -703,6 +715,7 @@ mod tests {
                 context: false,
                 body: true,
                 sdl: false,
+                path: false,
                 method: false,
             },
             response: Default::default(),
@@ -793,10 +806,10 @@ mod tests {
                     .unwrap())
             });
 
-        let mock_http_client = mock_with_deferred_callback(move |res: hyper::Request<Body>| {
+        let mock_http_client = mock_with_deferred_callback(move |req: hyper::Request<Body>| {
             Box::pin(async {
                 let deserialized_response: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
+                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
                         .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
@@ -939,10 +952,10 @@ mod tests {
                     .unwrap())
             });
 
-        let mock_http_client = mock_with_deferred_callback(move |res: hyper::Request<Body>| {
+        let mock_http_client = mock_with_deferred_callback(move |req: hyper::Request<Body>| {
             Box::pin(async {
                 let mut deserialized_response: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
+                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
                         .unwrap();
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
                 assert_eq!(
