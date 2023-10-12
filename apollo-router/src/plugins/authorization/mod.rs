@@ -311,11 +311,7 @@ impl AuthorizationPlugin {
             let file_id = compiler
                 .db
                 .source_file(QUERY_EXECUTABLE.into())
-                .ok_or_else(|| {
-                    QueryPlannerError::SpecError(SpecError::ValidationError(
-                        "missing input file for query".to_string(),
-                    ))
-                })?;
+                .ok_or_else(|| QueryPlannerError::SpecError(SpecError::UnknownFileId))?;
             let filtered_query = compiler.db.source_code(file_id).to_string();
 
             Ok(Some((
