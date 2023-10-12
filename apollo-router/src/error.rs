@@ -32,6 +32,7 @@ use crate::spec::SpecError;
 #[ignore_extra_doc_attributes]
 #[non_exhaustive]
 #[allow(missing_docs)] // FIXME
+#[cfg(not(feature = "custom_to_graphql_error"))]
 pub(crate) enum FetchError {
     /// invalid type for variable: '{name}'
     ValidationInvalidTypeVariable {
@@ -116,6 +117,101 @@ pub(crate) enum FetchError {
     },
 }
 
+/// Error types for execution.
+///
+/// Note that these are not actually returned to the client, but are instead converted to JSON for
+/// [`struct@Error`].
+#[derive(Error, Display, Debug, Clone, Serialize, Eq, PartialEq)]
+#[serde(untagged)]
+#[ignore_extra_doc_attributes]
+#[non_exhaustive]
+#[allow(missing_docs)] // FIXME
+#[cfg(feature = "custom_to_graphql_error")]
+pub enum FetchError {
+    /// invalid type for variable: '{name}'
+    ValidationInvalidTypeVariable {
+        /// Name of the variable.
+        name: String,
+    },
+
+    /// query could not be planned: {reason}
+    ValidationPlanningError {
+        /// The failure reason.
+        reason: String,
+    },
+
+    /// request was malformed: {reason}
+    MalformedRequest {
+        /// The reason the serialization failed.
+        reason: String,
+    },
+
+    /// response was malformed: {reason}
+    MalformedResponse {
+        /// The reason the serialization failed.
+        reason: String,
+    },
+
+    /// service '{service}' response was malformed: {reason}
+    SubrequestMalformedResponse {
+        /// The service that responded with the malformed response.
+        service: String,
+
+        /// The reason the serialization failed.
+        reason: String,
+    },
+
+    /// service '{service}' returned a PATCH response which was not expected
+    SubrequestUnexpectedPatchResponse {
+        /// The service that returned the PATCH response.
+        service: String,
+    },
+
+    /// HTTP fetch failed from '{service}': {reason}
+    ///
+    /// note that this relates to a transport error and not a GraphQL error
+    SubrequestHttpError {
+        status_code: Option<u16>,
+
+        /// The service failed.
+        service: String,
+
+        /// The reason the fetch failed.
+        reason: String,
+    },
+    /// Websocket fetch failed from '{service}': {reason}
+    ///
+    /// note that this relates to a transport error and not a GraphQL error
+    SubrequestWsError {
+        /// The service failed.
+        service: String,
+
+        /// The reason the fetch failed.
+        reason: String,
+    },
+
+    /// subquery requires field '{field}' but it was not found in the current response
+    ExecutionFieldNotFound {
+        /// The field that is not found.
+        field: String,
+    },
+
+    #[cfg(test)]
+    /// invalid content: {reason}
+    ExecutionInvalidContent { reason: String },
+
+    /// could not find path: {reason}
+    ExecutionPathNotFound { reason: String },
+    /// could not compress request: {reason}
+    CompressionError {
+        /// The service that failed.
+        service: String,
+        /// The reason the compression failed.
+        reason: String,
+    },
+}
+
+#[cfg(not(feature = "custom_to_graphql_error"))]
 impl FetchError {
     /// Convert the fetch error to a GraphQL error.
     pub(crate) fn to_graphql_error(&self, path: Option<Path>) -> Error {
@@ -179,6 +275,42 @@ impl FetchError {
     }
 }
 
+#[cfg(feature = "custom_to_graphql_error")]
+use std::sync::OnceLock;
+#[cfg(feature = "custom_to_graphql_error")]
+static mut TO_GRAPHQL_ERROR: OnceLock<Box<dyn Fn(&FetchError, Option<Path>) -> Error + 'static>> =
+    OnceLock::new();
+#[cfg(feature = "custom_to_graphql_error")]
+pub unsafe fn set_to_graphql_error(
+    to_graphql_error: impl Fn(&FetchError, Option<Path>) -> Error + 'static,
+) {
+    TO_GRAPHQL_ERROR
+        .set(Box::new(to_graphql_error))
+        .map_err(|_| "to_graphql_error was already set")
+        .unwrap();
+}
+
+#[cfg(feature = "custom_to_graphql_error")]
+impl FetchError {
+    /// Convert the fetch error to a GraphQL error.
+    pub(crate) fn to_graphql_error(&self, path: Option<Path>) -> Error {
+        let callback = unsafe {
+            TO_GRAPHQL_ERROR
+                .get()
+                .expect("to_graphql_error was not set")
+        };
+        callback(self, path)
+    }
+
+    /// Convert the error to an appropriate response.
+    pub(crate) fn to_response(&self) -> Response {
+        Response {
+            errors: vec![self.to_graphql_error(None)],
+            ..Response::default()
+        }
+    }
+}
+
 impl ErrorExtension for FetchError {
     fn extension_code(&self) -> String {
         match self {
@@ -211,8 +343,169 @@ impl From<QueryPlannerError> for FetchError {
 }
 
 /// Error types for CacheResolver
+#[cfg(not(feature = "custom_to_graphql_error"))]
+#[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub(crate) enum RouterError {
+    /// Error types for CacheResolver
+    CacheResolver(CacheResolverError),
+    /// Error types for QueryPlanner
+    QueryPlanner(QueryPlannerError),
+    /// Container for planner setup errors
+    Planner(PlannerErrors),
+}
+
+/// Error types for CacheResolver
+#[cfg(feature = "custom_to_graphql_error")]
+#[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum RouterError {
+    /// Error types for CacheResolver
+    CacheResolver(CacheResolverError),
+    /// Error types for QueryPlanner
+    QueryPlanner(QueryPlannerError),
+    /// Container for planner setup errors
+    Planner(PlannerErrors),
+}
+
+#[cfg(not(feature = "custom_to_graphql_error"))]
+impl IntoGraphQLErrors for RouterError {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        match self {
+            Self::CacheResolver(error) => {
+                let CacheResolverError::RetrievalError(retrieval_error) = error;
+                Self::QueryPlanner(retrieval_error.deref().clone())
+                    .into_graphql_errors()
+                    .map_err(|_err| {
+                        Self::CacheResolver(CacheResolverError::RetrievalError(retrieval_error))
+                    })
+            }
+            Self::QueryPlanner(planner_error) => match planner_error {
+                QueryPlannerError::SpecError(err) => {
+                    let gql_err = match err.custom_extension_details() {
+                        Some(extension_details) => Error::builder()
+                            .message(err.to_string())
+                            .extension_code(err.extension_code())
+                            .extensions(extension_details)
+                            .build(),
+                        None => Error::builder()
+                            .message(err.to_string())
+                            .extension_code(err.extension_code())
+                            .build(),
+                    };
+
+                    Ok(vec![gql_err])
+                }
+                QueryPlannerError::SchemaValidationErrors(errs) => {
+                    Self::Planner(errs).into_graphql_errors()
+                }
+                QueryPlannerError::PlanningErrors(planning_errors) => Ok(planning_errors
+                    .errors
+                    .iter()
+                    .map(|p_err| Error::from(p_err.clone()))
+                    .collect()),
+                QueryPlannerError::Introspection(introspection_error) => Ok(vec![Error::builder()
+                    .message(
+                        introspection_error
+                            .message
+                            .unwrap_or_else(|| "introspection error".to_string()),
+                    )
+                    .extension_code("INTROSPECTION_ERROR")
+                    .build()]),
+                QueryPlannerError::LimitExceeded(OperationLimits {
+                    depth,
+                    height,
+                    root_fields,
+                    aliases,
+                }) => {
+                    let mut errors = Vec::new();
+                    let mut build = |exceeded, code, message| {
+                        if exceeded {
+                            errors.push(
+                                Error::builder()
+                                    .message(message)
+                                    .extension_code(code)
+                                    .build(),
+                            )
+                        }
+                    };
+                    build(
+                        depth,
+                        "MAX_DEPTH_LIMIT",
+                        "Maximum depth limit exceeded in this operation",
+                    );
+                    build(
+                        height,
+                        "MAX_HEIGHT_LIMIT",
+                        "Maximum height (field count) limit exceeded in this operation",
+                    );
+                    build(
+                        root_fields,
+                        "MAX_ROOT_FIELDS_LIMIT",
+                        "Maximum root fields limit exceeded in this operation",
+                    );
+                    build(
+                        aliases,
+                        "MAX_ALIASES_LIMIT",
+                        "Maximum aliases limit exceeded in this operation",
+                    );
+                    Ok(errors)
+                }
+                err => Err(Self::QueryPlanner(err)),
+            },
+            Self::Planner(planner_errors) => {
+                // TODO: NO
+                let errors = planner_errors
+                    .0
+                    .iter()
+                    .map(|e| Error::from(e.clone()))
+                    .collect();
+                Ok(errors)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "custom_to_graphql_error")]
+static mut INTO_GRAPHQL_ERRORS: OnceLock<
+    Box<dyn Fn(RouterError) -> Result<Vec<Error>, RouterError> + 'static>,
+> = OnceLock::new();
+#[cfg(feature = "custom_to_graphql_error")]
+pub unsafe fn set_into_graphql_errors(
+    into_graphql_errors: impl Fn(RouterError) -> Result<Vec<Error>, RouterError> + 'static,
+) {
+    INTO_GRAPHQL_ERRORS
+        .set(Box::new(into_graphql_errors))
+        .map_err(|_| "into_graphql_errors was already set")
+        .unwrap();
+}
+
+#[cfg(feature = "custom_to_graphql_error")]
+impl IntoGraphQLErrors for RouterError {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        let callback = unsafe {
+            INTO_GRAPHQL_ERRORS
+                .get()
+                .expect("into_graphql_errors was not set")
+        };
+        callback(self)
+    }
+}
+
+/// Error types for CacheResolver
+#[cfg(not(feature = "custom_to_graphql_error"))]
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 pub(crate) enum CacheResolverError {
+    /// value retrieval failed: {0}
+    RetrievalError(Arc<QueryPlannerError>),
+}
+
+/// Error types for CacheResolver
+#[cfg(feature = "custom_to_graphql_error")]
+#[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
+pub enum CacheResolverError {
     /// value retrieval failed: {0}
     RetrievalError(Arc<QueryPlannerError>),
 }
@@ -263,8 +556,50 @@ impl From<router_bridge::error::Error> for ServiceBuildError {
 }
 
 /// Error types for QueryPlanner
+#[cfg(not(feature = "custom_to_graphql_error"))]
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 pub(crate) enum QueryPlannerError {
+    /// couldn't instantiate query planner; invalid schema: {0}
+    SchemaValidationErrors(PlannerErrors),
+
+    /// invalid query
+    OperationValidationErrors(Vec<apollo_compiler::GraphQLError>),
+
+    /// couldn't plan query: {0}
+    PlanningErrors(PlanErrors),
+
+    /// query planning panicked: {0}
+    JoinError(String),
+
+    /// Cache resolution failed: {0}
+    CacheResolverError(Arc<CacheResolverError>),
+
+    /// empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
+    EmptyPlan(UsageReporting), // usage_reporting_signature
+
+    /// unhandled planner result
+    UnhandledPlannerResult,
+
+    /// router bridge error: {0}
+    RouterBridgeError(router_bridge::error::Error),
+
+    /// spec error: {0}
+    SpecError(SpecError),
+
+    /// introspection error: {0}
+    Introspection(IntrospectionError),
+
+    /// complexity limit exceeded
+    LimitExceeded(OperationLimits<bool>),
+
+    /// Unauthorized field or type
+    Unauthorized(Vec<Path>),
+}
+
+/// Error types for QueryPlanner
+#[cfg(feature = "custom_to_graphql_error")]
+#[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
+pub enum QueryPlannerError {
     /// couldn't instantiate query planner; invalid schema: {0}
     SchemaValidationErrors(PlannerErrors),
 
@@ -406,9 +741,15 @@ impl IntoGraphQLErrors for QueryPlannerError {
     }
 }
 
+#[cfg(not(feature = "custom_to_graphql_error"))]
 #[derive(Clone, Debug, Error, Serialize, Deserialize)]
 /// Container for planner setup errors
 pub(crate) struct PlannerErrors(Arc<Vec<PlannerError>>);
+
+#[cfg(feature = "custom_to_graphql_error")]
+#[derive(Clone, Debug, Error, Serialize, Deserialize)]
+/// Container for planner setup errors
+pub struct PlannerErrors(pub Arc<Vec<PlannerError>>);
 
 impl IntoGraphQLErrors for PlannerErrors {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
@@ -498,6 +839,7 @@ impl From<QueryPlannerError> for Response {
 }
 
 /// The payload if the plan_worker invocation failed
+#[cfg(not(feature = "custom_to_graphql_error"))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PlanErrors {
     /// The errors the plan_worker invocation failed with
@@ -505,6 +847,17 @@ pub(crate) struct PlanErrors {
     /// Usage reporting related data such as the
     /// operation signature and referenced fields
     pub(crate) usage_reporting: UsageReporting,
+}
+
+/// The payload if the plan_worker invocation failed
+#[cfg(feature = "custom_to_graphql_error")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanErrors {
+    /// The errors the plan_worker invocation failed with
+    pub errors: Arc<Vec<router_bridge::planner::PlanError>>,
+    /// Usage reporting related data such as the
+    /// operation signature and referenced fields
+    pub usage_reporting: UsageReporting,
 }
 
 impl From<router_bridge::planner::PlanErrors> for PlanErrors {

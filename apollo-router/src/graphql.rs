@@ -176,7 +176,24 @@ where
 }
 
 /// Trait used to get extension type from an error
+#[cfg(not(feature = "custom_to_graphql_error"))]
+
 pub(crate) trait ErrorExtension
+where
+    Self: Sized,
+{
+    fn extension_code(&self) -> String {
+        std::any::type_name::<Self>().to_shouty_snake_case()
+    }
+
+    fn custom_extension_details(&self) -> Option<Object> {
+        None
+    }
+}
+
+/// Trait used to get extension type from an error
+#[cfg(feature = "custom_to_graphql_error")]
+pub trait ErrorExtension
 where
     Self: Sized,
 {

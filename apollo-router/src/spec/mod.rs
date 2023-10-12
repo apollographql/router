@@ -24,9 +24,32 @@ use crate::graphql::ErrorExtension;
 use crate::json_ext::Object;
 
 /// GraphQL parsing errors.
+#[cfg(not(feature = "custom_to_graphql_error"))]
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub(crate) enum SpecError {
+    /// missing input file for query
+    UnknownFileId,
+    /// selection processing recursion limit exceeded
+    RecursionLimitExceeded,
+    /// invalid type error, expected another type than '{0}'
+    InvalidType(String),
+    /// cannot query field '{0}' on type '{1}'
+    InvalidField(String, String),
+    /// parsing error: {0}
+    ParsingError(String),
+    /// validation error
+    ValidationError(Vec<apollo_compiler::GraphQLError>),
+    /// Unknown operation named "{0}"
+    UnknownOperation(String),
+    /// subscription operation is not supported
+    SubscriptionNotSupported,
+}
+
+#[cfg(feature = "custom_to_graphql_error")]
+#[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum SpecError {
     /// missing input file for query
     UnknownFileId,
     /// selection processing recursion limit exceeded
