@@ -55,16 +55,24 @@ pub struct Context {
     #[serde(skip)]
     #[derivative(Debug = "ignore")]
     busy_timer: Arc<Mutex<BusyTimer>>,
+
+    #[serde(skip)]
+    pub(crate) id: String,
 }
 
 impl Context {
     /// Create a new context.
     pub fn new() -> Self {
+        let id = uuid::Uuid::new_v4()
+            .as_hyphenated()
+            .encode_lower(&mut uuid::Uuid::encode_buffer())
+            .to_string();
         Context {
             entries: Default::default(),
             private_entries: Arc::new(parking_lot::Mutex::new(Extensions::default())),
             created_at: Instant::now(),
             busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
+            id,
         }
     }
 }
