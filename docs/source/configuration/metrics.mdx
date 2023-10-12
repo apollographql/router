@@ -4,6 +4,41 @@ title: Collecting metrics in the Apollo Router
 
 The Apollo Router provides built-in support for metrics collection via [Prometheus](#using-prometheus) and [OpenTelemetry Collector](#using-opentelemetry-collector).
 
+## Common configuration
+
+### Service name
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    common:
+      # (Optional) Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
+      service_name: "router"
+```
+
+Service name discovery is handled in the following order:
+1. `OTEL_SERVICE_NAME` env
+2. `OTEL_RESOURCE_ATTRIBUTES` env
+3. `router.yaml` `service_name`
+4. `router.yaml` `resources` (attributes)
+
+If none of the above are found then the service name will be set to `unknown_service:apollo_router` or `unknown_service` if the executable name cannot be determined.
+
+### Resource
+
+A Resource is a set of key-value pairs that provide additional information to an exporter. APMs may interpret and display resource information. 
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    trace_config:
+      attributes:
+        "environment.name": "production"
+        "environment.namespace": "{env.MY_K8_NAMESPACE_ENV_VARIABLE}"
+```
+
+> [See OpenTelemetry conventions for resources.](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/README.md)
+
 ## Using Prometheus
 
 You can use [Prometheus and Grafana](https://prometheus.io/docs/visualization/grafana/) to collect metrics and visualize the router metrics.
@@ -11,11 +46,6 @@ You can use [Prometheus and Grafana](https://prometheus.io/docs/visualization/gr
 ```yaml title="router.yaml"
 telemetry:
   metrics:
-    common:
-      # (Optional, default to "apollo-router") Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
-      service_name: "apollo-router"
-      # (Optional)
-      service_namespace: "apollo"
     prometheus:
       # By setting this endpoint you enable the Prometheus exporter
       # All our endpoints exposed by plugins are namespaced by the name of the plugin
@@ -279,20 +309,3 @@ telemetry:
         - 20.00
 ```
 
-## Adding custom resources
-
-Resources are similar to [attributes](#adding-custom-attributeslabels), but there are more globals. They're configured directly on the metrics exporter, which means they're always present on each of your metrics.
-
-As an example, it can be useful to set a `environment_name` resource to help you identify metrics related to a particular environment:
-
-```yaml title="router.yaml"
-telemetry:
-  metrics:
-    common:
-      resources:
-        environment_name: "production"
-```
-
-> [See OpenTelemetry conventions for resources.](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/README.md)
->
-> For example, if you want to use a Datadog agent and specify a service name, you should set the `service.name` resource as shown above and described in the conventions document.
