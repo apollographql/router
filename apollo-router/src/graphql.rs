@@ -62,6 +62,7 @@ pub struct Error {
 }
 // Implement getter and getter_mut to not use pub field directly
 
+#[cfg(not(feature = "custom_to_graphql_error"))]
 #[buildstructor::buildstructor]
 impl Error {
     /// Returns a builder that builds a GraphQL [`Error`] from its components.
@@ -106,6 +107,106 @@ impl Error {
         extensions
             .entry("code")
             .or_insert_with(|| extension_code.into().into());
+        Self {
+            message,
+            locations,
+            path,
+            extensions,
+        }
+    }
+
+    pub(crate) fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
+        let mut object =
+            ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: error.to_string(),
+            })?;
+
+        let extensions =
+            extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
+                .map_err(|err| FetchError::SubrequestMalformedResponse {
+                    service: service_name.to_string(),
+                    reason: err.to_string(),
+                })?
+                .unwrap_or_default();
+        let message = extract_key_value_from_object!(object, "message", Value::String(s) => s)
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?
+            .map(|s| s.as_str().to_string())
+            .unwrap_or_default();
+        let locations = extract_key_value_from_object!(object, "locations")
+            .map(serde_json_bytes::from_value)
+            .transpose()
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?
+            .unwrap_or_default();
+        let path = extract_key_value_from_object!(object, "path")
+            .map(serde_json_bytes::from_value)
+            .transpose()
+            .map_err(|err| FetchError::SubrequestMalformedResponse {
+                service: service_name.to_string(),
+                reason: err.to_string(),
+            })?;
+
+        Ok(Error {
+            message,
+            locations,
+            path,
+            extensions,
+        })
+    }
+}
+
+#[cfg(feature = "custom_to_graphql_error")]
+#[buildstructor::buildstructor]
+impl Error {
+    /// Returns a builder that builds a GraphQL [`Error`] from its components.
+    ///
+    /// Builder methods:
+    ///
+    /// * `.message(impl Into<`[`String`]`>)`
+    ///   Required.
+    ///   Sets [`Error::message`].
+    ///
+    /// * `.locations(impl Into<`[`Vec`]`<`[`Location`]`>>)`
+    ///   Optional.
+    ///   Sets the entire `Vec` of [`Error::locations`], which defaults to the empty.
+    ///
+    /// * `.location(impl Into<`[`Location`]`>)`
+    ///   Optional, may be called multiple times.
+    ///   Adds one item at the end of [`Error::locations`].
+    ///
+    /// * `.path(impl Into<`[`Path`]`>)`
+    ///   Optional.
+    ///   Sets [`Error::path`].
+    ///
+    /// * `.extensions(impl Into<`[`serde_json_bytes::Map`]`<`[`ByteString`]`, `[`Value`]`>>)`
+    ///   Optional.
+    ///   Sets the entire [`Error::extensions`] map, which defaults to empty.
+    ///
+    /// * `.extension(impl Into<`[`ByteString`]`>, impl Into<`[`Value`]`>)`
+    ///   Optional, may be called multiple times.
+    ///   Adds one item to the [`Error::extensions`] map.
+    ///
+    /// * `.build()`
+    ///   Finishes the builder and returns a GraphQL [`Error`].
+    #[builder(visibility = "pub")]
+    fn new(
+        message: String,
+        locations: Vec<Location>,
+        path: Option<Path>,
+        extension_code: Option<String>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        mut extensions: JsonMap<ByteString, Value>,
+    ) -> Self {
+        if let Some(code) = extension_code {
+            extensions.entry("code").or_insert_with(|| code.into());
+        }
+
         Self {
             message,
             locations,
