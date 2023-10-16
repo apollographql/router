@@ -64,16 +64,7 @@ impl Selection {
                 if include_skip.statically_skipped() {
                     return Ok(None);
                 }
-                let field_type = match field.name.as_str() {
-                    TYPENAME => {
-                        // TODO: remove this case. The actual type is `String!` (non-null)
-                        // but some unit tests seem to rely on null
-                        FieldType::new_named("String")
-                    }
-                    "__schema" => FieldType::new_named("__Schema"),
-                    "__type" => FieldType::new_named("__Type"),
-                    _ => field.ty().into(),
-                };
+                let field_type = FieldType::from(field.ty());
 
                 let alias = field.alias.as_ref().map(|x| x.as_str().into());
 

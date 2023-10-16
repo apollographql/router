@@ -4,7 +4,7 @@ expression: errors
 ---
 [
     GraphQLError {
-        message: "fragment `UnusedTestFragment` must be used in an operation",
+        message: "compiler error: fragment `UnusedTestFragment` must be used in an operation",
         locations: [
             GraphQLLocation {
                 line: 1,

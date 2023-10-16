@@ -3097,13 +3097,14 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query)
         .response(json! {{
+            "__typename": "Query",
             "get": {
                 "name": "a",
                 "other": "b"
             }
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name": "a",
             }
@@ -3115,10 +3116,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name": null, "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name": null,
             }
@@ -3131,10 +3133,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query2)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name2": "a", "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name2": "a",
             }
@@ -3146,10 +3149,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query2)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name2": null, "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": null
         }})
         .test();
@@ -3160,10 +3164,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query3)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name": "a", "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name": "a",
             }
@@ -3175,10 +3180,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query3)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name": null, "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name": null,
             }
@@ -3191,10 +3197,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query4)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name2": "a", "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name2": "a",
             }
@@ -3206,10 +3213,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query4)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name2": null, "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": null,
         }})
         .test();
