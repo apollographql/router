@@ -5,7 +5,6 @@ use std::num::NonZeroUsize;
 use std::ops::AddAssign;
 use std::time::SystemTime;
 
-use derivative::Derivative;
 use http::header::HeaderName;
 use itertools::Itertools;
 use schemars::JsonSchema;
@@ -35,9 +34,7 @@ pub(crate) const ENDPOINT_DEFAULT: &str =
 
 pub(crate) const OTLP_ENDPOINT_DEFAULT: &str = "https://usage-reporting.api.apollographql.com";
 
-#[derive(Derivative)]
-#[derivative(Debug)]
-#[derive(Clone, Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Config {
     /// The Apollo Studio endpoint for exporting traces and metrics.
@@ -50,12 +47,10 @@ pub(crate) struct Config {
 
     /// The Apollo Studio API key.
     #[schemars(skip)]
-    #[serde(skip)]
     pub(crate) apollo_key: Option<String>,
 
     /// The Apollo Studio graph reference.
     #[schemars(skip)]
-    #[serde(skip)]
     pub(crate) apollo_graph_ref: Option<String>,
 
     /// The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.
@@ -104,7 +99,7 @@ pub(crate) struct SubgraphErrorConfig {
     /// Handling of errors coming from all subgraphs
     pub(crate) all: ErrorConfiguration,
     /// Handling of errors coming from specified subgraphs
-    pub(crate) subgraphs: Option<HashMap<String, ErrorConfiguration>>,
+    pub(crate) subgraphs: HashMap<String, ErrorConfiguration>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -119,28 +114,20 @@ pub(crate) struct ErrorConfiguration {
 impl Default for ErrorConfiguration {
     fn default() -> Self {
         Self {
-            send: default_send_errors(),
-            redact: default_redact_errors(),
+            send: true,
+            redact: true,
         }
     }
 }
 
 impl SubgraphErrorConfig {
     pub(crate) fn get_error_config(&self, subgraph: &str) -> &ErrorConfiguration {
-        if let Some(subgraph_conf) = self.subgraphs.as_ref().and_then(|s| s.get(subgraph)) {
+        if let Some(subgraph_conf) = self.subgraphs.get(subgraph) {
             subgraph_conf
         } else {
             &self.all
         }
     }
-}
-
-pub(crate) const fn default_send_errors() -> bool {
-    true
-}
-
-pub(crate) const fn default_redact_errors() -> bool {
-    true
 }
 
 const fn default_field_level_instrumentation_sampler() -> SamplerOption {

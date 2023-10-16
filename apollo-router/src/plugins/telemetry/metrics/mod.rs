@@ -39,41 +39,41 @@ pub(crate) mod prometheus;
 pub(crate) mod span_metrics_exporter;
 static UNKNOWN_SERVICE: &str = "unknown_service";
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
 /// Configuration to add custom attributes/labels on metrics
 pub(crate) struct MetricsAttributesConf {
     /// Configuration to forward header values or body values from router request/response in metric attributes/labels
-    pub(crate) supergraph: Option<AttributesForwardConf>,
+    pub(crate) supergraph: AttributesForwardConf,
     /// Configuration to forward header values or body values from subgraph request/response in metric attributes/labels
-    pub(crate) subgraph: Option<SubgraphAttributesConf>,
+    pub(crate) subgraph: SubgraphAttributesConf,
 }
 
 /// Configuration to add custom attributes/labels on metrics to subgraphs
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphAttributesConf {
     /// Attributes for all subgraphs
-    pub(crate) all: Option<AttributesForwardConf>,
+    pub(crate) all: AttributesForwardConf,
     /// Attributes per subgraph
-    pub(crate) subgraphs: Option<HashMap<String, AttributesForwardConf>>,
+    pub(crate) subgraphs: HashMap<String, AttributesForwardConf>,
 }
 
 /// Configuration to add custom attributes/labels on metrics to subgraphs
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct AttributesForwardConf {
     /// Configuration to insert custom attributes/labels in metrics
     #[serde(rename = "static")]
-    pub(crate) insert: Option<Vec<Insert>>,
+    pub(crate) insert: Vec<Insert>,
     /// Configuration to forward headers or body values from the request to custom attributes/labels in metrics
-    pub(crate) request: Option<Forward>,
+    pub(crate) request: Forward,
     /// Configuration to forward headers or body values from the response to custom attributes/labels in metrics
-    pub(crate) response: Option<Forward>,
+    pub(crate) response: Forward,
     /// Configuration to forward values from the context to custom attributes/labels in metrics
-    pub(crate) context: Option<Vec<ContextForward>>,
+    pub(crate) context: Vec<ContextForward>,
     /// Configuration to forward values from the error to custom attributes/labels in metrics
-    pub(crate) errors: Option<ErrorsForward>,
+    pub(crate) errors: ErrorsForward,
 }
 
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
@@ -88,21 +88,21 @@ pub(crate) struct Insert {
 
 /// Configuration to forward from headers/body
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Forward {
     /// Forward header values as custom attributes/labels in metrics
-    pub(crate) header: Option<Vec<HeaderForward>>,
+    pub(crate) header: Vec<HeaderForward>,
     /// Forward body values as custom attributes/labels in metrics
-    pub(crate) body: Option<Vec<BodyForward>>,
+    pub(crate) body: Vec<BodyForward>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ErrorsForward {
     /// Will include the error message in a "message" attribute
-    pub(crate) include_messages: bool,
+    pub(crate) include_messages: Option<bool>,
     /// Forward extensions values as custom attributes/labels in metrics
-    pub(crate) extensions: Option<Vec<BodyForward>>,
+    pub(crate) extensions: Vec<BodyForward>,
 }
 
 schemar_fn!(
@@ -112,8 +112,7 @@ schemar_fn!(
 );
 
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-#[serde(untagged)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, untagged)]
 /// Configuration to forward header values in metric labels
 pub(crate) enum HeaderForward {
     /// Match via header name
@@ -138,7 +137,7 @@ pub(crate) enum HeaderForward {
 }
 
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 /// Configuration to forward body values in metric attributes/labels
 pub(crate) struct BodyForward {
     /// The path in the body
@@ -208,39 +207,15 @@ impl HeaderForward {
 
 impl Forward {
     pub(crate) fn merge(&mut self, to_merge: Self) {
-        match (&mut self.body, to_merge.body) {
-            (Some(body), Some(body_to_merge)) => {
-                body.extend(body_to_merge);
-            }
-            (None, Some(body_to_merge)) => {
-                self.body = Some(body_to_merge);
-            }
-            _ => {}
-        }
-        match (&mut self.header, to_merge.header) {
-            (Some(header), Some(header_to_merge)) => {
-                header.extend(header_to_merge);
-            }
-            (None, Some(header_to_merge)) => {
-                self.header = Some(header_to_merge);
-            }
-            _ => {}
-        }
+        self.body.extend(to_merge.body);
+        self.header.extend(to_merge.header);
     }
 }
 
 impl ErrorsForward {
     pub(crate) fn merge(&mut self, to_merge: Self) {
-        match (&mut self.extensions, to_merge.extensions) {
-            (Some(extensions), Some(extensions_to_merge)) => {
-                extensions.extend(extensions_to_merge);
-            }
-            (None, Some(extensions_to_merge)) => {
-                self.extensions = Some(extensions_to_merge);
-            }
-            _ => {}
-        }
-        self.include_messages = to_merge.include_messages;
+        self.extensions.extend(to_merge.extensions);
+        self.include_messages = to_merge.include_messages.or(self.include_messages);
     }
 
     pub(crate) fn get_attributes_from_error(
@@ -255,26 +230,24 @@ impl ErrorsForward {
         {
             let gql_error = fetch_error.to_graphql_error(None);
             // Include error message
-            if self.include_messages {
+            if self.include_messages.unwrap_or_default() {
                 attributes.insert(
                     "message".to_string(),
                     AttributeValue::String(gql_error.message),
                 );
             }
             // Extract data from extensions
-            if let Some(extensions_fw) = &self.extensions {
-                for ext_fw in extensions_fw {
-                    let output = ext_fw.path.execute(&gql_error.extensions).unwrap();
-                    if let Some(val) = output {
-                        if let Ok(val) = AttributeValue::try_from(val) {
-                            attributes.insert(ext_fw.name.clone(), val);
-                        }
-                    } else if let Some(default_val) = &ext_fw.default {
-                        attributes.insert(ext_fw.name.clone(), default_val.clone());
+            for ext_fw in &self.extensions {
+                let output = ext_fw.path.execute(&gql_error.extensions).unwrap();
+                if let Some(val) = output {
+                    if let Ok(val) = AttributeValue::try_from(val) {
+                        attributes.insert(ext_fw.name.clone(), val);
                     }
+                } else if let Some(default_val) = &ext_fw.default {
+                    attributes.insert(ext_fw.name.clone(), default_val.clone());
                 }
             }
-        } else if self.include_messages {
+        } else if self.include_messages.unwrap_or_default() {
             attributes.insert(
                 "message".to_string(),
                 AttributeValue::String(err.to_string()),
@@ -295,59 +268,51 @@ impl AttributesForwardConf {
         let mut attributes = HashMap::new();
 
         // Fill from static
-        if let Some(to_insert) = &self.insert {
-            for Insert { name, value } in to_insert {
-                attributes.insert(name.clone(), value.clone());
-            }
+        for Insert { name, value } in &self.insert {
+            attributes.insert(name.clone(), value.clone());
         }
         // Fill from context
-        if let Some(from_context) = &self.context {
-            for ContextForward {
-                named,
-                default,
-                rename,
-            } in from_context
-            {
-                match context.get::<_, AttributeValue>(named) {
-                    Ok(Some(value)) => {
-                        attributes.insert(rename.as_ref().unwrap_or(named).clone(), value);
+        for ContextForward {
+            named,
+            default,
+            rename,
+        } in &self.context
+        {
+            match context.get::<_, AttributeValue>(named) {
+                Ok(Some(value)) => {
+                    attributes.insert(rename.as_ref().unwrap_or(named).clone(), value);
+                }
+                _ => {
+                    if let Some(default_val) = default {
+                        attributes.insert(
+                            rename.as_ref().unwrap_or(named).clone(),
+                            default_val.clone(),
+                        );
                     }
-                    _ => {
-                        if let Some(default_val) = default {
-                            attributes.insert(
-                                rename.as_ref().unwrap_or(named).clone(),
-                                default_val.clone(),
-                            );
-                        }
-                    }
-                };
-            }
+                }
+            };
         }
 
         // Fill from response
-        if let Some(from_response) = &self.response {
-            if let Some(header_forward) = &from_response.header {
-                attributes.extend(header_forward.iter().fold(
-                    HashMap::new(),
-                    |mut acc, current| {
-                        acc.extend(current.get_attributes_from_headers(&parts.headers));
-                        acc
-                    },
-                ));
-            }
+        attributes.extend(
+            self.response
+                .header
+                .iter()
+                .fold(HashMap::new(), |mut acc, current| {
+                    acc.extend(current.get_attributes_from_headers(&parts.headers));
+                    acc
+                }),
+        );
 
-            if let Some(body_forward) = &from_response.body {
-                if let Some(body) = &first_response {
-                    for body_fw in body_forward {
-                        let output = body_fw.path.execute(body).unwrap();
-                        if let Some(val) = output {
-                            if let Ok(val) = AttributeValue::try_from(val) {
-                                attributes.insert(body_fw.name.clone(), val);
-                            }
-                        } else if let Some(default_val) = &body_fw.default {
-                            attributes.insert(body_fw.name.clone(), default_val.clone());
-                        }
+        if let Some(body) = &first_response {
+            for body_fw in &self.response.body {
+                let output = body_fw.path.execute(body).unwrap();
+                if let Some(val) = output {
+                    if let Ok(val) = AttributeValue::try_from(val) {
+                        attributes.insert(body_fw.name.clone(), val);
                     }
+                } else if let Some(default_val) = &body_fw.default {
+                    attributes.insert(body_fw.name.clone(), default_val.clone());
                 }
             }
         }
@@ -362,27 +327,25 @@ impl AttributesForwardConf {
     ) -> HashMap<String, AttributeValue> {
         let mut attributes = HashMap::new();
 
-        if let Some(from_context) = &self.context {
-            for ContextForward {
-                named,
-                default,
-                rename,
-            } in from_context
-            {
-                match context.get::<_, AttributeValue>(named) {
-                    Ok(Some(value)) => {
-                        attributes.insert(rename.as_ref().unwrap_or(named).clone(), value);
+        for ContextForward {
+            named,
+            default,
+            rename,
+        } in &self.context
+        {
+            match context.get::<_, AttributeValue>(named) {
+                Ok(Some(value)) => {
+                    attributes.insert(rename.as_ref().unwrap_or(named).clone(), value);
+                }
+                _ => {
+                    if let Some(default_val) = default {
+                        attributes.insert(
+                            rename.as_ref().unwrap_or(named).clone(),
+                            default_val.clone(),
+                        );
                     }
-                    _ => {
-                        if let Some(default_val) = default {
-                            attributes.insert(
-                                rename.as_ref().unwrap_or(named).clone(),
-                                default_val.clone(),
-                            );
-                        }
-                    }
-                };
-            }
+                }
+            };
         }
 
         attributes
@@ -396,33 +359,28 @@ impl AttributesForwardConf {
         let mut attributes = HashMap::new();
 
         // Fill from static
-        if let Some(to_insert) = &self.insert {
-            for Insert { name, value } in to_insert {
-                attributes.insert(name.clone(), value.clone());
-            }
+        for Insert { name, value } in &self.insert {
+            attributes.insert(name.clone(), value.clone());
         }
+
         // Fill from response
-        if let Some(from_response) = &self.response {
-            if let Some(headers_forward) = &from_response.header {
-                attributes.extend(headers_forward.iter().fold(
-                    HashMap::new(),
-                    |mut acc, current| {
-                        acc.extend(current.get_attributes_from_headers(headers));
-                        acc
-                    },
-                ));
-            }
-            if let Some(body_forward) = &from_response.body {
-                for body_fw in body_forward {
-                    let output = body_fw.path.execute(body).unwrap();
-                    if let Some(val) = output {
-                        if let Ok(val) = AttributeValue::try_from(val) {
-                            attributes.insert(body_fw.name.clone(), val);
-                        }
-                    } else if let Some(default_val) = &body_fw.default {
-                        attributes.insert(body_fw.name.clone(), default_val.clone());
-                    }
+        attributes.extend(
+            self.response
+                .header
+                .iter()
+                .fold(HashMap::new(), |mut acc, current| {
+                    acc.extend(current.get_attributes_from_headers(headers));
+                    acc
+                }),
+        );
+        for body_fw in &self.response.body {
+            let output = body_fw.path.execute(body).unwrap();
+            if let Some(val) = output {
+                if let Ok(val) = AttributeValue::try_from(val) {
+                    attributes.insert(body_fw.name.clone(), val);
                 }
+            } else if let Some(default_val) = &body_fw.default {
+                attributes.insert(body_fw.name.clone(), default_val.clone());
             }
         }
 
@@ -437,33 +395,27 @@ impl AttributesForwardConf {
         let mut attributes = HashMap::new();
 
         // Fill from static
-        if let Some(to_insert) = &self.insert {
-            for Insert { name, value } in to_insert {
-                attributes.insert(name.clone(), value.clone());
-            }
+        for Insert { name, value } in &self.insert {
+            attributes.insert(name.clone(), value.clone());
         }
         // Fill from response
-        if let Some(from_request) = &self.request {
-            if let Some(headers_forward) = &from_request.header {
-                attributes.extend(headers_forward.iter().fold(
-                    HashMap::new(),
-                    |mut acc, current| {
-                        acc.extend(current.get_attributes_from_headers(headers));
-                        acc
-                    },
-                ));
-            }
-            if let Some(body_forward) = &from_request.body {
-                for body_fw in body_forward {
-                    let output = body_fw.path.execute(body).ok().flatten();
-                    if let Some(val) = output {
-                        if let Ok(val) = AttributeValue::try_from(val) {
-                            attributes.insert(body_fw.name.clone(), val);
-                        }
-                    } else if let Some(default_val) = &body_fw.default {
-                        attributes.insert(body_fw.name.clone(), default_val.clone());
-                    }
+        attributes.extend(
+            self.request
+                .header
+                .iter()
+                .fold(HashMap::new(), |mut acc, current| {
+                    acc.extend(current.get_attributes_from_headers(headers));
+                    acc
+                }),
+        );
+        for body_fw in &self.request.body {
+            let output = body_fw.path.execute(body).ok().flatten();
+            if let Some(val) = output {
+                if let Ok(val) = AttributeValue::try_from(val) {
+                    attributes.insert(body_fw.name.clone(), val);
                 }
+            } else if let Some(default_val) = &body_fw.default {
+                attributes.insert(body_fw.name.clone(), default_val.clone());
             }
         }
 
@@ -474,10 +426,7 @@ impl AttributesForwardConf {
         &self,
         err: &BoxError,
     ) -> HashMap<String, AttributeValue> {
-        self.errors
-            .as_ref()
-            .map(|e| e.get_attributes_from_error(err))
-            .unwrap_or_default()
+        self.errors.get_attributes_from_error(err)
     }
 }
 
@@ -526,11 +475,7 @@ impl ResourceDetector for ConfigResourceDetector {
 
 impl MetricsBuilder {
     pub(crate) fn new(config: &Conf) -> Self {
-        let metrics_common_config = config
-            .metrics
-            .clone()
-            .and_then(|m| m.common)
-            .unwrap_or_default();
+        let metrics_common_config = &config.metrics.common;
 
         let mut resource = Resource::from_detectors(
             Duration::from_secs(0),
@@ -574,6 +519,8 @@ impl MetricsBuilder {
 }
 
 pub(crate) trait MetricsConfigurator {
+    fn enabled(&self) -> bool;
+
     fn apply(
         &self,
         builder: MetricsBuilder,

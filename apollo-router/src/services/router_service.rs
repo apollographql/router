@@ -604,10 +604,12 @@ impl RouterService {
             .expect("We must have at least one response");
         let sg = http::Request::from_parts(parts, first);
 
-        context
-            .private_entries
-            .lock()
-            .insert(self.experimental_batching.clone());
+        if !ok_results.is_empty() {
+            context
+                .private_entries
+                .lock()
+                .insert(self.experimental_batching.clone());
+        }
         // Building up the batch of supergraph requests is tricky.
         // Firstly note that any http extensions are only propagated for the first request sent
         // through the pipeline. This is because there is simply no way to clone http
@@ -1172,6 +1174,119 @@ mod tests {
         let data: serde_json::Value =
             serde_json::from_slice(&hyper::body::to_bytes(response.into_body()).await.unwrap())
                 .unwrap();
+        assert_eq!(expected_response, data);
+    }
+
+    #[tokio::test]
+    async fn it_will_process_a_non_batched_defered_query() {
+        let expected_response = "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"topProducts\":[{\"upc\":\"1\",\"name\":\"Table\",\"reviews\":[{\"product\":{\"name\":\"Table\"},\"author\":{\"id\":\"1\",\"name\":\"Ada Lovelace\"}},{\"product\":{\"name\":\"Table\"},\"author\":{\"id\":\"2\",\"name\":\"Alan Turing\"}}]},{\"upc\":\"2\",\"name\":\"Couch\",\"reviews\":[{\"product\":{\"name\":\"Couch\"},\"author\":{\"id\":\"1\",\"name\":\"Ada Lovelace\"}}]}]},\"hasNext\":true}\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":false,\"incremental\":[{\"data\":{\"id\":\"1\"},\"path\":[\"topProducts\",0,\"reviews\",0]},{\"data\":{\"id\":\"4\"},\"path\":[\"topProducts\",0,\"reviews\",1]},{\"data\":{\"id\":\"2\"},\"path\":[\"topProducts\",1,\"reviews\",0]}]}\r\n--graphql--\r\n";
+        async fn with_config() -> router::Response {
+            let query = "
+                query TopProducts($first: Int) {
+                    topProducts(first: $first) {
+                        upc
+                        name
+                        reviews {
+                            ... @defer {
+                            id
+                            }
+                            product { name }
+                            author { id name }
+                        }
+                    }
+                }
+            ";
+            let http_request = supergraph::Request::canned_builder()
+                .header(http::header::ACCEPT, MULTIPART_DEFER_CONTENT_TYPE)
+                .query(query)
+                .build()
+                .unwrap()
+                .supergraph_request
+                .map(|req: crate::request::Request| {
+                    let bytes = serde_json::to_vec(&req).unwrap();
+                    hyper::Body::from(bytes)
+                });
+            let config = serde_json::json!({
+                "experimental_batching": {
+                    "enabled": true,
+                    "mode" : "batch_http_link"
+                }
+            });
+            crate::TestHarness::builder()
+                .configuration_json(config)
+                .unwrap()
+                .build_router()
+                .await
+                .unwrap()
+                .oneshot(router::Request::from(http_request))
+                .await
+                .unwrap()
+        }
+        // Send a request
+        let response = with_config().await.response;
+        assert_eq!(response.status(), http::StatusCode::OK);
+        let bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let data = String::from_utf8_lossy(&bytes);
+        assert_eq!(expected_response, data);
+    }
+
+    #[tokio::test]
+    async fn it_will_not_process_a_batched_deferred_query() {
+        let expected_response = "[\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"errors\":[{\"message\":\"Deferred responses and subscriptions aren't supported in batches\",\"extensions\":{\"code\":\"BATCHING_DEFER_UNSUPPORTED\"}}]}\r\n--graphql--\r\n, \r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"errors\":[{\"message\":\"Deferred responses and subscriptions aren't supported in batches\",\"extensions\":{\"code\":\"BATCHING_DEFER_UNSUPPORTED\"}}]}\r\n--graphql--\r\n]";
+
+        async fn with_config() -> router::Response {
+            let query = "
+                query TopProducts($first: Int) {
+                    topProducts(first: $first) {
+                        upc
+                        name
+                        reviews {
+                            ... @defer {
+                            id
+                            }
+                            product { name }
+                            author { id name }
+                        }
+                    }
+                }
+            ";
+            let http_request = supergraph::Request::canned_builder()
+                .header(http::header::ACCEPT, MULTIPART_DEFER_CONTENT_TYPE)
+                .query(query)
+                .build()
+                .unwrap()
+                .supergraph_request
+                .map(|req: crate::request::Request| {
+                    // Modify the request so that it is a valid array of requests.
+                    let mut json_bytes = serde_json::to_vec(&req).unwrap();
+                    let mut result = vec![b'['];
+                    result.append(&mut json_bytes.clone());
+                    result.push(b',');
+                    result.append(&mut json_bytes);
+                    result.push(b']');
+                    hyper::Body::from(result)
+                });
+            let config = serde_json::json!({
+                "experimental_batching": {
+                    "enabled": true,
+                    "mode" : "batch_http_link"
+                }
+            });
+            crate::TestHarness::builder()
+                .configuration_json(config)
+                .unwrap()
+                .build_router()
+                .await
+                .unwrap()
+                .oneshot(router::Request::from(http_request))
+                .await
+                .unwrap()
+        }
+        // Send a request
+        let response = with_config().await.response;
+        assert_eq!(response.status(), http::StatusCode::NOT_ACCEPTABLE);
+        let bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let data = String::from_utf8_lossy(&bytes);
         assert_eq!(expected_response, data);
     }
 }

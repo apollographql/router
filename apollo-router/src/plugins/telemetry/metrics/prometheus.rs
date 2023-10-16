@@ -6,7 +6,6 @@ use futures::future::BoxFuture;
 use http::StatusCode;
 use once_cell::sync::Lazy;
 use opentelemetry::sdk::metrics::MeterProvider;
-use opentelemetry::sdk::metrics::MeterProviderBuilder;
 use opentelemetry::sdk::Resource;
 use prometheus::Encoder;
 use prometheus::Registry;
@@ -27,32 +26,22 @@ use crate::ListenAddr;
 
 /// Prometheus configuration
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Config {
     /// Set to true to enable
     pub(crate) enabled: bool,
     /// The listen address
-    #[serde(default = "prometheus_default_listen_addr")]
     pub(crate) listen: ListenAddr,
     /// The path where prometheus will be exposed
-    #[serde(default = "prometheus_default_path")]
     pub(crate) path: String,
-}
-
-fn prometheus_default_listen_addr() -> ListenAddr {
-    ListenAddr::SocketAddr("127.0.0.1:9090".parse().expect("valid listenAddr"))
-}
-
-fn prometheus_default_path() -> String {
-    "/metrics".to_string()
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            enabled: true,
-            listen: prometheus_default_listen_addr(),
-            path: prometheus_default_path(),
+            enabled: false,
+            listen: ListenAddr::SocketAddr("127.0.0.1:9090".parse().expect("valid listenAddr")),
+            path: "/metrics".to_string(),
         }
     }
 }
@@ -82,6 +71,10 @@ pub(crate) fn commit_prometheus() {
 }
 
 impl MetricsConfigurator for Config {
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
+
     fn apply(
         &self,
         mut builder: MetricsBuilder,
@@ -95,74 +88,76 @@ impl MetricsConfigurator for Config {
             buckets: metrics_config.buckets.clone(),
         };
 
-        if self.enabled {
-            // Check the last registry to see if the resources are the same, if they are we can use it as is.
-            // Otherwise go with the new controller and store it so that it can be committed during telemetry activation.
-            // Note that during tests the prom registry cannot be reused as we have a different meter provider for each test.
-            // Prom reloading IS tested in an integration test.
-            #[cfg(not(test))]
-            if let Some((last_config, last_registry)) =
-                EXISTING_PROMETHEUS.lock().expect("lock poisoned").clone()
-            {
-                if prometheus_config == last_config {
-                    tracing::debug!("prometheus registry can be reused");
-                    builder.custom_endpoints.insert(
-                        self.listen.clone(),
-                        Endpoint::from_router_service(
-                            self.path.clone(),
-                            PrometheusService {
-                                registry: last_registry.clone(),
-                            }
-                            .boxed(),
-                        ),
-                    );
-                    return Ok(builder);
-                } else {
-                    tracing::debug!("prometheus registry cannot be reused");
-                }
+        // Check the last registry to see if the resources are the same, if they are we can use it as is.
+        // Otherwise go with the new controller and store it so that it can be committed during telemetry activation.
+        // Note that during tests the prom registry cannot be reused as we have a different meter provider for each test.
+        // Prom reloading IS tested in an integration test.
+        #[cfg(not(test))]
+        if let Some((last_config, last_registry)) =
+            EXISTING_PROMETHEUS.lock().expect("lock poisoned").clone()
+        {
+            if prometheus_config == last_config {
+                tracing::debug!("prometheus registry can be reused");
+                builder.custom_endpoints.insert(
+                    self.listen.clone(),
+                    Endpoint::from_router_service(
+                        self.path.clone(),
+                        PrometheusService {
+                            registry: last_registry.clone(),
+                        }
+                        .boxed(),
+                    ),
+                );
+                tracing::info!(
+                    "Prometheus endpoint exposed at {}{}",
+                    self.listen,
+                    self.path
+                );
+                return Ok(builder);
+            } else {
+                tracing::debug!("prometheus registry cannot be reused");
             }
-
-            let registry = prometheus::Registry::new();
-
-            let exporter = opentelemetry_prometheus::exporter()
-                .with_aggregation_selector(
-                    CustomAggregationSelector::builder()
-                        .boundaries(metrics_config.buckets.clone())
-                        .record_min_max(true)
-                        .build(),
-                )
-                .with_registry(registry.clone())
-                .build()?;
-
-            let meter_provider = MeterProvider::builder()
-                .with_reader(exporter)
-                .with_resource(builder.resource.clone())
-                .build();
-            builder.custom_endpoints.insert(
-                self.listen.clone(),
-                Endpoint::from_router_service(
-                    self.path.clone(),
-                    PrometheusService {
-                        registry: registry.clone(),
-                    }
-                    .boxed(),
-                ),
-            );
-            builder.prometheus_meter_provider = Some(meter_provider.clone());
-
-            NEW_PROMETHEUS
-                .lock()
-                .expect("lock poisoned")
-                .replace((prometheus_config, registry));
-
-            tracing::info!(
-                "Prometheus endpoint exposed at {}{}",
-                self.listen,
-                self.path
-            );
-        } else {
-            builder.prometheus_meter_provider = Some(MeterProviderBuilder::default().build());
         }
+
+        let registry = prometheus::Registry::new();
+
+        let exporter = opentelemetry_prometheus::exporter()
+            .with_aggregation_selector(
+                CustomAggregationSelector::builder()
+                    .boundaries(metrics_config.buckets.clone())
+                    .record_min_max(true)
+                    .build(),
+            )
+            .with_registry(registry.clone())
+            .build()?;
+
+        let meter_provider = MeterProvider::builder()
+            .with_reader(exporter)
+            .with_resource(builder.resource.clone())
+            .build();
+        builder.custom_endpoints.insert(
+            self.listen.clone(),
+            Endpoint::from_router_service(
+                self.path.clone(),
+                PrometheusService {
+                    registry: registry.clone(),
+                }
+                .boxed(),
+            ),
+        );
+        builder.prometheus_meter_provider = Some(meter_provider.clone());
+
+        NEW_PROMETHEUS
+            .lock()
+            .expect("lock poisoned")
+            .replace((prometheus_config, registry));
+
+        tracing::info!(
+            "Prometheus endpoint exposed at {}{}",
+            self.listen,
+            self.path
+        );
+
         Ok(builder)
     }
 }
