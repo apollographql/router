@@ -149,7 +149,7 @@ impl FreeformGraphQLSafelist {
     }
 
     fn normalize_body(&self, body_from_request: &str, ast: &ast::Document) -> String {
-        if ast.sources.values().any(|s| s.has_parse_errors()) {
+        if ast.check_parse_errors().is_err() {
             // If we can't parse the operation (whether from the PQ list or the
             // incoming request), then we can't normalize it. We keep it around
             // unnormalized, so that it at least works as a byte-for-byte

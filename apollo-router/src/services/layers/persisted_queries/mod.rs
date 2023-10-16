@@ -194,7 +194,7 @@ impl PersistedQueryLayer {
         // __type/__schema/__typename.) We do want to make sure the document
         // parsed properly before poking around at it, though.
         if self.introspection_enabled
-            && doc.ast.sources.values().all(|s| !s.has_parse_errors())
+            && doc.ast.check_parse_errors().is_ok()
             && doc
                 .executable
                 .all_operations()
