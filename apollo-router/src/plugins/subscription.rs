@@ -50,7 +50,7 @@ pub(crate) const SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS: &str =
     "apollo.subscription.custom_connection_params";
 const CALLBACK_SUBSCRIPTION_HEADER_NAME: HeaderName =
     HeaderName::from_static("subscription-protocol");
-const CALLBACK_SUBSCRIPTION_HEADER_VALUE: HeaderValue = HeaderValue::from_static("callback/1.0");
+static CALLBACK_SUBSCRIPTION_HEADER_VALUE: HeaderValue = HeaderValue::from_static("callback/1.0");
 
 #[derive(Debug, Clone)]
 pub(crate) struct Subscription {
@@ -705,7 +705,7 @@ mod tests {
             resp.headers()
                 .get(CALLBACK_SUBSCRIPTION_HEADER_NAME)
                 .unwrap(),
-            &CALLBACK_SUBSCRIPTION_HEADER_VALUE
+            CALLBACK_SUBSCRIPTION_HEADER_VALUE
         );
 
         let http_req = http::Request::post(format!(
@@ -929,7 +929,7 @@ mod tests {
             resp.headers()
                 .get(CALLBACK_SUBSCRIPTION_HEADER_NAME)
                 .unwrap(),
-            &CALLBACK_SUBSCRIPTION_HEADER_VALUE
+            CALLBACK_SUBSCRIPTION_HEADER_VALUE
         );
 
         let http_req = http::Request::post(format!(
