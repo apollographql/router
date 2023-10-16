@@ -92,7 +92,6 @@ pub(crate) struct MetricsCommon {
     /// Resources
     pub(crate) resources: HashMap<String, String>,
     /// Custom buckets for histograms
-    #[serde(default = "default_buckets")]
     pub(crate) buckets: Vec<f64>,
     /// Experimental metrics to know more about caching strategies
     pub(crate) experimental_cache_metrics: ExperimentalCacheMetricsConf,
@@ -118,12 +117,6 @@ impl Default for ExperimentalCacheMetricsConf {
     }
 }
 
-fn default_buckets() -> Vec<f64> {
-    vec![
-        0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
-    ]
-}
-
 impl Default for MetricsCommon {
     fn default() -> Self {
         Self {
@@ -131,7 +124,9 @@ impl Default for MetricsCommon {
             service_name: None,
             service_namespace: None,
             resources: HashMap::new(),
-            buckets: default_buckets(),
+            buckets: vec![
+                0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
+            ],
             experimental_cache_metrics: ExperimentalCacheMetricsConf::default(),
         }
     }

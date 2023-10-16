@@ -113,7 +113,7 @@ async fn api_schema_hides_field() {
     assert!(actual.errors[0]
         .message
         .as_str()
-        .contains(r#"Cannot query field "inStock" on type "Product""#));
+        .contains(r#"cannot query field `inStock` on type `Product`"#));
     assert_eq!(
         actual.errors[0].extensions["code"].as_str(),
         Some("GRAPHQL_VALIDATION_FAILED"),
@@ -121,15 +121,13 @@ async fn api_schema_hides_field() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn api_schema_hides_field_rust_validation() {
+async fn validation_errors_from_rust() {
     let request = supergraph::Request::fake_builder()
-        .query(r#"{ topProducts { name inStock } }"#)
-        .variable("topProductsFirst", 2_i32)
-        .variable("reviewsForAuthorAuthorId", 1_i32)
+        .query(r#"{ topProducts { name inStock } notAField }"#)
         .build()
         .expect("expecting valid request");
 
-    let (actual, _) = query_rust_with_config(
+    let (response, _) = query_rust_with_config(
         request,
         serde_json::json!({
             "telemetry":{
@@ -142,14 +140,7 @@ async fn api_schema_hides_field_rust_validation() {
     )
     .await;
 
-    assert!(actual.errors[0]
-        .message
-        .as_str()
-        .contains("cannot query field `inStock` on type `Product`"));
-    assert_eq!(
-        actual.errors[0].extensions["code"].as_str(),
-        Some("GRAPHQL_VALIDATION_FAILED"),
-    );
+    insta::assert_json_snapshot!(response.errors);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -737,7 +728,11 @@ async fn query_just_at_recursion_limit() {
     .unwrap();
 
     assert_eq!(1, actual.errors.len());
-    assert!(actual.errors[0].message.contains("parser limit(5) reached"));
+    let message = &actual.errors[0].message;
+    assert!(
+        message.contains("parser recursion limit reached"),
+        "{message}"
+    );
     assert_eq!(registry.totals(), expected_service_hits);
 }
 
