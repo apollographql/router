@@ -1,4 +1,5 @@
 use apollo_compiler::ast;
+use apollo_compiler::schema::FieldLookupError;
 use tower::BoxError;
 
 /// Traverse a document with the given visitor.
@@ -142,7 +143,12 @@ fn selection_set(
             let field_def = &visitor
                 .schema()
                 .type_field(parent_type, &def.name)
-                .map_err(|e| format!("{e:?}"))?
+                .map_err(|e| match e {
+                    FieldLookupError::NoSuchType => format!("type `{parent_type}` not defined"),
+                    FieldLookupError::NoSuchField(_, _) => {
+                        format!("no field `{}` in type `{parent_type}`", &def.name)
+                    }
+                })?
                 .clone();
             visitor.field(parent_type, field_def, def)
         }

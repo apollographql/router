@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use apollo_compiler::ast;
+use apollo_compiler::schema::FieldLookupError;
 use tower::BoxError;
 
 /// Transform a document with the given visitor.
@@ -206,7 +207,12 @@ pub(crate) fn selection_set(
                 let field_def = visitor
                     .schema()
                     .type_field(parent_type, &def.name)
-                    .map_err(|e| format!("{e:?}"))?
+                    .map_err(|e| match e {
+                        FieldLookupError::NoSuchType => format!("type `{parent_type}` not defined"),
+                        FieldLookupError::NoSuchField(_, _) => {
+                            format!("no field `{}` in type `{parent_type}`", &def.name)
+                        }
+                    })?
                     .clone();
                 if let Some(sel) = visitor.field(parent_type, &field_def, def)? {
                     selections.push(ast::Selection::Field(sel.into()))
