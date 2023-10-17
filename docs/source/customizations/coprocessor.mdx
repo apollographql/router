@@ -228,18 +228,17 @@ Properties of the JSON body are divided into two high-level categories:
 
 </ExpansionPanel>
 
-
 #### `SupergraphRequest`
 
 <ExpansionPanel title="Click to expand">
 
-```json title="Example coprocessor request body"
+```json
+
 {
   // Control properties
   "version": 1,
-  "stage": "RouterRequest",
+  "stage": "SupergraphRequest",
   "control": "continue",
-  "id": "1b19c05fdafc521016df33148ad63c1b",
 
   // Data properties
   "headers": {
@@ -268,23 +267,22 @@ Properties of the JSON body are divided into two high-level categories:
       "46"
     ]
   },
-  body: {
-    "query": "query Long { me { name },
-    "operation_name": "MyQuery",
-    "variables": {},
-    "extensions": {}
+  "body": {
+    "query": "query Long {\n  me {\n  name\n}\n}",
+    "operationName": "MyQuery"
   },
   "context": {
     "entries": {
       "accepts-json": false,
       "accepts-wildcard": true,
-      "accepts-multipart": false
+      "accepts-multipart": false,
+      "this-is-a-test-context": 42
     }
   },
-  "sdl": "..." // String omitted due to length
-  "path": "/",
-  "method": "POST"
+  "serviceName": "service name shouldn't change",
+  "uri": "http://thisurihaschanged"
 }
+
 ```
 
 </ExpansionPanel>
@@ -294,60 +292,29 @@ Properties of the JSON body are divided into two high-level categories:
 <ExpansionPanel title="Click to expand">
 
 ```json
+
 {
   // Control properties
   "version": 1,
-  "stage": "RouterResponse",
-  "control": "continue",
-  "id": "1b19c05fdafc521016df33148ad63c1b",
-
-  "hasNext": false,
-  // Data properties
-  "headers": {
-    "vary": [
-      "origin"
-    ],
-    "content-type": [
-      "application/json"
-    ]
+  "stage": "SupergraphRequest",
+  "control": {
+    "break": 200
   },
+
+  // Data properties
   "body": {
-    "data": {
-      "me": {
-        "name": "Ada Lovelace"
-      }
-    }
+    "errors": [{ "message": "my error message" }]
   },
   "context": {
     "entries": {
-      "apollo_telemetry::subgraph_metrics_attributes": {},
-      "accepts-json": false,
-      "accepts-multipart": false,
-      "apollo_telemetry::client_name": "manual",
-      "apollo_telemetry::usage_reporting": {
-        "statsReportKey": "# Long\nquery Long{me{name}}",
-        "referencedFieldsByType": {
-          "User": {
-            "fieldNames": [
-              "name"
-            ],
-            "isInterface": false
-          },
-          "Query": {
-            "fieldNames": [
-              "me"
-            ],
-            "isInterface": false
-          }
-        }
-      },
-      "apollo_telemetry::client_version": "",
-      "accepts-wildcard": true
+      "testKey": true
     }
   },
-  "statusCode": 200,
-  "sdl": "..." // Omitted due to length
+  "headers": {
+    "aheader": ["a value"]
+  }
 }
+
 ```
 
 </ExpansionPanel>
@@ -547,97 +514,6 @@ Properties of the JSON body are divided into two high-level categories:
   },
   "serviceName": "reviews",
   "statusCode": 200
-}
-
-```
-
-</ExpansionPanel>
-
-#### `SupergraphRequest`
-
-<ExpansionPanel title="Click to expand">
-
-```json
-
-{
-  // Control properties
-  "version": 1,
-  "stage": "SupergraphRequest",
-  "control": "continue",
-
-  // Data properties
-  "headers": {
-    "cookie": [
-      "tasty_cookie=strawberry"
-    ],
-    "content-type": [
-      "application/json"
-    ],
-    "host": [
-      "127.0.0.1:4000"
-    ],
-    "apollo-federation-include-trace": [
-      "ftv1"
-    ],
-    "apollographql-client-name": [
-      "manual"
-    ],
-    "accept": [
-      "*/*"
-    ],
-    "user-agent": [
-      "curl/7.79.1"
-    ],
-    "content-length": [
-      "46"
-    ]
-  },
-  "body": {
-    "query": "query Long {\n  me {\n  name\n}\n}",
-    "operationName": "MyQuery"
-  },
-  "context": {
-    "entries": {
-      "accepts-json": false,
-      "accepts-wildcard": true,
-      "accepts-multipart": false,
-      "this-is-a-test-context": 42
-    }
-  },
-  "serviceName": "service name shouldn't change",
-  "uri": "http://thisurihaschanged"
-}
-
-```
-
-</ExpansionPanel>
-
-#### `SupergraphResponse`
-
-<ExpansionPanel title="Click to expand">
-
-```json
-
-{
-  // Control properties
-  "version": 1,
-  "stage": "SupergraphRequest",
-  "control": {
-    "break": 200
-  },
-
-  // Data properties
-  "body": {
-    "errors": [{ "message": "my error message" }]
-  },
-  "context": {
-    "entries": {
-      "testKey": true
-    }
-  },
-  "headers": {
-    "aheader": ["a value"]
-  }
 }
 
 ```
