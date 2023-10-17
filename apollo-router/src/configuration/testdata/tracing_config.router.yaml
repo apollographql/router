@@ -3,7 +3,7 @@ supergraph:
 telemetry:
   tracing:
     common:
-      attributes:
+      resource:
         foo: bar
       max_attributes_per_event: 2
       max_attributes_per_link: 3
