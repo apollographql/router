@@ -60,7 +60,6 @@ The Router did not gracefully shutdown when an idle connections are made by a cl
 
 This is now fixed, and the Router will now gracefully shut down in a timely fashion.
 
----
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3969
 
@@ -68,7 +67,6 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 When returning small responses (less than 10 bytes) and compressing them using gzip, the router could go into an infinite loop
 
----
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3961
 
