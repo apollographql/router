@@ -5232,7 +5232,7 @@ expression: "&schema"
               "description": "Propagation configuration",
               "type": "object",
               "properties": {
-                "awsxray": {
+                "aws_xray": {
                   "description": "Propagate AWS X-Ray",
                   "default": false,
                   "type": "boolean"
