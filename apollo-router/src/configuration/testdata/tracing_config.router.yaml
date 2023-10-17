@@ -2,7 +2,7 @@ supergraph:
   listen: 1.2.3.4:5
 telemetry:
   tracing:
-    trace_config:
+    common:
       attributes:
         foo: bar
       max_attributes_per_event: 2
