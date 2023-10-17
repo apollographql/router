@@ -1,5 +1,22 @@
-description: telemetry.tracing.trace_config has been renamed to telemetry.tracing.common
+description: Telemetry exporters now have an enabled field
 actions:
-  - type: move
-    from: telemetry.tracing.trace_config
-    to: telemetry.tracing.common
+  - type: add
+    path: telemetry.tracing.jaeger
+    name: enabled
+    value: true
+  - type: add
+    path: telemetry.tracing.otlp
+    name: enabled
+    value: true
+  - type: add
+    path: telemetry.tracing.zipkin
+    name: enabled
+    value: true
+  - type: add
+    path: telemetry.tracing.datadog
+    name: enabled
+    value: true
+  - type: add
+    path: telemetry.metrics.otlp
+    name: enabled
+    value: true
