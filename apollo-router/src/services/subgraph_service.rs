@@ -2781,6 +2781,18 @@ mod tests {
         server.await.unwrap()
     }
 
+    // Note: This test relies on a checked in certificate with the following validity
+    // characteristics:
+    //         Validity
+    //           Not Before: Oct 10 07:32:39 2023 GMT
+    //           Not After : Oct  7 07:32:39 2033 GMT
+    // If this test fails and it is October 7th 2033, you will need to generate a
+    // new self signed cert. Currently, we use openssl to do this, in the future I
+    // hope we have something better...
+    // In the testdata directory run:
+    // openssl x509 -req -in server_self_signed.csr -signkey server.key -out server_self_signed.crt -extfile server.ext -days 3650
+    // That will give you another 10 years, assuming nothing else in the signing
+    // framework has expired.
     #[tokio::test(flavor = "multi_thread")]
     async fn tls_self_signed() {
         let certificate_pem = include_str!("./testdata/server_self_signed.crt");

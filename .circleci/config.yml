@@ -402,10 +402,6 @@ commands:
             # Use helm to template our chart against all kube versions
             TEMPLATE_DIR=$(mktemp -d)
             for kube_version in ${CURRENT_KUBE_VERSIONS}; do
-              # Skip 1.25.14, 1.26.9, 1.27.6 and 1.28.2 until supported by kubeconform
-              if [[ "${kube_version}" == "1.25.14" ]] || [[ "${kube_version}" == "1.26.9" ]] || [[ "${kube_version}" == "1.27.6" ]] || [[ "${kube_version}" == "1.28.2" ]]; then
-                continue
-              fi
               # Use helm to template our chart against kube_version
               helm template --kube-version "${kube_version}" router helm/chart/router --set autoscaling.enabled=true > "${TEMPLATE_DIR}/router-${kube_version}.yaml"
 
@@ -601,9 +597,11 @@ jobs:
             - run:
                 name: helm-docs install
                 command: |
-                  sudo apt update
-                  sudo apt install golang
-                  GOPATH="${HOME}/.local" GO111MODULE=on go get github.com/norwoodj/helm-docs/cmd/helm-docs
+                  # install golang (to ${HOME}/go)
+                  curl -OLs https://go.dev/dl/go1.21.3.linux-amd64.tar.gz
+                  tar -C "${HOME}" -xf go1.21.3.linux-amd64.tar.gz
+                  # install helm-docs
+                  PATH="${HOME}/go/bin" GOPATH="${HOME}/.local" GO111MODULE=on go install github.com/norwoodj/helm-docs/cmd/helm-docs@latest
       - when:
           condition:
             or:
