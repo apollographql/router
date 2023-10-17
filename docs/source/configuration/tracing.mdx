@@ -29,7 +29,7 @@ Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/)
 ```yaml title="router.yaml"
 telemetry:
   tracing:
-    trace_config:
+    common:
       # (Optional) Set the service name to easily find traces related to the apollo-router in your metrics dashboards
       service_name: "router"
 ```
@@ -49,7 +49,7 @@ A Resource is a set of key-value pairs that provide additional global informatio
 ```yaml title="router.yaml"
 telemetry:
   tracing:
-    trace_config:
+    common:
       attributes:
         "environment.name": "production"
         "environment.namespace": "{env.MY_K8_NAMESPACE_ENV_VARIABLE}"
@@ -64,7 +64,7 @@ To prevent sending to many traces to your APM you may want to enable sampling.
 ```yaml title="router.yaml"
 telemetry:
   tracing:
-    trace_config:
+    common:
       sampler: always_on # (default) all requests are sampled (always_on|always_off|<0.0-1.0>)
       parent_based_sampler: true # (default) If an incoming span has OpenTelemetry headers then the request will always be sampled. 
 ```
@@ -113,7 +113,7 @@ You may set limits on spans to prevent sending too much data to your APM.
 ```yaml title="router.yaml"
 telemetry:
   tracing:
-    trace_config:
+    common:
 
       # Optional limits
       max_attributes_per_event: 10
