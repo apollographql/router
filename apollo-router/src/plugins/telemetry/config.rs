@@ -1,15 +1,10 @@
 //! Configuration for the telemetry plugin.
 use std::collections::BTreeMap;
-use std::env;
 use std::io::IsTerminal;
 
 use axum::headers::HeaderName;
-use opentelemetry::sdk::resource::EnvResourceDetector;
-use opentelemetry::sdk::resource::ResourceDetector;
 use opentelemetry::sdk::trace::SpanLimits;
-use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
-use opentelemetry::KeyValue;
 use opentelemetry::Value;
 use regex::Regex;
 use schemars::JsonSchema;
@@ -22,6 +17,7 @@ use crate::configuration::ConfigurationError;
 use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugin::serde::deserialize_regex;
 use crate::plugins::telemetry::metrics;
+use crate::plugins::telemetry::resource::ConfigResource;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
@@ -89,8 +85,8 @@ pub(crate) struct MetricsCommon {
     pub(crate) service_name: Option<String>,
     /// Set a service.namespace attribute in your metrics
     pub(crate) service_namespace: Option<String>,
-    /// Resources
-    pub(crate) resources: HashMap<String, String>,
+    /// Otel configuration via resource
+    pub(crate) resources: BTreeMap<String, AttributeValue>,
     /// Custom buckets for histograms
     pub(crate) buckets: Vec<f64>,
     /// Experimental metrics to know more about caching strategies
@@ -123,7 +119,7 @@ impl Default for MetricsCommon {
             attributes: Default::default(),
             service_name: None,
             service_namespace: None,
-            resources: HashMap::new(),
+            resources: BTreeMap::new(),
             buckets: vec![
                 0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
             ],
@@ -349,9 +345,9 @@ pub(crate) struct RequestPropagation {
 #[non_exhaustive]
 pub(crate) struct Trace {
     /// The trace service name
-    pub(crate) service_name: String,
+    pub(crate) service_name: Option<String>,
     /// The trace service namespace
-    pub(crate) service_namespace: String,
+    pub(crate) service_namespace: Option<String>,
     /// The sampler, always_on, always_off or a decimal between 0.0 and 1.0
     pub(crate) sampler: SamplerOption,
     /// Whether to use parent based sampling
@@ -366,8 +362,32 @@ pub(crate) struct Trace {
     pub(crate) max_attributes_per_event: u32,
     /// The maximum attributes per link before discarding
     pub(crate) max_attributes_per_link: u32,
-    /// Default attributes
+    /// The resources configured on the tracing pipeline
     pub(crate) attributes: BTreeMap<String, AttributeValue>,
+}
+
+impl ConfigResource for Trace {
+    fn service_name(&self) -> Option<String> {
+        self.service_name.clone()
+    }
+    fn service_namespace(&self) -> Option<String> {
+        self.service_namespace.clone()
+    }
+    fn resource(&self) -> &BTreeMap<String, AttributeValue> {
+        &self.attributes
+    }
+}
+
+impl ConfigResource for MetricsCommon {
+    fn service_name(&self) -> Option<String> {
+        self.service_name.clone()
+    }
+    fn service_namespace(&self) -> Option<String> {
+        self.service_namespace.clone()
+    }
+    fn resource(&self) -> &BTreeMap<String, AttributeValue> {
+        &self.resources
+    }
 }
 
 fn default_parent_based_sampler() -> bool {
@@ -381,7 +401,7 @@ fn default_sampler() -> SamplerOption {
 impl Default for Trace {
     fn default() -> Self {
         Self {
-            service_name: "router".to_string(),
+            service_name: Default::default(),
             service_namespace: Default::default(),
             sampler: default_sampler(),
             parent_based_sampler: default_parent_based_sampler(),
@@ -563,58 +583,8 @@ impl From<&Trace> for opentelemetry::sdk::trace::Config {
         trace_config = trace_config.with_max_attributes_per_event(config.max_attributes_per_event);
         trace_config = trace_config.with_max_attributes_per_link(config.max_attributes_per_link);
 
-        let mut resource_defaults = vec![];
-        resource_defaults.push(KeyValue::new(
-            opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-            config.service_name.clone(),
-        ));
-        resource_defaults.push(KeyValue::new(
-            opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE,
-            config.service_namespace.clone(),
-        ));
-        resource_defaults.push(KeyValue::new(
-            opentelemetry_semantic_conventions::resource::SERVICE_VERSION,
-            std::env!("CARGO_PKG_VERSION"),
-        ));
-
-        if let Some(executable_name) = std::env::current_exe().ok().and_then(|path| {
-            path.file_name()
-                .and_then(|p| p.to_str().map(|s| s.to_string()))
-        }) {
-            resource_defaults.push(KeyValue::new(
-                opentelemetry_semantic_conventions::resource::PROCESS_EXECUTABLE_NAME,
-                executable_name,
-            ));
-        }
-
         // Take the default first, then config, then env resources, then env variable. Last entry wins
-        let resource = Resource::new(resource_defaults)
-            .merge(&Resource::new(
-                config
-                    .attributes
-                    .iter()
-                    .map(|(k, v)| {
-                        KeyValue::new(
-                            opentelemetry::Key::from(k.clone()),
-                            opentelemetry::Value::from(v.clone()),
-                        )
-                    })
-                    .collect::<Vec<KeyValue>>(),
-            ))
-            .merge(&EnvResourceDetector::new().detect(Duration::from_secs(0)))
-            .merge(&Resource::new(
-                env::var("OTEL_SERVICE_NAME")
-                    .ok()
-                    .map(|v| {
-                        vec![KeyValue::new(
-                            opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                            v,
-                        )]
-                    })
-                    .unwrap_or_default(),
-            ));
-
-        trace_config = trace_config.with_resource(resource);
+        trace_config = trace_config.with_resource(config.to_resource());
         trace_config
     }
 }
@@ -679,8 +649,6 @@ impl Conf {
 
 #[cfg(test)]
 mod tests {
-    use opentelemetry::sdk::trace::Config;
-    use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
     use serde_json::json;
 
     use super::*;
@@ -836,36 +804,5 @@ mod tests {
         AttributeValue::try_from(json!([1, true])).expect_err("mixed conversion must fail");
         AttributeValue::try_from(json!([1.1, true])).expect_err("mixed conversion must fail");
         AttributeValue::try_from(json!([true, "bar"])).expect_err("mixed conversion must fail");
-    }
-
-    #[test]
-    fn test_service_name() {
-        let router_config = Trace {
-            service_name: "foo".to_string(),
-            ..Default::default()
-        };
-        let otel_config: Config = (&router_config).into();
-        assert_eq!(
-            Some(Value::String("foo".into())),
-            otel_config.resource.get(SERVICE_NAME)
-        );
-
-        // Env should take precedence
-        env::set_var("OTEL_RESOURCE_ATTRIBUTES", "service.name=bar");
-        let otel_config: Config = (&router_config).into();
-        assert_eq!(
-            Some(Value::String("bar".into())),
-            otel_config.resource.get(SERVICE_NAME)
-        );
-
-        // Env should take precedence
-        env::set_var("OTEL_SERVICE_NAME", "bif");
-        let otel_config: Config = (&router_config).into();
-        assert_eq!(
-            Some(Value::String("bif".into())),
-            otel_config.resource.get(SERVICE_NAME)
-        );
-        env::remove_var("OTEL_SERVICE_NAME");
-        env::remove_var("OTEL_RESOURCE_ATTRIBUTES");
     }
 }

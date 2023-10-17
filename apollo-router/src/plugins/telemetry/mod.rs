@@ -129,6 +129,7 @@ pub(crate) mod formatters;
 pub(crate) mod metrics;
 mod otlp;
 pub(crate) mod reload;
+mod resource;
 pub(crate) mod tracing;
 pub(crate) mod utils;
 

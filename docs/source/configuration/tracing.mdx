@@ -24,39 +24,54 @@ Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/)
 
 ## Common configuration
 
-### Trace config
-
-In your router's YAML config file, the `trace_config` section contains common configuration that's used by all exporters. This section is optional, and it falls back on the values of environment variables specified by the [OpenTelemetry spec](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/sdk-environment-variables.md) if `service_name` is not set.
+### Service name
 
 ```yaml title="router.yaml"
 telemetry:
   tracing:
     trace_config:
+      # (Optional) Set the service name to easily find traces related to the apollo-router in your metrics dashboards
       service_name: "router"
-      service_namespace: "apollo"
-      # Optional. Either a float between 0 and 1 or 'always_on' or 'always_off'
-      sampler: 0.1
-
-      # Optional. Use a parent based sampler. This enables remote spans help make a decision on if a span is sampeld or not.
-      # https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/sdk.md#parentbased
-      parent_based_sampler: false
-
-      # Optional limits
-      max_attributes_per_event: 10
-      max_attributes_per_link: 10
-      max_attributes_per_span: 10
-      max_events_per_span: 10
-      max_links_per_span: 10
-
-      # Attributes particular to an exporter that have not
-      # been explicitly handled in Router configuration.
-      attributes:
-        some.config.attribute: "config value"
 ```
 
-If `service_name` is set, then environment variables are not used. However, you can embed environment variables into your router config using Unix `${key:default}` syntax.
+Service name discovery is handled in the following order:
+1. `OTEL_SERVICE_NAME` env
+2. `OTEL_RESOURCE_ATTRIBUTES` env
+3. `router.yaml` `service_name`
+4. `router.yaml` `resources` (attributes)
 
-If no environment variable is set and `service_name` is not present then `router` is used as the default service name.
+If none of the above are found then the service name will be set to `unknown_service:apollo_router` or `unknown_service` if the executable name cannot be determined.
+
+### Resource
+
+A Resource is a set of key-value pairs that provide additional global information exported with your traces.
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    trace_config:
+      attributes:
+        "environment.name": "production"
+        "environment.namespace": "{env.MY_K8_NAMESPACE_ENV_VARIABLE}"
+```
+
+> [See OpenTelemetry conventions for resources.](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/README.md)
+
+### Sampling
+
+To prevent sending to many traces to your APM you may want to enable sampling. 
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    trace_config:
+      sampler: always_on # (default) all requests are sampled (always_on|always_off|<0.0-1.0>)
+      parent_based_sampler: true # (default) If an incoming span has OpenTelemetry headers then the request will always be sampled. 
+```
+
+Setting `sampler` to `0.1` will result in only 10% of your requests being sampled.
+
+`parent_based_sampler` enables clients to make the sampling decision. This guarantees that a trace that starts at a client will also have spans at the router. You may wish to turn this off if your router is exposed directly to the internet. 
 
 ### Propagation
 
@@ -90,6 +105,23 @@ telemetry:
 ```
 
 Specifying explicit propagation is generally only required if you're using an exporter that supports multiple trace ID formats (e.g., OpenTelemetry Collector, Jaeger, or OpenTracing compatible exporters).
+
+### Span limits
+
+You may set limits on spans to prevent sending too much data to your APM.
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    trace_config:
+
+      # Optional limits
+      max_attributes_per_event: 10
+      max_attributes_per_link: 10
+      max_attributes_per_span: 10
+      max_events_per_span: 10
+      max_links_per_span: 10
+```
 
 ## Trace ID
 

@@ -96,7 +96,6 @@ impl TracingConfigurator for Config {
                 tracing::info!("Configuring Jaeger tracing: {} (agent)", batch_processor);
                 let exporter = opentelemetry_jaeger::new_agent_pipeline()
                     .with_trace_config(trace_config.into())
-                    .with_service_name(trace_config.service_name.clone())
                     .with(&agent.endpoint.to_socket(), |b, s| b.with_endpoint(s))
                     .build_async_agent_exporter(opentelemetry::runtime::Tokio)?;
                 Ok(builder.with_span_processor(
@@ -118,7 +117,6 @@ impl TracingConfigurator for Config {
 
                 let exporter = opentelemetry_jaeger::new_collector_pipeline()
                     .with_trace_config(trace_config.into())
-                    .with_service_name(trace_config.service_name.clone())
                     .with(&collector.username, |b, u| b.with_username(u))
                     .with(&collector.password, |b, p| b.with_password(p))
                     .with(
