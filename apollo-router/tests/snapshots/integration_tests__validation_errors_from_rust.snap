@@ -4,23 +4,17 @@ expression: response.errors
 ---
 [
   {
-    "message": "cannot query field `inStock` on type `Product`",
-    "locations": [
-      {
-        "line": 4,
-        "column": 5
-      }
-    ],
+    "message": "compiler error: fragment `Unused` must be used in an operation",
     "extensions": {
       "code": "GRAPHQL_VALIDATION_FAILED"
     }
   },
   {
-    "message": "cannot query field `notAField` on type `Query`",
+    "message": "compiler error: the argument `notAnArg` is not supported",
     "locations": [
       {
-        "line": 6,
-        "column": 3
+        "line": 1,
+        "column": 22
       }
     ],
     "extensions": {
