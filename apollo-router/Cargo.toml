@@ -57,13 +57,13 @@ apollo-compiler = "0.11.3"
 apollo-encoder = "0.7.0"
 apollo-parser = "0.6.3"
 arc-swap = "1.6.0"
-async-compression = { version = "0.4.3", features = [
+async-compression = { version = "0.4.4", features = [
     "tokio",
     "brotli",
     "gzip",
     "deflate",
 ] }
-async-trait = "0.1.73"
+async-trait = "0.1.74"
 axum = { version = "0.6.20", features = ["headers", "json", "original-uri"] }
 base64 = "0.21.4"
 bloomfilter = "1.0.12"
@@ -196,7 +196,7 @@ serde_json = { version = "1.0.107", features = [
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
-strum_macros = "0.25.2"
+strum_macros = "0.25.3"
 sys-info = "0.9.1"
 thiserror = "1.0.49"
 tokio = { version = "1.33.0", features = ["full"] }
@@ -290,7 +290,7 @@ rhai = { version = "1.16.2", features = [
 ] }
 similar-asserts = "1.5.0"
 tempfile = "3.8.0"
-test-log = { version = "0.2.12", default-features = false, features = [
+test-log = { version = "0.2.13", default-features = false, features = [
     "trace",
 ] }
 test-span = "0.7"
