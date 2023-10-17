@@ -228,6 +228,130 @@ Properties of the JSON body are divided into two high-level categories:
 
 </ExpansionPanel>
 
+
+#### `SupergraphRequest`
+
+<ExpansionPanel title="Click to expand">
+
+```json title="Example coprocessor request body"
+{
+  // Control properties
+  "version": 1,
+  "stage": "RouterRequest",
+  "control": "continue",
+  "id": "1b19c05fdafc521016df33148ad63c1b",
+
+  // Data properties
+  "headers": {
+    "cookie": [
+      "tasty_cookie=strawberry"
+    ],
+    "content-type": [
+      "application/json"
+    ],
+    "host": [
+      "127.0.0.1:4000"
+    ],
+    "apollo-federation-include-trace": [
+      "ftv1"
+    ],
+    "apollographql-client-name": [
+      "manual"
+    ],
+    "accept": [
+      "*/*"
+    ],
+    "user-agent": [
+      "curl/7.79.1"
+    ],
+    "content-length": [
+      "46"
+    ]
+  },
+  body: {
+    "query": "query Long { me { name },
+    "operation_name": "MyQuery",
+    "variables": {},
+    "extensions": {}
+  },
+  "context": {
+    "entries": {
+      "accepts-json": false,
+      "accepts-wildcard": true,
+      "accepts-multipart": false
+    }
+  },
+  "sdl": "..." // String omitted due to length
+  "path": "/",
+  "method": "POST"
+}
+```
+
+</ExpansionPanel>
+
+#### `SupergraphResponse`
+
+<ExpansionPanel title="Click to expand">
+
+```json
+{
+  // Control properties
+  "version": 1,
+  "stage": "RouterResponse",
+  "control": "continue",
+  "id": "1b19c05fdafc521016df33148ad63c1b",
+
+  "hasNext": false,
+  // Data properties
+  "headers": {
+    "vary": [
+      "origin"
+    ],
+    "content-type": [
+      "application/json"
+    ]
+  },
+  "body": {
+    "data": {
+      "me": {
+        "name": "Ada Lovelace"
+      }
+    }
+  },
+  "context": {
+    "entries": {
+      "apollo_telemetry::subgraph_metrics_attributes": {},
+      "accepts-json": false,
+      "accepts-multipart": false,
+      "apollo_telemetry::client_name": "manual",
+      "apollo_telemetry::usage_reporting": {
+        "statsReportKey": "# Long\nquery Long{me{name}}",
+        "referencedFieldsByType": {
+          "User": {
+            "fieldNames": [
+              "name"
+            ],
+            "isInterface": false
+          },
+          "Query": {
+            "fieldNames": [
+              "me"
+            ],
+            "isInterface": false
+          }
+        }
+      },
+      "apollo_telemetry::client_version": "",
+      "accepts-wildcard": true
+    }
+  },
+  "statusCode": 200,
+  "sdl": "..." // Omitted due to length
+}
+```
+
+</ExpansionPanel>
+
 #### `SubgraphRequest`
 
 <ExpansionPanel title="Click to expand">
@@ -507,6 +631,8 @@ This value is one of the following:
 
 - `RouterRequest`: The `RouterService` has just received a client request.
 - `RouterResponse`: The `RouterService` is about to send response data to a client.
+- `SupergraphRequest`: The `SubgraphService` is about process a graphql request.
+- `SupergraphResponse`: The `SubgraphService` has just send a subgraph response.
 - `SubgraphRequest`: The `SubgraphService` is about to send a request to a subgraph.
 - `SubgraphResponse`: The `SubgraphService` has just received a subgraph response.
 
@@ -595,6 +721,21 @@ If your coprocessor [returns a _different_ value](#responding-to-coprocessor-req
 <tr>
 <td>
 
+##### `hasNext`
+
+`bool`
+
+</td>
+<td>
+
+When `stage` is `SupergraphResponse`, if present and `true` then there will be subsequent `SupergraphResponse` calls to the co-processor for each multi-part (`@defer`/subscriptions) response.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 ##### `headers`
 
 `object`
@@ -635,7 +776,7 @@ The HTTP method that is used by the request.
 </td>
 <td>
 
-The `RouterService` path that this coprocessor request pertains to.
+The `RouterService` or `SupergraphService` path that this coprocessor request pertains to.
 
 </td>
 </tr>
@@ -711,6 +852,7 @@ When `stage` is `SubgraphRequest`, this is the full URI of the subgraph the rout
 
 </tbody>
 </table>
+
 
 ## Responding to coprocessor requests
 
