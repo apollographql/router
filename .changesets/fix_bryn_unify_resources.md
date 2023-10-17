@@ -1,4 +1,4 @@
-### Bring Utel `service.name` into line with the Otel spec ([PR #4034](https://github.com/apollographql/router/pull/4034))
+### Bring Otel `service.name` into line with the Otel spec ([PR #4034](https://github.com/apollographql/router/pull/4034))
 
 Handling of Otel `service.name` has been brought into line with the [Otel spec](https://opentelemetry.io/docs/concepts/sdk-configuration/general-sdk-configuration/#otel_service_name) across traces and metrics.
 
