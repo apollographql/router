@@ -85,8 +85,8 @@ pub(crate) struct MetricsCommon {
     pub(crate) service_name: Option<String>,
     /// Set a service.namespace attribute in your metrics
     pub(crate) service_namespace: Option<String>,
-    /// Otel configuration via resource
-    pub(crate) resources: BTreeMap<String, AttributeValue>,
+    /// The Open Telemetry resource
+    pub(crate) resource: BTreeMap<String, AttributeValue>,
     /// Custom buckets for histograms
     pub(crate) buckets: Vec<f64>,
     /// Experimental metrics to know more about caching strategies
@@ -119,7 +119,7 @@ impl Default for MetricsCommon {
             attributes: Default::default(),
             service_name: None,
             service_namespace: None,
-            resources: BTreeMap::new(),
+            resource: BTreeMap::new(),
             buckets: vec![
                 0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
             ],
@@ -362,8 +362,8 @@ pub(crate) struct Trace {
     pub(crate) max_attributes_per_event: u32,
     /// The maximum attributes per link before discarding
     pub(crate) max_attributes_per_link: u32,
-    /// The resources configured on the tracing pipeline
-    pub(crate) attributes: BTreeMap<String, AttributeValue>,
+    /// The Open Telemetry resource
+    pub(crate) resource: BTreeMap<String, AttributeValue>,
 }
 
 impl ConfigResource for Trace {
@@ -374,7 +374,7 @@ impl ConfigResource for Trace {
         self.service_namespace.clone()
     }
     fn resource(&self) -> &BTreeMap<String, AttributeValue> {
-        &self.attributes
+        &self.resource
     }
 }
 
@@ -386,7 +386,7 @@ impl ConfigResource for MetricsCommon {
         self.service_namespace.clone()
     }
     fn resource(&self) -> &BTreeMap<String, AttributeValue> {
-        &self.resources
+        &self.resource
     }
 }
 
@@ -410,7 +410,7 @@ impl Default for Trace {
             max_links_per_span: default_max_links_per_span(),
             max_attributes_per_event: default_max_attributes_per_event(),
             max_attributes_per_link: default_max_attributes_per_link(),
-            attributes: Default::default(),
+            resource: Default::default(),
         }
     }
 }

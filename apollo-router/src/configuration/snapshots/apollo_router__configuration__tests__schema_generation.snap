@@ -4426,8 +4426,8 @@ expression: "&schema"
                   },
                   "additionalProperties": false
                 },
-                "resources": {
-                  "description": "Otel configuration via resource",
+                "resource": {
+                  "description": "The Open Telemetry resource",
                   "default": {},
                   "type": "object",
                   "additionalProperties": {
@@ -4697,8 +4697,48 @@ expression: "&schema"
               "description": "Common configuration",
               "type": "object",
               "properties": {
-                "attributes": {
-                  "description": "The resources configured on the tracing pipeline",
+                "max_attributes_per_event": {
+                  "description": "The maximum attributes per event before discarding",
+                  "default": 128,
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0.0
+                },
+                "max_attributes_per_link": {
+                  "description": "The maximum attributes per link before discarding",
+                  "default": 128,
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0.0
+                },
+                "max_attributes_per_span": {
+                  "description": "The maximum attributes per span before discarding",
+                  "default": 128,
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0.0
+                },
+                "max_events_per_span": {
+                  "description": "The maximum events per span before discarding",
+                  "default": 128,
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0.0
+                },
+                "max_links_per_span": {
+                  "description": "The maximum links per span before discarding",
+                  "default": 128,
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0.0
+                },
+                "parent_based_sampler": {
+                  "description": "Whether to use parent based sampling",
+                  "default": true,
+                  "type": "boolean"
+                },
+                "resource": {
+                  "description": "The Open Telemetry resource",
                   "default": {},
                   "type": "object",
                   "additionalProperties": {
@@ -4758,46 +4798,6 @@ expression: "&schema"
                       }
                     ]
                   }
-                },
-                "max_attributes_per_event": {
-                  "description": "The maximum attributes per event before discarding",
-                  "default": 128,
-                  "type": "integer",
-                  "format": "uint32",
-                  "minimum": 0.0
-                },
-                "max_attributes_per_link": {
-                  "description": "The maximum attributes per link before discarding",
-                  "default": 128,
-                  "type": "integer",
-                  "format": "uint32",
-                  "minimum": 0.0
-                },
-                "max_attributes_per_span": {
-                  "description": "The maximum attributes per span before discarding",
-                  "default": 128,
-                  "type": "integer",
-                  "format": "uint32",
-                  "minimum": 0.0
-                },
-                "max_events_per_span": {
-                  "description": "The maximum events per span before discarding",
-                  "default": 128,
-                  "type": "integer",
-                  "format": "uint32",
-                  "minimum": 0.0
-                },
-                "max_links_per_span": {
-                  "description": "The maximum links per span before discarding",
-                  "default": 128,
-                  "type": "integer",
-                  "format": "uint32",
-                  "minimum": 0.0
-                },
-                "parent_based_sampler": {
-                  "description": "Whether to use parent based sampling",
-                  "default": true,
-                  "type": "boolean"
                 },
                 "sampler": {
                   "description": "The sampler, always_on, always_off or a decimal between 0.0 and 1.0",

@@ -2,7 +2,7 @@ telemetry:
   tracing:
     common:
       service_name: router
-      attributes:
+      resource:
         str: a
         int: 1
         float: 1
