@@ -64,7 +64,6 @@ pub(crate) struct SubscriptionConfig {
     pub(crate) mode: SubscriptionModeConfig,
     /// Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode)
     /// (default: true)
-    #[serde(default = "enable_deduplication_default")]
     pub(crate) enable_deduplication: bool,
     /// This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.
     pub(crate) max_opened_subscriptions: Option<usize>,
@@ -72,16 +71,12 @@ pub(crate) struct SubscriptionConfig {
     pub(crate) queue_capacity: Option<usize>,
 }
 
-fn enable_deduplication_default() -> bool {
-    true
-}
-
 impl Default for SubscriptionConfig {
     fn default() -> Self {
         Self {
             enabled: true,
             mode: Default::default(),
-            enable_deduplication: enable_deduplication_default(),
+            enable_deduplication: true,
             max_opened_subscriptions: None,
             queue_capacity: None,
         }
