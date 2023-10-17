@@ -140,7 +140,7 @@ pub(crate) struct Tracing {
     /// Propagation configuration
     pub(crate) propagation: Propagation,
     /// Common configuration
-    pub(crate) trace_config: Trace,
+    pub(crate) common: Trace,
     /// OpenTelemetry native exporter configuration
     pub(crate) otlp: otlp::Config,
     /// Jaeger exporter configuration
@@ -569,23 +569,23 @@ impl From<SamplerOption> for opentelemetry::sdk::trace::Sampler {
 
 impl From<&Trace> for opentelemetry::sdk::trace::Config {
     fn from(config: &Trace) -> Self {
-        let mut trace_config = opentelemetry::sdk::trace::config();
+        let mut common = opentelemetry::sdk::trace::config();
 
         let mut sampler: opentelemetry::sdk::trace::Sampler = config.sampler.clone().into();
         if config.parent_based_sampler {
             sampler = parent_based(sampler);
         }
 
-        trace_config = trace_config.with_sampler(sampler);
-        trace_config = trace_config.with_max_events_per_span(config.max_events_per_span);
-        trace_config = trace_config.with_max_attributes_per_span(config.max_attributes_per_span);
-        trace_config = trace_config.with_max_links_per_span(config.max_links_per_span);
-        trace_config = trace_config.with_max_attributes_per_event(config.max_attributes_per_event);
-        trace_config = trace_config.with_max_attributes_per_link(config.max_attributes_per_link);
+        common = common.with_sampler(sampler);
+        common = common.with_max_events_per_span(config.max_events_per_span);
+        common = common.with_max_attributes_per_span(config.max_attributes_per_span);
+        common = common.with_max_links_per_span(config.max_links_per_span);
+        common = common.with_max_attributes_per_event(config.max_attributes_per_event);
+        common = common.with_max_attributes_per_link(config.max_attributes_per_link);
 
         // Take the default first, then config, then env resources, then env variable. Last entry wins
-        trace_config = trace_config.with_resource(config.to_resource());
-        trace_config
+        common = common.with_resource(config.to_resource());
+        common
     }
 }
 
@@ -597,7 +597,7 @@ impl Conf {
     pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
         Ok(
             match (
-                &self.tracing.trace_config.sampler,
+                &self.tracing.common.sampler,
                 &self.apollo.field_level_instrumentation_sampler,
             ) {
                 // Error conditions
