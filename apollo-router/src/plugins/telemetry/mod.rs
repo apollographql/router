@@ -124,6 +124,7 @@ use crate::ListenAddr;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
+mod config_new;
 mod endpoint;
 pub(crate) mod formatters;
 pub(crate) mod metrics;

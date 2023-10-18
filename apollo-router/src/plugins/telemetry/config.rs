@@ -56,12 +56,22 @@ pub(crate) struct Conf {
     /// Logging configuration
     #[serde(rename = "experimental_logging", default)]
     pub(crate) logging: Logging,
+
+    #[allow(dead_code)]
+    #[serde(rename = "logging", default)]
+    pub(crate) new_logging: config_new::logging::Logging,
     /// Metrics configuration
     pub(crate) metrics: Metrics,
     /// Tracing configuration
     pub(crate) tracing: Tracing,
     /// Apollo reporting configuration
     pub(crate) apollo: apollo::Config,
+    /// Event configuration
+    pub(crate) events: config_new::events::Events,
+    /// Span configuration
+    pub(crate) spans: config_new::spans::Spans,
+    /// Instrument configuration
+    pub(crate) instruments: config_new::instruments::Instruments,
 }
 
 /// Metrics configuration
