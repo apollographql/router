@@ -293,6 +293,21 @@ async fn service_call(
                     let (subs_tx, subs_rx) = mpsc::channel(1);
                     let query_plan = plan.clone();
                     let execution_service_factory_cloned = execution_service_factory.clone();
+                    let mut cloned_supergraph_req = SupergraphRequest::builder()
+                        .extensions(req.supergraph_request.body().extensions.clone())
+                        .and_query(req.supergraph_request.body().query.clone())
+                        .context(context.clone())
+                        .method(req.supergraph_request.method().clone())
+                        .and_operation_name(req.supergraph_request.body().operation_name.clone())
+                        .uri(req.supergraph_request.uri().clone())
+                        .variables(req.supergraph_request.body().variables.clone());
+
+                    for (header_name, header_value) in req.supergraph_request.headers().clone() {
+                        if let Some(header_name) = header_name {
+                            cloned_supergraph_req =
+                                cloned_supergraph_req.header(header_name, header_value);
+                        }
+                    }
                     // Spawn task for subscription
                     tokio::spawn(async move {
                         subscription_task(
@@ -301,6 +316,9 @@ async fn service_call(
                             query_plan,
                             subs_rx,
                             notify,
+                            cloned_supergraph_req
+                                .build()
+                                .expect("it's a clone of the original one; qed"),
                         )
                         .await;
                     });
@@ -349,6 +367,7 @@ async fn subscription_task(
     query_plan: Arc<QueryPlan>,
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
     notify: Notify<String, graphql::Response>,
+    supergraph_req: SupergraphRequest,
 ) {
     let sub_params = match rx.recv().await {
         Some(sub_params) => sub_params,
@@ -433,7 +452,7 @@ async fn subscription_task(
                             tracing::info!(http.request.body = ?val, apollo.subgraph.name = %service_name, "Subscription event body from subgraph {service_name:?}");
                         }
                         val.created_at = Some(Instant::now());
-                        let res = dispatch_event(&execution_service_factory, query_plan.as_ref(), context.clone(), val, sender.clone())
+                        let res = dispatch_event(&supergraph_req, &execution_service_factory, query_plan.as_ref(), context.clone(), val, sender.clone())
                             .instrument(tracing::info_span!(SUBSCRIPTION_EVENT_SPAN_NAME,
                                 graphql.document = graphql_document,
                                 graphql.operation.name = %operation_name,
@@ -500,6 +519,7 @@ async fn subscription_task(
 }
 
 async fn dispatch_event(
+    supergraph_req: &SupergraphRequest,
     execution_service_factory: &ExecutionServiceFactory,
     query_plan: Option<&Arc<QueryPlan>>,
     context: Context,
@@ -510,8 +530,33 @@ async fn dispatch_event(
     let span = Span::current();
     let res = match query_plan {
         Some(query_plan) => {
+            let mut cloned_supergraph_req = SupergraphRequest::builder()
+                .extensions(supergraph_req.supergraph_request.body().extensions.clone())
+                .and_query(supergraph_req.supergraph_request.body().query.clone())
+                .context(supergraph_req.context.clone())
+                .method(supergraph_req.supergraph_request.method().clone())
+                .and_operation_name(
+                    supergraph_req
+                        .supergraph_request
+                        .body()
+                        .operation_name
+                        .clone(),
+                )
+                .uri(supergraph_req.supergraph_request.uri().clone())
+                .variables(supergraph_req.supergraph_request.body().variables.clone());
+
+            for (header_name, header_value) in supergraph_req.supergraph_request.headers().clone() {
+                if let Some(header_name) = header_name {
+                    cloned_supergraph_req = cloned_supergraph_req.header(header_name, header_value);
+                }
+            }
             let execution_request = ExecutionRequest::internal_builder()
-                .supergraph_request(http::Request::default())
+                .supergraph_request(
+                    cloned_supergraph_req
+                        .build()
+                        .expect("it's a clone of the original one; qed")
+                        .supergraph_request,
+                )
                 .query_plan(query_plan.clone())
                 .context(context)
                 .source_stream_value(val.data.take().unwrap_or_default())
