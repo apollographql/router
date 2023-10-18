@@ -31,10 +31,10 @@ telemetry
 `telemetry.tracing.propagation.awsxray` has been renamed to `aws_xray`
 ```diff
 telemetry
-  metrics:
-    common:
--      resources:
-+      resource:   
+  tracing:
+    propagation:
+-      awsxray: true
++      aws_xray: true
 ```
 
 The Router will upgrade any existing configuration on startup. However, you should update your configuration to use the new format as soon as possible. 
