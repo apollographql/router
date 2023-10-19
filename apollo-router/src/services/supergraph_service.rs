@@ -847,6 +847,7 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
+    use http::HeaderValue;
     use tower::ServiceExt;
 
     use super::*;
@@ -1452,12 +1453,7 @@ mod tests {
             .create_or_subscribe("TEST_TOPIC".to_string(), false)
             .await
             .unwrap();
-        let subgraphs = MockedSubgraphs([
-            ("user", MockSubgraph::builder().with_json(
-                    serde_json::json!{{"query":"subscription{userWasCreated{name activeOrganization{__typename id}}}"}},
-                    serde_json::json!{{"data": {"userWasCreated": { "__typename": "User", "id": "1", "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
-                ).with_subscription_stream(handle.clone()).build()),
-            ("orga", MockSubgraph::builder().with_json(
+        let orga_subgraph = MockSubgraph::builder().with_json(
                 serde_json::json!{{
                     "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{id name}}}}",
                     "variables": {
@@ -1473,10 +1469,20 @@ mod tests {
                         ] }]
                     },
                     }}
-            ).build())
+            ).build().with_map_request(|req: subgraph::Request| {
+                assert!(req.subgraph_request.headers().contains_key("x-test"));
+                assert_eq!(req.subgraph_request.headers().get("x-test").unwrap(), HeaderValue::from_static("test"));
+                req
+            });
+        let subgraphs = MockedSubgraphs([
+            ("user", MockSubgraph::builder().with_json(
+                    serde_json::json!{{"query":"subscription{userWasCreated{name activeOrganization{__typename id}}}"}},
+                    serde_json::json!{{"data": {"userWasCreated": { "__typename": "User", "id": "1", "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
+                ).with_subscription_stream(handle.clone()).build()),
+            ("orga", orga_subgraph)
         ].into_iter().collect());
 
-        let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "subscription": { "enabled": true, "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
+        let mut configuration: Configuration = serde_json::from_value(serde_json::json!({"include_subgraph_errors": { "all": true }, "headers": {"all": {"request": [{"propagate": {"named": "x-test"}}]}}, "subscription": { "enabled": true, "mode": {"preview_callback": {"public_url": "http://localhost:4545"}}}})).unwrap();
         configuration.notify = notify.clone();
         let configuration = Arc::new(configuration);
         let service = TestHarness::builder()
@@ -1491,6 +1497,7 @@ mod tests {
             .query(
                 "subscription { userWasCreated { name activeOrganization { id  suborga { id name } } } }",
             )
+            .header("x-test", "test")
             .context(subscription_context())
             .build()
             .unwrap();
