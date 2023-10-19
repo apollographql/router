@@ -51,7 +51,6 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
         field_def: &ast::FieldDefinition,
         node: &ast::Field,
     ) -> Result<(), BoxError> {
-        let field_name = &node.name;
         if self.is_field_authenticated(field_def) {
             self.found = true;
             return Ok(());
