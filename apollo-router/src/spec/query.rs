@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use apollo_compiler::ast;
 use apollo_compiler::executable;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::ExecutableDocument;
 use derivative::Derivative;
 use indexmap::IndexSet;
@@ -526,21 +527,13 @@ impl Query {
                             // be inadvertently leaking some data for an @inacessible type or something, nullify the whole object. However, do note that due to `@interfaceObject`,
                             // some subgraph can have returned a __typename that is the name of an interface in the supergraph, and this is fine (that is, we should not
                             // return such a __typename to the user, but as long as it's not returned, having it in the internal data is ok and sometimes expected).
-                            if parameters
-                                .schema
-                                .definitions
-                                .get_object(input_type)
-                                .is_none()
-                                && parameters
-                                    .schema
-                                    .definitions
-                                    .get_interface(input_type)
-                                    .is_none()
-                            {
+                            let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
+                                parameters.schema.definitions.types.get(input_type)
+                            else {
                                 parameters.nullified.push(Path::from_response_slice(path));
                                 *output = Value::Null;
                                 return Ok(());
-                            }
+                            };
                         }
 
                         if output.is_null() {
