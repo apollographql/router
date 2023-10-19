@@ -17,6 +17,7 @@ use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 
 const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
+static DONT_CACHE_HEADER_VALUE: HeaderValue = HeaderValue::from_static(DONT_CACHE_RESPONSE_VALUE);
 
 /// A persisted query.
 #[derive(Deserialize, Clone, Debug)]
@@ -134,10 +135,7 @@ async fn apq_request(
                     // Persisted query errors (especially "not found") need to be uncached, because
                     // hopefully we're about to fill in the APQ cache and the same request will
                     // succeed next time.
-                    .header(
-                        CACHE_CONTROL,
-                        HeaderValue::from_static(DONT_CACHE_RESPONSE_VALUE),
-                    )
+                    .header(CACHE_CONTROL, DONT_CACHE_HEADER_VALUE.clone())
                     .context(request.context)
                     .build()
                     .expect("response is valid");

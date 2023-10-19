@@ -20,6 +20,7 @@ use crate::plugin::PluginInit;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::execution;
+use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::router;
 use crate::services::router_service::RouterCreator;
@@ -272,6 +273,7 @@ impl<'a> TestHarness<'a> {
         let (config, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
+            Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
             config,
         )
@@ -296,6 +298,7 @@ impl<'a> TestHarness<'a> {
         let (config, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
+            Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
             Arc::new(supergraph_creator),
             config.clone(),
         )

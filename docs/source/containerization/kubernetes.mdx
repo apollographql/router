@@ -1,264 +1,258 @@
 ---
-title: Kubernetes and the router
-description: Using router images with kubernetes
+title: Deploy in Kubernetes
+description: Self-hosted deployment of Apollo Router in Kubernetes
 ---
 
 import { Link } from 'gatsby';
+import ElasticNotice from '../../shared/elastic-notice.mdx';
+import HelmShowOutput from '../../shared/helm-show-router-output.mdx';
+import CoprocTypicalConfig from '../../shared/coproc-typical-config.mdx';
 
-## Sample Kubernetes Configuration
+Learn how to deploy a self-hosted Apollo Router in Kubernetes using Helm charts.
 
-> Note: The Apollo Router is made available under the Elastic License v2.0 (ELv2).  This applies to its source code and all distributions, including versions installed via Helm charts.  Read [our licensing page](https://www.apollographql.com/docs/resources/elastic-license-v2-faq/) for more details.
-
-### Helm
-
-[Helm](https://helm.sh) is the package manager for kubernetes.
-
-There is a complete [helm chart definition](https://github.com/apollographql/router/tree/v1.30.0/helm/chart/router) in the repo which illustrates how to use helm to deploy the router in kubernetes.
-
-In both the following examples, we are using helm to install the router:
- - into namespace "router-deploy" (create namespace if it doesn't exist)
- - with helm install name "router-test"
- - with support for prometheus enabled
-
-#### Using helm chart from our Open Container Initiative (OCI) registry
-
-Starting with release 0.14.0, each time we release the router, we'll release
-our helm chart and store it in the same OCI registry in which we store our
-router docker images.
-
-You can use helm to install charts from an OCI registry as follows:
-
-```bash
-helm install --set router.configuration.telemetry.metrics.prometheus.enabled=true --set managedFederation.apiKey="REDACTED" --set managedFederation.graphRef="REDACTED" --create-namespace --namespace router-deploy router-test oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.8 --values router/values.yaml
+```mermaid
+flowchart LR;
+  clients(Clients);
+  subgraph "Kubernetes cluster";
+  lb(["<b>Load Balancer</b>"])
+  router_a(["<b>Apollo Router</b>"]);
+  coproc_a(["<b>Coprocessor</b>"]);
+  router_b(["<b>Apollo Router</b>"]);
+  coproc_b(["<b>Coprocessor</b>"]);
+  router_a <-.-> coproc_a;
+  router_b <-.-> coproc_b;
+  end;
+  clients -.->|Query| lb;
+  lb -.-> router_a & router_b;
+  class clients secondary;
 ```
 
-For more details about using helm with OCI based registries, see [here](https://helm.sh/docs/topics/registries/)
+The following guides provide the steps to:
 
-#### Using helm chart from your filesystem
+* Get a router Helm chart from the Apollo container repository.
+* Deploy a router with a basic Helm chart.
+* Configure chart values to export metrics, enable Rhai scripting, and deploy a coprocessor.
+* Choose chart values that best suit migration from a gateway to the router.
 
-You would run this command from "repo"/helm/chart directory.
+<ElasticNotice />
 
-(where "repo" is the directory containing your checked out router github repository)
+## About the router Helm chart
+
+[Helm](https://helm.sh) is a package manager for Kubernetes (k8s). Apollo provides an application Helm chart with each release of Apollo Router in GitHub. Since the router version 0.14.0, Apollo has released the router Helm chart as an [Open Container Initiative (OCI)](https://helm.sh/docs/topics/registries/) image in our GitHub container registry.
+
+> The path to the OCI router chart is `oci://ghcr.io/apollographql/helm-charts/router`.
+
+You customize a deployed router with the same [command-line options and YAML configuration](../../configuration/overview) but under different Helm CLI options and YAML keys.  
+
+## Basic deployment
+
+Follow this guide to deploy the Apollo Router using Helm to install the basic chart provided with each router release. 
+
+Each router chart has a `values.yaml` file with router and deployment settings. The released, unedited file has a few explicit settings, including:
+
+* Default container ports for the router's [HTTP server](../../configuration/overview/#listen-address), [health check endpoint](../../configuration/health-checks), and [metrics endpoint](../../configuration/metrics).
+* A command-line argument to enable [hot reloading of the router](../../configuration/overview/#--hr----hot-reload).
+* A single replica.
+
+<ExpansionPanel title="Click to expand values.yaml for router v1.31.0">
+
+The values of the Helm chart for Apollo Router v1.31.0 in the GitHub container repository, as output by the `helm show` command:
 
 ```bash
-helm install --set router.configuration.telemetry.metrics.prometheus.enabled=true --set managedFederation.apiKey="REDACTED" --set managedFederation.graphRef="REDACTED" --create-namespace --namespace router-deploy router-test router --values router/values.yaml
+helm show values oci://ghcr.io/apollographql/helm-charts/router
 ```
 
-Once executed, you can check the status of the helm deploy:
+<HelmShowOutput/>
 
-```bash
-helm list --namespace router-deploy
-```
+</ExpansionPanel>
 
-### Kubernetes Configuration
+### Set up Helm
 
-If you aren't familiar with helm, the following example illustrates how you could do the same thing manually or as a base for kustomize.
+1. Install [Helm](https://helm.sh/docs/intro/install/) **version 3.x**. The Apollo Router's Helm chart requires Helm v3.x.
 
-Note: This example is generated using the helm template capability to generate the required kubernetes configuration from our helm chart. After generation, it is edited to remove the Helm management annotations.
+    > ⚠️ Your Kubernetes version must be compatible with Helm v3. For details, see [Helm Version Support Policy](https://helm.sh/docs/topics/version_skew/#supported-version-skew).
 
-```yaml
----
-# Source: router/templates/serviceaccount.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: release-name-router
-  labels:
-    helm.sh/chart: router-1.30.0
-    app.kubernetes.io/name: router
-    app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.30.0"
-    app.kubernetes.io/managed-by: Helm
----
-# Source: router/templates/secret.yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: "release-name-router"
-  labels:
-    helm.sh/chart: router-1.30.0
-    app.kubernetes.io/name: router
-    app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.30.0"
-    app.kubernetes.io/managed-by: Helm
-data:
-  managedFederationApiKey: "UkVEQUNURUQ="
----
-# Source: router/templates/configmap.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: release-name-router
-  labels:
-    helm.sh/chart: router-1.30.0
-    app.kubernetes.io/name: router
-    app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.30.0"
-    app.kubernetes.io/managed-by: Helm
-data:
-  configuration.yaml: |
-    health_check:
-      listen: 0.0.0.0:8088
-    supergraph:
-      listen: 0.0.0.0:80
-    telemetry:
-      metrics:
-        common:
-          resources:
-            service.name: release-name-router
-        prometheus:
-          enabled: true
-          listen: 0.0.0.0:9090
-          path: /metrics
----
-# Source: router/templates/service.yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: release-name-router
-  labels:
-    helm.sh/chart: router-1.30.0
-    app.kubernetes.io/name: router
-    app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.30.0"
-    app.kubernetes.io/managed-by: Helm
-spec:
-  type: ClusterIP
-  ports:
-    - port: 80
-      targetPort: http
-      protocol: TCP
-      name: http
-    - port: 8088
-      targetPort: health
-      protocol: TCP
-      name: health
-  selector:
-    app.kubernetes.io/name: router
-    app.kubernetes.io/instance: release-name
----
-# Source: router/templates/deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: release-name-router
-  labels:
-    helm.sh/chart: router-1.30.0
-    app.kubernetes.io/name: router
-    app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.30.0"
-    app.kubernetes.io/managed-by: Helm
+1. Log in with Helm to the Apollo container registry in GitHub.
   
-  annotations:
-    prometheus.io/path: /metrics
-    prometheus.io/port: "9090"
-    prometheus.io/scrape: "true"
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: router
-      app.kubernetes.io/instance: release-name
-  template:
-    metadata:
-      annotations:
-        kubectl.kubernetes.io/default-container: router
-      labels:
-        app.kubernetes.io/name: router
-        app.kubernetes.io/instance: release-name
-    spec:
-      serviceAccountName: release-name-router
-      securityContext:
-        {}
-      containers:
-        - name: router
-          securityContext:
-            {}
-          image: "ghcr.io/apollographql/router:v1.30.0"
-          imagePullPolicy: IfNotPresent
-          args:
-            - --hot-reload
-            - --config
-            - /app/configuration.yaml
-          env:
-            - name: APOLLO_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: "release-name-router"
-                  key: managedFederationApiKey
-                  optional: true
-            - name: APOLLO_GRAPH_REF
-              value: REDACTED
-          ports:
-            - name: http
-              containerPort: 80
-              protocol: TCP
-            - name: health
-              containerPort: 8088
-              protocol: TCP
-          lifecycle:
-            {}
-          livenessProbe:
-            httpGet:
-              path: "/health?live"
-              port: 8088
-            initialDelaySeconds: 0
-          readinessProbe:
-            httpGet:
-              path: "/health?ready"
-              port: 8088
-            initialDelaySeconds: 0
-          resources:
-            {}
-          volumeMounts:
-            - name: router-configuration
-              mountPath: /app/
-              readOnly: true
-      volumes:
-        - name: router-configuration
-          configMap:
-            name: release-name-router
-      terminationGracePeriodSeconds: 30
----
-# Source: router/templates/tests/test-connection.yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: "release-name-router-test-connection"
-  labels:
-    helm.sh/chart: router-1.30.0
-    app.kubernetes.io/name: router
-    app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.30.0"
-    app.kubernetes.io/managed-by: Helm
-  annotations:
-    "helm.sh/hook": test
-spec:
-  containers:
-    - name: netcat
-      image: busybox
-      command: ['nc']
-      args: ['-vz','-w','1','release-name-router:80']
-  restartPolicy: Never
-```
+    * Get a GitHub OCI token and save it in an environment variable, `GITHUB_OCI_TOKEN`. For reference, follow the guide for [authenticating to the GitHub container registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#authenticating-to-the-container-registry).
 
-## The health endpoint
+    * Log in with the `helm registry login` command, using your saved `GITHUB_OCI_TOKEN` and GitHub username:
 
-The router supports a health endpoint. You can see from the examples above how it can be used in a kubernetes deployment.
+      ```bash
+      echo ${GITHUB_OCI_TOKEN} | helm registry login -u <username> --password-stdin ghcr.io
+      ```
 
-If you had a router running on port 8088 on your localhost, you could exercise the health endpoint as follows:
+1. After logging in, verify your access to the registry by showing the latest router chart values with the `helm show values` command:
+
+    ```bash
+    helm show values oci://ghcr.io/apollographql/helm-charts/router
+    ```
+
+### Set up cluster
+
+Install the tools and provision the infrastructure for your Kubernetes cluster.
+
+For an example, see the [Setup from Apollo's Build a Supergraph tutorial](https://github.com/apollosolutions/build-a-supergraph/tree/main/01-setup#01---setup). It provides steps you can reference for gathering accounts and credentials for your cloud platform (GCP or AWS), provisioning resources, and deploying your subgraphs.
+
+### Set up graph
+
+Set up your self-hosted graph and get its [graph ref](../../configuration/overview/#apollo_graph_ref) and [API key](../../configuration/overview/#apollo_graph_ref).
+
+If you need a guide to set up your graph, you can follow [the self-hosted router quickstart](/graphos/quickstart/self-hosted) and complete [step 1 (Set up Apollo tools)](/graphos/quickstart/self-hosted/#1-set-up-apollo-tools), [step 4 (Obtain your subgraph schemas)](/graphos/quickstart/self-hosted/#4-obtain-your-subgraph-schemas), and [step 5 (Publish your subgraph schemas)](/graphos/quickstart/self-hosted/#5-publish-your-subgraph-schemas).
+
+### Deploy router
+
+To deploy the router, run the `helm install` command with an argument for the OCI image in the container repository, an argument for the `values.yaml` configuration file, and additional arguments to override specific configuration values.
 
 ```bash
-curl "http://localhost:8088/health"
-{"status":"UP"}
+helm install --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml
+```
+The necessary arguments for specific configuration values:
+
+* `--set managedFederation.graphRef="<graph-ref>"`. The reference to your managed graph (`id@variant`), the same value as the [`APOLLO_GRAPH_REF` environment variable](../../configuration/overview/#apollo_graph_ref).
+* `--set managedFederation.apiKey="<graph-api-key>"`. The API key to your managed graph, the same value as the [`APOLLO_KEY` environment variable](../../configuration/overview/#apollo_key).
+
+Some optional but recommended arguments:
+
+* `--namespace <router-namespace>`. The namespace scope for this deployment.
+* `--version <router-version>`. The version of the router to deploy. If not specified by `helm install`, the latest version is installed.
+
+### Verify deployment
+
+Verify that your router is one of the deployed releases with the `helm list` command. 
+
+If you deployed with the `--namespace <router-namespace>` option, you can list only the releases within your namespace:
+
+```bash
+helm list --namespace <router-namespace>
 ```
 
-If you had a router running on your localhost, with default health-check configuration, you could exercise the health endpoint as follows:
+## Deploy with metrics endpoints 
 
-curl "http://localhost:8088/health"
+The router supports [metrics endpoints for Prometheus and OpenTelemetry protocol (OTLP)](../../configuration/metrics). A [basic deployment](#basic-deployment) doesn't enable metrics endpoints, because the router chart disables both Prometheus (explicitly) and OTLP (by omission).
 
-## Using `istio` with the router
+To enable metrics endpoints in your deployed router through a YAML configuration file:
 
-The [istio service mesh](https://istio.io/) is a very popular choice for enhanced traffic routing within Kubernetes.
+1. Create a YAML file, `my_values.yaml`, to contain additional values that override default values.
+1. Edit `my_values.yaml` to enable metrics endpoints:
 
-`istio-proxy` pod injection can cause an [issue](https://github.com/apollographql/router/issues/3533) in the router. The router may start executing at the same time that istio is reconfiguring networking for the router pod. This is an issue with `istio`, not the router, and you can resolve it by following the advice in [istio's injection documentation](https://istio.io/latest/docs/ops/common-problems/injection/#pod-or-containers-start-with-network-issues-if-istio-proxy-is-not-ready).
+    ```yaml title="my_values.yaml"
+    router:
+      configuration:
+        telemetry:
+          metrics:
+            prometheus:
+              enabled: true
+              listen: 0.0.0.0:9090
+              path: "/metrics"
+            otlp:
+              temporality: delta
+              endpoint: <otlp-endpoint-addr>
+    ```
+
+    > ⚠️ **Note**: Although this example enables both Prometheus and OTLP, in practice it's common to enable only one endpoint.
+
+    * `router.configuration.telemetry.metrics.prometheus` was already configured but disabled (`enabled: false`) by default. This configuration sets `enabled: true`.
+    * `router.configuration.telemetry.metrics.otlp` is enabled by inclusion.
+    * `router.configuration.telemetry.temporality` by default is `temporality: cumulative` and is a good choice for most metrics consumers. For DataDog, use `temporality: delta`.
+
+1. Deploy the router with the additional YAML configuration file. For example, starting with the `helm install` command from the basic deployment step, append `--values my_values.yaml`:
+
+    ```bash
+    helm install --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml --values my_values.yaml
+    ```
+
+## Deploy with Rhai scripts
+
+The router supports [Rhai scripting](../../customizations/rhai) to add custom functionality.
+
+Enabling Rhai scripts in your deployed router requires mounting an extra volume for your Rhai scripts and getting your scripts onto the volume. That can be done by following steps in [a separate example for creating a custom in-house router chart](https://github.com/apollographql/in-house-router-example). The example creates a new (in-house) chart that wraps (and depends on) the released router chart, and the new chart has templates that add the necessary configuration to allow Rhai scripts for a deployed router.
+
+## Deploy with a coprocessor
+
+The router supports [external coprocessing](../../customizations/coprocessor) to run custom logic on requests throughout the [router's request-handling lifecycle](../../customizations/rhai/#router-request-lifecycle).
+
+A deployed coprocessor has its own application image and container in the router pod. 
+
+To configure a coprocessor and its container for your deployed router through a YAML configuration file:
+
+1. Create a YAML file, `my_values.yaml`, to contain additional values that override default values.
+1. Edit `my_values.yaml` to configure a coprocessor for the router. For reference, follow the [typical](../../customizations/coprocessor#typical-configuration) and [minimal](../../customizations/coprocessor#minimal-configuration)  configuration examples, and apply them to `router.configuration.coprocessor`. 
+
+  <ExpansionPanel title="Example of typical configuration for a coprocessor">
+
+  <CoprocTypicalConfig/>
+
+  </ExpansionPanel>
+
+1. Edit `my_values.yaml` to add a container for the coprocessor.
+
+  ```yaml title="my_values.yaml"
+  extraContainers:
+    - name: <coprocessor-deployed-name> # name of deployed container
+      image: <coprocessor-app-image> # name of application image
+      ports:
+        - containerPort: <coprocessor-container-port> # must match port of router.configuration.coprocessor.url
+      env: [] # array of environment variables
+  ```
+
+1. Deploy the router with the additional YAML configuration file. For example, starting with the `helm install` command from the basic deployment step, append `--values my_values.yaml`:
+
+  ```bash
+  helm install --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml --values my_values.yaml
+  ```
+
+## Separate configurations per environment
+
+To support your different deployment configurations for different environments (development, staging, production, etc.), Apollo recommends separating your configuration values into separate files:
+
+- A **common** file, which contains values that apply across all environments.
+- A unique **environment** file per environment, which includes and overrides the values from the common file while adding new environment-specific values.
+
+The `helm install` command applies each `--values <values-file>` option in the order you set them within the command. Therefore, a common file must be set before an environment file so that the environment file's values are applied last and override the common file's values. 
+
+For example, this command deploys with a `common_values.yaml` file applied first and then a `prod_values.yaml` file:
+
+```bash
+helm install --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml  --values common_values.yaml --values prod_values.yaml
+```
+
+## Configure for migration from gateway
+
+When [migrating from `@apollo/gateway` to the Apollo Router](../migrating-from-gateway), consider the following tips to maximize the compatibility of your router deployment.
+
+### Increase maximum request bytes
+
+By default the router sets its maximum supported request size at 2MB, while the gateway sets its maximum supported request size at 20MB. If your gateway accepts requests larger than 2MB, which it does by default, you can use the following configuration to ensure that the router is compatible with your gateway deployment.
+
+  ```yaml title="values.yaml"
+  router:
+    configuration:
+      limits:
+        experimental_http_max_request_bytes: 20000000 #20MB
+  ```
+
+### Increase request timeout
+
+The router's timeout is increased to accommodate subgraph operations with high latency.
+
+  ```yaml title="values.yaml"
+  router:
+    configuration:
+      traffic_shaping:
+        router:
+          timeout: 6min
+        all:
+          timeout: 5min
+  ```
+
+### Propagate subgraph errors
+
+The gateway propagates subgraph errors to clients, but the router doesn't by default, so it needs to be configured to propagate them.
+
+  ```yaml title="values.yaml"
+  router:
+    configuration:
+      include_subgraph_errors:
+        all: true
+  ```

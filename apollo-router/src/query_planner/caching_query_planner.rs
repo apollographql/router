@@ -28,6 +28,7 @@ use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::Compiler;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::query_planner;
@@ -109,6 +110,7 @@ where
     pub(crate) async fn warm_up(
         &mut self,
         query_analysis: &QueryAnalysisLayer,
+        persisted_query_layer: &PersistedQueryLayer,
         mut cache_keys: Vec<WarmUpCachingQueryKey>,
     ) {
         let _timer = Timer::new(|duration| {
@@ -129,12 +131,39 @@ where
 
         cache_keys.shuffle(&mut thread_rng());
 
+        let persisted_queries_operations = persisted_query_layer.all_operations();
+
+        let capacity = cache_keys.len()
+            + persisted_queries_operations
+                .as_ref()
+                .map(|ops| ops.len())
+                .unwrap_or(0);
+        tracing::info!(
+            "warming up the query plan cache with {} queries, this might take a while",
+            capacity
+        );
+
+        // persisted queries are added first because they should get a lower priority in the LRU cache,
+        // since a lot of them may be there to support old clients
+        let mut all_cache_keys = Vec::with_capacity(capacity);
+        if let Some(queries) = persisted_queries_operations {
+            for query in queries {
+                all_cache_keys.push(WarmUpCachingQueryKey {
+                    query,
+                    operation: None,
+                    metadata: CacheKeyMetadata::default(),
+                });
+            }
+        }
+
+        all_cache_keys.extend(cache_keys.into_iter());
+
         let mut count = 0usize;
         for WarmUpCachingQueryKey {
             mut query,
             operation,
             metadata,
-        } in cache_keys
+        } in all_cache_keys
         {
             let caching_key = CachingQueryKey {
                 schema_id: schema_id.clone(),

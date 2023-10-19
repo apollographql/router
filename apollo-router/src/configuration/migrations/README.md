@@ -5,12 +5,12 @@ It uses [proteus](https://github.com/rust-playground/proteus) under the hood, wh
 
 A migration has the following format:
 
-The filename should begin with a 5 digit numerical prefix. This allows us to apply migrations in a deterministic order.
-`Filename: 00001-name.yaml`
+The filename should begin with a 4 digit numerical prefix. This allows us to apply migrations in a deterministic order.
+`Filename: 0001-name.yaml`
 
 The yaml consists of a description and a number of actions:
 ```yaml
-description: telemetry.tracing.trace_config.attributes.router has been renamed to 'supergraph' for consistency
+description: telemetry.tracing.common.attributes.router has been renamed to 'supergraph' for consistency
 actions:
   - type: move
     from: some.source

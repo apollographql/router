@@ -37,7 +37,7 @@ impl PersistedQueryLayer {
     /// Create a new [`PersistedQueryLayer`] from CLI options, YAML configuration,
     /// and optionally, an existing persisted query manifest poller.
     pub(crate) async fn new(configuration: &Configuration) -> Result<Self, BoxError> {
-        if configuration.preview_persisted_queries.enabled {
+        if configuration.persisted_queries.enabled {
             Ok(Self {
                 manifest_poller: Some(
                     PersistedQueryManifestPoller::new(configuration.clone()).await?,
@@ -251,6 +251,12 @@ impl PersistedQueryLayer {
                 Err(supergraph_err_operation_not_in_safelist(request))
             }
         }
+    }
+
+    pub(crate) fn all_operations(&self) -> Option<Vec<String>> {
+        self.manifest_poller
+            .as_ref()
+            .map(|poller| poller.get_all_operations())
     }
 }
 

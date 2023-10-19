@@ -103,6 +103,32 @@ mod router_base64 {
 }
 
 #[export_module]
+mod router_json {
+    pub(crate) type Object = crate::json_ext::Object;
+    pub(crate) type Value = crate::json_ext::Value;
+
+    #[rhai_fn(name = "to_string", pure)]
+    pub(crate) fn object_to_string(x: &mut Object) -> String {
+        format!("{x:?}")
+    }
+
+    #[rhai_fn(name = "to_string", pure)]
+    pub(crate) fn value_to_string(x: &mut Value) -> String {
+        format!("{x:?}")
+    }
+
+    #[rhai_fn(pure, return_raw)]
+    pub(crate) fn encode(input: &mut Dynamic) -> Result<String, Box<EvalAltResult>> {
+        serde_json::to_string(input).map_err(|e| e.to_string().into())
+    }
+
+    #[rhai_fn(pure, return_raw)]
+    pub(crate) fn decode(input: &mut ImmutableString) -> Result<Dynamic, Box<EvalAltResult>> {
+        serde_json::from_str(input).map_err(|e| e.to_string().into())
+    }
+}
+
+#[export_module]
 mod router_expansion {
     pub(crate) type Expansion = expansion::Expansion;
 
@@ -1464,6 +1490,8 @@ impl Rhai {
         combine_with_exported_module!(&mut module, "context", router_context);
 
         let base64_module = exported_module!(router_base64);
+        let json_module = exported_module!(router_json);
+
         let expansion_module = exported_module!(router_expansion);
 
         // Share main so we can move copies into each closure as required for logging
@@ -1487,6 +1515,8 @@ impl Rhai {
             .register_global_module(module.into())
             // Register our base64 module (not global)
             .register_static_module("base64", base64_module.into())
+            // Register our json module (not global)
+            .register_static_module("json", json_module.into())
             // Register our expansion module (not global)
             // Hide the fact that it is an expansion module by calling it "env"
             .register_static_module("env", expansion_module.into())

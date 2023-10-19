@@ -13,7 +13,7 @@ use tower_service::Service;
 use super::externalize_header_map;
 use super::*;
 use crate::graphql;
-use crate::layers::async_checkpoint::AsyncCheckpointLayer;
+use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::response;
@@ -82,7 +82,7 @@ impl SupergraphStage {
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
-            AsyncCheckpointLayer::new(move |request: supergraph::Request| {
+            OneShotAsyncCheckpointLayer::new(move |request: supergraph::Request| {
                 let request_config = request_config.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
@@ -169,7 +169,6 @@ impl SupergraphStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered()
             .service(service)
             .boxed()
     }
@@ -212,7 +211,7 @@ where
     let payload = Externalizable::supergraph_builder()
         .stage(PipelineStep::SupergraphRequest)
         .control(Control::default())
-        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .id(request.context.id.clone())
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)
@@ -356,12 +355,13 @@ where
 
     let payload = Externalizable::supergraph_builder()
         .stage(PipelineStep::SupergraphResponse)
-        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .id(response.context.id.clone())
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)
         .and_status_code(status_to_send)
         .and_sdl(sdl_to_send.clone())
+        .and_has_next(first.has_next)
         .build();
 
     // Second, call our co-processor and get a reply.
@@ -417,6 +417,7 @@ where
             let generator_coprocessor_url = coprocessor_url.clone();
             let generator_map_context = map_context.clone();
             let generator_sdl_to_send = sdl_to_send.clone();
+            let generator_id = map_context.id.clone();
 
             async move {
                 let body_to_send = response_config.body.then(|| {
@@ -429,12 +430,13 @@ where
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
                 // providing them will be a source of confusion.
-                let payload = Externalizable::router_builder()
+                let payload = Externalizable::supergraph_builder()
                     .stage(PipelineStep::SupergraphResponse)
-                    .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+                    .id(generator_id)
                     .and_body(body_to_send)
                     .and_context(context_to_send)
                     .and_sdl(generator_sdl_to_send)
+                    .and_has_next(deferred_response.has_next)
                     .build();
 
                 // Second, call our co-processor and get a reply.
@@ -754,13 +756,13 @@ mod tests {
 
         let value = response.headers().get("aheader").unwrap();
 
-        assert_eq!("a value", value);
+        assert_eq!(value, "a value");
 
         assert_eq!(
-            "my error message",
             response.body_mut().next().await.unwrap().errors[0]
                 .message
-                .as_str()
+                .as_str(),
+            "my error message"
         );
     }
 
@@ -853,7 +855,7 @@ mod tests {
                       "this-is-a-test-context": 42
                     }
                   },
-                  "sdl": "the sdl shouldnt change"
+                  "sdl": "the sdl shouldn't change"
                 });
                 Ok(hyper::Response::builder()
                     .body(Body::from(serde_json::to_string(&input).unwrap()))
@@ -890,8 +892,116 @@ mod tests {
         let body = res.response.body_mut().next().await.unwrap();
         // the body should have changed:
         assert_eq!(
-            json!({ "data": { "test": 42_u32 } }),
             serde_json::to_value(&body).unwrap(),
+            json!({ "data": { "test": 42_u32 } }),
+        );
+    }
+
+    #[tokio::test]
+    async fn multi_part() {
+        let supergraph_stage = SupergraphStage {
+            response: SupergraphResponseConf {
+                headers: true,
+                context: true,
+                body: true,
+                sdl: true,
+                status_code: false,
+            },
+            request: Default::default(),
+        };
+
+        let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_call()
+            .returning(|req: supergraph::Request| {
+                Ok(supergraph::Response::fake_stream_builder()
+                    .response(
+                        graphql::Response::builder()
+                            .data(json!({ "test": 1 }))
+                            .has_next(true)
+                            .build(),
+                    )
+                    .response(
+                        graphql::Response::builder()
+                            .data(json!({ "test": 2 }))
+                            .has_next(true)
+                            .build(),
+                    )
+                    .response(
+                        graphql::Response::builder()
+                            .data(json!({ "test": 3 }))
+                            .has_next(false)
+                            .build(),
+                    )
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+
+        let mock_http_client = mock_with_deferred_callback(move |res: hyper::Request<Body>| {
+            Box::pin(async {
+                let mut deserialized_response: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
+                        .unwrap();
+                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
+                assert_eq!(
+                    PipelineStep::SupergraphResponse.to_string(),
+                    deserialized_response.stage
+                );
+
+                // Copy the has_next from the body into the data for checking later
+                deserialized_response
+                    .body
+                    .as_mut()
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .get_mut("data")
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .insert(
+                        "has_next".to_string(),
+                        serde_json::Value::from(deserialized_response.has_next.unwrap_or_default()),
+                    );
+
+                Ok(hyper::Response::builder()
+                    .body(Body::from(
+                        serde_json::to_string(&deserialized_response).unwrap_or_default(),
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = supergraph_stage.as_service(
+            mock_http_client,
+            mock_supergraph_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::canned_builder()
+            .query("foo")
+            .build()
+            .unwrap();
+
+        let mut res = service.oneshot(request).await.unwrap();
+
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&body).unwrap(),
+            json!({ "data": { "test": 1, "has_next": true }, "hasNext": true }),
+        );
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&body).unwrap(),
+            json!({ "data": { "test": 2, "has_next": true }, "hasNext": true }),
+        );
+        let body = res.response.body_mut().next().await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&body).unwrap(),
+            json!({ "data": { "test": 3, "has_next": false }, "hasNext": false }),
         );
     }
 }

@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -16,6 +18,7 @@ use multimap::MultiMap;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::sync::Notify;
+use tower_service::Service;
 
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
@@ -229,6 +232,9 @@ pub(super) fn serve_router_on_listen_addr(
 
                                 match res {
                                     NetworkStream::Tcp(stream) => {
+                                        let received_first_request = Arc::new(AtomicBool::new(false));
+                                        let app = IdleConnectionChecker::new(received_first_request.clone(), app);
+
                                         stream
                                             .set_nodelay(true)
                                             .expect(
@@ -251,12 +257,19 @@ pub(super) fn serve_router_on_listen_addr(
                                                 let c = connection.as_mut();
                                                 c.graceful_shutdown();
 
-                                                let _= connection.await;
+                                                // if the connection was idle and we never received the first request,
+                                                // hyper's graceful shutdown would wait indefinitely, so instead we
+                                                // close the connection right away
+                                                if received_first_request.load(Ordering::Relaxed) {
+                                                    let _= connection.await;
+                                                }
                                             }
                                         }
                                     }
                                     #[cfg(unix)]
                                     NetworkStream::Unix(stream) => {
+                                        let received_first_request = Arc::new(AtomicBool::new(false));
+                                        let app = IdleConnectionChecker::new(received_first_request.clone(), app);
                                         let connection = Http::new()
                                         .http1_keep_alive(true)
                                         .serve_connection(stream, app);
@@ -273,11 +286,19 @@ pub(super) fn serve_router_on_listen_addr(
                                                 let c = connection.as_mut();
                                                 c.graceful_shutdown();
 
-                                                let _= connection.await;
+                                                // if the connection was idle and we never received the first request,
+                                                // hyper's graceful shutdown would wait indefinitely, so instead we
+                                                // close the connection right away
+                                                if received_first_request.load(Ordering::Relaxed) {
+                                                    let _= connection.await;
+                                                }
                                             }
                                         }
                                     },
                                     NetworkStream::Tls(stream) => {
+                                        let received_first_request = Arc::new(AtomicBool::new(false));
+                                        let app = IdleConnectionChecker::new(received_first_request.clone(), app);
+
                                         stream.get_ref().0
                                             .set_nodelay(true)
                                             .expect(
@@ -305,7 +326,12 @@ pub(super) fn serve_router_on_listen_addr(
                                                 let c = connection.as_mut();
                                                 c.graceful_shutdown();
 
-                                                let _= connection.await;
+                                                // if the connection was idle and we never received the first request,
+                                                // hyper's graceful shutdown would wait indefinitely, so instead we
+                                                // close the connection right away
+                                                if received_first_request.load(Ordering::Relaxed) {
+                                                    let _= connection.await;
+                                                }
                                             }
                                         }
                                     }
@@ -403,6 +429,42 @@ pub(super) fn serve_router_on_listen_addr(
         listener
     };
     (server, shutdown_sender)
+}
+
+struct IdleConnectionChecker<S> {
+    received_request: Arc<AtomicBool>,
+    inner: S,
+}
+
+impl<S> IdleConnectionChecker<S> {
+    fn new(b: Arc<AtomicBool>, service: S) -> Self {
+        IdleConnectionChecker {
+            received_request: b,
+            inner: service,
+        }
+    }
+}
+impl<S, B> Service<http::Request<B>> for IdleConnectionChecker<S>
+where
+    S: Service<http::Request<B>>,
+{
+    type Response = <S as Service<http::Request<B>>>::Response;
+
+    type Error = <S as Service<http::Request<B>>>::Error;
+
+    type Future = <S as Service<http::Request<B>>>::Future;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::result::Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: http::Request<B>) -> Self::Future {
+        self.received_request.store(true, Ordering::Relaxed);
+        self.inner.call(req)
+    }
 }
 
 #[cfg(test)]

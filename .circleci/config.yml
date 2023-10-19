@@ -10,7 +10,7 @@ executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
       - image: cimg/base:stable
-    resource_class: medium
+    resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
       RUST_TEST_THREADS: 6
@@ -378,6 +378,9 @@ commands:
                 key: "<< pipeline.parameters.merge_version >>-lint"
                 paths:
                   - target
+  xtask_release_preverify:
+    steps:
+      - run: xtask release pre-verify
 
   xtask_check_helm:
     steps:
@@ -525,6 +528,18 @@ jobs:
             cargo fetch
       - xtask_test:
           variant: "updated"
+  pre_verify_release:
+    environment:
+      <<: *common_job_environment
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - setup_environment:
+          platform: << parameters.platform >>
+      - xtask_release_preverify
 
   build_release:
     parameters:
@@ -582,9 +597,11 @@ jobs:
             - run:
                 name: helm-docs install
                 command: |
-                  sudo apt update
-                  sudo apt install golang
-                  GOPATH="${HOME}/.local" GO111MODULE=on go get github.com/norwoodj/helm-docs/cmd/helm-docs
+                  # install golang (to ${HOME}/go)
+                  curl -OLs https://go.dev/dl/go1.21.3.linux-amd64.tar.gz
+                  tar -C "${HOME}" -xf go1.21.3.linux-amd64.tar.gz
+                  # install helm-docs
+                  PATH="${HOME}/go/bin" GOPATH="${HOME}/.local" GO111MODULE=on go install github.com/norwoodj/helm-docs/cmd/helm-docs@latest
       - when:
           condition:
             or:
@@ -827,7 +844,41 @@ workflows:
   nightly:
     when: << pipeline.parameters.nightly >>
     jobs:
+      - lint:
+          matrix:
+            parameters:
+              platform: [ amd_linux_build ]
+      - check_helm:
+          matrix:
+            parameters:
+              platform: [ amd_linux_helm ]
+      - check_compliance:
+          matrix:
+            parameters:
+              platform: [ amd_linux_build ]
+
+      - test_updated:
+          requires:
+            - lint
+            - check_helm
+            - check_compliance
+          matrix:
+            parameters:
+              platform:
+                [ amd_linux_test ]
+      - test:
+          requires:
+            - lint
+            - check_helm
+            - check_compliance
+          matrix:
+            parameters:
+              platform:
+                [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
       - build_release:
+          requires:
+            - test
+            - test_updated
           nightly: true
           context: router
           matrix:
@@ -839,7 +890,75 @@ workflows:
     when:
       not: << pipeline.parameters.nightly >>
     jobs:
+      - pre_verify_release:
+          matrix:
+            parameters:
+              platform: [ amd_linux_build ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
+      - lint:
+          matrix:
+            parameters:
+              platform: [ amd_linux_build ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
+      - check_helm:
+          matrix:
+            parameters:
+              platform: [ amd_linux_helm ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
+      - check_compliance:
+          matrix:
+            parameters:
+              platform: [ amd_linux_build ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
+      - test_updated:
+          requires:
+            - lint
+            - check_helm
+            - check_compliance
+          matrix:
+            parameters:
+              platform:
+                [ amd_linux_test ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
+      - test:
+          requires:
+            - lint
+            - check_helm
+            - check_compliance
+          matrix:
+            parameters:
+              platform:
+                [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
       - build_release:
+          requires:
+            - pre_verify_release
+            - test
+            - test_updated
           matrix:
             parameters:
               platform:

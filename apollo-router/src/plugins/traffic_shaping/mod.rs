@@ -73,7 +73,19 @@ struct Shaping {
     //  *experimental feature*: Enables request retry
     experimental_retry: Option<RetryConfig>,
     /// Enable HTTP2 for subgraphs
-    experimental_enable_http2: Option<bool>,
+    experimental_http2: Option<Http2Config>,
+}
+
+#[derive(PartialEq, Default, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Http2Config {
+    #[default]
+    /// Enable HTTP2 for subgraphs
+    Enable,
+    /// Disable HTTP2 for subgraphs
+    Disable,
+    /// Only HTTP2 is active
+    Http2Only,
 }
 
 impl Merge for Shaping {
@@ -94,10 +106,10 @@ impl Merge for Shaping {
                     .as_ref()
                     .or(fallback.experimental_retry.as_ref())
                     .cloned(),
-                experimental_enable_http2: self
-                    .experimental_enable_http2
+                experimental_http2: self
+                    .experimental_http2
                     .as_ref()
-                    .or(fallback.experimental_enable_http2.as_ref())
+                    .or(fallback.experimental_http2.as_ref())
                     .cloned(),
             },
         }
@@ -458,13 +470,13 @@ impl TrafficShaping {
         }
     }
 
-    pub(crate) fn enable_subgraph_http2(&self, service_name: &str) -> bool {
+    pub(crate) fn enable_subgraph_http2(&self, service_name: &str) -> Http2Config {
         Self::merge_config(
             self.config.all.as_ref(),
             self.config.subgraphs.get(service_name),
         )
-        .and_then(|config| config.shaping.experimental_enable_http2)
-        .unwrap_or(true)
+        .and_then(|config| config.shaping.experimental_http2)
+        .unwrap_or(Http2Config::Enable)
     }
 }
 
@@ -488,6 +500,7 @@ mod test {
     use crate::plugin::DynPlugin;
     use crate::query_planner::BridgeQueryPlanner;
     use crate::router_factory::create_plugins;
+    use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::services::router;
     use crate::services::router_service::RouterCreator;
@@ -608,6 +621,7 @@ mod test {
 
         RouterCreator::new(
             QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
+            Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
             Arc::new(supergraph_creator),
             Arc::new(Configuration::default()),
         )
@@ -712,39 +726,42 @@ mod test {
         let config = serde_yaml::from_str::<Config>(
             r#"
         all:
-          experimental_enable_http2: false
+          experimental_http2: disable
         subgraphs: 
           products:
-            experimental_enable_http2: true
+            experimental_http2: enable
           reviews:
-            experimental_enable_http2: false
+            experimental_http2: disable
         router:
           timeout: 65s
         "#,
         )
         .unwrap();
 
-        assert!(TrafficShaping::merge_config(
-            config.all.as_ref(),
-            config.subgraphs.get("products")
-        )
-        .unwrap()
-        .shaping
-        .experimental_enable_http2
-        .unwrap());
-        assert!(!TrafficShaping::merge_config(
-            config.all.as_ref(),
-            config.subgraphs.get("reviews")
-        )
-        .unwrap()
-        .shaping
-        .experimental_enable_http2
-        .unwrap());
-        assert!(!TrafficShaping::merge_config(config.all.as_ref(), None)
-            .unwrap()
-            .shaping
-            .experimental_enable_http2
-            .unwrap());
+        assert!(
+            TrafficShaping::merge_config(config.all.as_ref(), config.subgraphs.get("products"))
+                .unwrap()
+                .shaping
+                .experimental_http2
+                .unwrap()
+                == Http2Config::Enable
+        );
+        assert!(
+            TrafficShaping::merge_config(config.all.as_ref(), config.subgraphs.get("reviews"))
+                .unwrap()
+                .shaping
+                .experimental_http2
+                .unwrap()
+                == Http2Config::Disable
+        );
+        assert!(
+            TrafficShaping::merge_config(config.all.as_ref(), None)
+                .unwrap()
+                .shaping
+                .experimental_http2
+                .unwrap()
+                == Http2Config::Disable
+        );
     }
 
     #[tokio::test]
@@ -752,12 +769,12 @@ mod test {
         let config = serde_yaml::from_str::<Config>(
             r#"
         all:
-          experimental_enable_http2: false
+          experimental_http2: disable
         subgraphs: 
           products:
-            experimental_enable_http2: true
+            experimental_http2: enable
           reviews:
-            experimental_enable_http2: false
+            experimental_http2: disable
         router:
           timeout: 65s
         "#,
@@ -768,9 +785,9 @@ mod test {
             .await
             .unwrap();
 
-        assert!(shaping_config.enable_subgraph_http2("products"));
-        assert!(!shaping_config.enable_subgraph_http2("reviews"));
-        assert!(!shaping_config.enable_subgraph_http2("this_doesnt_exist"));
+        assert!(shaping_config.enable_subgraph_http2("products") == Http2Config::Enable);
+        assert!(shaping_config.enable_subgraph_http2("reviews") == Http2Config::Disable);
+        assert!(shaping_config.enable_subgraph_http2("this_doesnt_exist") == Http2Config::Disable);
     }
 
     #[tokio::test(flavor = "multi_thread")]

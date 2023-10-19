@@ -95,6 +95,8 @@ The value of `urls` is a list of URLs for all Redis instances in your cluster.
 
 > ⚠️ **You should specify your Redis URLs via environment variables and [variable expansion](./overview#variable-expansion)**. This prevents your Redis URLs from being committed to version control, which is especially dangerous if they include authentication information like a username and/or password.
 
+All query plan cache entries will be prefixed with `plan.` within the distributed cache. 
+
 ## Distributed APQ caching
 
 To enable distributed caching of automatic persisted queries (APQ), add the following to your router's [YAML config file](./overview/#yaml-config-file):
@@ -111,3 +113,5 @@ apq:
 The value of `urls` is a list of URLs for all Redis instances in your cluster.
 
 > ⚠️ **You should specify your Redis URLs via environment variables and [variable expansion](./overview#variable-expansion)**. This prevents your Redis URLs from being committed to version control, which is especially dangerous if they include authentication information like a username and/or password.
+
+All APQ cache entries will be prefixed with `apq` followed by a null byte character (referenced by the escape sequence `\0` in most programming languages) within the distributed cache.
