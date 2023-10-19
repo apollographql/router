@@ -48,9 +48,8 @@ pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN_NAME: &str = "subscription";
 pub(crate) static SUBSCRIPTION_CALLBACK_HMAC_KEY: OnceCell<String> = OnceCell::new();
 pub(crate) const SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS: &str =
     "apollo.subscription.custom_connection_params";
-const CALLBACK_SUBSCRIPTION_HEADER_NAME: HeaderName =
-    HeaderName::from_static("subscription-protocol");
-static CALLBACK_SUBSCRIPTION_HEADER_VALUE: HeaderValue = HeaderValue::from_static("callback/1.0");
+const CALLBACK_SUBSCRIPTION_HEADER_NAME: &str = "subscription-protocol";
+const CALLBACK_SUBSCRIPTION_HEADER_VALUE: &str = "callback/1.0";
 
 #[derive(Debug, Clone)]
 pub(crate) struct Subscription {
@@ -469,7 +468,7 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NO_CONTENT)
-                                            .header(CALLBACK_SUBSCRIPTION_HEADER_NAME, CALLBACK_SUBSCRIPTION_HEADER_VALUE)
+                                            .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
                                             .body::<hyper::Body>("".into())
                                             .map_err(BoxError::from)?,
                                         context: req.context,
@@ -478,7 +477,7 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
-                                            .header(CALLBACK_SUBSCRIPTION_HEADER_NAME, CALLBACK_SUBSCRIPTION_HEADER_VALUE)
+                                            .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
                                             .body("suscription doesn't exist".into())
                                             .map_err(BoxError::from)?,
                                         context: req.context,
@@ -703,9 +702,9 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
         assert_eq!(
             resp.headers()
-                .get(CALLBACK_SUBSCRIPTION_HEADER_NAME)
+                .get(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME))
                 .unwrap(),
-            CALLBACK_SUBSCRIPTION_HEADER_VALUE
+            HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE)
         );
 
         let http_req = http::Request::post(format!(
@@ -927,9 +926,9 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
         assert_eq!(
             resp.headers()
-                .get(CALLBACK_SUBSCRIPTION_HEADER_NAME)
+                .get(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME))
                 .unwrap(),
-            CALLBACK_SUBSCRIPTION_HEADER_VALUE
+            HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE)
         );
 
         let http_req = http::Request::post(format!(
