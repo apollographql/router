@@ -492,30 +492,29 @@ impl Query {
             executable::Type::Named(type_name) => {
                 // we cannot know about the expected format of custom scalars
                 // so we must pass them directly to the client
-                if parameters
-                    .schema
-                    .definitions
-                    .get_scalar(type_name)
-                    .is_some()
-                {
-                    *output = input.clone();
-                    return Ok(());
-                } else if let Some(enum_type) = parameters.schema.definitions.get_enum(type_name) {
-                    return match input.as_str() {
-                        Some(s) => {
-                            if enum_type.values.contains_key(s) {
-                                *output = input.clone();
-                                Ok(())
-                            } else {
+                match parameters.schema.definitions.types.get(type_name) {
+                    Some(ExtendedType::Scalar(_)) => {
+                        *output = input.clone();
+                        return Ok(());
+                    }
+                    Some(ExtendedType::Enum(enum_type)) => {
+                        return match input.as_str() {
+                            Some(s) => {
+                                if enum_type.values.contains_key(s) {
+                                    *output = input.clone();
+                                    Ok(())
+                                } else {
+                                    *output = Value::Null;
+                                    Ok(())
+                                }
+                            }
+                            None => {
                                 *output = Value::Null;
                                 Ok(())
                             }
-                        }
-                        None => {
-                            *output = Value::Null;
-                            Ok(())
-                        }
-                    };
+                        };
+                    }
+                    _ => {}
                 }
 
                 match input {
