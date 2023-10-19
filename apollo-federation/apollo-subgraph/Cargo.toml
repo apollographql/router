@@ -1,12 +1,17 @@
 [package]
 name = "apollo-subgraph"
-version = "0.1.0"
+version = "0.0.1"
+authors = ["The Apollo GraphQL Contributors"]
 edition = "2021"
+description = "Apollo Federation for Composing Subgraphs"
+documentation = "https://docs.rs/apollo-subgraph"
+repository = "https://github.com/apollographql/federation-next"
+license = "Elastic-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-apollo-at-link = { path = "../apollo-at-link", version = "0.1.0" }
+apollo-at-link = { path = "../apollo-at-link", version = "0.0.1" }
 apollo-compiler = "=1.0.0-beta.3"
 indexmap = "2.0.2"
 salsa = "0.16.1"

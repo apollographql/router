@@ -1,7 +1,12 @@
 [package]
 name = "apollo-at-link"
-version = "0.1.0"
+version = "0.0.1"
+authors = ["The Apollo GraphQL Contributors"]
 edition = "2021"
+description = "Apollo Federation @link usage"
+documentation = "https://docs.rs/apollo-at-link"
+repository = "https://github.com/apollographql/federation-next"
+license = "Elastic-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
