@@ -1,10 +1,15 @@
-use crate::spec::Identity;
-use crate::spec::Url;
-use apollo_compiler::ast::{Directive, Value};
 use std::fmt;
 use std::str;
 use std::{collections::HashMap, sync::Arc};
+
+use apollo_compiler::ast::{Directive, Value};
 use thiserror::Error;
+
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
+
+pub mod database;
+pub mod spec;
 
 pub const DEFAULT_LINK_NAME: &str = "link";
 pub const DEFAULT_IMPORT_SCALAR_NAME: &str = "Import";

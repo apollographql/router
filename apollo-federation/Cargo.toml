@@ -1,18 +1,12 @@
 [workspace]
 
 members = [
-  "apollo-at-link",
-  "apollo-federation-error",
+  "apollo-federation",
   "apollo-harness",
-  "apollo-subgraph",
-  "apollo-supergraph",
 ]
 
 default-members = [
-  "apollo-at-link",
-  "apollo-federation-error",
-  "apollo-subgraph",
-  "apollo-supergraph",
+  "apollo-federation",
 ]
 
 resolver = "2"

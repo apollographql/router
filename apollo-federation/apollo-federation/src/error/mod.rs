@@ -1,8 +1,12 @@
-use crate::ast::AstNode;
+use std::fmt::{Display, Formatter, Write};
+
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
-use std::fmt::{Display, Formatter, Write};
 use strum::IntoEnumIterator;
+
+use crate::error::ast::AstNode;
+
+pub mod ast;
 
 // What we really needed here was the string representations in enum form, this isn't meant to
 // replace AST components.

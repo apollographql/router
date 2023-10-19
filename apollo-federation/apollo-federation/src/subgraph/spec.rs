@@ -1,8 +1,5 @@
-use crate::spec::FederationSpecError::{UnsupportedFederationDirective, UnsupportedVersionError};
-use apollo_at_link::link::{
-    Import, Link, DEFAULT_IMPORT_SCALAR_NAME, DEFAULT_LINK_NAME, DEFAULT_PURPOSE_ENUM_NAME,
-};
-use apollo_at_link::spec::{Identity, Url, Version};
+use std::sync::Arc;
+
 use apollo_compiler::ast::{
     Argument, Directive, DirectiveDefinition, DirectiveLocation, EnumValueDefinition,
     FieldDefinition, InputValueDefinition, Name, NamedType, Type, Value,
@@ -12,9 +9,15 @@ use apollo_compiler::schema::{
 };
 use apollo_compiler::Node;
 use indexmap::{IndexMap, IndexSet};
-use std::sync::Arc;
-
 use thiserror::Error;
+
+use crate::link::spec::{Identity, Url, Version};
+use crate::link::{
+    Import, Link, DEFAULT_IMPORT_SCALAR_NAME, DEFAULT_LINK_NAME, DEFAULT_PURPOSE_ENUM_NAME,
+};
+use crate::subgraph::spec::FederationSpecError::{
+    UnsupportedFederationDirective, UnsupportedVersionError,
+};
 
 pub const COMPOSE_DIRECTIVE_NAME: &str = "composeDirective";
 pub const KEY_DIRECTIVE_NAME: &str = "key";
@@ -624,8 +627,9 @@ impl LinkSpecDefinitions {
 
 #[cfg(test)]
 mod tests {
+    use crate::subgraph::database::federation_link_identity;
+
     use super::*;
-    use crate::database::federation_link_identity;
 
     #[test]
     fn handle_unsupported_federation_version() {

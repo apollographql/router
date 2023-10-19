@@ -28,7 +28,7 @@ pub struct Identity {
 impl fmt::Display for Identity {
     /// Display a specification identity.
     ///
-    ///     # use apollo_at_link::spec::Identity;
+    ///     # use apollo_federation::link::spec::Identity;
     ///     assert_eq!(
     ///         Identity { domain: "https://specs.apollo.dev".to_string(), name: "federation".to_string() }.to_string(),
     ///         "https://specs.apollo.dev/federation"
@@ -67,7 +67,7 @@ pub struct Version {
 impl fmt::Display for Version {
     /// Display a specification version number.
     ///
-    ///     # use apollo_at_link::spec::Version;
+    ///     # use apollo_federation::link::spec::Version;
     ///     assert_eq!(Version { major: 2, minor: 3 }.to_string(), "2.3")
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}.{}", self.major, self.minor)
@@ -96,7 +96,7 @@ impl str::FromStr for Version {
 impl Version {
     /// Whether this version satisfies the provided `required` version.
     ///
-    ///     # use apollo_at_link::spec::Version;
+    ///     # use apollo_federation::link::spec::Version;
     ///     assert!(&Version { major: 1, minor: 0 }.satisfies(&Version{ major: 1, minor: 0 }));
     ///     assert!(&Version { major: 1, minor: 2 }.satisfies(&Version{ major: 1, minor: 0 }));
     ///
@@ -118,7 +118,7 @@ impl Version {
     ///
     /// # Examples
     ///
-    ///     # use apollo_at_link::spec::Version;
+    ///     # use apollo_federation::link::spec::Version;
     ///     assert!(&Version { major: 1, minor: 1 }.satisfies_range(&Version{ major: 1, minor: 0 }, &Version{ major: 1, minor: 10 }));
     ///
     ///     assert!(!&Version { major: 2, minor: 0 }.satisfies_range(&Version{ major: 1, minor: 0 }, &Version{ major: 1, minor: 10 }));
@@ -143,7 +143,7 @@ pub struct Url {
 impl fmt::Display for Url {
     /// Display a specification url.
     ///
-    ///     # use apollo_at_link::spec::*;
+    ///     # use apollo_federation::link::spec::*;
     ///     assert_eq!(
     ///         Url {
     ///           identity: Identity { domain: "https://specs.apollo.dev".to_string(), name: "federation".to_string() },

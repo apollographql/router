@@ -1,21 +1,23 @@
-use crate::spec::{
-    AppliedFederationLink, FederationSpecDefinitions, FederationSpecError, LinkSpecDefinitions,
-    ANY_SCALAR_NAME, ENTITIES_QUERY, ENTITY_UNION_NAME, FEDERATION_V2_DIRECTIVE_NAMES,
-    KEY_DIRECTIVE_NAME, SERVICE_SDL_QUERY, SERVICE_TYPE,
-};
-use apollo_at_link::link::LinkError;
-use apollo_at_link::link::{self, DEFAULT_LINK_NAME};
-use apollo_at_link::spec::Identity;
+use std::collections::BTreeMap;
+use std::fmt::Formatter;
+use std::sync::Arc;
+
 use apollo_compiler::ast::{Name, NamedType};
 use apollo_compiler::schema::{ComponentStr, ExtendedType, ObjectType};
 use apollo_compiler::{Node, Schema};
 use indexmap::map::Entry;
 use indexmap::{IndexMap, IndexSet};
-use std::collections::BTreeMap;
-use std::fmt::Formatter;
-use std::sync::Arc;
 
-pub mod database;
+use crate::link::spec::Identity;
+use crate::link::LinkError;
+use crate::link::{Link, DEFAULT_LINK_NAME};
+use crate::subgraph::spec::{
+    AppliedFederationLink, FederationSpecDefinitions, FederationSpecError, LinkSpecDefinitions,
+    ANY_SCALAR_NAME, ENTITIES_QUERY, ENTITY_UNION_NAME, FEDERATION_V2_DIRECTIVE_NAMES,
+    KEY_DIRECTIVE_NAME, SERVICE_SDL_QUERY, SERVICE_TYPE,
+};
+
+mod database;
 mod spec;
 
 // TODO: we need a strategy for errors. All (or almost all) federation errors have a code in
@@ -94,7 +96,7 @@ impl Subgraph {
             .get_all(DEFAULT_LINK_NAME);
 
         for directive in link_directives {
-            let link_directive = link::Link::from_directive_application(directive)?;
+            let link_directive = Link::from_directive_application(directive)?;
             if link_directive
                 .url
                 .identity
@@ -335,8 +337,9 @@ impl Subgraphs {
 
 #[cfg(test)]
 mod tests {
+    use crate::subgraph::database::keys;
+
     use super::*;
-    use crate::database::keys;
 
     #[test]
     fn can_inspect_a_type_key() {

@@ -13,11 +13,12 @@
 
 use std::sync::Arc;
 
-use apollo_at_link::database::links_metadata;
-use apollo_at_link::link::Link;
-use apollo_at_link::spec::{Identity, APOLLO_SPEC_DOMAIN};
 use apollo_compiler::executable::{Directive, SelectionSet};
 use apollo_compiler::Schema;
+
+use crate::link::database::links_metadata;
+use crate::link::spec::{Identity, APOLLO_SPEC_DOMAIN};
+use crate::link::Link;
 
 // TODO: we should define this as part as some more generic "FederationSpec" definition, but need
 // to define the ground work for that in `apollo-at-link` first.
@@ -38,6 +39,8 @@ pub struct Key {
 
 impl Key {
     // TODO: same remark as above: not meant to be `Option`
+    // TODO remove suppression OR use method in final version
+    #[allow(dead_code)]
     pub fn selections(&self) -> Option<Arc<SelectionSet>> {
         self.selections.clone()
     }
@@ -61,7 +64,7 @@ impl Key {
 
 pub fn federation_link(schema: &Schema) -> Arc<Link> {
     links_metadata(schema)
-        // TODO: error handling?
+        // TODO: error handling?
         .unwrap_or_default()
         .unwrap_or_default()
         .for_identity(&federation_link_identity())
@@ -75,6 +78,8 @@ pub fn key_directive_name(schema: &Schema) -> String {
     federation_link(schema).directive_name_in_schema("key")
 }
 
+// TODO remove suppression OR use method in final version
+#[allow(dead_code)]
 pub fn keys(schema: &Schema, type_name: &str) -> Vec<Key> {
     let key_name = key_directive_name(schema);
     if let Some(type_def) = schema.types.get(type_name) {
