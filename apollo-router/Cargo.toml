@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.32.0"
+version = "1.33.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -59,13 +59,13 @@ apollo-compiler = "0.11.3"
 apollo-encoder = "0.7.0"
 apollo-parser = "0.6.3"
 arc-swap = "1.6.0"
-async-compression = { version = "0.4.3", features = [
+async-compression = { version = "0.4.4", features = [
     "tokio",
     "brotli",
     "gzip",
     "deflate",
 ] }
-async-trait = "0.1.73"
+async-trait = "0.1.74"
 axum = { version = "0.6.20", features = ["headers", "json", "original-uri"] }
 base64 = "0.21.4"
 bloomfilter = "1.0.12"
@@ -89,7 +89,7 @@ dhat = { version = "0.3.2", optional = true }
 diff = "0.1.13"
 directories = "5.0.1"
 displaydoc = "0.2"
-flate2 = "1.0.27"
+flate2 = "1.0.28"
 fred = { version = "6.3.2", features = ["enable-rustls", "no-client-setname"] }
 futures = { version = "0.3.28", features = ["thread-pool"] }
 graphql_client = "0.13.0"
@@ -173,7 +173,7 @@ proteus = "0.5.0"
 rand = "0.8.5"
 rand_core = "0.6.4"
 rhai = { version = "1.16.2", features = ["sync", "serde", "internals"] }
-regex = "1.10.0"
+regex = "1.10.2"
 reqwest = { version = "0.11.22", default-features = false, features = [
     "rustls-tls",
     "rustls-native-certs",
@@ -188,7 +188,7 @@ rustls-pemfile = "1.0.3"
 schemars = { version = "0.8.15", features = ["url"] }
 shellexpand = "3.1.0"
 sha2 = "0.10.8"
-serde = { version = "1.0.188", features = ["derive", "rc"] }
+serde = { version = "1.0.189", features = ["derive", "rc"] }
 serde_derive_default = "0.1"
 serde_json_bytes = { version = "0.2.2", features = ["preserve_order"] }
 serde_json = { version = "1.0.107", features = [
@@ -198,7 +198,7 @@ serde_json = { version = "1.0.107", features = [
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
-strum_macros = "0.25.2"
+strum_macros = "0.25.3"
 sys-info = "0.9.1"
 thiserror = "1.0.49"
 tokio = { version = "1.33.0", features = ["full"] }
@@ -294,7 +294,7 @@ rhai = { version = "1.16.2", features = [
 ] }
 similar-asserts = "1.5.0"
 tempfile = "3.8.0"
-test-log = { version = "0.2.12", default-features = false, features = [
+test-log = { version = "0.2.13", default-features = false, features = [
     "trace",
 ] }
 test-span = "0.7"

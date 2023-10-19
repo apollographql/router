@@ -15,7 +15,7 @@ impl TracingConfigurator for super::super::otlp::Config {
         self.enabled
     }
 
-    fn apply(&self, builder: Builder, _trace_config: &Trace) -> Result<Builder, BoxError> {
+    fn apply(&self, builder: Builder, _common: &Trace) -> Result<Builder, BoxError> {
         tracing::info!("Configuring Otlp tracing: {}", self.batch_processor);
         let exporter: SpanExporterBuilder = self.exporter()?;
         Ok(builder.with_span_processor(

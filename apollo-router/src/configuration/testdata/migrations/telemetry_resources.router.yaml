@@ -1,0 +1,6 @@
+telemetry:
+  metrics:
+    common:
+      resources:
+        test: val
+
