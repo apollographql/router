@@ -10,7 +10,7 @@ The filename should begin with a 4 digit numerical prefix. This allows us to app
 
 The yaml consists of a description and a number of actions:
 ```yaml
-description: telemetry.tracing.trace_config.attributes.router has been renamed to 'supergraph' for consistency
+description: telemetry.tracing.common.attributes.router has been renamed to 'supergraph' for consistency
 actions:
   - type: move
     from: some.source

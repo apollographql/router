@@ -17,7 +17,7 @@ async fn test_telemetry_doesnt_hang_with_invalid_schema() {
         r#"
     telemetry:
       tracing:
-        trace_config:
+        common:
           service_name: router
         otlp:
           endpoint: default
