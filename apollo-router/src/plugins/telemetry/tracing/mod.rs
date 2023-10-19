@@ -27,7 +27,7 @@ pub(crate) mod zipkin;
 
 pub(crate) trait TracingConfigurator {
     fn enabled(&self) -> bool;
-    fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError>;
+    fn apply(&self, builder: Builder, common: &Trace) -> Result<Builder, BoxError>;
 }
 
 #[derive(Debug)]

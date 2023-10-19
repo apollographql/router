@@ -463,7 +463,7 @@ impl ResourceDetector for ConfigResourceDetector {
         );
         resource = resource.merge(&mut Resource::new(
             self.0
-                .resources
+                .resource
                 .clone()
                 .into_iter()
                 .map(|(k, v)| KeyValue::new(k, v)),

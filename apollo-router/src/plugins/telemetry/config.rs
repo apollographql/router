@@ -85,8 +85,8 @@ pub(crate) struct MetricsCommon {
     pub(crate) service_name: Option<String>,
     /// Set a service.namespace attribute in your metrics
     pub(crate) service_namespace: Option<String>,
-    /// Otel configuration via resource
-    pub(crate) resources: BTreeMap<String, AttributeValue>,
+    /// The Open Telemetry resource
+    pub(crate) resource: BTreeMap<String, AttributeValue>,
     /// Custom buckets for histograms
     pub(crate) buckets: Vec<f64>,
     /// Experimental metrics to know more about caching strategies
@@ -119,7 +119,7 @@ impl Default for MetricsCommon {
             attributes: Default::default(),
             service_name: None,
             service_namespace: None,
-            resources: BTreeMap::new(),
+            resource: BTreeMap::new(),
             buckets: vec![
                 0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
             ],
@@ -140,7 +140,7 @@ pub(crate) struct Tracing {
     /// Propagation configuration
     pub(crate) propagation: Propagation,
     /// Common configuration
-    pub(crate) trace_config: Trace,
+    pub(crate) common: Trace,
     /// OpenTelemetry native exporter configuration
     pub(crate) otlp: otlp::Config,
     /// Jaeger exporter configuration
@@ -362,8 +362,8 @@ pub(crate) struct Trace {
     pub(crate) max_attributes_per_event: u32,
     /// The maximum attributes per link before discarding
     pub(crate) max_attributes_per_link: u32,
-    /// The resources configured on the tracing pipeline
-    pub(crate) attributes: BTreeMap<String, AttributeValue>,
+    /// The Open Telemetry resource
+    pub(crate) resource: BTreeMap<String, AttributeValue>,
 }
 
 impl ConfigResource for Trace {
@@ -374,7 +374,7 @@ impl ConfigResource for Trace {
         self.service_namespace.clone()
     }
     fn resource(&self) -> &BTreeMap<String, AttributeValue> {
-        &self.attributes
+        &self.resource
     }
 }
 
@@ -386,7 +386,7 @@ impl ConfigResource for MetricsCommon {
         self.service_namespace.clone()
     }
     fn resource(&self) -> &BTreeMap<String, AttributeValue> {
-        &self.resources
+        &self.resource
     }
 }
 
@@ -410,7 +410,7 @@ impl Default for Trace {
             max_links_per_span: default_max_links_per_span(),
             max_attributes_per_event: default_max_attributes_per_event(),
             max_attributes_per_link: default_max_attributes_per_link(),
-            attributes: Default::default(),
+            resource: Default::default(),
         }
     }
 }
@@ -569,23 +569,23 @@ impl From<SamplerOption> for opentelemetry::sdk::trace::Sampler {
 
 impl From<&Trace> for opentelemetry::sdk::trace::Config {
     fn from(config: &Trace) -> Self {
-        let mut trace_config = opentelemetry::sdk::trace::config();
+        let mut common = opentelemetry::sdk::trace::config();
 
         let mut sampler: opentelemetry::sdk::trace::Sampler = config.sampler.clone().into();
         if config.parent_based_sampler {
             sampler = parent_based(sampler);
         }
 
-        trace_config = trace_config.with_sampler(sampler);
-        trace_config = trace_config.with_max_events_per_span(config.max_events_per_span);
-        trace_config = trace_config.with_max_attributes_per_span(config.max_attributes_per_span);
-        trace_config = trace_config.with_max_links_per_span(config.max_links_per_span);
-        trace_config = trace_config.with_max_attributes_per_event(config.max_attributes_per_event);
-        trace_config = trace_config.with_max_attributes_per_link(config.max_attributes_per_link);
+        common = common.with_sampler(sampler);
+        common = common.with_max_events_per_span(config.max_events_per_span);
+        common = common.with_max_attributes_per_span(config.max_attributes_per_span);
+        common = common.with_max_links_per_span(config.max_links_per_span);
+        common = common.with_max_attributes_per_event(config.max_attributes_per_event);
+        common = common.with_max_attributes_per_link(config.max_attributes_per_link);
 
         // Take the default first, then config, then env resources, then env variable. Last entry wins
-        trace_config = trace_config.with_resource(config.to_resource());
-        trace_config
+        common = common.with_resource(config.to_resource());
+        common
     }
 }
 
@@ -597,7 +597,7 @@ impl Conf {
     pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
         Ok(
             match (
-                &self.tracing.trace_config.sampler,
+                &self.tracing.common.sampler,
                 &self.apollo.field_level_instrumentation_sampler,
             ) {
                 // Error conditions

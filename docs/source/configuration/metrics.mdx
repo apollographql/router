@@ -20,7 +20,7 @@ Service name discovery is handled in the following order:
 1. `OTEL_SERVICE_NAME` env
 2. `OTEL_RESOURCE_ATTRIBUTES` env
 3. `router.yaml` `service_name`
-4. `router.yaml` `resources` (attributes)
+4. `router.yaml` `resource`
 
 If none of the above are found then the service name will be set to `unknown_service:apollo_router` or `unknown_service` if the executable name cannot be determined.
 
@@ -30,9 +30,9 @@ A Resource is a set of key-value pairs that provide additional information to an
 
 ```yaml title="router.yaml"
 telemetry:
-  tracing:
-    trace_config:
-      attributes:
+  metrics:
+    common:
+      resource:
         "environment.name": "production"
         "environment.namespace": "{env.MY_K8_NAMESPACE_ENV_VARIABLE}"
 ```

@@ -1,8 +1,8 @@
 telemetry:
   tracing:
-    trace_config:
+    common:
       service_name: router
-      attributes:
+      resource:
         str: a
         int: 1
         float: 1

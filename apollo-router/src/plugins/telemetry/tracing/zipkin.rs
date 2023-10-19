@@ -38,11 +38,11 @@ impl TracingConfigurator for Config {
         self.enabled
     }
 
-    fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
+    fn apply(&self, builder: Builder, common: &Trace) -> Result<Builder, BoxError> {
         tracing::info!("configuring Zipkin tracing: {}", self.batch_processor);
 
         let exporter = opentelemetry_zipkin::new_pipeline()
-            .with_trace_config(trace_config.into())
+            .with_trace_config(common.into())
             .with(&self.endpoint.to_uri(&DEFAULT_ENDPOINT), |b, endpoint| {
                 b.with_collector_endpoint(endpoint.to_string())
             })
