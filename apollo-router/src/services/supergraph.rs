@@ -251,6 +251,34 @@ impl Response {
         )
     }
 
+    /// This is the constructor (or builder) to use when constructing a "fake" Response stream.
+    ///
+    /// This does not enforce the provision of the data that is required for a fully functional
+    /// Response. It's usually enough for testing, when a fully constructed Response is
+    /// difficult to construct and not required for the purposes of the test.
+    ///
+    /// In addition, fake responses are expected to be valid, and will panic if given invalid values.
+    #[builder(visibility = "pub")]
+    fn fake_stream_new(
+        responses: Vec<graphql::Response>,
+        status_code: Option<StatusCode>,
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
+        context: Context,
+    ) -> Result<Self, BoxError> {
+        let mut builder = http::Response::builder().status(status_code.unwrap_or(StatusCode::OK));
+        for (key, values) in headers {
+            let header_name: HeaderName = key.try_into()?;
+            for value in values {
+                let header_value: HeaderValue = value.try_into()?;
+                builder = builder.header(header_name.clone(), header_value);
+            }
+        }
+
+        let stream = futures::stream::iter(responses);
+        let response = builder.body(stream.boxed())?;
+        Ok(Self { response, context })
+    }
+
     /// This is the constructor (or builder) to use when constructing a Response that represents a global error.
     /// It has no path and no response data.
     /// This is useful for things such as authentication errors.

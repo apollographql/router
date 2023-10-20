@@ -4,7 +4,8 @@ expression: new_config
 ---
 ---
 telemetry:
-  apollo:
-    field_level_instrumentation:
-      sampler: always_off
+  metrics:
+    common:
+      resource:
+        test: val
 

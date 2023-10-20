@@ -30,6 +30,8 @@ pub(crate) const LINK_URL_ARGUMENT: &str = "url";
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub(crate) enum SpecError {
+    /// missing input file for query
+    UnknownFileId,
     /// selection processing recursion limit exceeded
     RecursionLimitExceeded,
     /// invalid type error, expected another type than '{0}'
@@ -38,8 +40,8 @@ pub(crate) enum SpecError {
     InvalidField(String, String),
     /// parsing error: {0}
     ParsingError(String),
-    /// validation error: {0}
-    ValidationError(String),
+    /// validation error
+    ValidationError(Vec<apollo_compiler::GraphQLError>),
     /// Unknown operation named "{0}"
     UnknownOperation(String),
     /// subscription operation is not supported
@@ -61,6 +63,10 @@ impl SpecError {
 impl ErrorExtension for SpecError {
     fn extension_code(&self) -> String {
         match self {
+            // This code doesn't really make sense, but it's what was used in the past, and it will
+            // be obsolete soon with apollo-compiler v1.0. So keep using it instead of introducing
+            // a new code that will only exist for a few weeks.
+            SpecError::UnknownFileId => "GRAPHQL_VALIDATION_FAILED",
             SpecError::RecursionLimitExceeded => "RECURSION_LIMIT_EXCEEDED",
             SpecError::InvalidType(_) => "INVALID_TYPE",
             SpecError::InvalidField(_, _) => "INVALID_FIELD",

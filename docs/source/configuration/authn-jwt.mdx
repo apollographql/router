@@ -1,25 +1,17 @@
 ---
 title: JWT Authentication in the Apollo Router
+description: Restrict access to credentialed users and systems
 ---
 
-> ⚠️ **This is an [Enterprise feature](../enterprise-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
->
-> If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](/graphos/org/plans/#enterprise-trials).
+<GraphOSEnterpriseRequired />
 
-The Apollo Router supports request authentication and key rotation via the [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**) and [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**) standards. This support is compatible with popular identity providers (**IdPs**) like Okta and Auth0.
+Authentication is crucial to prevent illegitimate access and protect sensitive data in your graph. The Apollo Router supports request authentication and key rotation via the [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**) and [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**) standards. This support is compatible with popular identity providers (**IdPs**) like Okta and Auth0.
 
-By enabling JWT authentication, you can block malicious traffic at the edge of your graph instead of relying on [header forwarding](./header-propagation/) to propagate tokens to your subgraphs.
+By enabling JWT authentication, you can block malicious traffic at the _edge_ of your graph instead of relying on [header forwarding](./header-propagation/) to propagate tokens to your subgraphs.
 
-> ⚠️ Under all circumstances, your subgraphs should be accessible _only_ via the router—not directly by clients. This is especially true if you're relying on JWT authentication in the router. Make sure to [secure your subgraphs](/federation/building-supergraphs/subgraphs-overview/#securing-your-subgraphs).
+> ⚠️ Your subgraphs should always be accessible _only_ via the router—not directly by clients. This is especially true if you rely on JWT authentication in the router. See [Securing your subgraphs](/graphos/graphs/securing-a-subgraph) for steps to restrict subgraph access to only your router.
 
-**To use this feature:**
-
-- You must have an identity provider (**IdP**) or similar service that issues JWTs to authenticated clients using one of the signature algorithms supported by the [jsonwebtoken Rust library](https://crates.io/crates/jsonwebtoken) (most popular signing algorithms are supported).
-- You must have a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/) and [connect your router to GraphOS](./overview/#environment-variables).
-
-If you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne, etc.), adding JWT authentication to your router is comparatively straightforward. If you use your own custom IdP, [advanced configuration is required](#creating-your-own-jwks-advanced).
-
-## How it works
+## How JWT authentication works
 
 These are the high-level steps of JWT-based authentication with the Apollo Router:
 
@@ -37,7 +29,9 @@ These are the high-level steps of JWT-based authentication with the Apollo Route
 
 ## Turning it on
 
-You enable JWT authentication for your router with the following steps:
+If you use your own custom IdP, [advanced configuration is required](#creating-your-own-jwks-advanced).
+
+Otherwise, if you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne, etc.), enabling JWT authentication in your router is a two step process described below. 
 
 1. Set configuration options for JWT authentication in your router's [YAML config file](./overview/#yaml-config-file), under the `authentication` key:
 
@@ -339,11 +333,18 @@ For more information, refer to [the coprocessor documentation](../customizations
 
 ## Creating your own JWKS (advanced)
 
-> ⚠️ **Most third-party IdP services create and host a JWKS for you.** If you use a third-party IdP, consult its documentation to obtain the [JWKS URL](#jwks) to pass to your router.
->
-> Read this section if you use a _custom_ IdP that doesn't currently publish its JWKS at a router-accessible URL.
+<blockquote>
+
+⚠️ **Note**:
+
+- **Most third-party IdP services create and host a JSON Web Key Set (JWKS) for you.** Read this section only if you use a _custom_ IdP that doesn't publish its JWKS at a router-accessible URL.
+- To be compatible with JWT authentication supported by Apollo Router, your IdP (or whatever service issues JWTs to authenticated clients) must use one of the [signature algorithms](https://crates.io/crates/jsonwebtoken#algorithms) supported by the router.
+
+</blockquote>
 
 The Apollo Router obtains each JSON Web Key (JWK) that it uses from the URLs that you specify via the [`jwks`](#jwks) configuration option. Each URL must provide a set of valid JWKs in a single JSON object called a JWK Set (or **JWKS**).
+
+> Consult your IdP's documentation to obtain the [JWKS URL](#jwks) to pass to your router.
 
 To provide a JWKS to your router, configure your IdP service to do the following whenever its collection of valid JWKs changes (such as when a JWK expires or is rotated):
 
