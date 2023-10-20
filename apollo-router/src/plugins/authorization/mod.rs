@@ -60,7 +60,7 @@ pub(crate) struct CacheKeyMetadata {
 }
 
 /// Authorization plugin
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[allow(dead_code)]
 pub(crate) struct Conf {
     /// Reject unauthenticated requests
