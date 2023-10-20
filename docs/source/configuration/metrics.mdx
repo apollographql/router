@@ -4,6 +4,41 @@ title: Collecting metrics in the Apollo Router
 
 The Apollo Router provides built-in support for metrics collection via [Prometheus](#using-prometheus) and [OpenTelemetry Collector](#using-opentelemetry-collector).
 
+## Common configuration
+
+### Service name
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    common:
+      # (Optional) Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
+      service_name: "router"
+```
+
+Service name discovery is handled in the following order:
+1. `OTEL_SERVICE_NAME` env
+2. `OTEL_RESOURCE_ATTRIBUTES` env
+3. `router.yaml` `service_name`
+4. `router.yaml` `resource`
+
+If none of the above are found then the service name will be set to `unknown_service:apollo_router` or `unknown_service` if the executable name cannot be determined.
+
+### Resource
+
+A Resource is a set of key-value pairs that provide additional information to an exporter. APMs may interpret and display resource information. 
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    common:
+      resource:
+        "environment.name": "production"
+        "environment.namespace": "{env.MY_K8_NAMESPACE_ENV_VARIABLE}"
+```
+
+> [See OpenTelemetry conventions for resources.](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/README.md)
+
 ## Using Prometheus
 
 You can use [Prometheus and Grafana](https://prometheus.io/docs/visualization/grafana/) to collect metrics and visualize the router metrics.
@@ -11,11 +46,6 @@ You can use [Prometheus and Grafana](https://prometheus.io/docs/visualization/gr
 ```yaml title="router.yaml"
 telemetry:
   metrics:
-    common:
-      # (Optional, default to "apollo-router") Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
-      service_name: "apollo-router"
-      # (Optional)
-      service_namespace: "apollo"
     prometheus:
       # By setting this endpoint you enable the Prometheus exporter
       # All our endpoints exposed by plugins are namespaced by the name of the plugin
@@ -56,11 +86,38 @@ apollo_router_http_request_duration_seconds_bucket{le="0.9"} 1
 
 > Note that if you haven't run a query against the router yet, you'll see a blank page because no metrics have been generated!
 
-### Available metrics
+## Datadog via OTLP
+
+To use Datadog, you must configure the Datadog agent to accept OTLP metrics. This can be done by adding the following to your `datadog.yaml`:
+
+```yaml title="datadog.yaml"
+otlp_config:
+  receiver:
+    protocols:
+      grpc:
+        endpoint: <dd-agent-ip>:4317
+```
+
+The router must also be configured to send traces to the Datadog agent:
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    otlp:
+      enabled: true
+      # Temporality MUST be set to delta. Failure to do this will result in incorrect metrics.
+      temporality: delta
+      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
+      endpoint: "${env.DATADOG_AGENT_HOST}:4317"
+```
+
+See [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host) for more details
+
+## Available metrics
 
 The following metrics are available for Prometheus and OpenTelemetry. Attributes are listed where applicable.
 
-#### HTTP
+### HTTP
 
 - `apollo_router_http_request_duration_seconds_bucket` - HTTP router request duration
 - `apollo_router_http_request_duration_seconds_bucket` - HTTP subgraph request duration, attributes:
@@ -71,12 +128,12 @@ The following metrics are available for Prometheus and OpenTelemetry. Attributes
   - `subgraph`: The subgraph being queried
   - `status` : If the retry was aborted (`aborted`)
 
-#### Session
+### Session
 
 - `apollo_router_session_count_total` - Number of currently connected clients
 - `apollo_router_session_count_active` - Number of in-flight GraphQL requests
 
-#### Cache
+### Cache
 
 - `apollo_router_cache_size` — Number of entries in the cache
 - `apollo_router_cache_hit_count` - Number of cache hits
@@ -89,24 +146,24 @@ All cache metrics listed above have the following attributes:
 - `kind`: the cache being queried (`apq`, `query planner`, `introspection`)
 - `storage`: The backend storage of the cache (`memory`, `redis`)
 
-#### Coprocessor
+### Coprocessor
 
-- `apollo_router_operations_coprocessor_total` - Total operations with co-processors enabled.
-- `apollo_router_operations_coprocessor.duration` - Time spent waiting for the coprocessor to answer, in seconds
+- `apollo_router_operations_coprocessor_total` - Total operations with coprocessors enabled.
+- `apollo_router_operations_coprocessor.duration` - Time spent waiting for the coprocessor to answer, in seconds.
 
 The coprocessor operations metric has the following attributes:
 
 - `coprocessor.stage`: string (`RouterRequest`, `RouterResponse`, `SubgraphRequest`, `SubgraphResponse`)
 - `coprocessor.succeeded`: bool
 
-#### Performance
+### Performance
 
 - `apollo_router_processing_time` - Time spent processing a request (outside of waiting for external or subgraph requests) in seconds.
 - `apollo_router_query_planning_time` - Time spent planning queries in seconds.
 - `apollo_router_query_planning_warmup_duration` - Time spent planning queries in seconds.
 - `apollo_router_schema_load_duration` - Time spent loading the schema in seconds.
 
-#### Uplink
+### Uplink
 
 - `apollo_router_uplink_fetch_duration_seconds_bucket` - Uplink request duration, attributes:
 
@@ -122,11 +179,21 @@ The coprocessor operations metric has the following attributes:
 
 Note that the initial call to uplink during router startup will not be reflected in metrics.
 
-#### Subscription
+### Subscription
 
 - `apollo_router_opened_subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated)
 - `apollo_router_deduplicated_subscriptions_total` - Number of subscriptions that has been deduplicated
 - `apollo_router_skipped_event_count` - Number of subscription events that has been skipped because too many events have been received from the subgraph but not yet sent to the client.
+
+### Batching
+
+- `apollo_router.operations.batching` - A counter of the number of query batches received by the router.
+- `apollo_router.operations.batching.size` - A histogram tracking the number of queries contained within a query batch.
+
+#### Studio
+
+- `apollo.router.telemetry.studio.reports` - The number of reports submitted to Studio by the Router.
+  - `type`: The type of report submitted: "traces" or "metrics"
 
 ## Using OpenTelemetry Collector
 
@@ -136,7 +203,10 @@ You can send metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/
 telemetry:
   metrics:
     otlp:
-      # Either 'default' or a URL
+      # Enable the OpenTelemetry exporter
+      enabled: true
+
+      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317 for gRPC and http://127.0.0.1:4318 for HTTP)
       endpoint: default
 
       # Optional protocol. Only grpc is supported currently.
@@ -213,7 +283,7 @@ telemetry:
                   path: .type # JSON query path to fetch data from extensions
                 - name: message
                   path: .reason
-            # Will create this kind of metric for example apollo_router_http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name",subgraph_error_extended_type="SubrequestHttpError"}
+            # Will create this kind of metric for example apollo_router_http_requests_error_total{message="cannot contact the subgraph",subgraph="my_subgraph_name",subgraph_error_extended_type="SubrequestHttpError"}
           subgraphs:
             my_subgraph_name: # Apply these rules only for the subgraph named `my_subgraph_name`
               request:
@@ -271,20 +341,3 @@ telemetry:
         - 20.00
 ```
 
-## Adding custom resources
-
-Resources are similar to [attributes](#adding-custom-attributeslabels), but there are more globals. They're configured directly on the metrics exporter, which means they're always present on each of your metrics.
-
-As an example, it can be useful to set a `environment_name` resource to help you identify metrics related to a particular environment:
-
-```yaml title="router.yaml"
-telemetry:
-  metrics:
-    common:
-      resources:
-        environment_name: "production"
-```
-
-> [See OpenTelemetry conventions for resources.](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/README.md)
->
-> For example, if you want to use a Datadog agent and specify a service name, you should set the `service.name` resource as shown above and described in the conventions document.

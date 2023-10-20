@@ -171,6 +171,22 @@ async fn test_reload_via_sighup() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_shutdown_with_idle_connection() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(HAPPY_CONFIG)
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+    let _conn = std::net::TcpStream::connect("127.0.0.1:4000").unwrap();
+    router.execute_default_query().await;
+    tokio::time::timeout(Duration::from_secs(1), router.graceful_shutdown())
+        .await
+        .unwrap();
+    Ok(())
+}
+
 async fn command_output(command: &mut Command) -> String {
     let output = command.output().await.unwrap();
     let success = output.status.success();

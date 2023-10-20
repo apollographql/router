@@ -1,0 +1,5 @@
+description: telemetry.tracing.trace_config has been renamed to telemetry.tracing.common
+actions:
+  - type: move
+    from: telemetry.tracing.trace_config
+    to: telemetry.tracing.common

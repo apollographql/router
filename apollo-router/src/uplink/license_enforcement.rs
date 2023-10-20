@@ -178,7 +178,7 @@ impl LicenseEnforcementReport {
                 .name("Operation aliases limiting")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.preview_persisted_queries")
+                .path("$.persisted_queries")
                 .name("Persisted queries")
                 .build(),
         ]

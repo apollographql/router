@@ -10,4 +10,5 @@ telemetry:
         endpoint: default
       batch_processor:
         scheduled_delay: 100ms
+      enabled: true
 

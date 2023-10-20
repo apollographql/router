@@ -1,0 +1,30 @@
+---
+source: apollo-router/tests/integration_tests.rs
+expression: response.errors
+---
+[
+  {
+    "message": "cannot query field `inStock` on type `Product`",
+    "locations": [
+      {
+        "line": 4,
+        "column": 5
+      }
+    ],
+    "extensions": {
+      "code": "GRAPHQL_VALIDATION_FAILED"
+    }
+  },
+  {
+    "message": "cannot query field `notAField` on type `Query`",
+    "locations": [
+      {
+        "line": 6,
+        "column": 3
+      }
+    ],
+    "extensions": {
+      "code": "GRAPHQL_VALIDATION_FAILED"
+    }
+  }
+]
