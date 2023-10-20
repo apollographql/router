@@ -60,7 +60,7 @@ pub(crate) struct CacheKeyMetadata {
 }
 
 /// Authorization plugin
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[allow(dead_code)]
 pub(crate) struct Conf {
     /// Reject unauthenticated requests
@@ -71,7 +71,7 @@ pub(crate) struct Conf {
     preview_directives: Directives,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[allow(dead_code)]
 pub(crate) struct Directives {
     /// enables the `@authenticated` and `@requiresScopes` directives
