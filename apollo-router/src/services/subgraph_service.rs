@@ -29,9 +29,9 @@ use http::HeaderValue;
 use http::Request;
 use hyper::client::HttpConnector;
 use hyper::Body;
-use hyper::Client;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
+use hyper_trust_dns_connector::AsyncHyperResolver;
 use mediatype::names::APPLICATION;
 use mediatype::names::JSON;
 use mediatype::MediaType;
@@ -141,7 +141,7 @@ pub(crate) struct SubgraphService {
     // Note: We use hyper::Client here in preference to reqwest to avoid expensive URL translation
     // in the hot path. We use reqwest elsewhere because it's convenient and some of the
     // opentelemetry crate require reqwest clients to work correctly (at time of writing).
-    client: Decompression<hyper::Client<HttpsConnector<HttpConnector>>>,
+    client: Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>,
     service: Arc<String>,
 
     /// Whether apq is enabled in the router for subgraph calls
@@ -233,7 +233,8 @@ impl SubgraphService {
         tls_config: ClientConfig,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
-        let mut http_connector = HttpConnector::new();
+        // let mut http_connector = HttpConnector::new();
+        let mut http_connector = hyper_trust_dns_connector::new_async_http_connector().unwrap();
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
@@ -681,7 +682,7 @@ async fn call_http(
     request: SubgraphRequest,
     body: graphql::Request,
     context: Context,
-    client: Decompression<Client<HttpsConnector<HttpConnector>>>,
+    client: Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
     let SubgraphRequest {
@@ -927,7 +928,9 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
 }
 
 async fn do_fetch(
-    mut client: Decompression<Client<HttpsConnector<HttpConnector>>>,
+    mut client: Decompression<
+        hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>,
+    >,
     context: &Context,
     service_name: &str,
     request: Request<Body>,
