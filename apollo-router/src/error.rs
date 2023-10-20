@@ -565,7 +565,6 @@ impl std::fmt::Display for ParseErrors {
             if i > 0 {
                 f.write_str("\n")?;
             }
-            // TODO(@goto-bus-stop): display line/column once that is exposed from apollo-rs
             write!(f, "{}", error)?;
         }
         let remaining = errors.count();
