@@ -293,21 +293,8 @@ async fn service_call(
                     let (subs_tx, subs_rx) = mpsc::channel(1);
                     let query_plan = plan.clone();
                     let execution_service_factory_cloned = execution_service_factory.clone();
-                    let mut cloned_supergraph_req = SupergraphRequest::builder()
-                        .extensions(req.supergraph_request.body().extensions.clone())
-                        .and_query(req.supergraph_request.body().query.clone())
-                        .context(context.clone())
-                        .method(req.supergraph_request.method().clone())
-                        .and_operation_name(req.supergraph_request.body().operation_name.clone())
-                        .uri(req.supergraph_request.uri().clone())
-                        .variables(req.supergraph_request.body().variables.clone());
-
-                    for (header_name, header_value) in req.supergraph_request.headers().clone() {
-                        if let Some(header_name) = header_name {
-                            cloned_supergraph_req =
-                                cloned_supergraph_req.header(header_name, header_value);
-                        }
-                    }
+                    let cloned_supergraph_req =
+                        clone_supergraph_request(&req.supergraph_request, context.clone())?;
                     // Spawn task for subscription
                     tokio::spawn(async move {
                         subscription_task(
@@ -316,9 +303,7 @@ async fn service_call(
                             query_plan,
                             subs_rx,
                             notify,
-                            cloned_supergraph_req
-                                .build()
-                                .expect("it's a clone of the original one; qed"),
+                            cloned_supergraph_req,
                         )
                         .await;
                     });
@@ -530,33 +515,13 @@ async fn dispatch_event(
     let span = Span::current();
     let res = match query_plan {
         Some(query_plan) => {
-            let mut cloned_supergraph_req = SupergraphRequest::builder()
-                .extensions(supergraph_req.supergraph_request.body().extensions.clone())
-                .and_query(supergraph_req.supergraph_request.body().query.clone())
-                .context(supergraph_req.context.clone())
-                .method(supergraph_req.supergraph_request.method().clone())
-                .and_operation_name(
-                    supergraph_req
-                        .supergraph_request
-                        .body()
-                        .operation_name
-                        .clone(),
-                )
-                .uri(supergraph_req.supergraph_request.uri().clone())
-                .variables(supergraph_req.supergraph_request.body().variables.clone());
-
-            for (header_name, header_value) in supergraph_req.supergraph_request.headers().clone() {
-                if let Some(header_name) = header_name {
-                    cloned_supergraph_req = cloned_supergraph_req.header(header_name, header_value);
-                }
-            }
+            let cloned_supergraph_req = clone_supergraph_request(
+                &supergraph_req.supergraph_request,
+                supergraph_req.context.clone(),
+            )
+            .expect("it's a clone of the original one; qed");
             let execution_request = ExecutionRequest::internal_builder()
-                .supergraph_request(
-                    cloned_supergraph_req
-                        .build()
-                        .expect("it's a clone of the original one; qed")
-                        .supergraph_request,
-                )
+                .supergraph_request(cloned_supergraph_req.supergraph_request)
                 .query_plan(query_plan.clone())
                 .context(context)
                 .source_stream_value(val.data.take().unwrap_or_default())
@@ -642,6 +607,29 @@ async fn plan_query(
         ))
         .await
 }
+
+fn clone_supergraph_request(
+    req: &http::Request<graphql::Request>,
+    context: Context,
+) -> Result<SupergraphRequest, BoxError> {
+    let mut cloned_supergraph_req = SupergraphRequest::builder()
+        .extensions(req.body().extensions.clone())
+        .and_query(req.body().query.clone())
+        .context(context)
+        .method(req.method().clone())
+        .and_operation_name(req.body().operation_name.clone())
+        .uri(req.uri().clone())
+        .variables(req.body().variables.clone());
+
+    for (header_name, header_value) in req.headers().clone() {
+        if let Some(header_name) = header_name {
+            cloned_supergraph_req = cloned_supergraph_req.header(header_name, header_value);
+        }
+    }
+
+    cloned_supergraph_req.build()
+}
+
 /// Builder which generates a plugin pipeline.
 ///
 /// This is at the heart of the delegation of responsibility model for the router. A schema,
