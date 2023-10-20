@@ -11,8 +11,6 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use apollo_compiler::ApolloCompiler;
-use apollo_compiler::HirDatabase;
 use buildstructor::Builder;
 use displaydoc::Display;
 use itertools::Itertools;
@@ -90,7 +88,7 @@ impl LicenseEnforcementReport {
 
     pub(crate) fn build(
         configuration: &Configuration,
-        schema: &ApolloCompiler,
+        schema: &apollo_compiler::schema::Schema,
     ) -> LicenseEnforcementReport {
         LicenseEnforcementReport {
             restricted_config_in_use: Self::validate_configuration(
@@ -130,13 +128,14 @@ impl LicenseEnforcementReport {
     }
 
     fn validate_schema(
-        schema: &ApolloCompiler,
+        schema: &apollo_compiler::schema::Schema,
         schema_restrictions: &Vec<SchemaRestriction>,
     ) -> Vec<SchemaRestriction> {
         let feature_urls = schema
-            .db
-            .schema()
-            .directives_by_name(LINK_DIRECTIVE_NAME)
+            .schema_definition
+            .directives
+            .iter()
+            .filter(|dir| dir.name.as_str() == LINK_DIRECTIVE_NAME)
             .filter_map(|link| {
                 link.argument_by_name(LINK_URL_ARGUMENT)
                     .and_then(|value| value.as_str().map(|s| s.to_string()))
