@@ -15,7 +15,6 @@ use indexmap::IndexMap;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use tokio::sync::mpsc;
-use tokio::sync::Mutex;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -29,7 +28,7 @@ use super::execution::QueryPlan;
 use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use super::layers::content_negotiation;
 use super::layers::persisted_queries::PersistedQueryLayer;
-use super::layers::query_analysis::Compiler;
+use super::layers::query_analysis::ParsedDocument;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
 use super::router::ClientRequestAccepts;
@@ -579,16 +578,17 @@ async fn plan_query(
     query_str: String,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
     // FIXME: we have about 80 tests creating a supergraph service and crafting a supergraph request for it
-    // none of those tests create a compiler to put it in the context, and the compiler cannot be created
+    // none of those tests create an executable document to put it in the context, and the document cannot be created
     // from inside the supergraph request fake builder, because it needs a schema matching the query.
-    // So while we are updating the tests to create a compiler manually, this here will make sure current
+    // So while we are updating the tests to create a document manually, this here will make sure current
     // tests will pass
     {
         let mut entries = context.private_entries.lock();
-        if !entries.contains_key::<Compiler>() {
-            let (compiler, _) =
-                Query::make_compiler(&query_str, &schema, &Configuration::default());
-            entries.insert(Compiler(Arc::new(Mutex::new(compiler))));
+        if !entries.contains_key::<ParsedDocument>() {
+            let doc = Query::parse_document(&query_str, &schema, &Configuration::default());
+            Query::validate_query(&schema, &doc.executable)
+                .map_err(crate::error::QueryPlannerError::from)?;
+            entries.insert::<ParsedDocument>(doc);
         }
         drop(entries);
     }
@@ -852,6 +852,7 @@ mod tests {
         @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
          {
         query: Query
+        subscription: Subscription
    }
    directive @core(feature: String!) repeatable on SCHEMA
    directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
@@ -1413,7 +1414,6 @@ mod tests {
             .unwrap();
         let mut stream = service.oneshot(request).await.unwrap();
         let res = stream.next_response().await.unwrap();
-        assert_eq!(&res.data, &Some(serde_json_bytes::Value::Null));
         insta::assert_json_snapshot!(res);
         notify.broadcast(graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": { "name": "test", "activeOrganization": { "__typename": "Organization", "id": "0" }}})).build()).await.unwrap();
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
@@ -1491,7 +1491,6 @@ mod tests {
             .unwrap();
         let mut stream = service.oneshot(request).await.unwrap();
         let res = stream.next_response().await.unwrap();
-        assert_eq!(&res.data, &Some(serde_json_bytes::Value::Null));
         insta::assert_json_snapshot!(res);
         notify.broadcast(graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": { "name": "test", "activeOrganization": { "__typename": "Organization", "id": "0" }}})).build()).await.unwrap();
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
@@ -1559,8 +1558,6 @@ mod tests {
             .unwrap();
         let mut stream = service.ready().await.unwrap().call(request).await.unwrap();
         let res = stream.next_response().await.unwrap();
-        assert_eq!(&res.data, &Some(serde_json_bytes::Value::Null));
-        assert!(res.errors.is_empty());
         insta::assert_json_snapshot!(res);
         notify.broadcast(graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": { "name": "test", "activeOrganization": { "__typename": "Organization", "id": "0" }}})).build()).await.unwrap();
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
@@ -1750,7 +1747,8 @@ mod tests {
             .unwrap();
 
         let mut stream = service.oneshot(request).await.unwrap();
-        let _res = stream.next_response().await.unwrap();
+        let res = stream.next_response().await.unwrap();
+        assert_eq!(res.errors, []);
         let res = stream.next_response().await.unwrap();
         assert_eq!(
             res.incremental

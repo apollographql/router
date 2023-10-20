@@ -310,7 +310,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_validation_failure() -> Result<(), BoxError> {
-        let query = "query {topProducts{unknown}}";
+        let query = "query {topProducts(minStarRating: 4.7){name}}";
         let results = get_metrics_for_request(query, None, None, false).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
