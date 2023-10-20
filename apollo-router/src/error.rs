@@ -15,6 +15,7 @@ pub(crate) use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
 use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
+use crate::graphql::Location as ErrorLocation;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
@@ -266,6 +267,9 @@ pub(crate) enum QueryPlannerError {
     /// couldn't instantiate query planner; invalid schema: {0}
     SchemaValidationErrors(PlannerErrors),
 
+    /// invalid query
+    OperationValidationErrors(Vec<apollo_compiler::GraphQLError>),
+
     /// couldn't plan query: {0}
     PlanningErrors(PlanErrors),
 
@@ -297,6 +301,29 @@ pub(crate) enum QueryPlannerError {
     Unauthorized(Vec<Path>),
 }
 
+impl IntoGraphQLErrors for Vec<apollo_compiler::GraphQLError> {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        Ok(self
+            .into_iter()
+            .map(|err| {
+                Error::builder()
+                    .message(err.message)
+                    .locations(
+                        err.locations
+                            .into_iter()
+                            .map(|location| ErrorLocation {
+                                line: location.line as u32,
+                                column: location.column as u32,
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .extension_code("GRAPHQL_VALIDATION_FAILED")
+                    .build()
+            })
+            .collect())
+    }
+}
+
 impl IntoGraphQLErrors for QueryPlannerError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
@@ -318,6 +345,9 @@ impl IntoGraphQLErrors for QueryPlannerError {
             QueryPlannerError::SchemaValidationErrors(errs) => errs
                 .into_graphql_errors()
                 .map_err(QueryPlannerError::SchemaValidationErrors),
+            QueryPlannerError::OperationValidationErrors(errs) => errs
+                .into_graphql_errors()
+                .map_err(QueryPlannerError::OperationValidationErrors),
             QueryPlannerError::PlanningErrors(planning_errors) => Ok(planning_errors
                 .errors
                 .iter()
@@ -432,15 +462,20 @@ impl From<CacheResolverError> for QueryPlannerError {
 
 impl From<SpecError> for QueryPlannerError {
     fn from(err: SpecError) -> Self {
-        QueryPlannerError::SpecError(err)
+        match err {
+            SpecError::ValidationError(errors) => {
+                QueryPlannerError::OperationValidationErrors(errors)
+            }
+            _ => QueryPlannerError::SpecError(err),
+        }
     }
 }
 
 impl From<ValidationErrors> for QueryPlannerError {
     fn from(err: ValidationErrors) -> Self {
-        // This needs to be serializable, so eagerly stringify the non-serializable
-        // ApolloDiagnostics.
-        QueryPlannerError::SpecError(SpecError::ValidationError(err.to_string()))
+        QueryPlannerError::OperationValidationErrors(
+            err.errors.iter().map(|e| e.to_json()).collect(),
+        )
     }
 }
 
@@ -518,9 +553,9 @@ pub(crate) enum SchemaError {
 }
 
 /// Collection of schema validation errors.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct ParseErrors {
-    pub(crate) errors: Vec<apollo_parser::Error>,
+    pub(crate) errors: apollo_compiler::Diagnostics,
 }
 
 impl std::fmt::Display for ParseErrors {
@@ -530,8 +565,7 @@ impl std::fmt::Display for ParseErrors {
             if i > 0 {
                 f.write_str("\n")?;
             }
-            // TODO(@goto-bus-stop): display line/column once that is exposed from apollo-rs
-            write!(f, "at index {}: {}", error.index(), error.message())?;
+            write!(f, "{}", error)?;
         }
         let remaining = errors.count();
         if remaining > 0 {
@@ -542,19 +576,54 @@ impl std::fmt::Display for ParseErrors {
 }
 
 /// Collection of schema validation errors.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct ValidationErrors {
-    pub(crate) errors: Vec<apollo_compiler::ApolloDiagnostic>,
+    pub(crate) errors: apollo_compiler::Diagnostics,
+}
+
+impl IntoGraphQLErrors for ValidationErrors {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        Ok(self
+            .errors
+            .iter()
+            .map(|diagnostic| {
+                Error::builder()
+                    .message(diagnostic.message().to_string())
+                    .locations(
+                        diagnostic
+                            .get_line_column()
+                            .map(|location| {
+                                vec![ErrorLocation {
+                                    line: location.line as u32,
+                                    column: location.column as u32,
+                                }]
+                            })
+                            .unwrap_or_default(),
+                    )
+                    .extension_code("GRAPHQL_VALIDATION_FAILED")
+                    .build()
+            })
+            .collect())
+    }
 }
 
 impl std::fmt::Display for ValidationErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut errors = self.errors.iter();
-        if let Some(error) = errors.next() {
-            write!(f, "at index {}: {}", error.location.offset(), error.data)?;
-        }
-        for error in errors {
-            write!(f, "\nat index {}: {}", error.location.offset(), error.data)?;
+        for (index, error) in self.errors.iter().enumerate() {
+            if index > 0 {
+                f.write_str("\n")?;
+            }
+            if let Some(location) = error.get_line_column() {
+                write!(
+                    f,
+                    "[{}:{}] {}",
+                    location.line,
+                    location.column,
+                    error.message()
+                )?;
+            } else {
+                write!(f, "{}", error.message())?;
+            }
         }
         Ok(())
     }

@@ -1,17 +1,16 @@
 //! Authorization plugin
 
-use apollo_compiler::hir;
-use apollo_compiler::hir::FieldDefinition;
-use apollo_compiler::hir::TypeDefinition;
-use apollo_compiler::ApolloCompiler;
-use apollo_compiler::FileId;
-use apollo_compiler::HirDatabase;
+use std::collections::HashMap;
+use std::collections::HashSet;
+
+use apollo_compiler::ast;
+use apollo_compiler::schema;
+use apollo_compiler::schema::Name;
 use tower::BoxError;
 
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::spec::query::transform;
-use crate::spec::query::transform::get_field_type;
 use crate::spec::query::traverse;
 use crate::spec::Schema;
 
@@ -19,75 +18,59 @@ pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: &str = "authenticated";
 pub(crate) const AUTHENTICATED_SPEC_URL: &str = "https://specs.apollo.dev/authenticated/v0.1";
 
 pub(crate) struct AuthenticatedCheckVisitor<'a> {
-    compiler: &'a ApolloCompiler,
-    file_id: FileId,
+    schema: &'a schema::Schema,
+    fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
     pub(crate) found: bool,
     authenticated_directive_name: String,
 }
 
 impl<'a> AuthenticatedCheckVisitor<'a> {
-    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Option<Self> {
+    pub(crate) fn new(schema: &'a schema::Schema, executable: &'a ast::Document) -> Option<Self> {
         Some(Self {
-            compiler,
-            file_id,
+            schema,
+            fragments: transform::collect_fragments(executable),
             found: false,
             authenticated_directive_name: Schema::directive_name(
-                compiler,
+                schema,
                 AUTHENTICATED_SPEC_URL,
                 AUTHENTICATED_DIRECTIVE_NAME,
             )?,
         })
     }
 
-    fn is_field_authenticated(&self, field: &FieldDefinition) -> bool {
-        field
-            .directive_by_name(&self.authenticated_directive_name)
-            .is_some()
-            || field
-                .ty()
-                .type_def(&self.compiler.db)
-                .map(|t| self.is_type_authenticated(&t))
-                .unwrap_or(false)
+    fn is_field_authenticated(&self, field: &schema::FieldDefinition) -> bool {
+        field.directives.has(&self.authenticated_directive_name)
+            || self
+                .schema
+                .types
+                .get(field.ty.inner_named_type())
+                .is_some_and(|t| self.is_type_authenticated(t))
     }
 
-    fn is_type_authenticated(&self, t: &TypeDefinition) -> bool {
-        t.directive_by_name(&self.authenticated_directive_name)
-            .is_some()
+    fn is_type_authenticated(&self, t: &schema::ExtendedType) -> bool {
+        t.directives().has(&self.authenticated_directive_name)
     }
 }
 
 impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
-    fn compiler(&self) -> &ApolloCompiler {
-        self.compiler
-    }
-
-    fn operation(&mut self, node: &hir::OperationDefinition) -> Result<(), BoxError> {
-        traverse::operation(self, node)
-    }
-
-    fn field(&mut self, parent_type: &str, node: &hir::Field) -> Result<(), BoxError> {
-        let field_name = node.name();
-
-        if self
-            .compiler
-            .db
-            .types_definitions_by_name()
-            .get(parent_type)
-            .and_then(|def| def.field(&self.compiler.db, field_name))
-            .is_some_and(|field| self.is_field_authenticated(field))
-        {
+    fn field(
+        &mut self,
+        _parent_type: &str,
+        field_def: &ast::FieldDefinition,
+        node: &ast::Field,
+    ) -> Result<(), BoxError> {
+        if self.is_field_authenticated(field_def) {
             self.found = true;
             return Ok(());
         }
-        traverse::field(self, parent_type, node)
+        traverse::field(self, field_def, node)
     }
 
-    fn fragment_definition(&mut self, node: &hir::FragmentDefinition) -> Result<(), BoxError> {
+    fn fragment_definition(&mut self, node: &ast::FragmentDefinition) -> Result<(), BoxError> {
         if self
-            .compiler
-            .db
-            .types_definitions_by_name()
-            .get(node.type_condition())
+            .schema
+            .types
+            .get(&node.type_condition)
             .is_some_and(|type_definition| self.is_type_authenticated(type_definition))
         {
             self.found = true;
@@ -96,17 +79,16 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
         traverse::fragment_definition(self, node)
     }
 
-    fn fragment_spread(&mut self, node: &hir::FragmentSpread) -> Result<(), BoxError> {
-        let fragments = self.compiler.db.fragments(self.file_id);
-        let condition = fragments
-            .get(node.name())
-            .ok_or("MissingFragmentDefinition")?
-            .type_condition();
+    fn fragment_spread(&mut self, node: &ast::FragmentSpread) -> Result<(), BoxError> {
+        let condition = &self
+            .fragments
+            .get(&node.fragment_name)
+            .ok_or("MissingFragment")?
+            .type_condition;
 
         if self
-            .compiler
-            .db
-            .types_definitions_by_name()
+            .schema
+            .types
             .get(condition)
             .is_some_and(|type_definition| self.is_type_authenticated(type_definition))
         {
@@ -119,13 +101,12 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
     fn inline_fragment(
         &mut self,
         parent_type: &str,
-        node: &hir::InlineFragment,
+        node: &ast::InlineFragment,
     ) -> Result<(), BoxError> {
-        if let Some(name) = node.type_condition() {
+        if let Some(name) = &node.type_condition {
             if self
-                .compiler
-                .db
-                .types_definitions_by_name()
+                .schema
+                .types
                 .get(name)
                 .is_some_and(|type_definition| self.is_type_authenticated(type_definition))
             {
@@ -136,11 +117,16 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
 
         traverse::inline_fragment(self, parent_type, node)
     }
+
+    fn schema(&self) -> &apollo_compiler::Schema {
+        self.schema
+    }
 }
 
 pub(crate) struct AuthenticatedVisitor<'a> {
-    compiler: &'a ApolloCompiler,
-    file_id: FileId,
+    schema: &'a schema::Schema,
+    fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
+    implementers_map: &'a HashMap<Name, HashSet<Name>>,
     pub(crate) query_requires_authentication: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
     current_path: Path,
@@ -148,75 +134,80 @@ pub(crate) struct AuthenticatedVisitor<'a> {
 }
 
 impl<'a> AuthenticatedVisitor<'a> {
-    pub(crate) fn new(compiler: &'a ApolloCompiler, file_id: FileId) -> Option<Self> {
+    pub(crate) fn new(
+        schema: &'a schema::Schema,
+        executable: &'a ast::Document,
+        implementers_map: &'a HashMap<Name, HashSet<Name>>,
+    ) -> Option<Self> {
         Some(Self {
-            compiler,
-            file_id,
+            schema,
+            fragments: transform::collect_fragments(executable),
+            implementers_map,
             query_requires_authentication: false,
             unauthorized_paths: Vec::new(),
             current_path: Path::default(),
             authenticated_directive_name: Schema::directive_name(
-                compiler,
+                schema,
                 AUTHENTICATED_SPEC_URL,
                 AUTHENTICATED_DIRECTIVE_NAME,
             )?,
         })
     }
 
-    fn is_field_authenticated(&self, field: &FieldDefinition) -> bool {
-        field
-            .directive_by_name(&self.authenticated_directive_name)
-            .is_some()
-            || field
-                .ty()
-                .type_def(&self.compiler.db)
-                .map(|t| self.is_type_authenticated(&t))
-                .unwrap_or(false)
+    fn is_field_authenticated(&self, field: &schema::FieldDefinition) -> bool {
+        field.directives.has(&self.authenticated_directive_name)
+            || self
+                .schema
+                .types
+                .get(field.ty.inner_named_type())
+                .is_some_and(|t| self.is_type_authenticated(t))
     }
 
-    fn is_type_authenticated(&self, t: &TypeDefinition) -> bool {
-        t.directive_by_name(&self.authenticated_directive_name)
-            .is_some()
+    fn is_type_authenticated(&self, t: &schema::ExtendedType) -> bool {
+        t.directives().has(&self.authenticated_directive_name)
     }
 
     fn implementors_with_different_requirements(
         &self,
-        parent_type: &str,
-        node: &hir::Field,
+        field_def: &ast::FieldDefinition,
+        node: &ast::Field,
     ) -> bool {
         // if all selections under the interface field are fragments with type conditions
         // then we don't need to check that they have the same authorization requirements
-        if node.selection_set().fields().is_empty() {
+        if node.selection_set.iter().all(|sel| {
+            matches!(
+                sel,
+                ast::Selection::FragmentSpread(_) | ast::Selection::InlineFragment(_)
+            )
+        }) {
             return false;
         }
 
-        if let Some(type_definition) = get_field_type(self, parent_type, node.name())
-            .and_then(|ty| self.compiler.db.find_type_definition_by_name(ty))
-        {
-            if self.implementors_with_different_type_requirements(&type_definition) {
+        let type_name = field_def.ty.inner_named_type();
+        if let Some(type_definition) = self.schema.types.get(type_name) {
+            if self.implementors_with_different_type_requirements(type_name, type_definition) {
                 return true;
             }
         }
         false
     }
 
-    fn implementors_with_different_type_requirements(&self, t: &TypeDefinition) -> bool {
-        if t.is_interface_type_definition() {
+    fn implementors_with_different_type_requirements(
+        &self,
+        type_name: &str,
+        t: &schema::ExtendedType,
+    ) -> bool {
+        if t.is_interface() {
             let mut is_authenticated: Option<bool> = None;
 
             for ty in self
-                .compiler
-                .db
-                .subtype_map()
-                .get(t.name())
+                .implementers_map
+                .get(type_name)
                 .into_iter()
                 .flatten()
-                .cloned()
-                .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
+                .filter_map(|ty| self.schema.types.get(ty))
             {
-                let ty_is_authenticated = ty
-                    .directive_by_name(&self.authenticated_directive_name)
-                    .is_some();
+                let ty_is_authenticated = ty.directives().has(&self.authenticated_directive_name);
                 match is_authenticated {
                     None => is_authenticated = Some(ty_is_authenticated),
                     Some(other_ty_is_authenticated) => {
@@ -234,30 +225,16 @@ impl<'a> AuthenticatedVisitor<'a> {
     fn implementors_with_different_field_requirements(
         &self,
         parent_type: &str,
-        field: &hir::Field,
+        field: &ast::Field,
     ) -> bool {
-        if let Some(t) = self
-            .compiler
-            .db
-            .find_type_definition_by_name(parent_type.to_string())
-        {
-            if t.is_interface_type_definition() {
+        if let Some(t) = self.schema.types.get(parent_type) {
+            if t.is_interface() {
                 let mut is_authenticated: Option<bool> = None;
 
-                for ty in self
-                    .compiler
-                    .db
-                    .subtype_map()
-                    .get(t.name())
-                    .into_iter()
-                    .flatten()
-                    .cloned()
-                    .filter_map(|ty| self.compiler.db.find_type_definition_by_name(ty))
-                {
-                    if let Some(f) = ty.field(&self.compiler.db, field.name()) {
-                        let field_is_authenticated = f
-                            .directive_by_name(&self.authenticated_directive_name)
-                            .is_some();
+                for ty in self.implementers_map.get(parent_type).into_iter().flatten() {
+                    if let Ok(f) = self.schema.type_field(ty, &field.name) {
+                        let field_is_authenticated =
+                            f.directives.has(&self.authenticated_directive_name);
                         match is_authenticated {
                             Some(other) => {
                                 if field_is_authenticated != other {
@@ -277,60 +254,45 @@ impl<'a> AuthenticatedVisitor<'a> {
 }
 
 impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
-    fn compiler(&self) -> &ApolloCompiler {
-        self.compiler
-    }
-
     fn operation(
         &mut self,
-        node: &hir::OperationDefinition,
-    ) -> Result<Option<apollo_encoder::OperationDefinition>, BoxError> {
-        let operation_requires_authentication = node
-            .object_type(&self.compiler.db)
-            .map(|ty| {
-                ty.directive_by_name(&self.authenticated_directive_name)
-                    .is_some()
-            })
-            .unwrap_or(false);
+        root_type: &str,
+        node: &ast::OperationDefinition,
+    ) -> Result<Option<ast::OperationDefinition>, BoxError> {
+        let operation_requires_authentication = self
+            .schema
+            .get_object(root_type)
+            .is_some_and(|ty| ty.directives.has(&self.authenticated_directive_name));
 
         if operation_requires_authentication {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_authentication = true;
             Ok(None)
         } else {
-            transform::operation(self, node)
+            transform::operation(self, root_type, node)
         }
     }
 
     fn field(
         &mut self,
         parent_type: &str,
-        node: &hir::Field,
-    ) -> Result<Option<apollo_encoder::Field>, BoxError> {
-        let field_name = node.name();
+        field_def: &ast::FieldDefinition,
+        node: &ast::Field,
+    ) -> Result<Option<ast::Field>, BoxError> {
+        let field_name = &node.name;
 
-        let mut is_field_list = false;
+        let is_field_list = field_def.ty.is_list();
 
-        let field_requires_authentication = self
-            .compiler
-            .db
-            .types_definitions_by_name()
-            .get(parent_type)
-            .and_then(|def| def.field(&self.compiler.db, field_name))
-            .is_some_and(|field| {
-                if field.ty().is_list() {
-                    is_field_list = true;
-                }
-                self.is_field_authenticated(field)
-            });
+        let field_requires_authentication = self.is_field_authenticated(field_def);
 
-        self.current_path.push(PathElement::Key(field_name.into()));
+        self.current_path
+            .push(PathElement::Key(field_name.as_str().into()));
         if is_field_list {
             self.current_path.push(PathElement::Flatten);
         }
 
         let implementors_with_different_requirements =
-            self.implementors_with_different_requirements(parent_type, node);
+            self.implementors_with_different_requirements(field_def, node);
 
         let implementors_with_different_field_requirements =
             self.implementors_with_different_field_requirements(parent_type, node);
@@ -343,7 +305,7 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
             self.query_requires_authentication = true;
             Ok(None)
         } else {
-            transform::field(self, parent_type, node)
+            transform::field(self, field_def, node)
         };
 
         if is_field_list {
@@ -356,13 +318,12 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
 
     fn fragment_definition(
         &mut self,
-        node: &hir::FragmentDefinition,
-    ) -> Result<Option<apollo_encoder::FragmentDefinition>, BoxError> {
+        node: &ast::FragmentDefinition,
+    ) -> Result<Option<ast::FragmentDefinition>, BoxError> {
         let fragment_requires_authentication = self
-            .compiler
-            .db
-            .types_definitions_by_name()
-            .get(node.type_condition())
+            .schema
+            .types
+            .get(&node.type_condition)
             .is_some_and(|type_definition| self.is_type_authenticated(type_definition));
 
         if fragment_requires_authentication {
@@ -374,20 +335,19 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
 
     fn fragment_spread(
         &mut self,
-        node: &hir::FragmentSpread,
-    ) -> Result<Option<apollo_encoder::FragmentSpread>, BoxError> {
-        let fragments = self.compiler.db.fragments(self.file_id);
-        let condition = fragments
-            .get(node.name())
-            .ok_or("MissingFragmentDefinition")?
-            .type_condition();
+        node: &ast::FragmentSpread,
+    ) -> Result<Option<ast::FragmentSpread>, BoxError> {
+        let condition = &self
+            .fragments
+            .get(&node.fragment_name)
+            .ok_or("MissingFragment")?
+            .type_condition;
         self.current_path
-            .push(PathElement::Fragment(condition.into()));
+            .push(PathElement::Fragment(condition.as_str().into()));
 
         let fragment_requires_authentication = self
-            .compiler
-            .db
-            .types_definitions_by_name()
+            .schema
+            .types
             .get(condition)
             .is_some_and(|type_definition| self.is_type_authenticated(type_definition));
 
@@ -407,10 +367,9 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
     fn inline_fragment(
         &mut self,
         parent_type: &str,
-
-        node: &hir::InlineFragment,
-    ) -> Result<Option<apollo_encoder::InlineFragment>, BoxError> {
-        match node.type_condition() {
+        node: &ast::InlineFragment,
+    ) -> Result<Option<ast::InlineFragment>, BoxError> {
+        match &node.type_condition {
             None => {
                 self.current_path.push(PathElement::Fragment(String::new()));
                 let res = transform::inline_fragment(self, parent_type, node);
@@ -418,12 +377,12 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
                 res
             }
             Some(name) => {
-                self.current_path.push(PathElement::Fragment(name.into()));
+                self.current_path
+                    .push(PathElement::Fragment(name.as_str().into()));
 
                 let fragment_requires_authentication = self
-                    .compiler
-                    .db
-                    .types_definitions_by_name()
+                    .schema
+                    .types
                     .get(name)
                     .is_some_and(|type_definition| self.is_type_authenticated(type_definition));
 
@@ -441,11 +400,16 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
             }
         }
     }
+
+    fn schema(&self) -> &apollo_compiler::Schema {
+        self.schema
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::ApolloCompiler;
+    use apollo_compiler::ast;
+    use apollo_compiler::Schema;
     use multimap::MultiMap;
     use serde_json_bytes::json;
     use tower::ServiceExt;
@@ -529,29 +493,24 @@ mod tests {
     "#;
 
     #[track_caller]
-    fn filter(schema: &str, query: &str) -> (apollo_encoder::Document, Vec<Path>) {
-        let mut compiler = ApolloCompiler::new();
+    fn filter(schema: &str, query: &str) -> (ast::Document, Vec<Path>) {
+        let schema = Schema::parse(schema, "schema.graphql");
+        let doc = ast::Document::parse(query, "query.graphql");
+        schema.validate().unwrap();
+        doc.to_executable(&schema).validate(&schema).unwrap();
 
-        let _schema_id = compiler.add_type_system(schema, "schema.graphql");
-        let file_id = compiler.add_executable(query, "query.graphql");
-
-        let diagnostics = compiler.validate();
-        for diagnostic in &diagnostics {
-            println!("{diagnostic}");
-        }
-        assert!(!diagnostics.into_iter().any(|err| err.data.is_error()));
-
-        let mut visitor = AuthenticatedVisitor::new(&compiler, file_id).unwrap();
+        let map = schema.implementers_map();
+        let mut visitor = AuthenticatedVisitor::new(&schema, &doc, &map).unwrap();
 
         (
-            transform::document(&mut visitor, file_id).unwrap(),
+            transform::document(&mut visitor, &doc).unwrap(),
             visitor.unauthorized_paths,
         )
     }
 
     struct TestResult<'a> {
         query: &'a str,
-        result: apollo_encoder::Document,
+        result: ast::Document,
         paths: Vec<Path>,
     }
 

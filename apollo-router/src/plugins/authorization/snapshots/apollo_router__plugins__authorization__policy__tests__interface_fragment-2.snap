@@ -21,7 +21,7 @@ query:
 extracted_policies: {"read user", "read username"}
 successful policies: ["read user", "read username"]
 filtered:
-query {
+{
   topProducts {
     type
   }
@@ -30,6 +30,7 @@ query {
     ...F
   }
 }
+
 fragment F on User {
   name
 }

@@ -3,5 +3,6 @@ supergraph:
 telemetry:
   tracing:
     otlp:
+      enabled: true
       endpoint: ${env.TEST_CONFIG_ENDPOINT}
       protocol: http

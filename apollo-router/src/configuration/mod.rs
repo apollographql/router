@@ -667,8 +667,7 @@ impl Supergraph {
 
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Limits {
     /// If set, requests with operations deeper than this maximum
     /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
@@ -776,16 +775,13 @@ pub(crate) struct Router {
 
 /// Automatic Persisted Queries (APQ) configuration
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Apq {
     /// Activates Automatic Persisted Queries (enabled by default)
-    #[serde(default = "default_apq")]
     pub(crate) enabled: bool,
 
-    #[serde(default)]
     pub(crate) router: Router,
 
-    #[serde(default)]
     pub(crate) subgraph: SubgraphConfiguration<SubgraphApq>,
 }
 
@@ -803,15 +799,10 @@ impl Apq {
 
 /// Subgraph level Automatic Persisted Queries (APQ) configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphApq {
     /// Enable
-    #[serde(default = "default_subgraph_apq")]
     pub(crate) enabled: bool,
-}
-
-fn default_subgraph_apq() -> bool {
-    false
 }
 
 fn default_apq() -> bool {

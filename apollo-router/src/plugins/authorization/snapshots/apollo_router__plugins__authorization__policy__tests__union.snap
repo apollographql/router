@@ -19,7 +19,7 @@ query:
 extracted_policies: {"a", "b"}
 successful policies: ["a"]
 filtered:
-query {
+{
   test
   uni {
     ... on A {

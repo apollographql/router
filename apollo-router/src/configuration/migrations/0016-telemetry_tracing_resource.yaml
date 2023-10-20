@@ -1,0 +1,5 @@
+description: telemetry.tracing.common.attributes has been renamed to telemetry.tracing.common.resource
+actions:
+  - type: move
+    from: telemetry.tracing.common.attributes
+    to: telemetry.tracing.common.resource

@@ -4,6 +4,231 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.33.0] - 2023-10-17
+
+## 🚀 Features
+
+### Add `hasNext` to SupergraphRequest ([Issue #4016](https://github.com/apollographql/router/issues/4016))
+
+Coprocessors multi-part response support has been enhanced to include `hasNext`, allowing you to determine when a request has completed.
+
+When `stage` is `SupergraphResponse`, `hasNext` if present and `true` indicates that there will be subsequent `SupergraphResponse` calls to the co-processor for each multi-part (`@defer`/subscriptions) response.
+
+See the [coprocessor documentation](https://www.apollographql.com/docs/router/customizations/coprocessor/) for more details.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4017
+
+### Expose the ability to set topology spread constraints on the helm chart ([3891](https://github.com/apollographql/router/issues/3891))
+
+Give developers the ability to set topology spread constraints that can be used to guarantee that federation pods are spread out evenly across AZs.
+
+By [bjoern](https://github.com/bjoernw) in https://github.com/apollographql/router/pull/3892
+
+## 🐛 Fixes
+
+### Ignore JWKS keys which aren't supported by the router ([Issue #3853](https://github.com/apollographql/router/issues/3853))
+
+If you have a JWKS which contains a key which has an algorithm (alg) which the router doesn't recognise, then the entire JWKS is disregarded even if there were other keys in the JWKS which the router could use.
+
+We have changed the JWKS processing logic so that we remove entries with an unrecognised algorithm from the list of available keys. We print a warning with the name of the algorithm for each removed entry.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3922
+
+### Fix panic when streaming responses to co-processor ([Issue #4013](https://github.com/apollographql/router/issues/4013))
+
+Streamed responses will no longer cause a panic in the co-processor plugin. This affected defer and stream queries.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4014
+
+### Only reject defer/subscriptions if actually part of a batch ([Issue #3956](https://github.com/apollographql/router/issues/3956))
+
+Fix the checking logic so that deferred queries or subscriptions will only be rejected when experimental batching is enabled and the operations are part of a batch.
+
+Without this fix, all subscriptions or deferred queries would be rejected when experimental batching support was enabled.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3959
+
+### Fix requires selection in arrays ([Issue #3972](https://github.com/apollographql/router/issues/3972))
+
+When a field has a `@requires` annotation that selects an array, and some fields are missing in that array or some of the elements are null, the router would short circuit the selection and remove the entire array. This relaxes the condition to allow nulls in the selected array
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3975
+
+### Fix router hang when opening the explorer, prometheus or health check page ([Issue #3941](https://github.com/apollographql/router/issues/3941))
+
+The Router did not gracefully shutdown when an idle connections are made by a client, and would instead hang. In particular, web browsers make such connection in anticipation of future traffic.
+
+This is now fixed, and the Router will now gracefully shut down in a timely fashion.
+
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3969
+
+### Fix hang and high CPU usage when compressing small responses ([PR #3961](https://github.com/apollographql/router/pull/3961))
+
+When returning small responses (less than 10 bytes) and compressing them using gzip, the router could go into an infinite loop
+
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3961
+
+## 📃 Configuration
+
+### Add `enabled` field for telemetry exporters ([PR #3952](https://github.com/apollographql/router/pull/3952))
+
+Telemetry configuration now supports `enabled` on all exporters. This allows exporters to be disabled without removing them from the configuration and in addition allows for a more streamlined default configuration.
+
+```diff
+telemetry:
+  tracing: 
+    datadog:
++      enabled: true
+    jaeger:
++      enabled: true
+    otlp:
++      enabled: true
+    zipkin:
++      enabled: true
+```
+
+Existing configurations will be migrated to the new format automatically on startup. However, you should update your configuration to use the new format as soon as possible. 
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3952
+
+## 🛠 Maintenance
+
+### Create a replacement self-signed server certificate: 10 years lifespan ([Issue #3998](https://github.com/apollographql/router/issues/3998))
+
+This certificate is only used for testing, so 10 years lifespan is acceptable.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4009
+
+## 📚 Documentation
+
+### Updated documentation for deploying router ([PR #3943](https://github.com/apollographql/router/pull/3943))
+
+Updated documentation for containerized router deployments, with guides and examples for [deploying on Kubernetes](https://www.apollographql.com/docs/router/containerization/kubernetes) and [running on Docker](https://www.apollographql.com/docs/router/containerization/docker).
+
+By [@shorgi](https://github.com/shorgi) in https://github.com/apollographql/router/pull/3943
+
+### Document guidance for request and response buffering ([Issue #3838](https://github.com/apollographql/router/issues/3838))
+
+Provides specific guidance on request and response buffering within the router.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3970
+
+
+
+# [1.32.0] - 2023-10-04
+
+## 🚀 Features
+
+### Move persisted queries to general availability ([PR #3914](https://github.com/apollographql/router/pull/3914))
+
+[Persisted Queries](https://www.apollographql.com/docs/graphos/operations/persisted-queries/) (a GraphOS Enterprise feature) is now moving to General Availability, from Preview where it has been since Apollo Router 1.25. In addition to Safelisting, persisted queries can now also be used to [pre-warm the query plan cache](https://github.com/apollographql/router/releases/tag/v1.31.0) to speed up schema updates. 
+
+
+The feature is now configured with a `persisted_queries` top-level key in the YAML configuration instead of with `preview_persisted_queries`. Existing configuration files will keep working as before, but with a warning that can be resolved by renaming the configuration section from `preview_persisted_queries` to `persisted_queries`:
+
+```diff
+-preview_persisted_queries:
++persisted_queries:
+   enabled: true
+```
+
+By [@glasser](https://github.com/glasser) in https://github.com/apollographql/router/pull/3914
+
+## 🐛 Fixes
+
+### Allow coprocessor to return error message ([PR #3806](https://github.com/apollographql/router/pull/3806))
+
+Previously, a regression prevented an error message string from being returned in the body of a coprocessor request. That regression has been fixed, and a coprocessor can once again [return with an error message](https://www.apollographql.com/docs/router/customizations/coprocessor#terminating-a-client-request):
+
+```json
+{
+    "version": 1,
+    "stage": "SubgraphRequest",
+    "control": {
+        "break": 401
+    },
+    "body": "my error message"
+}
+```
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3806
+
+
+
+## 🛠 Maintenance
+
+### Update to OpenTelemetry 0.20.0 ([PR #3649](https://github.com/apollographql/router/pull/3649))
+
+The router now uses OpenTelemetry 0.20.0. This includes a number of fixes and improvements from upstream.
+
+In particular metrics have some significant changes:
+* Prometheus metrics are now aligned with the [OpenTelemetry spec](https://opentelemetry.io/docs/specs/otel/compatibility/prometheus_and_openmetrics/), and will not report `service_name` on each individual metric. Resource attributes are now moved to a single `target_info` metric.
+
+  Users should check that their dashboards and alerts are properly configured when upgrading.
+
+* The default service name for metrics is now `unknown_service` as per the [OpenTelemetry spec](https://opentelemetry.io/docs/concepts/sdk-configuration/general-sdk-configuration/#otel_service_name).
+
+  Users should ensure to configure service name via router.yaml, or via the `OTEL_SERVICE_NAME` environment variable.
+
+* The order of priority for setting service name has been brought into line with the rest of the router configuration. The order of priority is now:
+  1. `OTEL_RESOURCE_ATTRIBUTES` environment variable
+  2. `OTEL_SERVICE_NAME` environment variable
+  3. `resource_attributes` in router.yaml
+  4. `service_name` in router.yaml
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3649
+
+### Fix type handling for telemetry metric counter ([Issue #3865](https://github.com/apollographql/router/issues/3865))
+
+Previously, the assignment of some telemetry metric counters may not have succeeded because the assignment type wasn't accounted for. For example, the following panicked in debug mode because `1` wasn't `1u64`:
+
+```rust
+tracing::info!(
+    monotonic_counter
+        .apollo
+        .router
+        .operations
+        .authentication
+        .jwt = 1,
+    authentication.jwt.failed = true
+)
+```
+
+This issue has been fixed by adding more supported types for metric counters.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3868
+
+
+## 🧪 Experimental
+
+### Support for query batching ([Issue #126](https://github.com/apollographql/router/issues/126))
+
+An experimental implementation of query batching has been added to support client request batching in the Apollo Router.
+
+If you’re using Apollo Client, you can leverage its built-in support for batching to reduce the number of individual requests sent to the Apollo Router.
+
+Once [configured](https://www.apollographql.com/docs/react/api/link/apollo-link-batch-http/), Apollo Client  automatically combines multiple operations into a single HTTP request. The number of operations within a batch is client configurable, including the maximum number of operations in a batch and the maximum duration to wait for operations to accumulate before sending the batch request. 
+
+The Apollo Router must be configured to receive batch requests, otherwise it rejects them. When processing a batch request, the router deserializes and processes each operation of a batch independently, and it responds to the client only after all operations of the batch have been completed.
+
+```yaml
+experimental_batching:
+  enabled: true
+  mode: batch_http_link
+```
+
+All operations within a batch execute concurrently with respect to each other.
+
+Don't use subscriptions or `@defer` queries within a batch, as they are unsupported.
+
+For details, see the documentation for [query batching](https://www.apollographql.com/docs/router/executing-operations/query-batching).
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3837
+
+
+
 # [1.31.0] - 2023-09-27
 
 ## 🚀 Features

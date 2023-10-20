@@ -19,7 +19,7 @@ query:
 extracted_policies: {"internal", "profile", "read user", "read username"}
 successful policies: ["profile", "read user", "internal"]
 filtered:
-query {
+{
   topProducts {
     type
     internal

@@ -19,7 +19,7 @@ query:
 extracted_policies: {"a", "b", "itf"}
 successful policies: []
 filtered:
-query {
+{
   test
 }
 

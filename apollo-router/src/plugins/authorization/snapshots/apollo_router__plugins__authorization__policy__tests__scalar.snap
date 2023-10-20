@@ -14,7 +14,7 @@ query:
 extracted_policies: {"internal"}
 successful policies: []
 filtered:
-query {
+{
   topProducts {
     type
   }

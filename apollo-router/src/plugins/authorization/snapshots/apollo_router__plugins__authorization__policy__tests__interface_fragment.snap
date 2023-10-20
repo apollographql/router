@@ -21,7 +21,7 @@ query:
 extracted_policies: {"read user", "read username"}
 successful policies: []
 filtered:
-query {
+{
   topProducts {
     type
   }

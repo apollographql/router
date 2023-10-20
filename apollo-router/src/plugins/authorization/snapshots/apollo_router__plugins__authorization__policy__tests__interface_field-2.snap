@@ -21,7 +21,7 @@ query:
 extracted_policies: {"a", "b"}
 successful policies: []
 filtered:
-query {
+{
   test
   itf {
     ... on A {
