@@ -110,7 +110,7 @@ struct AuthenticationPlugin {
     subgraph: Option<SubgraphAuth>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 struct JWTConf {
     /// List of JWKS used to verify tokens
@@ -135,17 +135,6 @@ struct JwksConf {
     #[serde(default)]
     algorithms: Option<Vec<Algorithm>>,
 }
-
-impl Default for JWTConf {
-    fn default() -> Self {
-        Self {
-            jwks: Default::default(),
-            header_name: default_header_name(),
-            header_value_prefix: default_header_value_prefix(),
-        }
-    }
-}
-
 /// Authentication
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

@@ -24,39 +24,54 @@ Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/)
 
 ## Common configuration
 
-### Trace config
-
-In your router's YAML config file, the `trace_config` section contains common configuration that's used by all exporters. This section is optional, and it falls back on the values of environment variables specified by the [OpenTelemetry spec](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/sdk-environment-variables.md) if `service_name` is not set.
+### Service name
 
 ```yaml title="router.yaml"
 telemetry:
   tracing:
-    trace_config:
+    common:
+      # (Optional) Set the service name to easily find traces related to the apollo-router in your metrics dashboards
       service_name: "router"
-      service_namespace: "apollo"
-      # Optional. Either a float between 0 and 1 or 'always_on' or 'always_off'
-      sampler: 0.1
-
-      # Optional. Use a parent based sampler. This enables remote spans help make a decision on if a span is sampeld or not.
-      # https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/sdk.md#parentbased
-      parent_based_sampler: false
-
-      # Optional limits
-      max_attributes_per_event: 10
-      max_attributes_per_link: 10
-      max_attributes_per_span: 10
-      max_events_per_span: 10
-      max_links_per_span: 10
-
-      # Attributes particular to an exporter that have not
-      # been explicitly handled in Router configuration.
-      attributes:
-        some.config.attribute: "config value"
 ```
 
-If `service_name` is set, then environment variables are not used. However, you can embed environment variables into your router config using Unix `${key:default}` syntax.
+Service name discovery is handled in the following order:
+1. `OTEL_SERVICE_NAME` env
+2. `OTEL_RESOURCE_ATTRIBUTES` env
+3. `router.yaml` `service_name`
+4. `router.yaml` `resource`
 
-If no environment variable is set and `service_name` is not present then `router` is used as the default service name.
+If none of the above are found then the service name will be set to `unknown_service:apollo_router` or `unknown_service` if the executable name cannot be determined.
+
+### Resource
+
+A Resource is a set of key-value pairs that provide additional global information exported with your traces.
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    common:
+      resource:
+        "environment.name": "production"
+        "environment.namespace": "{env.MY_K8_NAMESPACE_ENV_VARIABLE}"
+```
+
+> [See OpenTelemetry conventions for resources.](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/README.md)
+
+### Sampling
+
+To prevent sending to many traces to your APM you may want to enable sampling. 
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    common:
+      sampler: always_on # (default) all requests are sampled (always_on|always_off|<0.0-1.0>)
+      parent_based_sampler: true # (default) If an incoming span has OpenTelemetry headers then the request will always be sampled. 
+```
+
+Setting `sampler` to `0.1` will result in only 10% of your requests being sampled.
+
+`parent_based_sampler` enables clients to make the sampling decision. This guarantees that a trace that starts at a client will also have spans at the router. You may wish to turn this off if your router is exposed directly to the internet. 
 
 ### Propagation
 
@@ -82,7 +97,7 @@ telemetry:
       zipkin: false
 
       # https://aws.amazon.com/xray/ (compliant with opentracing)
-      awsxray: false
+      aws_xray: false
 
       # If you have your own way to generate a trace id and you want to pass it via a custom request header
       request:
@@ -90,6 +105,23 @@ telemetry:
 ```
 
 Specifying explicit propagation is generally only required if you're using an exporter that supports multiple trace ID formats (e.g., OpenTelemetry Collector, Jaeger, or OpenTracing compatible exporters).
+
+### Span limits
+
+You may set limits on spans to prevent sending too much data to your APM.
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    common:
+
+      # Optional limits
+      max_attributes_per_event: 10
+      max_attributes_per_link: 10
+      max_attributes_per_span: 10
+      max_events_per_span: 10
+      max_links_per_span: 10
+```
 
 ## Trace ID
 
@@ -134,6 +166,7 @@ telemetry:
   tracing:
     # Datadog
     datadog:
+      enabled: true
       batch_processor:
         scheduled_delay: 100ms
         max_concurrent_exports: 1000
@@ -148,7 +181,7 @@ telemetry:
 
 You will need to experiment to find the setting that are appropriate for your use case.
 
-## Using Datadog
+## Using Datadog (native)
 
 The Apollo Router can be configured to connect to either the default agent address or a URL.
 
@@ -156,8 +189,9 @@ The Apollo Router can be configured to connect to either the default agent addre
 telemetry:
   tracing:
     datadog:
-      # Either 'default' or a URL (example: 'http://127.0.0.1:8126')
-      endpoint: default
+      enabled: true
+      # Optional endpoint, either 'default' or a URL (Defaults to http://localhost:8126/v0.4/traces)
+      endpoint: "http://${env.DATADOG_AGENT_HOST}:8126/v0.4/traces"
 ```
 
 [Given that there are some incompatibilities](https://docs.rs/opentelemetry-datadog/latest/opentelemetry_datadog/#quirks)
@@ -168,7 +202,7 @@ To fix this, you can configure the Apollo Router to perform a mapping for the sp
 telemetry:
   tracing:
     datadog:
-      endpoint: default
+      enabled: true
       enable_span_mapping: true
 ```
 
@@ -208,9 +242,13 @@ Instead when `enable_span_mapping` is set to `true` the following trace will be 
 ```
 
 
-## Using Jaeger
+## Using Jaeger (native)
+
+> :warning: [Jaeger native is deprecated](https://opentelemetry.io/blog/2022/jaeger-native-otlp/) and will be removed in a future release of the Apollo Router. Instead, [OTLP](#jaeger) should be used.
 
 The Apollo Router can be configured to export tracing data to Jaeger either via an agent or http collector.
+
+Unless explicitly configured to use a collector, Jaeger will use an agent by default.
 
 ### Agent config
 
@@ -218,36 +256,43 @@ The Apollo Router can be configured to export tracing data to Jaeger either via 
 telemetry:
   tracing:
     jaeger:
+      enabled: true
+      # Optional agent configuration,
       agent:
-        # Either 'default' or a URL
-        endpoint: docker_jaeger:14268
+        # Optional endpoint, either 'default' or a socket address (Defaults to 127.0.0.1:6832)
+        endpoint: "${env.JAEGER_HOST}:6832"  
 ```
 
 ### Collector config
-
-If you're using Kubernetes, you can inject your secrets into configuration via environment variables:
 
 ```yaml title="router.yaml"
 telemetry:
   tracing:
     jaeger:
+      enabled: true
+      # Optional collector configuration,
       collector:
-        endpoint: "http://my-jaeger-collector"
+        # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:14268/api/traces)
+        endpoint: "http://${env.JAEGER_HOST}:14268/api/traces"
         username: "${env.JAEGER_USERNAME}"
         password: "${env.JAEGER_PASSWORD}"
 ```
 
-## OpenTelemetry Collector via OTLP
+## OTLP
 
-[OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) is a horizontally scalable collector that you can use to receive, process, and export your telemetry data in a pluggable way.
-
-If you find that the built-in telemetry features of the Apollo Router are missing some desired functionality (e.g., [exporting to Kafka](https://opentelemetry.io/docs/collector/configuration/#exporters)), then it's worth considering this option.
+OTLP (OpenTelemetry protocol) is the native protocol for open telemetry. It can be used to export traces to a variety of backends including:
+* OpenTelemetry Collector
+* Datadog
+* Honeycomb
+* Lightstep
 
 ```yaml title="router.yaml"
 telemetry:
   tracing:
     otlp:
-      # Either 'default' or a URL
+      enabled: true
+      
+      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317 for gRPC and http://127.0.0.1:4318 for HTTP)
       endpoint: default
 
       # Optional protocol (Defaults to grpc)
@@ -270,6 +315,57 @@ telemetry:
 
 Remember that `file.` and `env.` prefixes can be used for expansion in config yaml. e.g. `${file.ca.txt}`.
 
+### Datadog
+
+To use Datadog, you must configure the Datadog agent to accept OTLP traces. This can be done by adding the following to your `datadog.yaml`:
+
+```yaml title="datadog.yaml"
+otlp_config:
+  receiver:
+    protocols:
+      grpc:
+        endpoint: <dd-agent-ip>:4317
+```
+
+The router must also be configured to send traces to the Datadog agent:
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    otlp:
+      enabled: true
+
+      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
+      endpoint: "${env.DATADOG_AGENT_HOST}:4317"
+```
+
+See [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host) for more details 
+
+### Jaeger
+
+Since 1.35.0, [Jaeger supports native OTLP ingestion](https://medium.com/jaegertracing/introducing-native-support-for-opentelemetry-in-jaeger-eb661be8183c).
+
+Ensure that when running Jaeger in docker port 4317 is exposed and that `COLLECTOR_OTLP_ENABLED` is set to `true`:
+```bash
+docker run --name jaeger \
+  -e COLLECTOR_OTLP_ENABLED=true \
+  -p 16686:16686 \
+  -p 4317:4317 \
+  -p 4318:4318 \
+  jaegertracing/all-in-one:1.35
+```
+
+Then configure the router to send traces via OTLP:
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    otlp:
+      enabled: true
+
+      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
+      endpoint: "http://${env.JAEGER_HOST}:4317"
+```
+
 ## Using Zipkin
 
 The Apollo Router can be configured to export tracing data to either the default collector address or a URL:
@@ -278,6 +374,8 @@ The Apollo Router can be configured to export tracing data to either the default
 telemetry:
   tracing:
     zipkin:
-      # Either 'default' or a URL
-      endpoint: http://my_zipkin_collector.dev
+      enabled: true
+
+      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:9411/api/v2/spans)
+      endpoint: "http://${env.ZIPKIN_HOST}:9411/api/v2/spans}"   
 ```
