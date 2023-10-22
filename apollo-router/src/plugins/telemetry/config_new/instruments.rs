@@ -1,7 +1,6 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::plugins::telemetry::config_new::attributes::Extendable;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::RouterCustomAttribute;
 use crate::plugins::telemetry::config_new::attributes::RouterEvent;
@@ -9,11 +8,17 @@ use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphCustomAttribute;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphCustomAttribute;
+use crate::plugins::telemetry::config_new::attributes::{
+    DefaultAttributeRequirementLevel, Extendable,
+};
 
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Instruments {
+    /// The attributes to include by default in instruments based on their level as specified in the otel semantic conventions and Apollo documentation.
+    default_attribute_requirement_level: DefaultAttributeRequirementLevel,
+
     /// Router service instruments. For more information see documentation on Router lifecycle.
     router: Extendable<RouterInstruments, Instrument<RouterAttributes, RouterCustomAttribute>>,
     /// Supergraph service instruments. For more information see documentation on Router lifecycle.
