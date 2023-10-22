@@ -1,10 +1,15 @@
-use crate::plugins::telemetry::config_new::attributes::{
-    DefaultAttributeRequirementLevel, Extendable, HttpCommonAttributes, HttpServerAttributes,
-    RouterCustomAttribute, SubgraphAttributes, SubgraphCustomAttribute, SupergraphAttributes,
-    SupergraphCustomAttribute,
-};
 use schemars::JsonSchema;
 use serde::Deserialize;
+
+use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use crate::plugins::telemetry::config_new::attributes::Extendable;
+use crate::plugins::telemetry::config_new::attributes::HttpCommonAttributes;
+use crate::plugins::telemetry::config_new::attributes::HttpServerAttributes;
+use crate::plugins::telemetry::config_new::attributes::RouterCustomAttribute;
+use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
+use crate::plugins::telemetry::config_new::attributes::SubgraphCustomAttribute;
+use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
+use crate::plugins::telemetry::config_new::attributes::SupergraphCustomAttribute;
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]

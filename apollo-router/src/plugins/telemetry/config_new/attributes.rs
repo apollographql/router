@@ -1,9 +1,11 @@
-use crate::plugins::telemetry::config::AttributeValue;
+use std::collections::HashMap;
+
 use schemars::gen::SchemaGenerator;
 use schemars::schema::Schema;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::collections::HashMap;
+
+use crate::plugins::telemetry::config::AttributeValue;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[allow(dead_code)]
@@ -68,9 +70,12 @@ where
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum RouterEvent {
-    OnRequest,
-    OnResponse,
-    OnError,
+    /// When a service request occurs.
+    Request,
+    /// When a service response occurs.
+    Response,
+    /// When a service error occurs.
+    Error,
 }
 
 #[allow(dead_code)]
@@ -540,7 +545,7 @@ pub(crate) struct HttpCommonAttributes {
     /// Examples:
     /// * ipv4
     /// * ipv6
-    /// Requirement level:	Recommended
+    /// Requirement level: Recommended
     #[serde(rename = "network.type")]
     network_type: bool,
 
@@ -565,7 +570,7 @@ pub(crate) struct HttpServerAttributes {
     /// Requirement level: Recommended
     #[serde(rename = "client.address")]
     client_address: bool,
-    /// 	The port of the original client behind all proxies, if known (e.g. from Forwarded or a similar header). Otherwise, the immediate client peer port.
+    /// The port of the original client behind all proxies, if known (e.g. from Forwarded or a similar header). Otherwise, the immediate client peer port.
     /// Examples:
     /// * 83.164.160.102
     /// Requirement level: Recommended
@@ -577,7 +582,7 @@ pub(crate) struct HttpServerAttributes {
     /// Requirement level: Conditionally Required: If and only if it’s available
     #[serde(rename = "http.route")]
     http_route: bool,
-    ///	Local socket address. Useful in case of a multi-IP host.
+    /// Local socket address. Useful in case of a multi-IP host.
     /// Examples:
     /// * 10.1.2.80
     /// * /tmp/my.sock
@@ -587,7 +592,7 @@ pub(crate) struct HttpServerAttributes {
     /// Local socket port. Useful in case of a multi-port host.
     /// Examples:
     /// * 65123
-    /// Requirement level: 	Opt-In
+    /// Requirement level: Opt-In
     #[serde(rename = "network.local.port")]
     network_local_port: bool,
     /// Peer address of the network connection - IP address or Unix domain socket name.
@@ -597,7 +602,7 @@ pub(crate) struct HttpServerAttributes {
     /// Requirement level: Recommended
     #[serde(rename = "network.peer.address")]
     network_peer_address: bool,
-    ///	Peer port number of the network connection.
+    /// Peer port number of the network connection.
     /// Examples:
     /// * 65123
     /// Requirement level: Recommended
@@ -619,16 +624,16 @@ pub(crate) struct HttpServerAttributes {
     /// Requirement level: Recommended
     #[serde(rename = "server.port")]
     server_port: bool,
-    ///	The URI path component
+    /// The URI path component
     /// Examples:
     /// * /search
     /// Requirement level: Required
     #[serde(rename = "url.path")]
     url_path: bool,
-    ///	The URI query component
+    /// The URI query component
     /// Examples:
     /// * q=OpenTelemetry
-    /// Requirement level: 	Conditionally Required: If and only if one was received/sent.
+    /// Requirement level: Conditionally Required: If and only if one was received/sent.
     #[serde(rename = "url.query")]
     url_query: bool,
 
@@ -678,7 +683,7 @@ pub(crate) struct HttpClientAttributes {
     #[serde(rename = "server.address")]
     server_address: bool,
 
-    ///	Port identifier of the “URI origin” HTTP request is sent to.
+    /// Port identifier of the “URI origin” HTTP request is sent to.
     /// Examples:
     /// * 80
     /// * 8080

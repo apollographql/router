@@ -1,9 +1,13 @@
-use crate::plugins::telemetry::config_new::attributes::{
-    Extendable, RouterAttributes, RouterCustomAttribute, SubgraphAttributes,
-    SubgraphCustomAttribute, SupergraphAttributes, SupergraphCustomAttribute,
-};
 use schemars::JsonSchema;
 use serde::Deserialize;
+
+use crate::plugins::telemetry::config_new::attributes::Extendable;
+use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
+use crate::plugins::telemetry::config_new::attributes::RouterCustomAttribute;
+use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
+use crate::plugins::telemetry::config_new::attributes::SubgraphCustomAttribute;
+use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
+use crate::plugins::telemetry::config_new::attributes::SupergraphCustomAttribute;
 
 /// Events are
 #[allow(dead_code)]
