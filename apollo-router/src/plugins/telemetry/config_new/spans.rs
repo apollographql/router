@@ -72,5 +72,6 @@ pub(crate) struct SupergraphSpans {
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphSpans {
+    /// Custom attributes that are attached to the subgraph span.
     attributes: Extendable<SubgraphAttributes, SubgraphCustomAttribute>,
 }

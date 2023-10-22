@@ -25,15 +25,19 @@ pub(crate) struct Instruments {
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 struct RouterInstruments {
+    /// Histogram of server request duration
     #[serde(rename = "http.server.request.duration")]
     http_server_request_duration: bool,
 
+    /// Gauge of active requests
     #[serde(rename = "http.server.active_requests")]
     http_server_active_requests: bool,
 
+    /// Histogram of server request body size
     #[serde(rename = "http.server.request.body.size")]
     http_server_request_body_size: bool,
 
+    /// Histogram of server response body size
     #[serde(rename = "http.server.response.body.size")]
     http_server_response_body_size: bool,
 }
@@ -47,14 +51,17 @@ struct SupergraphInstruments {}
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 struct SubgraphInstruments {
+    /// Histogram of client request duration
     #[serde(rename = "http.client.request.duration")]
-    http_server_request_duration: bool,
+    http_client_request_duration: bool,
 
-    #[serde(rename = "http.server.request.body.size")]
-    http_server_request_body_size: bool,
+    /// Histogram of client request body size
+    #[serde(rename = "http.client.request.body.size")]
+    http_client_request_body_size: bool,
 
+    /// Histogram of client response body size
     #[serde(rename = "http.client.response.body.size")]
-    http_server_response_body_size: bool,
+    http_client_response_body_size: bool,
 }
 
 #[allow(dead_code)]
@@ -75,6 +82,8 @@ where
 
     /// The units of the instrument, e.g. "ms", "bytes", "requests".
     unit: String,
+
+    /// Attributes to include on the instrument.
     #[serde(default = "Extendable::empty::<A, E>")]
     attributes: Extendable<A, E>,
 }
