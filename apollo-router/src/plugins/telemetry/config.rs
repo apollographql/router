@@ -57,7 +57,7 @@ pub(crate) struct Conf {
     #[serde(rename = "experimental_logging", default)]
     pub(crate) logging: Logging,
 
-    #[allow(dead_code)]
+    #[cfg(feature = "telemetry_next")]
     #[serde(rename = "logging", default)]
     pub(crate) new_logging: config_new::logging::Logging,
     /// Metrics configuration
@@ -66,10 +66,14 @@ pub(crate) struct Conf {
     pub(crate) tracing: Tracing,
     /// Apollo reporting configuration
     pub(crate) apollo: apollo::Config,
+
+    #[cfg(feature = "telemetry_next")]
     /// Event configuration
     pub(crate) events: config_new::events::Events,
+    #[cfg(feature = "telemetry_next")]
     /// Span configuration
     pub(crate) spans: config_new::spans::Spans,
+    #[cfg(feature = "telemetry_next")]
     /// Instrument configuration
     pub(crate) instruments: config_new::instruments::Instruments,
 }
