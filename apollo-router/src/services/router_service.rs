@@ -363,10 +363,12 @@ impl RouterService {
         let supergraph_requests = match self.translate_request(req).await {
             Ok(requests) => requests,
             Err(err) => {
-                ::tracing::error!(
-                    monotonic_counter.apollo_router_http_requests_total = 1u64,
-                    status = %err.status.as_u16(),
-                    error = %err.error,
+                u64_counter!(
+                    "apollo_router_http_requests_total",
+                    "Total number of HTTP requests made.",
+                    1,
+                    status = err.status.as_u16() as i64,
+                    error = err.error.to_string()
                 );
 
                 return router::Response::error_builder()
