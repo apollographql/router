@@ -275,8 +275,6 @@ pub(crate) enum SubgraphCustomAttribute {
     SubgraphOperationKind {
         /// The kind of the subgraph operation (query|mutation|subscription).
         subgraph_operation_kind: OperationKind,
-        /// Optional default value.
-        default: Option<String>,
     },
     SubgraphQueryVariable {
         /// The name of a subgraph query variable.
@@ -322,10 +320,6 @@ pub(crate) enum SubgraphCustomAttribute {
     SupergraphOperationKind {
         /// The supergraph query operation kind (query|mutation|subscription).
         supergraph_operation_kind: OperationKind,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
     },
     SupergraphQueryVariable {
         /// The supergraph query variable name.
