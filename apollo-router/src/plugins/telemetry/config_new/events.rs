@@ -29,7 +29,7 @@ pub(crate) struct Events {
 struct RouterEvents {
     /// Log the router request
     request: bool,
-    /// Log the router request
+    /// Log the router response
     response: bool,
     /// Log the router error
     error: bool,
@@ -41,7 +41,7 @@ struct RouterEvents {
 struct SupergraphEvents {
     /// Log the supergraph request
     request: EventLevel,
-    /// Log the supergraph request
+    /// Log the supergraph response
     response: EventLevel,
     /// Log the supergraph error
     error: EventLevel,
@@ -53,7 +53,7 @@ struct SupergraphEvents {
 struct SubgraphEvents {
     /// Log the subgraph request
     request: EventLevel,
-    /// Log the subgraph request
+    /// Log the subgraph response
     response: EventLevel,
     /// Log the subgraph error
     error: EventLevel,
