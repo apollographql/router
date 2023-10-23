@@ -70,14 +70,26 @@ pub(crate) struct Conf {
     /// `@authenticated` and `@requiresScopes` directives
     #[serde(default)]
     preview_directives: Directives,
+    /// Log authorization errors
+    #[serde(default = "enable_log_errors")]
+    log_errors: bool,
 }
 
+fn enable_log_errors() -> bool {
+    true
+}
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[allow(dead_code)]
 pub(crate) struct Directives {
     /// enables the `@authenticated` and `@requiresScopes` directives
     #[serde(default)]
     enabled: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct UnauthorizedPaths {
+    pub(crate) paths: Vec<Path>,
+    pub(crate) log_errors: bool,
 }
 
 pub(crate) struct AuthorizationPlugin {
@@ -110,6 +122,16 @@ impl AuthorizationPlugin {
                 }
             }
         }
+    }
+
+    pub(crate) fn log_errors(configuration: &Configuration) -> bool {
+        let has_config = configuration
+            .apollo_plugins
+            .plugins
+            .iter()
+            .find(|(s, _)| s.as_str() == "authorization")
+            .and_then(|(_, v)| v.get("log_errors").and_then(|v| v.as_bool()));
+        has_config.unwrap_or(true)
     }
 
     pub(crate) async fn query_analysis(
@@ -441,7 +463,7 @@ impl Plugin for AuthorizationPlugin {
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
             .map_request(|request: execution::Request| {
-                let filtered = !request.query_plan.query.unauthorized_paths.is_empty();
+                let filtered = !request.query_plan.query.unauthorized.paths.is_empty();
                 let needs_authenticated = request.context.contains_key(AUTHENTICATED_KEY);
                 let needs_requires_scopes = request.context.contains_key(REQUIRED_SCOPES_KEY);
 
