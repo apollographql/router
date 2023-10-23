@@ -42,11 +42,22 @@ struct File {
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 enum Format {
+    /// https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_AnalyzeLogData-discoverable-fields.html
     Aws,
+    /// https://github.com/trentm/node-bunyan
     Bunyan,
+    /// https://go2docs.graylog.org/5-0/getting_in_log_data/ingest_gelf.html#:~:text=The%20Graylog%20Extended%20Log%20Format,UDP%2C%20TCP%2C%20or%20HTTP.
     Gelf,
+
+    /// https://cloud.google.com/logging/docs/structured-logging
     Google,
+    /// https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-appender-log
     OpenTelemetry,
+
+    /// https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html
+    Json,
+
+    /// https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html
     #[default]
     Text,
 }
