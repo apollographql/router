@@ -65,11 +65,12 @@ impl QueryAnalysisLayer {
                 .message("Must provide query string.".to_string())
                 .extension_code("MISSING_QUERY_STRING")
                 .build()];
-            tracing::error!(
-                monotonic_counter.apollo_router_http_requests_total = 1u64,
-                status = %StatusCode::BAD_REQUEST.as_u16(),
-                error = "Must provide query string",
-                "Must provide query string"
+            u64_counter!(
+                "apollo_router_http_requests_total",
+                "Total number of HTTP requests made.",
+                1,
+                status = StatusCode::BAD_REQUEST.as_u16() as i64,
+                error = "Must provide query string"
             );
 
             return Err(SupergraphResponse::builder()

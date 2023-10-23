@@ -4,17 +4,16 @@ expression: "TestResult {\n    query: QUERY,\n    extracted_policies: &extracted
 ---
 query:
 
-        query {
-            topProducts {
-                type
-            }
-
-            moi: me {
-                name
-            }
-        }
-        
-extracted_policies: {"profile", "read user", "read username"}
+          query {
+              topProducts {
+                  type
+              }
+              me {
+                  name
+              }
+          }
+          
+extracted_policies: {"profile", "read:user", "read:username"}
 successful policies: []
 filtered:
 {

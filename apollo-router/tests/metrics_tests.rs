@@ -122,3 +122,41 @@ async fn test_metrics_bad_query() {
     router.execute_bad_query().await;
     router.assert_metrics_contains(r#"apollo_router_operations_total{http_response_status_code="400",otel_scope_name="apollo/router"} 1"#, None).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_bad_queries() {
+    let mut router = IntegrationTest::builder()
+        .config(PROMETHEUS_CONFIG)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_http_requests_total{status="200",otel_scope_name="apollo/router"}"#,
+            None,
+        )
+        .await;
+    router.execute_bad_content_encoding().await;
+    router
+            .assert_metrics_contains(
+                r#"apollo_router_http_requests_total{error="unknown content-encoding header value \"garbage\"",status="400",otel_scope_name="apollo/router"}"#,
+                None,
+            )
+            .await;
+
+    router.execute_bad_query().await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_http_requests_total{error="Must provide query string",status="400",otel_scope_name="apollo/router"}"#,
+            None,
+        )
+        .await;
+    router
+        .assert_log_not_contains(
+            "OpenTelemetry metric error occurred: Metrics error: Instrument description conflict",
+        )
+        .await;
+}

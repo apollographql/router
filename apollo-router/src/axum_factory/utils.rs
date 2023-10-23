@@ -70,10 +70,12 @@ pub(super) async fn decompress_request_body(
                 unknown => {
                     let message = format!("unknown content-encoding header value {unknown:?}");
                     tracing::error!(message);
-                    ::tracing::error!(
-                       monotonic_counter.apollo_router_http_requests_total = 1u64,
-                       status = %400u16,
-                       error = %message,
+                    u64_counter!(
+                        "apollo_router_http_requests_total",
+                        "Total number of HTTP requests made.",
+                        1,
+                        status = StatusCode::BAD_REQUEST.as_u16() as i64,
+                        error = message.clone()
                     );
 
                     Err((StatusCode::BAD_REQUEST, message).into_response())
@@ -82,10 +84,12 @@ pub(super) async fn decompress_request_body(
 
             Err(err) => {
                 let message = format!("cannot read content-encoding header: {err}");
-                ::tracing::error!(
-                   monotonic_counter.apollo_router_http_requests_total = 1u64,
-                   status = %400u16,
-                   error = %message,
+                u64_counter!(
+                    "apollo_router_http_requests_total",
+                    "Total number of HTTP requests made.",
+                    1,
+                    status = 400,
+                    error = message.clone()
                 );
                 Err((StatusCode::BAD_REQUEST, message).into_response())
             }
