@@ -100,17 +100,17 @@ where
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum InstrumentType {
-    /// A monotonic counter
+    /// A monotonic counter https://opentelemetry.io/docs/specs/otel/metrics/data-model/#sums
     Counter,
 
-    /// A counter
+    /// A counter https://opentelemetry.io/docs/specs/otel/metrics/data-model/#sums
     UpDownCounter,
 
-    /// A histogram
+    /// A histogram https://opentelemetry.io/docs/specs/otel/metrics/data-model/#histogram
     Histogram,
 
-    /// A counter
-    Gague,
+    /// A gauge https://opentelemetry.io/docs/specs/otel/metrics/data-model/#gauge
+    Gauge,
 }
 
 #[allow(dead_code)]
