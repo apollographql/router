@@ -1,6 +1,8 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use crate::plugins::telemetry::config_new::attributes::Extendable;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::RouterCustomAttribute;
 use crate::plugins::telemetry::config_new::attributes::RouterEvent;
@@ -8,9 +10,6 @@ use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphCustomAttribute;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphCustomAttribute;
-use crate::plugins::telemetry::config_new::attributes::{
-    DefaultAttributeRequirementLevel, Extendable,
-};
 
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
