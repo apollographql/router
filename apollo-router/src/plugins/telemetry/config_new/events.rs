@@ -17,35 +17,56 @@ pub(crate) struct Events {
     /// Router service events
     router: Extendable<RouterEvents, Event<RouterAttributes, RouterCustomAttribute>>,
     /// Subgraph service events
-    supergraph: Extendable<SupergraphEvents, Event<SupergraphAttributes, SupergraphCustomAttribute>>,
+    supergraph:
+        Extendable<SupergraphEvents, Event<SupergraphAttributes, SupergraphCustomAttribute>>,
     /// Supergraph service events
     subgraph: Extendable<SubgraphEvents, Event<SubgraphAttributes, SubgraphCustomAttribute>>,
 }
 
-
+#[allow(dead_code)]
+#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
+#[serde(deny_unknown_fields, default)]
+struct RouterEvents {
+    /// Log the router request
+    request: bool,
+    /// Log the router request
+    response: bool,
+    /// Log the router error
+    error: bool,
+}
 
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
-struct RouterEvents {}
+struct SupergraphEvents {
+    /// Log the supergraph request
+    request: EventLevel,
+    /// Log the supergraph request
+    response: EventLevel,
+    /// Log the supergraph error
+    error: EventLevel,
+}
 
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
-struct SupergraphEvents {}
+struct SubgraphEvents {
+    /// Log the subgraph request
+    request: EventLevel,
+    /// Log the subgraph request
+    response: EventLevel,
+    /// Log the subgraph error
+    error: EventLevel,
+}
 
 #[allow(dead_code)]
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
-struct SubgraphEvents {}
-
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Debug, Default)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum EventLevel {
     Info,
     Warn,
     Error,
+    #[default]
     Off,
 }
 
