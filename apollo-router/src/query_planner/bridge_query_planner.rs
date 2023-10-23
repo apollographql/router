@@ -137,7 +137,7 @@ impl BridgeQueryPlanner {
                     tracing::warn!(
                         monotonic_counter.apollo.router.api_schema = 1u64,
                         generation.result = "failed",
-                        "API schema generation mismatch: apollo-supergraph and query-planner write different schema"
+                        "API schema generation mismatch: apollo-federation and query-planner write different schema"
                     );
 
                     let differences = diff::lines(&api_schema.schema, &new_api_schema);
@@ -164,7 +164,7 @@ impl BridgeQueryPlanner {
                         }
                     }
                     tracing::debug!(
-                        "different API schema between apollo-supergraph and query-planner:\n{}",
+                        "different API schema between apollo-federation and query-planner:\n{}",
                         output
                     );
                 } else {

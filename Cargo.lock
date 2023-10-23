@@ -199,17 +199,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4668cab20f66d8d020e1fbc0ebe47217433c1b6c8f2040faf858554e394ace6"
 
 [[package]]
-name = "apollo-at-link"
-version = "0.0.1"
-source = "git+https://github.com/apollographql/federation-next.git?branch=geal/apollo-compiler-1.0.0-beta4#7602ff4ba141be1070eff8319971a93e9072b13b"
-dependencies = [
- "apollo-compiler 1.0.0-beta.4",
- "salsa",
- "thiserror",
- "url",
-]
-
-[[package]]
 name = "apollo-compiler"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -255,6 +244,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "apollo-federation"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38d08d88375b1cb778d4b663877fa5d2ba482180283d2071f4de75e697627d60"
+dependencies = [
+ "apollo-compiler 1.0.0-beta.4",
+ "indexmap 2.0.2",
+ "lazy_static",
+ "salsa",
+ "strum",
+ "strum_macros",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "apollo-parser"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -283,7 +288,7 @@ dependencies = [
  "access-json",
  "anyhow",
  "apollo-compiler 1.0.0-beta.4",
- "apollo-supergraph",
+ "apollo-federation",
  "arc-swap",
  "askama",
  "async-compression",
@@ -466,30 +471,6 @@ dependencies = [
  "arbitrary",
  "once_cell",
  "thiserror",
-]
-
-[[package]]
-name = "apollo-subgraph"
-version = "0.0.1"
-source = "git+https://github.com/apollographql/federation-next.git?branch=geal/apollo-compiler-1.0.0-beta4#7602ff4ba141be1070eff8319971a93e9072b13b"
-dependencies = [
- "apollo-at-link",
- "apollo-compiler 1.0.0-beta.4",
- "indexmap 2.0.2",
- "salsa",
- "thiserror",
-]
-
-[[package]]
-name = "apollo-supergraph"
-version = "0.0.1"
-source = "git+https://github.com/apollographql/federation-next.git?branch=geal/apollo-compiler-1.0.0-beta4#7602ff4ba141be1070eff8319971a93e9072b13b"
-dependencies = [
- "apollo-at-link",
- "apollo-compiler 1.0.0-beta.4",
- "apollo-subgraph",
- "indexmap 2.0.2",
- "salsa",
 ]
 
 [[package]]
