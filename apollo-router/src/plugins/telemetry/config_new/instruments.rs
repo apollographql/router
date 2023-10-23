@@ -83,7 +83,7 @@ where
     ty: InstrumentType,
 
     /// The value of the instrument.
-    value: InstrumentValue<E>,
+    value: InstrumentValue,
 
     /// The description of the instrument.
     description: String,
@@ -114,21 +114,12 @@ pub(crate) enum InstrumentType {
 }
 
 
-#[allow(dead_code)]
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) struct InstrumentValue<T> {
-    #[serde(flatten)]
-    pub(crate) custom: T,
-    #[serde(flatten)]
-    pub(crate) standard: StandardValue,
-}
 
 
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum StandardValue {
+pub(crate) enum InstrumentValue {
     Duration,
     Unit,
     Active
