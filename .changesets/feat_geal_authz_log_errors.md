@@ -6,7 +6,8 @@ THos logs can be disabled in the configuration:
 
 ```yaml
 authorization:
-  log_errors: true
+  preview_directives:
+    log_errors: true
 ```
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4076

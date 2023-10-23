@@ -70,9 +70,6 @@ pub(crate) struct Conf {
     /// `@authenticated` and `@requiresScopes` directives
     #[serde(default)]
     preview_directives: Directives,
-    /// Log authorization errors
-    #[serde(default = "enable_log_errors")]
-    log_errors: bool,
 }
 
 fn enable_log_errors() -> bool {
@@ -84,6 +81,9 @@ pub(crate) struct Directives {
     /// enables the `@authenticated` and `@requiresScopes` directives
     #[serde(default)]
     enabled: bool,
+    /// Log authorization errors
+    #[serde(default = "enable_log_errors")]
+    log_errors: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,7 +130,8 @@ impl AuthorizationPlugin {
             .plugins
             .iter()
             .find(|(s, _)| s.as_str() == "authorization")
-            .and_then(|(_, v)| v.get("log_errors").and_then(|v| v.as_bool()));
+            .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
+            .and_then(|v| v.get("log_errors").and_then(|v| v.as_bool()));
         has_config.unwrap_or(true)
     }
 
