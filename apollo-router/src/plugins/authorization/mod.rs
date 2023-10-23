@@ -16,15 +16,14 @@ use tower::ServiceExt;
 
 use self::authenticated::AuthenticatedCheckVisitor;
 use self::authenticated::AuthenticatedVisitor;
-use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
+use self::authenticated::AUTHENTICATED_SPEC_URL;
 use self::policy::PolicyExtractionVisitor;
 use self::policy::PolicyFilteringVisitor;
-use self::policy::POLICY_DIRECTIVE_NAME;
+use self::policy::POLICY_SPEC_URL;
 use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
-use self::scopes::REQUIRES_SCOPES_DIRECTIVE_NAME;
+use self::scopes::REQUIRES_SCOPES_SPEC_URL;
 use crate::error::QueryPlannerError;
-use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::json_ext::Path;
@@ -61,7 +60,7 @@ pub(crate) struct CacheKeyMetadata {
 }
 
 /// Authorization plugin
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[allow(dead_code)]
 pub(crate) struct Conf {
     /// Reject unauthenticated requests
@@ -72,12 +71,16 @@ pub(crate) struct Conf {
     preview_directives: Directives,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[allow(dead_code)]
 pub(crate) struct Directives {
     /// enables the `@authenticated` and `@requiresScopes` directives
-    #[serde(default)]
+    #[serde(default = "default_enable_directives")]
     enabled: bool,
+}
+
+fn default_enable_directives() -> bool {
+    true
 }
 
 pub(crate) struct AuthorizationPlugin {
@@ -96,29 +99,12 @@ impl AuthorizationPlugin {
             .find(|(s, _)| s.as_str() == "authorization")
             .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
             .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()));
-        let has_authorization_directives = schema
-            .definitions
-            .directive_definitions
-            .contains_key(AUTHENTICATED_DIRECTIVE_NAME)
-            || schema
-                .definitions
-                .directive_definitions
-                .contains_key(REQUIRES_SCOPES_DIRECTIVE_NAME)
-            || schema
-                .definitions
-                .directive_definitions
-                .contains_key(POLICY_DIRECTIVE_NAME);
 
-        match has_config {
-            Some(b) => Ok(b),
-            None => {
-                if has_authorization_directives {
-                    Err(ServiceBuildError::Schema(SchemaError::Api("cannot start the router on a schema with authorization directives without configuring the authorization plugin".to_string())))
-                } else {
-                    Ok(false)
-                }
-            }
-        }
+        let has_authorization_directives = schema.has_spec(AUTHENTICATED_SPEC_URL)
+            || schema.has_spec(REQUIRES_SCOPES_SPEC_URL)
+            || schema.has_spec(POLICY_SPEC_URL);
+
+        Ok(has_config.unwrap_or(true) && has_authorization_directives)
     }
 
     pub(crate) async fn query_analysis(
@@ -130,44 +116,44 @@ impl AuthorizationPlugin {
         let doc = Query::parse_document(query, schema, configuration);
         let ast = &doc.ast;
 
-        let mut visitor = AuthenticatedCheckVisitor::new(&schema.definitions, ast);
-
-        // if this fails, the query is invalid and will fail at the query planning phase.
-        // We do not return validation errors here for now because that would imply a huge
-        // refactoring of telemetry and tests
-        if traverse::document(&mut visitor, ast).is_ok() && visitor.found {
-            context.insert(AUTHENTICATED_KEY, true).unwrap();
+        if let Some(mut visitor) = AuthenticatedCheckVisitor::new(&schema.definitions, ast) {
+            // if this fails, the query is invalid and will fail at the query planning phase.
+            // We do not return validation errors here for now because that would imply a huge
+            // refactoring of telemetry and tests
+            if traverse::document(&mut visitor, ast).is_ok() && visitor.found {
+                context.insert(AUTHENTICATED_KEY, true).unwrap();
+            }
         }
 
-        let mut visitor = ScopeExtractionVisitor::new(&schema.definitions, ast);
+        if let Some(mut visitor) = ScopeExtractionVisitor::new(&schema.definitions, ast) {
+            // if this fails, the query is invalid and will fail at the query planning phase.
+            // We do not return validation errors here for now because that would imply a huge
+            // refactoring of telemetry and tests
+            if traverse::document(&mut visitor, ast).is_ok() {
+                let scopes: Vec<String> = visitor.extracted_scopes.into_iter().collect();
 
-        // if this fails, the query is invalid and will fail at the query planning phase.
-        // We do not return validation errors here for now because that would imply a huge
-        // refactoring of telemetry and tests
-        if traverse::document(&mut visitor, ast).is_ok() {
-            let scopes: Vec<String> = visitor.extracted_scopes.into_iter().collect();
-
-            if !scopes.is_empty() {
-                context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
+                if !scopes.is_empty() {
+                    context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
+                }
             }
         }
 
         // TODO: @policy is out of scope for preview, this will be reactivated later
         if false {
-            let mut visitor = PolicyExtractionVisitor::new(&schema.definitions, ast);
+            if let Some(mut visitor) = PolicyExtractionVisitor::new(&schema.definitions, ast) {
+                // if this fails, the query is invalid and will fail at the query planning phase.
+                // We do not return validation errors here for now because that would imply a huge
+                // refactoring of telemetry and tests
+                if traverse::document(&mut visitor, ast).is_ok() {
+                    let policies: HashMap<String, Option<bool>> = visitor
+                        .extracted_policies
+                        .into_iter()
+                        .map(|policy| (policy, None))
+                        .collect();
 
-            // if this fails, the query is invalid and will fail at the query planning phase.
-            // We do not return validation errors here for now because that would imply a huge
-            // refactoring of telemetry and tests
-            if traverse::document(&mut visitor, ast).is_ok() {
-                let policies: HashMap<String, Option<bool>> = visitor
-                    .extracted_policies
-                    .into_iter()
-                    .map(|policy| (policy, None))
-                    .collect();
-
-                if !policies.is_empty() {
-                    context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
+                    if !policies.is_empty() {
+                        context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
+                    }
                 }
             }
         }
@@ -307,26 +293,31 @@ impl AuthorizationPlugin {
         doc: &ast::Document,
         is_authenticated: bool,
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
-        let mut visitor =
-            AuthenticatedVisitor::new(&schema.definitions, doc, &schema.implementers_map);
-        let modified_query = transform::document(&mut visitor, doc)
-            .map_err(|e| SpecError::ParsingError(e.to_string()))?;
+        if let Some(mut visitor) =
+            AuthenticatedVisitor::new(&schema.definitions, doc, &schema.implementers_map)
+        {
+            let modified_query = transform::document(&mut visitor, doc)
+                .map_err(|e| SpecError::ParsingError(e.to_string()))?;
 
-        if visitor.query_requires_authentication {
-            if is_authenticated {
-                tracing::debug!("the query contains @authenticated, the request is authenticated, keeping the query");
-                Ok(None)
-            } else {
-                tracing::debug!("the query contains @authenticated, modified query:\n{modified_query}\nunauthorized paths: {:?}", visitor
+            if visitor.query_requires_authentication {
+                if is_authenticated {
+                    tracing::debug!("the query contains @authenticated, the request is authenticated, keeping the query");
+                    Ok(None)
+                } else {
+                    tracing::debug!("the query contains @authenticated, modified query:\n{modified_query}\nunauthorized paths: {:?}", visitor
                 .unauthorized_paths
                 .iter()
                 .map(|path| path.to_string())
                 .collect::<Vec<_>>());
 
-                Ok(Some((modified_query, visitor.unauthorized_paths)))
+                    Ok(Some((modified_query, visitor.unauthorized_paths)))
+                }
+            } else {
+                tracing::debug!("the query does not contain @authenticated");
+                Ok(None)
             }
         } else {
-            tracing::debug!("the query does not contain @authenticated");
+            tracing::debug!("the schema does not contain @authenticated");
             Ok(None)
         }
     }
@@ -336,27 +327,29 @@ impl AuthorizationPlugin {
         doc: &ast::Document,
         scopes: &[String],
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
-        let mut visitor = ScopeFilteringVisitor::new(
+        if let Some(mut visitor) = ScopeFilteringVisitor::new(
             &schema.definitions,
             doc,
             &schema.implementers_map,
             scopes.iter().cloned().collect(),
-        );
-
-        let modified_query = transform::document(&mut visitor, doc)
-            .map_err(|e| SpecError::ParsingError(e.to_string()))?;
-
-        if visitor.query_requires_scopes {
-            tracing::debug!("the query required scopes, the requests present scopes: {scopes:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
+        ) {
+            let modified_query = transform::document(&mut visitor, doc)
+                .map_err(|e| SpecError::ParsingError(e.to_string()))?;
+            if visitor.query_requires_scopes {
+                tracing::debug!("the query required scopes, the requests present scopes: {scopes:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
                 visitor
                     .unauthorized_paths
                     .iter()
                     .map(|path| path.to_string())
                     .collect::<Vec<_>>()
             );
-            Ok(Some((modified_query, visitor.unauthorized_paths)))
+                Ok(Some((modified_query, visitor.unauthorized_paths)))
+            } else {
+                tracing::debug!("the query does not require scopes");
+                Ok(None)
+            }
         } else {
-            tracing::debug!("the query does not require scopes");
+            tracing::debug!("the schema does not contain @requiresScopes");
             Ok(None)
         }
     }
@@ -366,27 +359,30 @@ impl AuthorizationPlugin {
         doc: &ast::Document,
         policies: &[String],
     ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
-        let mut visitor = PolicyFilteringVisitor::new(
+        if let Some(mut visitor) = PolicyFilteringVisitor::new(
             &schema.definitions,
             doc,
             &schema.implementers_map,
             policies.iter().cloned().collect(),
-        );
+        ) {
+            let modified_query = transform::document(&mut visitor, doc)
+                .map_err(|e| SpecError::ParsingError(e.to_string()))?;
 
-        let modified_query = transform::document(&mut visitor, doc)
-            .map_err(|e| SpecError::ParsingError(e.to_string()))?;
-
-        if visitor.query_requires_policies {
-            tracing::debug!("the query required policies, the requests present policies: {policies:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
+            if visitor.query_requires_policies {
+                tracing::debug!("the query required policies, the requests present policies: {policies:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
                 visitor
                     .unauthorized_paths
                     .iter()
                     .map(|path| path.to_string())
                     .collect::<Vec<_>>()
             );
-            Ok(Some((modified_query, visitor.unauthorized_paths)))
+                Ok(Some((modified_query, visitor.unauthorized_paths)))
+            } else {
+                tracing::debug!("the query does not require policies");
+                Ok(None)
+            }
         } else {
-            tracing::debug!("the query does not require policies");
+            tracing::debug!("the schema does not contain @policy");
             Ok(None)
         }
     }

@@ -59,6 +59,21 @@ impl Schema {
         Ok(schema)
     }
 
+    pub(crate) fn make_compiler(sdl: &str) -> Result<apollo_compiler::schema::Schema, SchemaError> {
+        let mut parser = apollo_compiler::Parser::new();
+        let ast = parser.parse_ast(sdl, "schema.graphql");
+
+        // Trace log recursion limit data
+        let recursion_limit = parser.recursion_reached();
+        tracing::trace!(?recursion_limit, "recursion limit data");
+
+        ast.check_parse_errors()
+            .map_err(|errors| SchemaError::Parse(ParseErrors { errors }))?;
+
+        let definitions = ast.to_schema();
+        Ok(definitions)
+    }
+
     pub(crate) fn parse(sdl: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
         let start = Instant::now();
         let mut parser = apollo_compiler::Parser::new();
@@ -214,6 +229,41 @@ impl Schema {
 
     pub(crate) fn has_errors(&self) -> bool {
         self.diagnostics.is_some()
+    }
+
+    pub(crate) fn has_spec(&self, url: &str) -> bool {
+        self.definitions
+            .schema_definition
+            .directives
+            .iter()
+            .filter(|dir| dir.name.as_str() == "link")
+            .any(|link| {
+                link.argument_by_name("url")
+                    .and_then(|value| value.as_str())
+                    == Some(url)
+            })
+    }
+
+    pub(crate) fn directive_name(
+        schema: &apollo_compiler::schema::Schema,
+        url: &str,
+        default: &str,
+    ) -> Option<String> {
+        schema
+            .schema_definition
+            .directives
+            .iter()
+            .filter(|dir| dir.name.as_str() == "link")
+            .find(|link| {
+                link.argument_by_name("url")
+                    .and_then(|value| value.as_str())
+                    == Some(url)
+            })
+            .map(|link| {
+                link.argument_by_name("as")
+                    .and_then(|value| value.as_str().map(|s| s.to_string()))
+                    .unwrap_or_else(|| default.to_string())
+            })
     }
 }
 
