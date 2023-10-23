@@ -113,15 +113,11 @@ pub(crate) enum InstrumentType {
     Gague,
 }
 
-
-
-
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum InstrumentValue {
     Duration,
     Unit,
-    Active
+    Active,
 }
-
