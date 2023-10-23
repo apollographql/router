@@ -83,8 +83,8 @@ where
     #[serde(rename = "type")]
     ty: InstrumentType,
 
-    /// The router event to instrument.
-    event: RouterEvent,
+    /// The value of the instrument.
+    value: InstrumentValue,
 
     /// The description of the instrument.
     description: String,
@@ -104,6 +104,15 @@ pub(crate) enum InstrumentType {
     /// A monotonic counter
     Counter,
 
-    /// A duration histogram
+    /// A histogram
+    Histogram,
+}
+
+
+#[allow(dead_code)]
+#[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum InstrumentValue {
     Duration,
+    Unit,
 }

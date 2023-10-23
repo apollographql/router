@@ -22,6 +22,8 @@ pub(crate) struct Events {
     subgraph: Extendable<SubgraphEvents, Event<SubgraphAttributes, SubgraphCustomAttribute>>,
 }
 
+
+
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
