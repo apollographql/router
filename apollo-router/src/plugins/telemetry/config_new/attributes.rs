@@ -408,13 +408,13 @@ pub(crate) struct SupergraphAttributes {
     /// * query findBookById { bookById(id: ?) { name } }
     /// Requirement level: Recommended
     #[serde(rename = "graphql.document")]
-    graphql_document: bool,
+    graphql_document: Option<bool>,
     /// The name of the operation being executed.
     /// Examples:
     /// * findBookById
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.name")]
-    graphql_operation_name: bool,
+    graphql_operation_name: Option<bool>,
     /// The type of the operation being executed.
     /// Examples:
     /// * query
@@ -422,7 +422,7 @@ pub(crate) struct SupergraphAttributes {
     /// * mutation
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.type")]
-    graphql_operation_type: bool,
+    graphql_operation_type: Option<bool>,
 }
 
 #[allow(dead_code)]
@@ -434,19 +434,19 @@ pub(crate) struct SubgraphAttributes {
     /// * products
     /// Requirement level: Required
     #[serde(rename = "graphql.federation.subgraph.name")]
-    graphql_federation_subgraph_name: bool,
+    graphql_federation_subgraph_name: Option<bool>,
     /// The GraphQL document being executed.
     /// Examples:
     /// * query findBookById { bookById(id: ?) { name } }
     /// Requirement level: Recommended
     #[serde(rename = "graphql.document")]
-    graphql_document: bool,
+    graphql_document: Option<bool>,
     /// The name of the operation being executed.
     /// Examples:
     /// * findBookById
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.name")]
-    graphql_operation_name: bool,
+    graphql_operation_name: Option<bool>,
     /// The type of the operation being executed.
     /// Examples:
     /// * query
@@ -454,7 +454,7 @@ pub(crate) struct SubgraphAttributes {
     /// * mutation
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.type")]
-    graphql_operation_type: bool,
+    graphql_operation_type: Option<bool>,
 }
 
 /// Common attributes for http server and client.
@@ -470,14 +470,14 @@ pub(crate) struct HttpCommonAttributes {
     /// * 500
     /// Requirement level: Conditionally Required: If request has ended with an error.
     #[serde(rename = "error.type")]
-    error_type: bool,
+    error_type: Option<bool>,
 
     /// The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size.
     /// Examples:
     /// * 3495
     /// Requirement level: Recommended
     #[serde(rename = "http.request.body.size")]
-    http_request_body_size: bool,
+    http_request_body_size: Option<bool>,
 
     /// HTTP request method.
     /// Examples:
@@ -486,7 +486,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * HEAD
     /// Requirement level: Required
     #[serde(rename = "http.request.method")]
-    http_request_method: bool,
+    http_request_method: Option<bool>,
 
     /// Original HTTP method sent by the client in the request line.
     /// Examples:
@@ -495,21 +495,21 @@ pub(crate) struct HttpCommonAttributes {
     /// * foo
     /// Requirement level: Conditionally Required
     #[serde(rename = "http.request.method.original")]
-    http_request_method_original: bool,
+    http_request_method_original: Option<bool>,
 
     /// The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size.
     /// Examples:
     /// * 3495
     /// Requirement level: Recommended
     #[serde(rename = "http.response.body.size")]
-    http_response_body_size: bool,
+    http_response_body_size: Option<bool>,
 
     /// HTTP response status code.
     /// Examples:
     /// * 200
     /// Requirement level: Conditionally Required: If and only if one was received/sent.
     #[serde(rename = "http.response.status_code")]
-    http_response_status_code: bool,
+    http_response_status_code: Option<bool>,
 
     /// OSI application layer or non-OSI equivalent.
     /// Examples:
@@ -517,7 +517,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * spdy
     /// Requirement level: Recommended: if not default (http).
     #[serde(rename = "network.protocol.name")]
-    network_protocol_name: bool,
+    network_protocol_name: Option<bool>,
 
     /// Version of the protocol specified in network.protocol.name.
     /// Examples:
@@ -527,7 +527,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * 3
     /// Requirement level: Recommended
     #[serde(rename = "network.protocol.version")]
-    network_protocol_version: bool,
+    network_protocol_version: Option<bool>,
 
     /// OSI transport layer.
     /// Examples:
@@ -535,7 +535,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * udp
     /// Requirement level: Conditionally Required
     #[serde(rename = "network.transport")]
-    network_transport: bool,
+    network_transport: Option<bool>,
 
     /// OSI network layer or non-OSI equivalent.
     /// Examples:
@@ -543,7 +543,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * ipv6
     /// Requirement level: Recommended
     #[serde(rename = "network.type")]
-    network_type: bool,
+    network_type: Option<bool>,
 
     /// Value of the HTTP User-Agent header sent by the client.
     /// Examples:
@@ -551,7 +551,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * libwww/2.17b3
     /// Requirement level: Recommended
     #[serde(rename = "user_agent.original")]
-    user_agent_original: bool,
+    user_agent_original: Option<bool>,
 }
 
 /// Attributes for Http servers
@@ -565,45 +565,45 @@ pub(crate) struct HttpServerAttributes {
     /// * 83.164.160.102
     /// Requirement level: Recommended
     #[serde(rename = "client.address")]
-    client_address: bool,
+    client_address: Option<bool>,
     /// The port of the original client behind all proxies, if known (e.g. from Forwarded or a similar header). Otherwise, the immediate client peer port.
     /// Examples:
     /// * 83.164.160.102
     /// Requirement level: Recommended
     #[serde(rename = "client.port")]
-    client_port: bool,
+    client_port: Option<bool>,
     /// The matched route (path template in the format used by the respective server framework).
     /// Examples:
     /// * 65123
     /// Requirement level: Conditionally Required: If and only if it’s available
     #[serde(rename = "http.route")]
-    http_route: bool,
+    http_route: Option<bool>,
     /// Local socket address. Useful in case of a multi-IP host.
     /// Examples:
     /// * 10.1.2.80
     /// * /tmp/my.sock
     /// Requirement level: Opt-In
     #[serde(rename = "network.local.address")]
-    network_local_address: bool,
+    network_local_address: Option<bool>,
     /// Local socket port. Useful in case of a multi-port host.
     /// Examples:
     /// * 65123
     /// Requirement level: Opt-In
     #[serde(rename = "network.local.port")]
-    network_local_port: bool,
+    network_local_port: Option<bool>,
     /// Peer address of the network connection - IP address or Unix domain socket name.
     /// Examples:
     /// * 10.1.2.80
     /// * /tmp/my.sock
     /// Requirement level: Recommended
     #[serde(rename = "network.peer.address")]
-    network_peer_address: bool,
+    network_peer_address: Option<bool>,
     /// Peer port number of the network connection.
     /// Examples:
     /// * 65123
     /// Requirement level: Recommended
     #[serde(rename = "network.peer.port")]
-    network_peer_port: bool,
+    network_peer_port: Option<bool>,
     /// Name of the local HTTP server that received the request.
     /// Examples:
     /// * example.com
@@ -611,7 +611,7 @@ pub(crate) struct HttpServerAttributes {
     /// * /tmp/my.sock
     /// Requirement level: Recommended
     #[serde(rename = "server.address")]
-    server_address: bool,
+    server_address: Option<bool>,
     /// Port of the local HTTP server that received the request.
     /// Examples:
     /// * 80
@@ -619,19 +619,19 @@ pub(crate) struct HttpServerAttributes {
     /// * 443
     /// Requirement level: Recommended
     #[serde(rename = "server.port")]
-    server_port: bool,
+    server_port: Option<bool>,
     /// The URI path component
     /// Examples:
     /// * /search
     /// Requirement level: Required
     #[serde(rename = "url.path")]
-    url_path: bool,
+    url_path: Option<bool>,
     /// The URI query component
     /// Examples:
     /// * q=OpenTelemetry
     /// Requirement level: Conditionally Required: If and only if one was received/sent.
     #[serde(rename = "url.query")]
-    url_query: bool,
+    url_query: Option<bool>,
 
     /// The URI scheme component identifying the used protocol.
     /// Examples:
@@ -639,7 +639,7 @@ pub(crate) struct HttpServerAttributes {
     /// * https
     /// Requirement level: Required
     #[serde(rename = "url.scheme")]
-    url_scheme: bool,
+    url_scheme: Option<bool>,
 }
 
 /// Attrubtes for HTTP clients
@@ -653,7 +653,7 @@ pub(crate) struct HttpClientAttributes {
     /// *
     /// Requirement level: Recommended: if and only if request was retried.
     #[serde(rename = "http.resend_count")]
-    http_resend_count: bool,
+    http_resend_count: Option<bool>,
 
     /// Peer address of the network connection - IP address or Unix domain socket name.
     /// Examples:
@@ -661,14 +661,14 @@ pub(crate) struct HttpClientAttributes {
     /// * /tmp/my.sock
     /// Requirement level: Recommended: If different than server.address.
     #[serde(rename = "network.peer.address")]
-    network_peer_address: bool,
+    network_peer_address: Option<bool>,
 
     /// Peer port number of the network connection.
     /// Examples:
     /// * 65123
     /// Requirement level: Recommended: If network.peer.address is set.
     #[serde(rename = "network.peer.port")]
-    network_peer_port: bool,
+    network_peer_port: Option<bool>,
 
     /// Host identifier of the “URI origin” HTTP request is sent to.
     /// Examples:
@@ -677,7 +677,7 @@ pub(crate) struct HttpClientAttributes {
     /// * /tmp/my.sock
     /// Requirement level: Required
     #[serde(rename = "server.address")]
-    server_address: bool,
+    server_address: Option<bool>,
 
     /// Port identifier of the “URI origin” HTTP request is sent to.
     /// Examples:
@@ -686,7 +686,7 @@ pub(crate) struct HttpClientAttributes {
     /// * 433
     /// Requirement level: Conditionally Required
     #[serde(rename = "server.port")]
-    server_port: bool,
+    server_port: Option<bool>,
 
     /// Absolute URL describing a network resource according to RFC3986
     /// Examples:
@@ -694,5 +694,5 @@ pub(crate) struct HttpClientAttributes {
     /// * localhost
     /// Requirement level: Required
     #[serde(rename = "url.full")]
-    url_full: bool,
+    url_full: Option<bool>,
 }

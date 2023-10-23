@@ -50,12 +50,12 @@ pub(crate) struct RouterAttributes {
     /// Attach the datadog trace ID to the router span as dd.trace_id.
     /// This can be output in logs and used to correlate traces in Datadog.
     #[serde(rename = "dd.trace_id")]
-    datadog_trace_id: bool,
+    datadog_trace_id: Option<bool>,
 
     /// Attach the opentelemetry trace ID to the router span as trace_id.
     /// This can be output in logs.
     #[serde(rename = "trace_id")]
-    trace_id: bool,
+    trace_id: Option<bool>,
 
     /// Span http attributes from Open Telemetry semantic conventions.
     #[serde(flatten)]
