@@ -24,7 +24,6 @@ use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
 use self::scopes::REQUIRES_SCOPES_SPEC_URL;
 use crate::error::QueryPlannerError;
-use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::json_ext::Path;
@@ -61,7 +60,7 @@ pub(crate) struct CacheKeyMetadata {
 }
 
 /// Authorization plugin
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[allow(dead_code)]
 pub(crate) struct Conf {
     /// Reject unauthenticated requests
@@ -72,24 +71,29 @@ pub(crate) struct Conf {
     preview_directives: Directives,
 }
 
-fn enable_log_errors() -> bool {
-    true
-}
-#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
+#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[allow(dead_code)]
 pub(crate) struct Directives {
     /// enables the `@authenticated` and `@requiresScopes` directives
-    #[serde(default)]
+    #[serde(default = "default_enable_directives")]
     enabled: bool,
     /// Log authorization errors
     #[serde(default = "enable_log_errors")]
     log_errors: bool,
 }
 
+fn enable_log_errors() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct UnauthorizedPaths {
     pub(crate) paths: Vec<Path>,
     pub(crate) log_errors: bool,
+}
+
+fn default_enable_directives() -> bool {
+    true
 }
 
 pub(crate) struct AuthorizationPlugin {
@@ -108,20 +112,12 @@ impl AuthorizationPlugin {
             .find(|(s, _)| s.as_str() == "authorization")
             .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
             .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()));
+
         let has_authorization_directives = schema.has_spec(AUTHENTICATED_SPEC_URL)
             || schema.has_spec(REQUIRES_SCOPES_SPEC_URL)
             || schema.has_spec(POLICY_SPEC_URL);
 
-        match has_config {
-            Some(b) => Ok(b),
-            None => {
-                if has_authorization_directives {
-                    Err(ServiceBuildError::Schema(SchemaError::Api("cannot start the router on a schema with authorization directives without configuring the authorization plugin".to_string())))
-                } else {
-                    Ok(false)
-                }
-            }
-        }
+        Ok(has_config.unwrap_or(true) && has_authorization_directives)
     }
 
     pub(crate) fn log_errors(configuration: &Configuration) -> bool {
