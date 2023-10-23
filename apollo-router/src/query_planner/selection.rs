@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::Entry;
+use serde_json_bytes::ByteString;
 
 use crate::error::FetchError;
 use crate::json_ext::Object;
@@ -53,16 +53,15 @@ pub(crate) fn select_object(
     selections: &[Selection],
     schema: &Schema,
 ) -> Result<Option<Value>, FetchError> {
-    let mut output = Object::new();
+    let mut output = Object::with_capacity(selections.len());
     for selection in selections {
         match selection {
             Selection::Field(field) => {
-                if let Some(value) = select_field(content, field, schema)? {
-                    match output.entry(field.name.to_owned()) {
-                        Entry::Occupied(mut existing) => existing.get_mut().deep_merge(value),
-                        Entry::Vacant(vacant) => {
-                            vacant.insert(value);
-                        }
+                if let Some((key, value)) = select_field(content, field, schema)? {
+                    if let Some(o) = output.get_mut(field.name.as_str()) {
+                        o.deep_merge(value);
+                    } else {
+                        output.insert(key.to_owned(), value);
                     }
                 }
             }
@@ -81,13 +80,16 @@ pub(crate) fn select_object(
     Ok(Some(Value::Object(output)))
 }
 
-fn select_field(
-    content: &Object,
+fn select_field<'a>(
+    content: &'a Object,
     field: &Field,
     schema: &Schema,
-) -> Result<Option<Value>, FetchError> {
-    let res = match (content.get(field.name.as_str()), &field.selections) {
-        (Some(v), _) => select_value(v, field, schema),
+) -> Result<Option<(&'a ByteString, Value)>, FetchError> {
+    let res = match (
+        content.get_key_value(field.name.as_str()),
+        &field.selections,
+    ) {
+        (Some((k, v)), _) => select_value(v, field, schema).map(|opt| opt.map(|v| (k, v))),
         (None, _) => Err(FetchError::ExecutionFieldNotFound {
             field: field.name.to_owned(),
         }),
@@ -125,8 +127,15 @@ fn select_value(
         (Value::Object(child), Some(selections)) => select_object(child, selections, schema),
         (Value::Array(elements), Some(_)) => elements
             .iter()
-            .map(|element| select_value(element, field, schema))
-            .collect(),
+            .map(|element| {
+                select_value(element, field, schema)
+                    // if a value cannot be selected from the array element, return Some(Value::Null)
+                    // instead of None, because None will short circuit the iteration and return
+                    // an empty array
+                    .map(|opt| opt.unwrap_or(Value::Null))
+            })
+            .collect::<Result<Vec<Value>, FetchError>>()
+            .map(|v| Some(Value::Array(v))),
         (value, None) => Ok(Some(value.to_owned())),
         _ => Ok(None),
     }

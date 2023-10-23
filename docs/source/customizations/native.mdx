@@ -164,6 +164,7 @@ Some notable layers are:
 * **buffered** - Make a service `Clone`. Typically required for any `async` layers.
 * **checkpoint** - Perform a sync call to decide if a request should proceed or not. Useful for validation.
 * **checkpoint_async** - Perform an async call to decide if the request should proceed or not. e.g. for Authentication. Requires `buffered`.
+* **oneshot_checkpoint_async** - Perform an async call to decide if the request should proceed or not. e.g. for Authentication. Does not require `buffered` and should be preferred to `checkpoint_async` for that reason.
 * **instrument** - Add a tracing span around a service.
 * **map_request** - Transform the request before proceeding. e.g. for header manipulation.
 * **map_response** - Transform the response before proceeding. e.g. for header manipulation.

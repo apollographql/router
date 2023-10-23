@@ -195,16 +195,16 @@ fn supergraph_service(service) {
 
 ## json encode/decode strings
 
-Your Rhai customization can use the functions `json_encode()` and `json_decode()` to convert Rhai objects to/from valid JSON encoded strings. Both functions can fail, so always handle exceptions when using them.
+Your Rhai customization can use the functions `json::encode()` and `json::decode()` to convert Rhai objects to/from valid JSON encoded strings. Both functions can fail, so always handle exceptions when using them.
 
 ```rhai
 fn router_service(service) {
     let original = `{"valid":"object"}`;
     try {
-        let encoded = json_decode(original);
+        let encoded = json::decode(original);
         // encoded is a Rhai object, with a property (or key) named valid with a String value of "object"
         print(`encoded.valid: ${encoded.valid}`);
-        let and_back = json_encode(encoded);
+        let and_back = json::encode(encoded);
         // and_back will be a string == original.
         if and_back != original {
             throw "something has gone wrong";
@@ -241,7 +241,34 @@ fn supergraph_service(service) {
 
 Note: You don't need to import the "base64" module. It is imported in the router.
 
-### Headers with multiple values
+### Different alphabets
+
+Base64 supports multiple alphabets to encode data, depending on the supported characters where it is used. The router supports the following alphabets:
+* `STANDARD`: the "base64" encoding as defined in [RFC 4648](https://datatracker.ietf.org/doc/html/rfc4648#section-4). This is the default when not specified
+* `STANDARD_NO_PAD`: the "base64" encoding as defined in [RFC 4648](https://datatracker.ietf.org/doc/html/rfc4648#section-4) without the padding (`=` or `==` characters at the end)
+* `URL_SAFE`: the "base64url" encoding as defined in [RFC 4648](https://datatracker.ietf.org/doc/html/rfc4648#section-5)
+* `URL_SAFE_NO_PAD`: the "base64url" encoding as defined in [RFC 4648](https://datatracker.ietf.org/doc/html/rfc4648#section-5) without the padding (`=` or `==` characters at the end)
+
+To use them, we can add an argument to the `encode` and `decode` methods:
+
+```rhai
+fn supergraph_service(service) {
+    let original = "alice and bob";
+    let encoded = base64::encode(original, base64::URL_SAFE);
+    // encoded will be "YWxpY2UgYW5kIGJvYgo="
+    try {
+        let and_back = base64::decode(encoded, base64::URL_SAFE);
+        // and_back will be "alice and bob"
+    }
+    catch(err)
+    {
+        // log any errors
+        log_error(`base64::decode error: ${err}`);
+    }
+}
+```
+
+## Headers with multiple values
 
 The simple get/set api for dealing with single value headers is sufficient for most use cases. If you wish to set multiple values on a key then you should do this by supplying an array of values.
 

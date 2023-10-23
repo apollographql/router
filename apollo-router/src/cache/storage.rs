@@ -3,6 +3,7 @@ use std::fmt::{self};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::Duration;
 
 use lru::LruCache;
 use serde::de::DeserializeOwned;
@@ -57,14 +58,15 @@ where
 {
     pub(crate) async fn new(
         max_capacity: NonZeroUsize,
-        _redis_urls: Option<Vec<url::Url>>,
+        redis_urls: Option<Vec<url::Url>>,
+        timeout: Option<Duration>,
         caller: &str,
     ) -> Self {
         Self {
             caller: caller.to_string(),
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            redis: if let Some(urls) = _redis_urls {
-                match RedisCacheStorage::new(urls, None).await {
+            redis: if let Some(urls) = redis_urls {
+                match RedisCacheStorage::new(urls, None, timeout).await {
                     Err(e) => {
                         tracing::error!(
                             "could not open connection to Redis for {} caching: {:?}",

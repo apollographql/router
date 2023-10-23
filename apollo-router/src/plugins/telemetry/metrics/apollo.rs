@@ -4,10 +4,11 @@ use std::sync::atomic::Ordering;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use opentelemetry::sdk::export::metrics::aggregation;
-use opentelemetry::sdk::metrics::selectors;
+use opentelemetry::runtime;
+use opentelemetry::sdk::metrics::PeriodicReader;
 use opentelemetry::sdk::Resource;
-use opentelemetry::KeyValue;
+use opentelemetry_api::KeyValue;
+use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
@@ -19,9 +20,10 @@ use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::filter::FilterMeterProvider;
+use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
+use crate::plugins::telemetry::otlp::CustomTemporalitySelector;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 mod duration_histogram;
@@ -37,6 +39,10 @@ fn default_buckets() -> Vec<f64> {
 static ROUTER_ID: OnceLock<Uuid> = OnceLock::new();
 
 impl MetricsConfigurator for Config {
+    fn enabled(&self) -> bool {
+        self.apollo_key.is_some() && self.apollo_graph_ref.is_some()
+    }
+
     fn apply(
         &self,
         mut builder: MetricsBuilder,
@@ -102,13 +108,31 @@ impl Config {
         tracing::debug!(endpoint = %endpoint, "creating Apollo OTLP metrics exporter");
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", key.parse()?);
+        let exporter = MetricsExporterBuilder::Tonic(
+            opentelemetry_otlp::new_exporter()
+                .tonic()
+                .with_endpoint(endpoint.as_str())
+                .with_timeout(batch_processor.max_export_timeout)
+                .with_metadata(metadata)
+                .with_compression(opentelemetry_otlp::Compression::Gzip),
+        )
+        .build_metrics_exporter(
+            Box::new(CustomTemporalitySelector(
+                opentelemetry::sdk::metrics::data::Temporality::Delta,
+            )),
+            Box::new(
+                CustomAggregationSelector::builder()
+                    .boundaries(default_buckets())
+                    .build(),
+            ),
+        )?;
+        let reader = PeriodicReader::builder(exporter, runtime::Tokio)
+            .with_interval(Duration::from_secs(60))
+            .build();
 
-        let exporter = opentelemetry_otlp::new_pipeline()
-            .metrics(
-                selectors::simple::histogram(default_buckets()),
-                aggregation::delta_temporality_selector(),
-                opentelemetry::runtime::Tokio,
-            )
+        builder.apollo_meter_provider_builder = builder
+            .apollo_meter_provider_builder
+            .with_reader(reader)
             .with_resource(Resource::new([
                 KeyValue::new(
                     "apollo.router.id",
@@ -126,24 +150,12 @@ impl Config {
                 ),
                 KeyValue::new("apollo.client.host", hostname()?),
                 KeyValue::new("apollo.client.uname", get_uname()?),
-            ]))
-            .with_period(Duration::from_secs(60))
-            .with_exporter(
-                opentelemetry_otlp::new_exporter()
-                    .tonic()
-                    .with_endpoint(endpoint.as_str())
-                    .with_timeout(batch_processor.max_export_timeout)
-                    .with_metadata(metadata),
-            )
-            .build()?;
-        builder =
-            builder.with_meter_provider(FilterMeterProvider::apollo_metrics(exporter.clone()));
-        builder = builder.with_exporter(exporter);
+            ]));
         Ok(builder)
     }
 
     fn configure_apollo_metrics(
-        builder: MetricsBuilder,
+        mut builder: MetricsBuilder,
         endpoint: &Url,
         key: &str,
         reference: &str,
@@ -155,7 +167,8 @@ impl Config {
         let exporter =
             ApolloExporter::new(endpoint, batch_processor_config, key, reference, schema_id)?;
 
-        Ok(builder.with_apollo_metrics_collector(exporter.start()))
+        builder.apollo_metrics_sender = exporter.start();
+        Ok(builder)
     }
 }
 
@@ -297,7 +310,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_validation_failure() -> Result<(), BoxError> {
-        let query = "query {topProducts{unknown}}";
+        let query = "query {topProducts(minStarRating: 4.7){name}}";
         let results = get_metrics_for_request(query, None, None, false).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
@@ -397,10 +410,8 @@ mod test {
     ) -> Result<Telemetry, BoxError> {
         Telemetry::new(PluginInit::fake_new(
             config::Conf {
-                logging: Default::default(),
-                metrics: None,
-                tracing: None,
-                apollo: Some(apollo_config),
+                apollo: apollo_config,
+                ..Default::default()
             },
             Default::default(),
         ))

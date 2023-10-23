@@ -88,11 +88,14 @@ supergraph:
     experimental_cache:
       redis: #highlight-line
         urls: ["redis://..."] #highlight-line
+        timeout: 5ms # Optional, by default: 2ms
 ```
 
 The value of `urls` is a list of URLs for all Redis instances in your cluster.
 
 > ⚠️ **You should specify your Redis URLs via environment variables and [variable expansion](./overview#variable-expansion)**. This prevents your Redis URLs from being committed to version control, which is especially dangerous if they include authentication information like a username and/or password.
+
+All query plan cache entries will be prefixed with `plan.` within the distributed cache. 
 
 ## Distributed APQ caching
 
@@ -104,8 +107,11 @@ apq:
     cache:
       redis: #highlight-line
         urls: ["redis://..."] #highlight-line
+        timeout: 5ms # Optional, by default: 2ms
 ```
 
 The value of `urls` is a list of URLs for all Redis instances in your cluster.
 
 > ⚠️ **You should specify your Redis URLs via environment variables and [variable expansion](./overview#variable-expansion)**. This prevents your Redis URLs from being committed to version control, which is especially dangerous if they include authentication information like a username and/or password.
+
+All APQ cache entries will be prefixed with `apq` followed by a null byte character (referenced by the escape sequence `\0` in most programming languages) within the distributed cache.

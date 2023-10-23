@@ -402,9 +402,12 @@ where
             (license, Instant::now(), Arc::new(AtomicU64::new(0))),
             license_handler,
         ))
-        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license }))
         .layer(Extension(service_factory))
-        .layer(cors);
+        .layer(cors)
+        // Telemetry layers MUST be last. This means that they will be hit first during execution of the pipeline
+        // Adding layers after telemetry will cause us to lose metrics and spans.
+        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license }))
+        .layer(middleware::from_fn(metrics_handler));
 
     let route = endpoints_on_main_listener
         .into_iter()
@@ -412,6 +415,17 @@ where
 
     let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
+}
+
+async fn metrics_handler<B>(request: Request<B>, next: Next<B>) -> Response {
+    let resp = next.run(request).await;
+    u64_counter!(
+        "apollo.router.operations",
+        "The number of graphql operations performed by the Router",
+        1,
+        "http.response.status_code" = resp.status().as_u16() as i64
+    );
+    resp
 }
 
 async fn license_handler<B>(
@@ -423,12 +437,13 @@ async fn license_handler<B>(
         license,
         LicenseState::LicensedHalt | LicenseState::LicensedWarn
     ) {
-        ::tracing::error!(
-           monotonic_counter.apollo_router_http_requests_total = 1u64,
-           status = %500u16,
-           error = LICENSE_EXPIRED_SHORT_MESSAGE,
+        u64_counter!(
+            "apollo_router_http_requests_total",
+            "Total number of HTTP requests made.",
+            1,
+            status = StatusCode::INTERNAL_SERVER_ERROR.as_u16() as i64,
+            error = LICENSE_EXPIRED_SHORT_MESSAGE
         );
-
         // This will rate limit logs about license to 1 a second.
         // The way it works is storing the delta in seconds from a starting instant.
         // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successfull log.

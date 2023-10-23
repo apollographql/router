@@ -5,10 +5,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::RwLock;
 
-use apollo_parser::ast;
-use apollo_parser::ast::AstNode;
-use apollo_parser::Parser;
-use apollo_parser::SyntaxTree;
+use apollo_compiler::ast;
 use futures::prelude::*;
 use reqwest::Client;
 use serde::Deserialize;
@@ -19,7 +16,7 @@ use tower::BoxError;
 use crate::uplink::persisted_queries_manifest_stream::MaybePersistedQueriesManifestChunks;
 use crate::uplink::persisted_queries_manifest_stream::PersistedQueriesManifestChunk;
 use crate::uplink::persisted_queries_manifest_stream::PersistedQueriesManifestQuery;
-use crate::uplink::stream_from_uplink;
+use crate::uplink::stream_from_uplink_transforming_new_response;
 use crate::uplink::UplinkConfig;
 use crate::Configuration;
 
@@ -63,7 +60,7 @@ impl FreeformGraphQLBehavior {
     fn action_for_freeform_graphql(
         &self,
         body_from_request: &str,
-        ast: SyntaxTree,
+        ast: &ast::Document,
     ) -> FreeformGraphQLAction {
         match self {
             FreeformGraphQLBehavior::AllowAll { .. } => FreeformGraphQLAction::Allow,
@@ -137,12 +134,13 @@ impl FreeformGraphQLSafelist {
     }
 
     fn insert_from_manifest(&mut self, body_from_manifest: &str) {
-        self.normalized_bodies.insert(
-            self.normalize_body(body_from_manifest, Parser::new(body_from_manifest).parse()),
-        );
+        self.normalized_bodies.insert(self.normalize_body(
+            body_from_manifest,
+            &ast::Document::parse(body_from_manifest, "from_manifest"),
+        ));
     }
 
-    fn is_allowed(&self, body_from_request: &str, ast: SyntaxTree) -> bool {
+    fn is_allowed(&self, body_from_request: &str, ast: &ast::Document) -> bool {
         // Note: consider adding an LRU cache that caches this function's return
         // value based solely on body_from_request without needing to normalize
         // the body.
@@ -150,55 +148,39 @@ impl FreeformGraphQLSafelist {
             .contains(&self.normalize_body(body_from_request, ast))
     }
 
-    fn normalize_body(&self, body_from_request: &str, ast: SyntaxTree) -> String {
-        if ast.errors().peekable().peek().is_some() {
+    fn normalize_body(&self, body_from_request: &str, ast: &ast::Document) -> String {
+        if ast.check_parse_errors().is_err() {
             // If we can't parse the operation (whether from the PQ list or the
             // incoming request), then we can't normalize it. We keep it around
             // unnormalized, so that it at least works as a byte-for-byte
-            // safelist entry. (We also do this if we get any other errors
-            // below.)
+            // safelist entry.
             body_from_request.to_string()
         } else {
-            let mut encoder_document = apollo_encoder::Document::new();
-
             let mut operations = vec![];
             let mut fragments = vec![];
 
-            for definition in ast.document().syntax().children() {
-                if ast::OperationDefinition::can_cast(definition.kind()) {
-                    operations.push(ast::OperationDefinition::cast(definition).unwrap())
-                } else if ast::FragmentDefinition::can_cast(definition.kind()) {
-                    fragments.push(ast::FragmentDefinition::cast(definition).unwrap())
+            for definition in &ast.definitions {
+                match definition {
+                    ast::Definition::OperationDefinition(def) => operations.push(def.clone()),
+                    ast::Definition::FragmentDefinition(def) => fragments.push(def.clone()),
+                    _ => {}
                 }
             }
 
-            // First include operation definitions, sorted by name.
-            operations.sort_by_key(|x| x.name().map(|n| n.text().to_string()));
-            for parser_operation in operations {
-                let encoder_operation = match parser_operation.try_into() {
-                    Ok(op) => op,
-                    Err(_) => return body_from_request.to_string(),
-                };
+            let mut new_document = ast::Document::new();
 
-                encoder_document.operation(encoder_operation)
-            }
+            // First include operation definitions, sorted by name.
+            operations.sort_by_key(|x| x.name.clone());
+            new_document
+                .definitions
+                .extend(operations.into_iter().map(Into::into));
 
             // Next include fragment definitions, sorted by name.
-            fragments.sort_by_key(|x| {
-                x.fragment_name()
-                    .and_then(|n| n.name())
-                    .map(|n| n.text().to_string())
-            });
-            for parser_fragment in fragments {
-                let encoder_fragment = match parser_fragment.try_into() {
-                    Ok(op) => op,
-                    Err(_) => return body_from_request.to_string(),
-                };
-
-                encoder_document.fragment(encoder_fragment)
-            }
-
-            encoder_document.to_string()
+            fragments.sort_by_key(|x| x.name.clone());
+            new_document
+                .definitions
+                .extend(fragments.into_iter().map(Into::into));
+            new_document.to_string()
         }
     }
 }
@@ -285,10 +267,18 @@ impl PersistedQueryManifestPoller {
             .cloned()
     }
 
+    pub(crate) fn get_all_operations(&self) -> Vec<String> {
+        let state = self
+            .state
+            .read()
+            .expect("could not acquire read lock on persisted query manifest state");
+        state.persisted_query_manifest.values().cloned().collect()
+    }
+
     pub(crate) fn action_for_freeform_graphql(
         &self,
         query: &str,
-        ast: SyntaxTree,
+        ast: &ast::Document,
     ) -> FreeformGraphQLAction {
         let state = self
             .state
@@ -339,23 +329,32 @@ async fn poll_uplink(
     mut drop_receiver: mpsc::Receiver<()>,
     http_client: Client,
 ) {
+    let http_client = http_client.clone();
     let mut uplink_executor = stream::select_all(vec![
-        stream_from_uplink::<PersistedQueriesManifestQuery, MaybePersistedQueriesManifestChunks>(
-            uplink_config.clone(),
-        )
-        .filter_map(|res| {
+        stream_from_uplink_transforming_new_response::<
+            PersistedQueriesManifestQuery,
+            MaybePersistedQueriesManifestChunks,
+            Option<PersistedQueryManifest>,
+        >(uplink_config.clone(), move |response| {
             let http_client = http_client.clone();
-            let graph_ref = uplink_config.apollo_graph_ref.clone();
-            async move {
-                match res {
-                    Ok(Some(chunks)) => match manifest_from_chunks(chunks, http_client).await {
-                        Ok(new_manifest) => Some(ManifestPollEvent::NewManifest(new_manifest)),
-                        Err(e) => Some(ManifestPollEvent::FetchError(e)),
-                    },
-                    Ok(None) => Some(ManifestPollEvent::NoPersistedQueryList { graph_ref }),
-                    Err(e) => Some(ManifestPollEvent::Err(e.into())),
+            Box::new(Box::pin(async move {
+                match response {
+                    Some(chunks) => manifest_from_chunks(chunks, http_client)
+                        .await
+                        .map(Some)
+                        .map_err(|err| {
+                            format!("could not download persisted query lists: {}", err).into()
+                        }),
+                    None => Ok(None),
                 }
-            }
+            }))
+        })
+        .map(|res| match res {
+            Ok(Some(new_manifest)) => ManifestPollEvent::NewManifest(new_manifest),
+            Ok(None) => ManifestPollEvent::NoPersistedQueryList {
+                graph_ref: uplink_config.apollo_graph_ref.clone(),
+            },
+            Err(e) => ManifestPollEvent::Err(e.into()),
         })
         .boxed(),
         drop_receiver
@@ -365,7 +364,8 @@ async fn poll_uplink(
                 future::ready(match res {
                     None => Some(ManifestPollEvent::Shutdown),
                     Some(()) => Some(ManifestPollEvent::Err(
-                        "received message on drop channel in persisted query layer, which never gets sent"
+                        "received message on drop channel in persisted query layer, which never \
+                         gets sent"
                             .into(),
                     )),
                 })
@@ -375,24 +375,23 @@ async fn poll_uplink(
     .take_while(|msg| future::ready(!matches!(msg, ManifestPollEvent::Shutdown)))
     .boxed();
 
-    let mut resolved_first_pq_manifest = false;
+    let mut ready_sender_once = Some(ready_sender);
 
     while let Some(event) = uplink_executor.next().await {
         match event {
             ManifestPollEvent::NewManifest(new_manifest) => {
-                let freeform_graphql_behavior = if config.preview_persisted_queries.safelist.enabled
-                {
-                    if config.preview_persisted_queries.safelist.require_id {
+                let freeform_graphql_behavior = if config.persisted_queries.safelist.enabled {
+                    if config.persisted_queries.safelist.require_id {
                         FreeformGraphQLBehavior::DenyAll {
-                            log_unknown: config.preview_persisted_queries.log_unknown,
+                            log_unknown: config.persisted_queries.log_unknown,
                         }
                     } else {
                         FreeformGraphQLBehavior::AllowIfInSafelist {
                             safelist: FreeformGraphQLSafelist::new(&new_manifest),
-                            log_unknown: config.preview_persisted_queries.log_unknown,
+                            log_unknown: config.persisted_queries.log_unknown,
                         }
                     }
-                } else if config.preview_persisted_queries.log_unknown {
+                } else if config.persisted_queries.log_unknown {
                     FreeformGraphQLBehavior::LogUnlessInSafelist {
                         safelist: FreeformGraphQLSafelist::new(&new_manifest),
                         apq_enabled: config.apq.enabled,
@@ -415,30 +414,22 @@ async fn poll_uplink(
                     })
                     .expect("could not acquire write lock on persisted query manifest state");
 
-                if !resolved_first_pq_manifest {
-                    send_startup_event(
-                        &ready_sender,
-                        ManifestPollResultOnStartup::LoadedOperations,
-                    )
-                    .await;
-                    resolved_first_pq_manifest = true;
-                }
+                send_startup_event_or_log_error(
+                    &mut ready_sender_once,
+                    ManifestPollResultOnStartup::LoadedOperations,
+                )
+                .await;
             }
-            ManifestPollEvent::FetchError(e) => {
-                send_startup_event(
-                    &ready_sender,
-                    ManifestPollResultOnStartup::Err(
-                        format!("could not fetch persisted queries: {e}").into(),
-                    ),
+            ManifestPollEvent::Err(e) => {
+                send_startup_event_or_log_error(
+                    &mut ready_sender_once,
+                    ManifestPollResultOnStartup::Err(e),
                 )
                 .await
             }
-            ManifestPollEvent::Err(e) => {
-                send_startup_event(&ready_sender, ManifestPollResultOnStartup::Err(e)).await
-            }
             ManifestPollEvent::NoPersistedQueryList { graph_ref } => {
-                send_startup_event(
-                    &ready_sender,
+                send_startup_event_or_log_error(
+                    &mut ready_sender_once,
                     ManifestPollResultOnStartup::Err(
                         format!("no persisted query list found for graph ref {}", &graph_ref)
                             .into(),
@@ -451,12 +442,28 @@ async fn poll_uplink(
         }
     }
 
-    async fn send_startup_event(
-        ready_sender: &mpsc::Sender<ManifestPollResultOnStartup>,
+    async fn send_startup_event_or_log_error(
+        ready_sender: &mut Option<mpsc::Sender<ManifestPollResultOnStartup>>,
         message: ManifestPollResultOnStartup,
     ) {
-        if let Err(e) = ready_sender.send(message).await {
-            tracing::debug!("could not send startup event for the persisted query layer: {e}");
+        match (ready_sender.take(), message) {
+            (Some(ready_sender), message) => {
+                if let Err(e) = ready_sender.send(message).await {
+                    tracing::debug!(
+                        "could not send startup event for the persisted query layer: {e}"
+                    );
+                }
+            }
+            (None, ManifestPollResultOnStartup::Err(err)) => {
+                // We've already successfully started up, but we received some sort of error. This doesn't
+                // need to break our functional router, but we can log in case folks are interested.
+                tracing::error!(
+                    "error while polling uplink for persisted query manifests: {}",
+                    err
+                )
+            }
+            // Do nothing in the normal background "new manifest" case.
+            (None, ManifestPollResultOnStartup::LoadedOperations) => {}
         }
     }
 }
@@ -490,46 +497,69 @@ async fn add_chunk_to_operations(
     operations: &mut PersistedQueryManifest,
     http_client: Client,
 ) -> Result<(), BoxError> {
-    // TODO: chunk URLs will eventually respond with fallback URLs, when it does, implement falling back here
-    if let Some(chunk_url) = chunk.urls.get(0) {
-        let chunk = http_client
-            .get(chunk_url.clone())
-            .send()
-            .await
-            .and_then(|r| r.error_for_status())
-            .map_err(|e| -> BoxError {
-                format!(
-                    "error fetching persisted queries manifest chunk from {}: {}",
-                    chunk_url, e
-                )
-                .into()
-            })?
-            .json::<SignedUrlChunk>()
-            .await
-            .map_err(|e| -> BoxError {
-                format!(
-                    "error reading body of persisted queries manifest chunk from {}: {}",
-                    chunk_url, e
-                )
-                .into()
-            })?;
-
-        if chunk.format != "apollo-persisted-query-manifest" {
-            return Err("chunk format is not 'apollo-persisted-query-manifest'".into());
+    let mut it = chunk.urls.iter().peekable();
+    while let Some(chunk_url) = it.next() {
+        match fetch_chunk(http_client.clone(), chunk_url).await {
+            Ok(chunk) => {
+                for operation in chunk.operations {
+                    operations.insert(operation.id, operation.body);
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                if it.peek().is_some() {
+                    // There's another URL to try, so log as debug and move on.
+                    tracing::debug!(
+                        "failed to fetch persisted query list chunk from {}: {}. \
+                         Other endpoints will be tried",
+                        chunk_url,
+                        e
+                    );
+                    continue;
+                } else {
+                    // No more URLs; fail the function.
+                    return Err(e);
+                }
+            }
         }
-
-        if chunk.version != 1 {
-            return Err("persisted query manifest chunk version is not 1".into());
-        }
-
-        for operation in chunk.operations {
-            operations.insert(operation.id, operation.body);
-        }
-
-        Ok(())
-    } else {
-        Err("persisted query chunk did not include any URLs to fetch operations from".into())
     }
+    // The loop always returns unless there's another iteration after it, so the
+    // only way we can fall off the loop is if we never entered it.
+    Err("persisted query chunk did not include any URLs to fetch operations from".into())
+}
+
+async fn fetch_chunk(http_client: Client, chunk_url: &String) -> Result<SignedUrlChunk, BoxError> {
+    let chunk = http_client
+        .get(chunk_url.clone())
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| -> BoxError {
+            format!(
+                "error fetching persisted queries manifest chunk from {}: {}",
+                chunk_url, e
+            )
+            .into()
+        })?
+        .json::<SignedUrlChunk>()
+        .await
+        .map_err(|e| -> BoxError {
+            format!(
+                "error reading body of persisted queries manifest chunk from {}: {}",
+                chunk_url, e
+            )
+            .into()
+        })?;
+
+    if chunk.format != "apollo-persisted-query-manifest" {
+        return Err("chunk format is not 'apollo-persisted-query-manifest'".into());
+    }
+
+    if chunk.version != 1 {
+        return Err("persisted query manifest chunk version is not 1".into());
+    }
+
+    Ok(chunk)
 }
 
 /// Types of events produced by the manifest poller.
@@ -538,7 +568,6 @@ pub(crate) enum ManifestPollEvent {
     NewManifest(PersistedQueryManifest),
     NoPersistedQueryList { graph_ref: String },
     Err(BoxError),
-    FetchError(BoxError),
     Shutdown,
 }
 
@@ -602,6 +631,24 @@ mod tests {
         .is_err());
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn poller_fails_over_on_gcs_failure() {
+        let (_mock_server1, url1) = mock_pq_uplink_bad_gcs().await;
+        let (id, body, manifest) = fake_manifest();
+        let (_mock_guard2, url2) = mock_pq_uplink_one_endpoint(&manifest, None).await;
+        let manifest_manager = PersistedQueryManifestPoller::new(
+            Configuration::fake_builder()
+                .uplink(UplinkConfig::for_tests(Endpoints::fallback(vec![
+                    url1, url2,
+                ])))
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(manifest_manager.get_operation_body(&id), Some(body))
+    }
+
     #[test]
     fn safelist_body_normalization() {
         let safelist = FreeformGraphQLSafelist::new(&PersistedQueryManifest::from([(
@@ -614,7 +661,7 @@ mod tests {
         ]));
 
         let is_allowed =
-            |body: &str| -> bool { safelist.is_allowed(body, Parser::new(body).parse()) };
+            |body: &str| -> bool { safelist.is_allowed(body, &ast::Document::parse(body, "")) };
 
         // Precise string matches.
         assert!(is_allowed(

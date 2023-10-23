@@ -10,6 +10,7 @@ use std::time::SystemTime;
 
 use buildstructor::buildstructor;
 use http::header::ACCEPT;
+use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use jsonpath_lib::Selector;
@@ -334,7 +335,10 @@ impl IntegrationTest {
     pub fn execute_default_query(
         &self,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
-        self.execute_query_internal(None)
+        self.execute_query_internal(
+            &json!({"query":"query {topProducts{name}}","variables":{}}),
+            None,
+        )
     }
 
     #[allow(dead_code)]
@@ -342,21 +346,34 @@ impl IntegrationTest {
         &self,
         query: &Value,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
-        self.execute_query_internal(Some(query))
+        self.execute_query_internal(query, None)
+    }
+
+    #[allow(dead_code)]
+    pub fn execute_bad_query(
+        &self,
+    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+        self.execute_query_internal(&json!({"garbage":{}}), None)
+    }
+
+    #[allow(dead_code)]
+    pub fn execute_bad_content_encoding(
+        &self,
+    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+        self.execute_query_internal(&json!({"garbage":{}}), Some("garbage"))
     }
 
     fn execute_query_internal(
         &self,
-        query: Option<&Value>,
+        query: &Value,
+        content_encoding: Option<&'static str>,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
-        let default_query = &json!({"query":"query {topProducts{name}}","variables":{}});
-        let query = query.unwrap_or(default_query).clone();
         let dispatch = self.subscriber.clone();
-
+        let query = query.clone();
         async move {
             let span = info_span!("client_request");
             let span_id = span.context().span().span_context().trace_id().to_string();
@@ -367,6 +384,7 @@ impl IntegrationTest {
                 let mut request = client
                     .post("http://localhost:4000")
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .header(CONTENT_ENCODING, content_encoding.unwrap_or("identity"))
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
                     .json(&query)
@@ -555,6 +573,20 @@ impl IntegrationTest {
         }
         self.dump_stack_traces();
         panic!("'{msg}' not detected in logs");
+    }
+
+    #[allow(dead_code)]
+    pub async fn assert_log_not_contains(&mut self, msg: &str) {
+        let now = Instant::now();
+        while now.elapsed() < Duration::from_secs(5) {
+            if let Ok(line) = self.stdio_rx.try_recv() {
+                if line.contains(msg) {
+                    self.dump_stack_traces();
+                    panic!("'{msg}' detected in logs");
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 
     #[allow(dead_code)]

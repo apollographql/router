@@ -1,35 +1,45 @@
-#![cfg_attr(not(test), allow(unused))] // TODO: remove when used
+use std::collections::HashMap;
 
-use apollo_compiler::hir;
-use apollo_compiler::ApolloCompiler;
-use apollo_compiler::HirDatabase;
+use apollo_compiler::ast;
+use apollo_compiler::schema::FieldLookupError;
 use tower::BoxError;
 
-/// Transform an executable document with the given visitor.
+/// Transform a document with the given visitor.
 pub(crate) fn document(
     visitor: &mut impl Visitor,
-    file_id: apollo_compiler::FileId,
-) -> Result<apollo_encoder::Document, BoxError> {
-    let mut encoder_node = apollo_encoder::Document::new();
-
-    for def in visitor.compiler().db.operations(file_id).iter() {
-        if let Some(op) = visitor.operation(def)? {
-            encoder_node.operation(op)
+    document: &ast::Document,
+) -> Result<ast::Document, BoxError> {
+    let mut new = ast::Document {
+        sources: document.sources.clone(),
+        definitions: Vec::new(),
+    };
+    for definition in &document.definitions {
+        match definition {
+            ast::Definition::OperationDefinition(def) => {
+                let root_type = visitor
+                    .schema()
+                    .root_operation(def.operation_type)
+                    .ok_or("missing root operation definition")?
+                    .clone();
+                if let Some(new_def) = visitor.operation(&root_type, def)? {
+                    new.definitions
+                        .push(ast::Definition::OperationDefinition(new_def.into()))
+                }
+            }
+            ast::Definition::FragmentDefinition(def) => {
+                if let Some(new_def) = visitor.fragment_definition(def)? {
+                    new.definitions
+                        .push(ast::Definition::FragmentDefinition(new_def.into()))
+                }
+            }
+            _ => {}
         }
     }
-    for def in visitor.compiler().db.fragments(file_id).values() {
-        if let Some(f) = visitor.fragment_definition(def)? {
-            encoder_node.fragment(f)
-        }
-    }
-
-    Ok(encoder_node)
+    Ok(new)
 }
 
 pub(crate) trait Visitor: Sized {
-    /// A compiler that contains both the executable document to transform
-    /// and the corresponding type system definitions.
-    fn compiler(&self) -> &ApolloCompiler;
+    fn schema(&self) -> &apollo_compiler::Schema;
 
     /// Transform an operation definition.
     ///
@@ -37,9 +47,10 @@ pub(crate) trait Visitor: Sized {
     /// Return `Ok(None)` to remove this operation.
     fn operation(
         &mut self,
-        hir: &hir::OperationDefinition,
-    ) -> Result<Option<apollo_encoder::OperationDefinition>, BoxError> {
-        operation(self, hir)
+        root_type: &str,
+        def: &ast::OperationDefinition,
+    ) -> Result<Option<ast::OperationDefinition>, BoxError> {
+        operation(self, root_type, def)
     }
 
     /// Transform a fragment definition.
@@ -48,9 +59,9 @@ pub(crate) trait Visitor: Sized {
     /// Return `Ok(None)` to remove this fragment.
     fn fragment_definition(
         &mut self,
-        hir: &hir::FragmentDefinition,
-    ) -> Result<Option<apollo_encoder::FragmentDefinition>, BoxError> {
-        fragment_definition(self, hir)
+        def: &ast::FragmentDefinition,
+    ) -> Result<Option<ast::FragmentDefinition>, BoxError> {
+        fragment_definition(self, def)
     }
 
     /// Transform a field within a selection set.
@@ -59,10 +70,11 @@ pub(crate) trait Visitor: Sized {
     /// Return `Ok(None)` to remove this field.
     fn field(
         &mut self,
-        parent_type: &str,
-        hir: &hir::Field,
-    ) -> Result<Option<apollo_encoder::Field>, BoxError> {
-        field(self, parent_type, hir)
+        _parent_type: &str,
+        field_def: &ast::FieldDefinition,
+        def: &ast::Field,
+    ) -> Result<Option<ast::Field>, BoxError> {
+        field(self, field_def, def)
     }
 
     /// Transform a fragment spread within a selection set.
@@ -71,9 +83,9 @@ pub(crate) trait Visitor: Sized {
     /// Return `Ok(None)` to remove this fragment spread.
     fn fragment_spread(
         &mut self,
-        hir: &hir::FragmentSpread,
-    ) -> Result<Option<apollo_encoder::FragmentSpread>, BoxError> {
-        fragment_spread(self, hir)
+        def: &ast::FragmentSpread,
+    ) -> Result<Option<ast::FragmentSpread>, BoxError> {
+        fragment_spread(self, def)
     }
 
     /// Transform a inline fragment within a selection set.
@@ -83,24 +95,9 @@ pub(crate) trait Visitor: Sized {
     fn inline_fragment(
         &mut self,
         parent_type: &str,
-        hir: &hir::InlineFragment,
-    ) -> Result<Option<apollo_encoder::InlineFragment>, BoxError> {
-        inline_fragment(self, parent_type, hir)
-    }
-
-    /// Transform a selection within a selection set.
-    ///
-    /// Call the [`selection`] free function for the default behavior.
-    /// Return `Ok(None)` to remove this selection from the selection set.
-    ///
-    /// Compared to `field`, `fragment_spread`, or `inline_fragment` trait methods,
-    /// this allows returning a different kind of selection.
-    fn selection(
-        &mut self,
-        hir: &hir::Selection,
-        parent_type: &str,
-    ) -> Result<Option<apollo_encoder::Selection>, BoxError> {
-        selection(self, hir, parent_type)
+        def: &ast::InlineFragment,
+    ) -> Result<Option<ast::InlineFragment>, BoxError> {
+        inline_fragment(self, parent_type, def)
     }
 }
 
@@ -109,37 +106,20 @@ pub(crate) trait Visitor: Sized {
 /// Never returns `Ok(None)`, the `Option` is for `Visitor` impl convenience.
 pub(crate) fn operation(
     visitor: &mut impl Visitor,
-    def: &hir::OperationDefinition,
-) -> Result<Option<apollo_encoder::OperationDefinition>, BoxError> {
-    let object_type = def
-        .object_type(&visitor.compiler().db)
-        .ok_or("ObjectTypeDefMissing")?;
-    let type_name = object_type.name();
-
-    let Some(selection_set) = selection_set(visitor, def.selection_set(), type_name)? else {
+    root_type: &str,
+    def: &ast::OperationDefinition,
+) -> Result<Option<ast::OperationDefinition>, BoxError> {
+    let Some(selection_set) = selection_set(visitor, root_type, &def.selection_set)? else {
         return Ok(None);
     };
 
-    let mut encoder_node =
-        apollo_encoder::OperationDefinition::new(operation_type(def.operation_ty()), selection_set);
-
-    if let Some(name) = def.name() {
-        encoder_node.name(Some(name.to_string()));
-    }
-
-    for def in def.variables() {
-        if let Some(v) = variable_definition(def)? {
-            encoder_node.variable_definition(v)
-        }
-    }
-
-    for hir in def.directives() {
-        if let Some(d) = directive(hir)? {
-            encoder_node.directive(d)
-        }
-    }
-
-    Ok(Some(encoder_node))
+    Ok(Some(ast::OperationDefinition {
+        name: def.name.clone(),
+        operation_type: def.operation_type,
+        variables: def.variables.clone(),
+        directives: def.directives.clone(),
+        selection_set,
+    }))
 }
 
 /// The default behavior for transforming a fragment definition.
@@ -147,25 +127,18 @@ pub(crate) fn operation(
 /// Never returns `Ok(None)`, the `Option` is for `Visitor` impl convenience.
 pub(crate) fn fragment_definition(
     visitor: &mut impl Visitor,
-    hir: &hir::FragmentDefinition,
-) -> Result<Option<apollo_encoder::FragmentDefinition>, BoxError> {
-    let name = hir.name();
-    let type_condition = hir.type_condition();
-
-    let Some(selection_set) = selection_set(visitor, hir.selection_set(), type_condition)? else {
+    def: &ast::FragmentDefinition,
+) -> Result<Option<ast::FragmentDefinition>, BoxError> {
+    let Some(selection_set) = selection_set(visitor, &def.type_condition, &def.selection_set)?
+    else {
         return Ok(None);
     };
-
-    let type_condition = apollo_encoder::TypeCondition::new(type_condition.into());
-    let mut encoder_node =
-        apollo_encoder::FragmentDefinition::new(name.into(), type_condition, selection_set);
-    for hir in hir.directives() {
-        if let Some(d) = directive(hir)? {
-            encoder_node.directive(d)
-        }
-    }
-
-    Ok(Some(encoder_node))
+    Ok(Some(ast::FragmentDefinition {
+        name: def.name.clone(),
+        type_condition: def.type_condition.clone(),
+        directives: def.directives.clone(),
+        selection_set,
+    }))
 }
 
 /// The default behavior for transforming a field within a selection set.
@@ -173,42 +146,21 @@ pub(crate) fn fragment_definition(
 /// Returns `Ok(None)` if the field had nested selections and they’re all removed.
 pub(crate) fn field(
     visitor: &mut impl Visitor,
-    parent_type: &str,
-    hir: &hir::Field,
-) -> Result<Option<apollo_encoder::Field>, BoxError> {
-    let name = hir.name();
-
-    let mut encoder_node = apollo_encoder::Field::new(name.into());
-
-    if let Some(alias) = hir.alias() {
-        encoder_node.alias(Some(alias.name().into()));
-    }
-
-    for arg in hir.arguments() {
-        encoder_node.argument(apollo_encoder::Argument::new(
-            arg.name().into(),
-            value(arg.value())?,
-        ));
-    }
-
-    for hir in hir.directives() {
-        if let Some(d) = directive(hir)? {
-            encoder_node.directive(d)
-        }
-    }
-
-    let selections = hir.selection_set();
-    if !selections.selection().is_empty() {
-        let field_type = get_field_type(visitor, parent_type, name)
-            .ok_or_else(|| format!("cannot query field '{name}' on type '{parent_type}'"))?;
-        match selection_set(visitor, selections, &field_type)? {
-            // we expected some fields on that object but got none: that field should be removed
-            None => return Ok(None),
-            Some(selection_set) => encoder_node.selection_set(Some(selection_set)),
-        }
-    }
-
-    Ok(Some(encoder_node))
+    field_def: &ast::FieldDefinition,
+    def: &ast::Field,
+) -> Result<Option<ast::Field>, BoxError> {
+    let Some(selection_set) =
+        selection_set(visitor, field_def.ty.inner_named_type(), &def.selection_set)?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(ast::Field {
+        alias: def.alias.clone(),
+        name: def.name.clone(),
+        arguments: def.arguments.clone(),
+        directives: def.directives.clone(),
+        selection_set,
+    }))
 }
 
 /// The default behavior for transforming a fragment spread.
@@ -216,17 +168,10 @@ pub(crate) fn field(
 /// Never returns `Ok(None)`, the `Option` is for `Visitor` impl convenience.
 pub(crate) fn fragment_spread(
     visitor: &mut impl Visitor,
-    hir: &hir::FragmentSpread,
-) -> Result<Option<apollo_encoder::FragmentSpread>, BoxError> {
+    def: &ast::FragmentSpread,
+) -> Result<Option<ast::FragmentSpread>, BoxError> {
     let _ = visitor; // Unused, but matches trait method signature
-    let name = hir.name();
-    let mut encoder_node = apollo_encoder::FragmentSpread::new(name.into());
-    for hir in hir.directives() {
-        if let Some(d) = directive(hir)? {
-            encoder_node.directive(d)
-        }
-    }
-    Ok(Some(encoder_node))
+    Ok(Some(def.clone()))
 }
 
 /// The default behavior for transforming an inline fragment.
@@ -235,182 +180,103 @@ pub(crate) fn fragment_spread(
 pub(crate) fn inline_fragment(
     visitor: &mut impl Visitor,
     parent_type: &str,
-    hir: &hir::InlineFragment,
-) -> Result<Option<apollo_encoder::InlineFragment>, BoxError> {
-    let parent_type = hir.type_condition().unwrap_or(parent_type);
-
-    let Some(selection_set) = selection_set(visitor, hir.selection_set(), parent_type)? else {
+    def: &ast::InlineFragment,
+) -> Result<Option<ast::InlineFragment>, BoxError> {
+    let Some(selection_set) = selection_set(visitor, parent_type, &def.selection_set)? else {
         return Ok(None);
     };
-
-    let mut encoder_node = apollo_encoder::InlineFragment::new(selection_set);
-
-    encoder_node.type_condition(
-        hir.type_condition()
-            .map(|name| apollo_encoder::TypeCondition::new(name.into())),
-    );
-
-    for hir in hir.directives() {
-        if let Some(d) = directive(hir)? {
-            encoder_node.directive(d)
-        }
-    }
-
-    Ok(Some(encoder_node))
-}
-
-pub(crate) fn get_field_type(
-    visitor: &impl Visitor,
-    parent: &str,
-    field_name: &str,
-) -> Option<String> {
-    Some(if field_name == "__typename" {
-        "String".into()
-    } else {
-        let db = &visitor.compiler().db;
-        db.types_definitions_by_name()
-            .get(parent)?
-            .field(db, field_name)?
-            .ty()
-            .name()
-    })
+    Ok(Some(ast::InlineFragment {
+        type_condition: def.type_condition.clone(),
+        directives: def.directives.clone(),
+        selection_set,
+    }))
 }
 
 pub(crate) fn selection_set(
     visitor: &mut impl Visitor,
-    hir: &hir::SelectionSet,
     parent_type: &str,
-) -> Result<Option<apollo_encoder::SelectionSet>, BoxError> {
-    let selections = hir
-        .selection()
+    set: &[ast::Selection],
+) -> Result<Option<Vec<ast::Selection>>, BoxError> {
+    if set.is_empty() {
+        return Ok(Some(Vec::new()));
+    }
+    let mut selections = Vec::new();
+    for sel in set {
+        match sel {
+            ast::Selection::Field(def) => {
+                let field_def = visitor
+                    .schema()
+                    .type_field(parent_type, &def.name)
+                    .map_err(|e| match e {
+                        FieldLookupError::NoSuchType => format!("type `{parent_type}` not defined"),
+                        FieldLookupError::NoSuchField(_, _) => {
+                            format!("no field `{}` in type `{parent_type}`", &def.name)
+                        }
+                    })?
+                    .clone();
+                if let Some(sel) = visitor.field(parent_type, &field_def, def)? {
+                    selections.push(ast::Selection::Field(sel.into()))
+                }
+            }
+            ast::Selection::FragmentSpread(def) => {
+                if let Some(sel) = visitor.fragment_spread(def)? {
+                    selections.push(ast::Selection::FragmentSpread(sel.into()))
+                }
+            }
+            ast::Selection::InlineFragment(def) => {
+                let fragment_type = def.type_condition.as_deref().unwrap_or(parent_type);
+                if let Some(sel) = visitor.inline_fragment(fragment_type, def)? {
+                    selections.push(ast::Selection::InlineFragment(sel.into()))
+                }
+            }
+        }
+    }
+    Ok((!selections.is_empty()).then_some(selections))
+}
+
+pub(crate) fn collect_fragments(
+    executable: &ast::Document,
+) -> HashMap<&ast::Name, &ast::FragmentDefinition> {
+    executable
+        .definitions
         .iter()
-        .filter_map(|hir| visitor.selection(hir, parent_type).transpose())
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok((!selections.is_empty()).then(|| apollo_encoder::SelectionSet::with_selections(selections)))
-}
-
-pub(crate) fn selection(
-    visitor: &mut impl Visitor,
-    hir: &hir::Selection,
-    parent_type: &str,
-) -> Result<Option<apollo_encoder::Selection>, BoxError> {
-    Ok(match hir {
-        hir::Selection::Field(hir) => visitor
-            .field(parent_type, hir)?
-            .map(apollo_encoder::Selection::Field),
-        hir::Selection::FragmentSpread(hir) => visitor
-            .fragment_spread(hir)?
-            .map(apollo_encoder::Selection::FragmentSpread),
-        hir::Selection::InlineFragment(hir) => visitor
-            .inline_fragment(parent_type, hir)?
-            .map(apollo_encoder::Selection::InlineFragment),
-    })
-}
-
-pub(crate) fn variable_definition(
-    hir: &hir::VariableDefinition,
-) -> Result<Option<apollo_encoder::VariableDefinition>, BoxError> {
-    let name = hir.name();
-    let ty = ty(hir.ty());
-
-    let mut encoder_node = apollo_encoder::VariableDefinition::new(name.into(), ty);
-
-    if let Some(default_value) = hir.default_value() {
-        encoder_node.default_value(value(default_value)?);
-    }
-
-    for hir in hir.directives() {
-        if let Some(d) = directive(hir)? {
-            encoder_node.directive(d)
-        }
-    }
-
-    Ok(Some(encoder_node))
-}
-
-pub(crate) fn directive(
-    hir: &hir::Directive,
-) -> Result<Option<apollo_encoder::Directive>, BoxError> {
-    let name = hir.name().into();
-    let mut encoder_directive = apollo_encoder::Directive::new(name);
-
-    for arg in hir.arguments() {
-        encoder_directive.arg(apollo_encoder::Argument::new(
-            arg.name().into(),
-            value(arg.value())?,
-        ));
-    }
-
-    Ok(Some(encoder_directive))
-}
-
-// FIXME: apollo-rs should provide these three conversions, or unify types
-
-pub(crate) fn operation_type(hir: hir::OperationType) -> apollo_encoder::OperationType {
-    match hir {
-        hir::OperationType::Query => apollo_encoder::OperationType::Query,
-        hir::OperationType::Mutation => apollo_encoder::OperationType::Mutation,
-        hir::OperationType::Subscription => apollo_encoder::OperationType::Subscription,
-    }
-}
-
-pub(crate) fn ty(hir: &hir::Type) -> apollo_encoder::Type_ {
-    match hir {
-        hir::Type::NonNull { ty: hir, .. } => apollo_encoder::Type_::NonNull {
-            ty: Box::new(ty(hir)),
-        },
-        hir::Type::List { ty: hir, .. } => apollo_encoder::Type_::List {
-            ty: Box::new(ty(hir)),
-        },
-        hir::Type::Named { name, .. } => apollo_encoder::Type_::NamedType { name: name.clone() },
-    }
-}
-
-pub(crate) fn value(hir: &hir::Value) -> Result<apollo_encoder::Value, BoxError> {
-    Ok(match hir {
-        hir::Value::Variable(val) => apollo_encoder::Value::Variable(val.name().into()),
-        hir::Value::Int { value, .. } => value
-            .to_i32_checked()
-            .map(apollo_encoder::Value::Int)
-            .unwrap_or_else(|| apollo_encoder::Value::Float(value.get())),
-        hir::Value::Float { value, .. } => apollo_encoder::Value::Float(value.get()),
-        hir::Value::String { value, .. } => apollo_encoder::Value::String(value.clone()),
-        hir::Value::Boolean { value, .. } => apollo_encoder::Value::Boolean(*value),
-        hir::Value::Null { .. } => apollo_encoder::Value::Null,
-        hir::Value::Enum { value, .. } => apollo_encoder::Value::Enum(value.src().into()),
-        hir::Value::List { value: list, .. } => {
-            apollo_encoder::Value::List(list.iter().map(value).collect::<Result<Vec<_>, _>>()?)
-        }
-        hir::Value::Object { value: obj, .. } => apollo_encoder::Value::Object(
-            obj.iter()
-                .map(|(k, v)| Ok::<_, BoxError>((k.src().to_string(), value(v)?)))
-                .collect::<Result<Vec<_>, _>>()?,
-        ),
-    })
+        .filter_map(|def| match def {
+            ast::Definition::FragmentDefinition(frag) => Some((&frag.name, frag.as_ref())),
+            _ => None,
+        })
+        .collect()
 }
 
 #[test]
 fn test_add_directive_to_fields() {
-    struct AddDirective<'a>(&'a ApolloCompiler);
+    struct AddDirective {
+        schema: apollo_compiler::Schema,
+    }
 
-    impl<'a> Visitor for AddDirective<'a> {
-        fn compiler(&self) -> &ApolloCompiler {
-            self.0
-        }
-
+    impl Visitor for AddDirective {
         fn field(
             &mut self,
-            parent_type: &str,
-            hir: &hir::Field,
-        ) -> Result<Option<apollo_encoder::Field>, BoxError> {
-            Ok(field(self, parent_type, hir)?.map(|mut encoder_node| {
-                encoder_node.directive(apollo_encoder::Directive::new("added".into()));
-                encoder_node
+            _parent_type: &str,
+            field_def: &ast::FieldDefinition,
+            def: &ast::Field,
+        ) -> Result<Option<ast::Field>, BoxError> {
+            Ok(field(self, field_def, def)?.map(|mut new| {
+                new.directives.push(
+                    ast::Directive {
+                        name: "added".into(),
+                        arguments: Vec::new(),
+                    }
+                    .into(),
+                );
+                new
             }))
+        }
+
+        fn schema(&self) -> &apollo_compiler::Schema {
+            &self.schema
         }
     }
 
-    let mut compiler = ApolloCompiler::new();
     let graphql = "
         type Query {
             a: String
@@ -432,8 +298,9 @@ fn test_add_directive_to_fields() {
             }
         }
     ";
-    let file_id = compiler.add_document(graphql, "");
-    let mut visitor = AddDirective(&compiler);
+    let ast = apollo_compiler::ast::Document::parse(graphql, "");
+    let (schema, _doc) = ast.to_mixed();
+    let mut visitor = AddDirective { schema };
     let expected = "query($id: ID = null) {
   a @added
   ... @defer {
@@ -441,14 +308,12 @@ fn test_add_directive_to_fields() {
   }
   ...F
 }
+
 fragment F on Query {
   next @added {
     a @added
   }
 }
 ";
-    assert_eq!(
-        document(&mut visitor, file_id).unwrap().to_string(),
-        expected
-    )
+    assert_eq!(document(&mut visitor, &ast).unwrap().to_string(), expected)
 }

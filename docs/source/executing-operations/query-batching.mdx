@@ -1,0 +1,210 @@
+---
+title: Query batching
+description: Receive query batches with the Apollo Router  
+---
+
+> **Experimental Feature**  
+> The Apollo Router provides [experimental](/resources/product-launch-stages/#experimental-features) support for client query batching.
+
+Learn about query batching and how to configure the Apollo Router to receive query batches.
+
+## About query batching
+
+Modern applications often require several requests to render a single page. This is usually the result of a component-based architecture where individual micro-frontends (MFE) make requests separately to fetch data relevant to them. Not only does this cause a performance overhead—different components may be requesting the same data—it can also cause a consistency issue. To combat this, MFE-based UIs batch multiple client operations, issued close together, into a single HTTP request. This is supported in Apollo Client and Apollo Server.
+
+The Apollo Router supports client query batching. If you’re using Apollo Client, you can leverage the built-in support for batching to reduce the number of individual operations sent to the router.
+
+Once configured, Apollo Client automatically combines multiple operations into a single HTTP request. The number of operations within a batch is client-configurable, including the maximum number in a batch and the maximum duration to wait for operations to accumulate before sending the batch. 
+
+The Apollo Router must be configured to receive query batches, otherwise it rejects them. When processing a  batch, the router deserializes and processes each operation of a batch independently, and it responds to the client only after all operations of the batch have been completed. Each operation executes concurrently with respect to other operations in the batch.
+
+## Configure query batching
+
+Both the Apollo Router and client need to be configured to support query batching.
+
+### Configure router
+
+By default, receiving client query batches is _not_ enabled in the Apollo Router. 
+
+To enable query batching, set the following fields in your `router.yaml` configuration file:
+
+```yaml title="router.yaml"
+experimental_batching:
+  enabled: true
+  mode: batch_http_link
+```
+
+| Attribute | Description | Valid Values | Default Value |
+| :-- | :-- | :-- | :-- |
+| `enabled` | Flag to enable reception of client query batches | boolean | `false` |
+| `mode` | Supported client batching mode | `batch_http_link`:  the client uses Apollo Link and its [`BatchHttpLink`](/react/api/link/apollo-link-batch-http) link. | No Default |
+
+### Configure client
+
+To enable batching in an Apollo client, configure `BatchHttpLink`. For details on implementing `BatchHttpLink`, see [batching operations](/react/api/link/apollo-link-batch-http/).
+
+### Configuration compatibility
+
+If the router receives a query batch from a client, and batching is *not* enabled, the router sends a `BATCHING_NOT_ENABLED` error to the client.
+
+## Metrics for query batching
+
+Metrics in the Apollo Router for query batching:
+
+<table class="field-table metrics">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Attributes</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+<tr class="required">
+<td style="min-width: 150px;">
+
+##### `apollo.router.operations.batching`
+
+</td>
+<td>
+
+mode
+
+</td>
+<td>
+
+Counter for the number of received batches.
+
+</td>
+</tr>
+
+<tr class="required">
+<td style="min-width: 150px;">
+
+##### `apollo.router.operations.batching.size`
+
+</td>
+<td>
+
+mode
+
+</td>
+<td>
+
+Histogram for the size of received batches.
+
+</td>
+</tr>
+</tbody>
+</table>
+
+
+## Query batch formats
+
+### Request format
+
+A query batch is an array of operations.
+
+```graphql
+[
+query MyFirstQuery {
+  me {
+    id
+  }
+},
+query MySecondQuery {
+  me {
+    name
+  }
+}
+]
+```
+
+### Response format
+
+Responses are provided in JSON array, with the order of responses matching the order of operations in the query batch.
+
+```json
+[
+  {"data":{"me":{"id":"1"}}},
+  {"data":{"me":{"name":"Ada Lovelace"}}}
+]
+```
+
+## Error handling for query batching
+
+### Batch error
+
+If a batch of queries cannot be processed, the entire batch fails.
+
+For example, this batch request is invalid because it has two commas to separate the constituent queries:
+
+```graphql
+[
+query MyFirstQuery {
+  me {
+    id
+  }
+},,
+query MySecondQuery {
+  me {
+    name
+  }
+}
+]
+```
+
+As a result, the router returns an invalid batch error:
+
+```json
+{"errors":
+  [
+    {"message":"Invalid GraphQL request","extensions":{"details":"failed to deserialize the request body into JSON: expected value at line 1 column 54","code":"INVALID_GRAPHQL_REQUEST"}}
+  ]
+}
+```
+
+### Individual query error
+
+If a single query in a batch cannot be processed, this results in an individual error. 
+
+For example, the query `MyFirstQuery` is accessing a field that doesn't exist, while the rest of the batch query is valid.
+
+```graphql
+[
+query MyFirstQuery {
+  me {
+    thisfielddoesnotexist
+  }
+},
+query MySecondQuery {
+  me {
+    name
+  }
+}
+]
+```
+
+As a result, an error is returned for the individual invalid query and the other (valid) query returns a response.
+
+```json
+[
+  {"errors":
+    [
+      {"message":"cannot query field 'thisfielddoesnotexist' on type 'User'",
+       "extensions":{"type":"User","field":"thisfielddoesnotexist","code":"INVALID_FIELD"}
+      }
+    ]
+  },
+  {"data":{"me":{"name":"Ada Lovelace"}}}
+]
+```
+
+## Known limitations
+
+### Unsupported query modes
+ 
+When batching is enabled, any batch operation that results in a stream of responses is unsupported, including:
+- [`@defer`](/graphos/operations/defer/)
+- [subscriptions](/graphos/operations/subscriptions/)
