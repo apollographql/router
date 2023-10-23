@@ -17,9 +17,9 @@ pub(crate) struct Events {
     /// Router service events
     router: Extendable<RouterEvents, Event<RouterAttributes, RouterCustomAttribute>>,
     /// Subgraph service events
-    supergraph: Extendable<RouterEvents, Event<SupergraphAttributes, SupergraphCustomAttribute>>,
+    supergraph: Extendable<SupergraphEvents, Event<SupergraphAttributes, SupergraphCustomAttribute>>,
     /// Supergraph service events
-    subgraph: Extendable<RouterEvents, Event<SubgraphAttributes, SubgraphCustomAttribute>>,
+    subgraph: Extendable<SubgraphEvents, Event<SubgraphAttributes, SubgraphCustomAttribute>>,
 }
 
 #[allow(dead_code)]
