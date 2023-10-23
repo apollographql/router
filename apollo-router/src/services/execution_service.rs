@@ -236,19 +236,12 @@ impl ExecutionService {
 
         tracing::debug_span!("format_response").in_scope(|| {
             let mut paths = Vec::new();
-            if let Some(filtered_query) = query.filtered_query.as_ref() {
+
+            if ! query.unauthorized_paths.is_empty() {
                 let unauthorized_paths = query.unauthorized_paths.iter().map(|path| path.to_string()).collect::<Vec<_>>();
                 if !unauthorized_paths.is_empty() {
                     event!(Level::ERROR, unauthorized_query_paths = ?unauthorized_paths, "Authorization error",);
                 }
-
-                paths = filtered_query.format_response(
-                    &mut response,
-                    operation_name,
-                    variables.clone(),
-                    schema.api_schema(),
-                    variables_set,
-                );
 
                 for path in &query.unauthorized_paths {
                     response.errors.push(Error::builder()
@@ -256,6 +249,16 @@ impl ExecutionService {
                     .path(path.clone())
                     .extension_code("UNAUTHORIZED_FIELD_OR_TYPE").build());
                 }
+            }
+
+            if let Some(filtered_query) = query.filtered_query.as_ref() {
+                paths = filtered_query.format_response(
+                    &mut response,
+                    operation_name,
+                    variables.clone(),
+                    schema.api_schema(),
+                    variables_set,
+                );
             }
 
             paths.extend(
