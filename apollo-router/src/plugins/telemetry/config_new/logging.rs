@@ -72,8 +72,8 @@ enum Rollover {
     /// Roll over every hour.
     Hourly,
     /// Roll over every day.
+    #[default]
     Daily,
     /// Never roll over.
-    #[default]
     Never,
 }
