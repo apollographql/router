@@ -289,6 +289,8 @@ pub(crate) enum SubgraphCustomAttribute {
     SubgraphResponseBody {
         /// The subgraph response body json path.
         subgraph_response_body: String,
+        /// Optional redaction pattern.
+        redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
     },
