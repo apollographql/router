@@ -75,7 +75,7 @@ pub(crate) struct Conf {
 fn enable_log_errors() -> bool {
     true
 }
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[allow(dead_code)]
 pub(crate) struct Directives {
     /// enables the `@authenticated` and `@requiresScopes` directives
