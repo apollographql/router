@@ -527,6 +527,11 @@ expression: "&schema"
               "description": "enables the `@authenticated` and `@requiresScopes` directives",
               "default": false,
               "type": "boolean"
+            },
+            "log_errors": {
+              "description": "Log authorization errors",
+              "default": true,
+              "type": "boolean"
             }
           }
         },
