@@ -610,3 +610,18 @@ You can enable [query deduplication](../configuration/traffic-shaping/#query-ded
 Introspection is turned off in the router by default, [as is best production practice](https://www.apollographql.com/blog/graphql/security/why-you-should-disable-graphql-introspection-in-production/). If you've chosen to [enable it](./overview/#introspection), keep in mind that **authorization directives don't affect introspection**. All fields that require authorization remain visible. However, directives applied to fields _aren't_ visible. If introspection might reveal too much information about internal types, then be sure it hasn't been enabled in your router configuration.
 
 With introspection turned off, you can use GraphOS's [schema registry](/graphos/delivery/) to explore your supergraph schema and empower your teammates to do the same. If you want to completely remove fields from a graph rather than just preventing access (even with introspection on), consider building a [contract graph](/graphos/delivery/contracts/).
+
+## Configuration options
+
+The authorization plugin behaviour can be modified with various options.
+
+### dry_run
+
+```yaml title="router.yaml"
+authorization:
+  preview_directives:
+    enabled: true
+    dry_run: true # default: false
+```
+
+This option executes the authorization directives without modifying the query: it only generates the list of unauthorized paths and returns it as part of the response. This is a way to evaluate the impact of authorization policies without breaking existing traffic.
