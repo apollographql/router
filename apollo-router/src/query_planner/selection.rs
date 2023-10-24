@@ -62,7 +62,11 @@ pub(crate) fn select_object(
                 if let Some(o) = output.get_mut(field.name.as_str()) {
                     o.deep_merge(value);
                 } else {
-                    output.insert(key.to_owned(), value);
+                    output.insert(
+                        key.map(|bytestring| bytestring.to_owned())
+                            .unwrap_or_else(|| field.name.as_str().to_owned().into()),
+                        value,
+                    );
                 }
             }
             Selection::InlineFragment(fragment) => {
@@ -80,16 +84,17 @@ fn select_field<'a>(
     content: &'a Object,
     field: &Field,
     schema: &Schema,
-) -> Result<(&'a ByteString, Value), FetchError> {
+) -> Result<(Option<&'a ByteString>, Value), FetchError> {
     let res = match (
         content.get_key_value(field.name.as_str()),
         &field.selections,
     ) {
-        (Some((k, v)), _) => select_value(v, field, schema).map(|opt| (k, opt)), //opt.map(|v| (k, v))),
-
-        (None, _) => Err(FetchError::ExecutionFieldNotFound {
+        (Some((k, v)), _) => select_value(v, field, schema).map(|opt| (Some(k), opt)), //opt.map(|v| (k, v))),
+        //FIXME: if this was a non nullable field, we should not return it
+        (None, _) => Ok((None, Value::Null)),
+        /*)Err(FetchError::ExecutionFieldNotFound {
             field: field.name.to_owned(),
-        }),
+        }),*/
     };
     res
 }

@@ -1208,18 +1208,6 @@ async fn typename_propagation() {
     node(id: ID): Node @join__field(graph: NODE_RELAY_SUBGRAPH)
   }"#;
 
-    let query = "query Query {
-        node {
-          __typename
-          ... on Book {
-            id
-            author {
-              __typename
-            }
-          }
-        }
-      }";
-
     let subgraphs = MockedSubgraphs(
         [
             ("author_subgraph", MockSubgraph::builder().with_json(
@@ -1322,6 +1310,26 @@ async fn typename_propagation() {
                 } }},
             ).with_json(
                 serde_json::json! {{
+                    "query": "query QueryBook__node_relay_subgraph__2($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename id}}}",
+                    "operationName": "QueryBook__node_relay_subgraph__2",
+                    "variables": {
+                        "representations": [{
+                            "__typename": "Book",
+                            "bookId": "book1",
+                            "author": {
+                                "fullName": null
+                            }
+                        }]
+                    }
+                }},
+                serde_json::json! {{"data": {
+                    "_entities": [{
+                        "__typename": "Book",
+                        "id": "1"
+                    }]
+                } }},
+            ).with_json(
+                serde_json::json! {{
                     "query": "query QueryBook2__node_relay_subgraph__2($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename id author{id}}}}",
                     "operationName": "QueryBook2__node_relay_subgraph__2",
                     "variables": {
@@ -1360,7 +1368,19 @@ async fn typename_propagation() {
 
     let request = supergraph::Request::fake_builder()
         .context(Context::new())
-        .query(query)
+        .query(
+            "query Query {
+            node {
+              __typename
+              ... on Book {
+                id
+                author {
+                  __typename
+                }
+              }
+            }
+          }",
+        )
         .build()
         .unwrap();
 
