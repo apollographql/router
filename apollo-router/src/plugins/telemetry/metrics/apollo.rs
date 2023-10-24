@@ -39,6 +39,10 @@ fn default_buckets() -> Vec<f64> {
 static ROUTER_ID: OnceLock<Uuid> = OnceLock::new();
 
 impl MetricsConfigurator for Config {
+    fn enabled(&self) -> bool {
+        self.apollo_key.is_some() && self.apollo_graph_ref.is_some()
+    }
+
     fn apply(
         &self,
         mut builder: MetricsBuilder,
@@ -306,7 +310,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_validation_failure() -> Result<(), BoxError> {
-        let query = "query {topProducts{unknown}}";
+        let query = "query {topProducts(minStarRating: 4.7){name}}";
         let results = get_metrics_for_request(query, None, None, false).await?;
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
@@ -406,10 +410,8 @@ mod test {
     ) -> Result<Telemetry, BoxError> {
         Telemetry::new(PluginInit::fake_new(
             config::Conf {
-                logging: Default::default(),
-                metrics: None,
-                tracing: None,
-                apollo: Some(apollo_config),
+                apollo: apollo_config,
+                ..Default::default()
             },
             Default::default(),
         ))

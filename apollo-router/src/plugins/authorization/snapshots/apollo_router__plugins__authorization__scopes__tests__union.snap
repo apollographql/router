@@ -19,7 +19,7 @@ query:
 extracted_scopes: {"a", "b", "c", "d"}
 request scopes: ["a", "b"]
 filtered:
-query {
+{
   test
   uni {
     ... on A {

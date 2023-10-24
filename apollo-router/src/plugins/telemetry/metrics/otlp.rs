@@ -32,6 +32,10 @@ impl From<HttpExporterBuilder> for MetricExporterBuilder {
 }
 
 impl MetricsConfigurator for super::super::otlp::Config {
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
+
     fn apply(
         &self,
         mut builder: MetricsBuilder,

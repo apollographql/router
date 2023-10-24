@@ -1,0 +1,5 @@
+description: telemetry.tracing.propagation.awsxray has been renamed to telemetry.tracing.propagation.aws_xray
+actions:
+  - type: move
+    from: telemetry.tracing.propagation.awsxray
+    to: telemetry.tracing.propagation.aws_xray

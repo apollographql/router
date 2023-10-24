@@ -3,7 +3,7 @@ telemetry:
     experimental_response_trace_id:
       enabled: true
       header_name: apollo-custom-trace-id
-    trace_config:
+    common:
       service_name: router
       sampler: always_on
   experimental_logging:

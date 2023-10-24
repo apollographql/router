@@ -64,6 +64,8 @@ async fn test_metrics_reloading() {
         .await;
 
     if std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok() {
+        router.assert_metrics_contains(r#"apollo_router_telemetry_studio_reports_total{type="metrics",otel_scope_name="apollo/router"} 2"#, Some(Duration::from_secs(10))).await;
+        router.assert_metrics_contains(r#"apollo_router_telemetry_studio_reports_total{type="traces",otel_scope_name="apollo/router"} 2"#, Some(Duration::from_secs(10))).await;
         router.assert_metrics_contains(r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#, Some(Duration::from_secs(120))).await;
         router.assert_metrics_contains(r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#, Some(Duration::from_secs(1))).await;
     }
@@ -119,4 +121,42 @@ async fn test_metrics_bad_query() {
     // This query won't make it to the supergraph service
     router.execute_bad_query().await;
     router.assert_metrics_contains(r#"apollo_router_operations_total{http_response_status_code="400",otel_scope_name="apollo/router"} 1"#, None).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_bad_queries() {
+    let mut router = IntegrationTest::builder()
+        .config(PROMETHEUS_CONFIG)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_http_requests_total{status="200",otel_scope_name="apollo/router"}"#,
+            None,
+        )
+        .await;
+    router.execute_bad_content_encoding().await;
+    router
+            .assert_metrics_contains(
+                r#"apollo_router_http_requests_total{error="unknown content-encoding header value \"garbage\"",status="400",otel_scope_name="apollo/router"}"#,
+                None,
+            )
+            .await;
+
+    router.execute_bad_query().await;
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_http_requests_total{error="Must provide query string",status="400",otel_scope_name="apollo/router"}"#,
+            None,
+        )
+        .await;
+    router
+        .assert_log_not_contains(
+            "OpenTelemetry metric error occurred: Metrics error: Instrument description conflict",
+        )
+        .await;
 }

@@ -597,9 +597,11 @@ jobs:
             - run:
                 name: helm-docs install
                 command: |
-                  sudo apt update
-                  sudo apt install golang
-                  GOPATH="${HOME}/.local" GO111MODULE=on go get github.com/norwoodj/helm-docs/cmd/helm-docs
+                  # install golang (to ${HOME}/go)
+                  curl -OLs https://go.dev/dl/go1.21.3.linux-amd64.tar.gz
+                  tar -C "${HOME}" -xf go1.21.3.linux-amd64.tar.gz
+                  # install helm-docs
+                  PATH="${HOME}/go/bin" GOPATH="${HOME}/.local" GO111MODULE=on go install github.com/norwoodj/helm-docs/cmd/helm-docs@latest
       - when:
           condition:
             or:
