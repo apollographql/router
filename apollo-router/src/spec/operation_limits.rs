@@ -11,7 +11,7 @@ use serde::Serialize;
 
 use crate::Configuration;
 
-#[cfg(not(feature = "custom_to_graphql_error"))]
+#[cfg(not(feature = "apollo_unsupported"))]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub(crate) struct OperationLimits<T> {
     pub(crate) depth: T,
@@ -20,7 +20,7 @@ pub(crate) struct OperationLimits<T> {
     pub(crate) aliases: T,
 }
 
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct OperationLimits<T> {
     pub depth: T,

@@ -62,7 +62,7 @@ pub struct Error {
 }
 // Implement getter and getter_mut to not use pub field directly
 
-#[cfg(not(feature = "custom_to_graphql_error"))]
+#[cfg(not(feature = "apollo_unsupported"))]
 #[buildstructor::buildstructor]
 impl Error {
     /// Returns a builder that builds a GraphQL [`Error`] from its components.
@@ -161,7 +161,7 @@ impl Error {
     }
 }
 
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 #[buildstructor::buildstructor]
 impl Error {
     /// Returns a builder that builds a GraphQL [`Error`] from its components.
@@ -277,7 +277,7 @@ where
 }
 
 /// Trait used to get extension type from an error
-#[cfg(not(feature = "custom_to_graphql_error"))]
+#[cfg(not(feature = "apollo_unsupported"))]
 
 pub(crate) trait ErrorExtension
 where
@@ -293,7 +293,7 @@ where
 }
 
 /// Trait used to get extension type from an error
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 pub trait ErrorExtension
 where
     Self: Sized,

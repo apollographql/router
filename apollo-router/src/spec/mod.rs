@@ -24,7 +24,7 @@ use crate::graphql::ErrorExtension;
 use crate::json_ext::Object;
 
 /// GraphQL parsing errors.
-#[cfg(not(feature = "custom_to_graphql_error"))]
+#[cfg(not(feature = "apollo_unsupported"))]
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub(crate) enum SpecError {
@@ -46,7 +46,7 @@ pub(crate) enum SpecError {
     SubscriptionNotSupported,
 }
 
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum SpecError {

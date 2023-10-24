@@ -32,7 +32,7 @@ use crate::spec::SpecError;
 #[ignore_extra_doc_attributes]
 #[non_exhaustive]
 #[allow(missing_docs)] // FIXME
-#[cfg(not(feature = "custom_to_graphql_error"))]
+#[cfg(not(feature = "apollo_unsupported"))]
 pub(crate) enum FetchError {
     /// invalid type for variable: '{name}'
     ValidationInvalidTypeVariable {
@@ -126,7 +126,7 @@ pub(crate) enum FetchError {
 #[ignore_extra_doc_attributes]
 #[non_exhaustive]
 #[allow(missing_docs)] // FIXME
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 pub enum FetchError {
     /// invalid type for variable: '{name}'
     ValidationInvalidTypeVariable {
@@ -211,7 +211,7 @@ pub enum FetchError {
     },
 }
 
-#[cfg(not(feature = "custom_to_graphql_error"))]
+#[cfg(not(feature = "apollo_unsupported"))]
 impl FetchError {
     /// Convert the fetch error to a GraphQL error.
     pub(crate) fn to_graphql_error(&self, path: Option<Path>) -> Error {
@@ -275,12 +275,12 @@ impl FetchError {
     }
 }
 
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 use std::sync::OnceLock;
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 static mut TO_GRAPHQL_ERROR: OnceLock<Box<dyn Fn(&FetchError, Option<Path>) -> Error + 'static>> =
     OnceLock::new();
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 pub unsafe fn set_to_graphql_error(
     to_graphql_error: impl Fn(&FetchError, Option<Path>) -> Error + 'static,
 ) {
@@ -290,7 +290,7 @@ pub unsafe fn set_to_graphql_error(
         .unwrap();
 }
 
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 impl FetchError {
     /// Convert the fetch error to a GraphQL error.
     pub(crate) fn to_graphql_error(&self, path: Option<Path>) -> Error {
@@ -343,7 +343,7 @@ impl From<QueryPlannerError> for FetchError {
 }
 
 /// Error types for CacheResolver
-#[cfg(not(feature = "custom_to_graphql_error"))]
+#[cfg(not(feature = "apollo_unsupported"))]
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 #[non_exhaustive]
@@ -357,7 +357,7 @@ pub(crate) enum RouterError {
 }
 
 /// Error types for CacheResolver
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 #[non_exhaustive]
@@ -370,7 +370,7 @@ pub enum RouterError {
     Planner(PlannerErrors),
 }
 
-#[cfg(not(feature = "custom_to_graphql_error"))]
+#[cfg(not(feature = "apollo_unsupported"))]
 impl IntoGraphQLErrors for RouterError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
@@ -468,11 +468,11 @@ impl IntoGraphQLErrors for RouterError {
     }
 }
 
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 static mut INTO_GRAPHQL_ERRORS: OnceLock<
     Box<dyn Fn(RouterError) -> Result<Vec<Error>, RouterError> + 'static>,
 > = OnceLock::new();
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 pub unsafe fn set_into_graphql_errors(
     into_graphql_errors: impl Fn(RouterError) -> Result<Vec<Error>, RouterError> + 'static,
 ) {
@@ -482,7 +482,7 @@ pub unsafe fn set_into_graphql_errors(
         .unwrap();
 }
 
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 impl IntoGraphQLErrors for RouterError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         let callback = unsafe {
@@ -495,7 +495,7 @@ impl IntoGraphQLErrors for RouterError {
 }
 
 /// Error types for CacheResolver
-#[cfg(not(feature = "custom_to_graphql_error"))]
+#[cfg(not(feature = "apollo_unsupported"))]
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 pub(crate) enum CacheResolverError {
     /// value retrieval failed: {0}
@@ -503,7 +503,7 @@ pub(crate) enum CacheResolverError {
 }
 
 /// Error types for CacheResolver
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 pub enum CacheResolverError {
     /// value retrieval failed: {0}
@@ -556,7 +556,7 @@ impl From<router_bridge::error::Error> for ServiceBuildError {
 }
 
 /// Error types for QueryPlanner
-#[cfg(not(feature = "custom_to_graphql_error"))]
+#[cfg(not(feature = "apollo_unsupported"))]
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 pub(crate) enum QueryPlannerError {
     /// couldn't instantiate query planner; invalid schema: {0}
@@ -597,7 +597,7 @@ pub(crate) enum QueryPlannerError {
 }
 
 /// Error types for QueryPlanner
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 pub enum QueryPlannerError {
     /// couldn't instantiate query planner; invalid schema: {0}
@@ -741,12 +741,12 @@ impl IntoGraphQLErrors for QueryPlannerError {
     }
 }
 
-#[cfg(not(feature = "custom_to_graphql_error"))]
+#[cfg(not(feature = "apollo_unsupported"))]
 #[derive(Clone, Debug, Error, Serialize, Deserialize)]
 /// Container for planner setup errors
 pub(crate) struct PlannerErrors(Arc<Vec<PlannerError>>);
 
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 #[derive(Clone, Debug, Error, Serialize, Deserialize)]
 /// Container for planner setup errors
 pub struct PlannerErrors(pub Arc<Vec<PlannerError>>);
@@ -839,7 +839,7 @@ impl From<QueryPlannerError> for Response {
 }
 
 /// The payload if the plan_worker invocation failed
-#[cfg(not(feature = "custom_to_graphql_error"))]
+#[cfg(not(feature = "apollo_unsupported"))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct PlanErrors {
     /// The errors the plan_worker invocation failed with
@@ -850,7 +850,7 @@ pub(crate) struct PlanErrors {
 }
 
 /// The payload if the plan_worker invocation failed
-#[cfg(feature = "custom_to_graphql_error")]
+#[cfg(feature = "apollo_unsupported")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanErrors {
     /// The errors the plan_worker invocation failed with

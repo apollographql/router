@@ -1,4 +1,5 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
+use std::convert::Infallible;
 use std::pin::Pin;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
@@ -30,10 +31,14 @@ use serde::Serialize;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
+use tower::layer::layer_fn;
+use tower::layer::util::Identity;
 use tower::service_fn;
 use tower::BoxError;
+use tower::Layer;
 use tower::ServiceExt;
 use tower_http::trace::TraceLayer;
+use tower_service::Service;
 
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
@@ -396,7 +401,8 @@ where
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
 
-    let main_route = main_router::<RF>(configuration)
+    #[allow(unused_mut)]
+    let mut main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
         .layer(middleware::from_fn_with_state(
             (license, Instant::now(), Arc::new(AtomicU64::new(0))),
@@ -409,12 +415,143 @@ where
         .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license }))
         .layer(middleware::from_fn(metrics_handler));
 
+    #[cfg(not(feature = "apollo_unsupported"))]
+    {
+        if let Some(custom_service) = unsafe { CUSTOM_SERVICE.get() } {
+            // main_route = main_route.layer(custom_service.clone());
+            main_route = main_route.layer(BoxCloneLayer::new(MyLayer {}));
+        }
+    }
+
     let route = endpoints_on_main_listener
         .into_iter()
         .fold(main_route, |acc, r| acc.merge(r.into_router()));
 
     let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
+}
+
+#[cfg(not(feature = "apollo_unsupported"))]
+use std::sync::OnceLock;
+
+use tower::util::BoxCloneService;
+#[cfg(not(feature = "apollo_unsupported"))]
+static mut CUSTOM_SERVICE: OnceLock<BoxCloneService<Request<Body>, Response, Infallible>> =
+    OnceLock::new();
+#[cfg(not(feature = "apollo_unsupported"))]
+pub unsafe fn set_custom_service<S>(custom_service: S)
+where
+    S: Service<Request<Body>, Response = Response, Error = Infallible> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    CUSTOM_SERVICE
+        .set(BoxCloneService::new(custom_service))
+        .map_err(|_| "custom axum service was already set")
+        .unwrap();
+}
+
+pub struct BoxCloneLayer<In, T, U, E> {
+    boxed: Arc<dyn Layer<In, Service = BoxCloneService<T, U, E>> + Send + Sync + 'static>,
+}
+
+impl<In, T, U, E> BoxCloneLayer<In, T, U, E> {
+    /// Create a new [`BoxLayer`].
+    pub fn new<L>(inner_layer: L) -> Self
+    where
+        L: Layer<In> + Send + Sync + 'static,
+        L::Service: Service<T, Response = U, Error = E> + Clone + Send + 'static,
+        <L::Service as Service<T>>::Future: Send + 'static,
+    {
+        let layer = layer_fn(move |inner: In| {
+            let out = inner_layer.layer(inner);
+            BoxCloneService::new(out)
+        });
+
+        Self {
+            boxed: Arc::new(layer),
+        }
+    }
+}
+
+impl<In, T, U, E> Layer<In> for BoxCloneLayer<In, T, U, E> {
+    type Service = BoxCloneService<T, U, E>;
+
+    fn layer(&self, inner: In) -> Self::Service {
+        self.boxed.layer(inner)
+    }
+}
+
+impl<In, T, U, E> Clone for BoxCloneLayer<In, T, U, E> {
+    fn clone(&self) -> Self {
+        Self {
+            boxed: Arc::clone(&self.boxed),
+        }
+    }
+}
+
+impl<In, T, U, E> std::fmt::Debug for BoxCloneLayer<In, T, U, E> {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        fmt.debug_struct("BoxCloneLayer").finish()
+    }
+}
+
+use futures::future::BoxFuture;
+#[derive(Clone)]
+struct MyLayer;
+
+use futures::task::Context;
+use futures::task::Poll;
+
+impl<S> Layer<S> for MyLayer {
+    type Service = MyMiddleware<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        MyMiddleware { inner }
+    }
+}
+
+impl<S> Clone for MyMiddleware<S>
+where
+    S: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+struct MyMiddleware<S> {
+    inner: S,
+}
+
+impl<S> Service<Request<Body>> for MyMiddleware<S>
+where
+    S: Service<Request<Body>, Response = Response> + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = Infallible;
+    // `BoxFuture` is a type alias for `Pin<Box<dyn Future + Send + 'a>>`
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // todo: return Ok with an http 500 or something
+        match self.inner.poll_ready(cx) {
+            Poll::Ready(Err(e)) => panic!("nope"),
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn call(&mut self, request: Request<Body>) -> Self::Future {
+        let future = self.inner.call(request);
+        Box::pin(async move {
+            // todo: return Ok with an http 500 or something
+            let response: Response = future.await.map_err(|_| "nope").unwrap();
+            Ok(response)
+        })
+    }
 }
 
 async fn metrics_handler<B>(request: Request<B>, next: Next<B>) -> Response {

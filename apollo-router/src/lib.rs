@@ -78,6 +78,25 @@ pub mod test_harness;
 pub mod tracer;
 mod uplink;
 
+#[cfg(feature = "apollo_unsupported")]
+pub use error::set_into_graphql_errors;
+#[cfg(feature = "apollo_unsupported")]
+pub use error::set_to_graphql_error;
+#[cfg(feature = "apollo_unsupported")]
+pub use error::CacheResolverError;
+#[cfg(feature = "apollo_unsupported")]
+pub use error::FetchError;
+#[cfg(feature = "apollo_unsupported")]
+pub use error::PlannerErrors;
+#[cfg(feature = "apollo_unsupported")]
+pub use error::QueryPlannerError;
+#[cfg(feature = "apollo_unsupported")]
+pub use error::RouterError;
+#[cfg(feature = "apollo_unsupported")]
+pub use json_ext::Path;
+#[cfg(feature = "apollo_unsupported")]
+pub use spec::operation_limits::OperationLimits;
+
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
 pub use crate::context::Context;
@@ -94,19 +113,6 @@ pub use crate::router_factory::Endpoint;
 pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;
 pub use crate::uplink::UplinkConfig;
-
-#[cfg(feature = "custom_to_graphql_error")]
-pub use error::set_into_graphql_errors;
-#[cfg(feature = "custom_to_graphql_error")]
-pub use error::set_to_graphql_error;
-#[cfg(feature = "custom_to_graphql_error")]
-pub use error::FetchError;
-#[cfg(feature = "custom_to_graphql_error")]
-pub use error::{CacheResolverError, PlannerErrors, QueryPlannerError, RouterError};
-#[cfg(feature = "custom_to_graphql_error")]
-pub use json_ext::Path;
-#[cfg(feature = "custom_to_graphql_error")]
-pub use spec::operation_limits::OperationLimits;
 
 /// Not part of the public API
 #[doc(hidden)]
