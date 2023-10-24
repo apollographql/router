@@ -22,7 +22,6 @@ use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
 use hyper_trust_dns_connector::new_async_http_connector;
 use hyper_trust_dns_connector::AsyncHyperResolver;
-
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
