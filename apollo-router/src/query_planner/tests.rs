@@ -1043,13 +1043,14 @@ async fn null_in_requires() {
   {
     id: ID
     thing: Thing
-    isEnabled: Boolean @join__field(graph: SUB2, requires: "thing { id text }")
+    isEnabled: Boolean @join__field(graph: SUB2, requires: "thing { a text }")
   }
   
   type Thing
   @join__type(graph: SUB1, key: "id")
   @join__type(graph: SUB2, key: "id") {
     id: ID
+    a: String @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
     text: String @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
   }
   "#;
@@ -1063,12 +1064,13 @@ async fn null_in_requires() {
 
     let subgraphs = MockedSubgraphs([
         ("sub1", MockSubgraph::builder().with_json(
-            serde_json::json!{{"query": "{stuff{__typename id thing{text}}}",}},
+            serde_json::json!{{"query": "{stuff{__typename id thing{a text}}}",}},
             serde_json::json!{{"data": {
                 "stuff": {
                   "__typename": "Stuff",
                   "id": "1",
                   "thing": {
+                    "a": "A",
                     "text": null
                   }
                 }
@@ -1082,7 +1084,7 @@ async fn null_in_requires() {
                         "__typename": "Stuff",
                         "id": "1",
                         "thing": {
-                            "id": "1",
+                            "a": "A",
                             "text": null
                         }
                     }

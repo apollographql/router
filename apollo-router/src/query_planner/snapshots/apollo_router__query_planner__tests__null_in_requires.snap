@@ -8,5 +8,5 @@ expression: "serde_json::to_value(&response).unwrap()"
       "id": "1",
       "isEnabled": true
     }
-  },
+  }
 }
