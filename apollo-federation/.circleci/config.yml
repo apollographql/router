@@ -137,6 +137,7 @@ jobs:
       platform:
         type: executor
     executor: << parameters.platform >>
+    working_directory: $CIRCLE_WORKING_DIRECTORY/apollo-federation
     steps:
       - checkout
       - install_system_deps:
