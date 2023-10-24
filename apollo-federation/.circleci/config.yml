@@ -24,14 +24,23 @@ executors:
     resource_class: windows.xlarge
     shell: powershell.exe -ExecutionPolicy Bypass
 
-# There are two workflows: lint and test.
+# Job filter for release jobs
+crate_release: &crate_release
+  filters:
+    branches:
+      ignore: /.*/
+    tags:
+      only: /^v[0-9]+\.[0-9]+\.[0-9]+(\-[0-9a-z]+)?+$/
 
-# We run `cargo clippy` for linting on
-# linux on stable rust.
-
-# Tests are run on three platforms: linux, macos and
-# windows. They all get run through stable and nightly rust so we are aware of
-# any breaking changes that might be happening in the near future.
+# There are following workflows:
+# - lint
+#   - run on linux on stable rust
+#   - run `cargo clippy` and `cargo fmt` checks
+# - test
+#   - tests are run on linux and macos using stable rust
+# - release
+#   - publish to crates.io using stable rust on linux
+# - security-scans
 workflows:
   lint:
     jobs:
@@ -49,6 +58,25 @@ workflows:
             parameters:
               platform: [linux, macos]
               rust_channel: [stable]
+  release:
+    jobs:
+      - test:
+          name: Test stable rust on linux
+          matrix:
+            parameters:
+              platform: [linux]
+              rust_channel: [stable]
+          <<: *crate_release
+      - publish:
+          name: Publish to crates.io
+          matrix:
+            parameters:
+              platform: [linux]
+              rust_channel: [stable]
+          requires:
+            - "Test stable rust on linux"
+          <<: *crate_release
+
   security-scans:
     jobs:
       - secops/gitleaks:
@@ -58,8 +86,6 @@ workflows:
             - secops-oidc
           git-base-revision: <<#pipeline.git.base_revision>><<pipeline.git.base_revision>><</pipeline.git.base_revision >>
           git-revision: << pipeline.git.revision >>
-
-
 
 # Details of the two jobs: lint and test.
 jobs:
@@ -101,6 +127,24 @@ jobs:
       - run:
           name: Run cargo test
           command: cargo test --all-features
+
+  publish:
+    parameters:
+      rust_channel:
+        type: enum
+        enum: ["stable"]
+        default: stable
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - install_system_deps:
+          rust_channel: << parameters.rust_channel >>
+          platform: << parameters.platform >>
+      - run:
+          name: Run cargo publish
+          command: cargo publish --dry-run
 
 # The folowing are reusable command snippets can be referred to in any `steps`.
 # Commands we currently have: install_system_deps, install_rust_toolchain.
