@@ -1,47 +1,64 @@
+use std::collections::BTreeMap;
+
 use schemars::JsonSchema;
 use serde::Deserialize;
+
+use crate::plugins::telemetry::config::AttributeValue;
 
 /// Logging configuration.
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Logging {
+    /// Common configuration
+    pub(crate) common: LoggingCommon,
     /// Settings for logging to stdout.
-    stdout: StdOut,
+    pub(crate) stdout: StdOut,
     /// Settings for logging to a file.
-    file: File,
+    pub(crate) file: File,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct LoggingCommon {
+    /// Set a service.name resource in your metrics
+    pub(crate) service_name: Option<String>,
+    /// Set a service.namespace attribute in your metrics
+    pub(crate) service_namespace: Option<String>,
+    /// The Open Telemetry resource
+    pub(crate) resource: BTreeMap<String, AttributeValue>,
 }
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
-struct StdOut {
+pub(crate) struct StdOut {
     /// Set to true to log to stdout.
-    enabled: bool,
+    pub(crate) enabled: bool,
     /// The format to log to stdout.
-    format: Format,
+    pub(crate) format: Format,
 }
 
 /// Log to a file
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
-struct File {
+pub(crate) struct File {
     /// Set to true to log to a file.
-    enabled: bool,
+    pub(crate) enabled: bool,
     /// The path pattern of the file to log to.
-    path: String,
+    pub(crate) path: String,
     /// The format of the log file.
-    format: Format,
+    pub(crate) format: Format,
     /// The period to rollover the log file.
-    rollover: Rollover,
+    pub(crate) rollover: Rollover,
 }
 
 /// The format for logging.
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-enum Format {
+pub(crate) enum Format {
     /// https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_AnalyzeLogData-discoverable-fields.html
     Aws,
     /// https://github.com/trentm/node-bunyan
@@ -66,7 +83,7 @@ enum Format {
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-enum Rollover {
+pub(crate) enum Rollover {
     /// Roll over every minute.
     Minutely,
     /// Roll over every hour.

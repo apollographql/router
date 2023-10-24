@@ -59,6 +59,7 @@ pub(crate) struct Conf {
 
     #[cfg(feature = "telemetry_next")]
     #[serde(rename = "logging", default)]
+    #[allow(dead_code)]
     pub(crate) new_logging: config_new::logging::Logging,
     /// Metrics configuration
     pub(crate) metrics: Metrics,
