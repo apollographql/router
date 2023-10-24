@@ -79,6 +79,8 @@ pub mod tracer;
 mod uplink;
 
 #[cfg(feature = "apollo_unsupported")]
+pub use axum_factory::set_add_main_endpoint_layer;
+#[cfg(feature = "apollo_unsupported")]
 pub use error::set_into_graphql_errors;
 #[cfg(feature = "apollo_unsupported")]
 pub use error::set_to_graphql_error;

@@ -19,6 +19,7 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Location as ErrorLocation;
 use crate::graphql::Response;
 use crate::json_ext::Path;
+#[cfg(not(feature = "apollo_unsupported"))]
 use crate::json_ext::Value;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::SpecError;
