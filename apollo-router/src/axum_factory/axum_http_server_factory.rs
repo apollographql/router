@@ -419,7 +419,18 @@ where
 
     let route = endpoints_on_main_listener
         .into_iter()
-        .fold(main_route, |acc, r| acc.merge(r.into_router()));
+        .fold(main_route, |acc, r| {
+            #[allow(unused_mut)]
+            let mut router = r.into_router();
+            #[cfg(feature = "apollo_unsupported")]
+            {
+                if let Some(main_endpoint_layer) = unsafe { ADD_MAIN_ENDPOINT_LAYER.get() } {
+                    router = main_endpoint_layer(router);
+                }
+            }
+
+            acc.merge(router)
+        });
 
     let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
@@ -433,11 +444,11 @@ static mut ADD_MAIN_ENDPOINT_LAYER: OnceLock<Box<dyn Fn(Router) -> Router>> = On
 
 #[cfg(feature = "apollo_unsupported")]
 pub unsafe fn set_add_main_endpoint_layer(
-    set_dd_main_endpoint_layer: impl Fn(Router) -> Router + 'static,
+    add_main_endpoint_layer: impl Fn(Router) -> Router + 'static,
 ) {
     ADD_MAIN_ENDPOINT_LAYER
-        .set(Box::new(set_dd_main_endpoint_layer))
-        .map_err(|_| "set_add_main_endpoint_layer was already set")
+        .set(Box::new(add_main_endpoint_layer))
+        .map_err(|_| "add_main_endpoint_layer was already set")
         .unwrap();
 }
 

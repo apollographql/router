@@ -11,3 +11,5 @@ pub(crate) use listeners::ListenAddrAndRouter;
 
 #[cfg(feature = "apollo_unsupported")]
 pub use axum_http_server_factory::set_add_main_endpoint_layer;
+#[cfg(feature = "apollo_unsupported")]
+pub use listeners::set_add_extra_endpoints_layer;
