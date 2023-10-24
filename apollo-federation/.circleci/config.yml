@@ -144,7 +144,7 @@ jobs:
           platform: << parameters.platform >>
       - run:
           name: Run cargo publish
-          command: cargo publish --package apollo-federation --dry-run
+          command: cargo publish --package apollo-federation
 
 # The folowing are reusable command snippets can be referred to in any `steps`.
 # Commands we currently have: install_system_deps, install_rust_toolchain.
