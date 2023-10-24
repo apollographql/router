@@ -28,7 +28,15 @@ telemetry
 -      resources:
 +      resource:   
 ```
+`telemetry.tracing.propagation.awsxray` has been renamed to `aws_xray`
+```diff
+telemetry
+  tracing:
+    propagation:
+-      awsxray: true
++      aws_xray: true
+```
 
 The Router will upgrade any existing configuration on startup. However, you should update your configuration to use the new format as soon as possible. 
 
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4044 and https://github.com/apollographql/router/pull/4050
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4044, https://github.com/apollographql/router/pull/4050 and https://github.com/apollographql/router/pull/4051
