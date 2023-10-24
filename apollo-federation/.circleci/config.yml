@@ -137,7 +137,6 @@ jobs:
       platform:
         type: executor
     executor: << parameters.platform >>
-    working_directory: $CIRCLE_WORKING_DIRECTORY/apollo-federation
     steps:
       - checkout
       - install_system_deps:
@@ -145,7 +144,7 @@ jobs:
           platform: << parameters.platform >>
       - run:
           name: Run cargo publish
-          command: cargo publish --dry-run
+          command: cargo publish --package apollo-federation --dry-run
 
 # The folowing are reusable command snippets can be referred to in any `steps`.
 # Commands we currently have: install_system_deps, install_rust_toolchain.
