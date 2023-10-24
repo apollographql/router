@@ -780,13 +780,13 @@ impl Telemetry {
                 .private_entries
                 .lock()
                 .get::<MetricsAttributes>()
-                .cloned()
+                .as_ref()
         }
         .map(|attrs| {
             attrs
                 .0
-                .into_iter()
-                .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
+                .iter()
+                .map(|(attr_name, attr_value)| KeyValue::new(attr_name.clone(), attr_value.clone()))
                 .collect::<Vec<KeyValue>>()
         })
         .unwrap_or_default();
@@ -1039,13 +1039,13 @@ impl Telemetry {
                 .private_entries
                 .lock()
                 .get::<SubgraphMetricsAttributes>()
-                .cloned()
+                .as_ref()
         }
         .map(|attrs| {
             attrs
                 .0
-                .into_iter()
-                .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
+                .iter()
+                .map(|(attr_name, attr_value)| KeyValue::new(attr_name.clone(), attr_value.clone()))
                 .collect::<Vec<KeyValue>>()
         })
         .unwrap_or_default();
@@ -1266,7 +1266,7 @@ impl Telemetry {
             .private_entries
             .lock()
             .get::<UsageReporting>()
-            .cloned()
+            .as_ref()
         {
             let licensed_operation_count =
                 licensed_operation_count(&usage_reporting.stats_report_key);
@@ -1340,8 +1340,8 @@ impl Telemetry {
                             },
                             referenced_fields_by_type: usage_reporting
                                 .referenced_fields_by_type
-                                .into_iter()
-                                .map(|(k, v)| (k, convert(v)))
+                                .iter()
+                                .map(|(k, v)| (k.clone(), convert(v.clone())))
                                 .collect(),
                         },
                     )]),
