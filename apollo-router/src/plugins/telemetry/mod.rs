@@ -585,7 +585,12 @@ impl Telemetry {
             hot_tracer.reload(tracer);
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
-            drop(last_provider);
+            // To ensure we don't hang tracing providers are dropped in a blocking task.
+            // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
+            // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
+            tokio::task::spawn_blocking(move || drop(last_provider))
+                .await
+                .expect("dropped our provider");
 
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
         }
