@@ -147,10 +147,6 @@ impl Variables {
             let mut values: IndexSet<Value> = IndexSet::new();
 
             data.select_values_and_paths(schema, current_dir, |path, value| {
-                /*if let Value::Object(content) = value {
-                if let Ok(mut value) =
-                    select_object(content, requires, schema /* , document*/)
-                {*/
                 let mut value = execute_selection_set(value, requires, schema, None);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
@@ -162,8 +158,7 @@ impl Variables {
                             inverted_paths.push(vec![path.clone()]);
                             values.insert(value);
                             debug_assert!(inverted_paths.len() == values.len());
-                        } //}
-                          //}
+                        }
                     }
                 }
             });

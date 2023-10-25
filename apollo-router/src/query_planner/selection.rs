@@ -53,7 +53,6 @@ pub(crate) fn execute_selection_set<'a>(
     selections: &[Selection],
     schema: &Schema,
     mut current_type: Option<&'a str>,
-    //document: &ParsedDocument,
 ) -> Value {
     let content = match input_content.as_object() {
         Some(o) => o,
@@ -331,14 +330,16 @@ mod tests {
 
     #[test]
     fn test_selection_missing_field() {
-        assert!(matches!(
+        // equivalent to "... on OtherStuffToIgnore {} ... on User { __typename id job { name } }"
+
+        assert_eq!(
             select!(
                 include_str!("testdata/schema.graphql"),
                 json!({"__typename": "User", "name":"Bob", "job":{"name":"astronaut"}}),
             )
-                .unwrap_err(),
-            FetchError::ExecutionFieldNotFound { field } if field == "id"
-        ));
+            .unwrap(),
+            bjson!([{}])
+        );
     }
 
     #[test]
