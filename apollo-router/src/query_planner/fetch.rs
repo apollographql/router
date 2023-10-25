@@ -152,17 +152,19 @@ impl Variables {
                     select_object(content, requires, schema /* , document*/)
                 {*/
                 let mut value = execute_selection_set(value, requires, schema);
-                rewrites::apply_rewrites(schema, &mut value, input_rewrites);
-                match values.get_index_of(&value) {
-                    Some(index) => {
-                        inverted_paths[index].push(path.clone());
+                if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
+                    rewrites::apply_rewrites(schema, &mut value, input_rewrites);
+                    match values.get_index_of(&value) {
+                        Some(index) => {
+                            inverted_paths[index].push(path.clone());
+                        }
+                        None => {
+                            inverted_paths.push(vec![path.clone()]);
+                            values.insert(value);
+                            debug_assert!(inverted_paths.len() == values.len());
+                        } //}
+                          //}
                     }
-                    None => {
-                        inverted_paths.push(vec![path.clone()]);
-                        values.insert(value);
-                        debug_assert!(inverted_paths.len() == values.len());
-                    } //}
-                      //}
                 }
             });
 
