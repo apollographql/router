@@ -561,7 +561,7 @@ impl Plugin for Telemetry {
 }
 
 impl Telemetry {
-    pub(crate) fn activate(&mut self) {
+    pub(crate) async fn activate(&mut self) {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
@@ -585,10 +585,7 @@ impl Telemetry {
             hot_tracer.reload(tracer);
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
-            // To ensure we don't hang tracing providers are dropped in a blocking task.
-            // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
-            // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
-            tokio::task::spawn_blocking(move || drop(last_provider));
+            drop(last_provider);
 
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
         }
