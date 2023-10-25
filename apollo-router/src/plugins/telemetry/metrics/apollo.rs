@@ -167,7 +167,9 @@ impl Config {
         let exporter =
             ApolloExporter::new(endpoint, batch_processor_config, key, reference, schema_id)?;
 
-        builder.apollo_metrics_sender = exporter.start();
+        let (sender, hdl) = exporter.start();
+        builder.apollo_metrics_sender = sender;
+        builder.apollo_metrics_receiver_hdl = Some(hdl);
         Ok(builder)
     }
 }

@@ -27,6 +27,7 @@ use serde::ser::SerializeStruct;
 use serde_json::Value;
 use sys_info::hostname;
 use tokio::task::JoinError;
+use tokio::task::JoinHandle;
 use tonic::codegen::http::uri::InvalidUri;
 use tower::BoxError;
 use url::Url;
@@ -133,9 +134,9 @@ impl ApolloExporter {
         })
     }
 
-    pub(crate) fn start(self) -> Sender {
+    pub(crate) fn start(self) -> (Sender, JoinHandle<()>) {
         let (tx, mut rx) = mpsc::channel::<SingleReport>(self.batch_config.max_queue_size);
-        tokio::spawn(async move {
+        let hdl = tokio::spawn(async move {
             let timeout = tokio::time::interval(self.batch_config.scheduled_delay);
             let mut report = Report::default();
             let mut backoff_warn = true;
@@ -144,14 +145,9 @@ impl ApolloExporter {
 
             loop {
                 tokio::select! {
-                    single_report = rx.next() => {
-                        if let Some(r) = single_report {
-                            report += r;
-                        } else {
-                            tracing::debug!("terminating apollo exporter");
-                            break;
-                        }
-                       },
+                    // If you run this example without `biased;`, the polling order is
+                    // pseudo-random and may never choose the timeout tick
+                    biased;
                     _ = timeout.tick() => {
                         match self.submit_report(std::mem::take(&mut report)).await {
                             Ok(_) => backoff_warn = true,
@@ -168,6 +164,14 @@ impl ApolloExporter {
                                 }
                             }
                         }
+                    },
+                    single_report = rx.next() => {
+                        if let Some(r) = single_report {
+                            report += r;
+                        } else {
+                            tracing::debug!("terminating apollo exporter");
+                            break;
+                        }
                     }
                 };
             }
@@ -176,7 +180,7 @@ impl ApolloExporter {
                 tracing::error!("failed to submit Apollo report: {}", e)
             }
         });
-        Sender::Apollo(tx)
+        (Sender::Apollo(tx), hdl)
     }
 
     pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {

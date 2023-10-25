@@ -16,6 +16,7 @@ use opentelemetry_api::KeyValue;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
+use tokio::task::JoinHandle;
 use tower::BoxError;
 
 use crate::error::FetchError;
@@ -435,6 +436,7 @@ pub(crate) struct MetricsBuilder {
     pub(crate) prometheus_meter_provider: Option<opentelemetry::sdk::metrics::MeterProvider>,
     pub(crate) custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     pub(crate) apollo_metrics_sender: Sender,
+    pub(crate) apollo_metrics_receiver_hdl: Option<JoinHandle<()>>,
     pub(crate) resource: Resource,
 }
 
@@ -484,6 +486,7 @@ impl MetricsBuilder {
             prometheus_meter_provider: None,
             custom_endpoints: MultiMap::new(),
             apollo_metrics_sender: Sender::default(),
+            apollo_metrics_receiver_hdl: None,
         }
     }
 }

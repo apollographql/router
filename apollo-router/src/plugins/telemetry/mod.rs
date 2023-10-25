@@ -45,6 +45,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tokio::runtime::Handle;
+use tokio::task::JoinHandle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -157,6 +158,7 @@ pub(crate) struct Telemetry {
     config: Arc<config::Conf>,
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
+    apollo_metrics_receiver_hdl: Option<JoinHandle<()>>,
     field_level_instrumentation_ratio: f64,
     sampling_filter_ratio: SamplerOption,
 
@@ -207,6 +209,18 @@ impl Drop for Telemetry {
         Self::safe_shutdown_meter_provider(&mut self.public_meter_provider);
         Self::safe_shutdown_meter_provider(&mut self.public_prometheus_meter_provider);
         self.safe_shutown_tracer();
+        // If we have an apollo metrics receiver, let's wait for it to close down
+        if let Some(receiver) = std::mem::take(&mut self.apollo_metrics_receiver_hdl) {
+            if let Ok(rt) = Handle::try_current() {
+                thread::spawn(move || {
+                    rt.spawn(async move {
+                        receiver.await.expect("receiver handle terminated");
+                    });
+                })
+                .join()
+                .expect("receiver thread joined");
+            }
+        }
     }
 }
 
@@ -237,6 +251,7 @@ impl Plugin for Telemetry {
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
+            apollo_metrics_receiver_hdl: metrics_builder.apollo_metrics_receiver_hdl,
             field_level_instrumentation_ratio,
             tracer_provider: Some(tracer_provider),
             public_meter_provider: Some(metrics_builder.public_meter_provider_builder.build())
