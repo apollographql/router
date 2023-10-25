@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
+use serde_json_bytes::Entry;
 
 use crate::error::FetchError;
 use crate::json_ext::Object;
@@ -48,6 +49,163 @@ pub(crate) struct InlineFragment {
     pub(crate) selections: Vec<Selection>,
 }
 
+pub(crate) fn execute_selection_set(
+    input_content: &Value,
+    selections: &[Selection],
+    schema: &Schema,
+    //document: &ParsedDocument,
+) -> Value {
+    let content = match input_content.as_object() {
+        Some(o) => o,
+        None => return Value::Null,
+    };
+
+    let mut output = Object::with_capacity(selections.len());
+    for selection in selections {
+        println!(
+            "execute_selection_set: selection {selection:?} from {}",
+            serde_json::to_string(&content).unwrap(),
+        );
+
+        match selection {
+            Selection::Field(Field {
+                alias,
+                name,
+                selections,
+            }) => {
+                let name = alias.as_deref().unwrap_or(name.as_str()); //node.alias ? node.alias : node.name;
+
+                match content.get_key_value(name) {
+                    None => {
+                        /*
+                        // the behaviour here does not align with the gateway: we should instead assume that
+                        // data is in the correct shape, and return a null (or even no value at all) on
+                        // missing fields. If a field was missing, it should have been nullified,
+                        // and if it was non nullable, the parent object would have been nullified.
+                        // Unfortunately, we don't validate subgraph responses yet
+                        continue;
+                        */
+                        return Value::Null;
+                    }
+                    Some((key, value)) => {
+                        if let Some(elements) = value.as_array() {
+                            let selected = elements
+                                .iter()
+                                .map(|element| match selections {
+                                    Some(sels) => execute_selection_set(element, sels, schema),
+                                    None => element.clone(),
+                                })
+                                .collect::<Vec<_>>();
+                            output.insert(key.clone(), Value::Array(selected));
+                        } else if let Some(sels) = selections {
+                            output.insert(key.clone(), execute_selection_set(value, sels, schema));
+                        } else {
+                            output.insert(key.clone(), value.clone());
+                        }
+                    }
+                }
+            }
+            Selection::InlineFragment(InlineFragment {
+                type_condition,
+                selections,
+            }) => match type_condition {
+                None => continue,
+                Some(condition) => {
+                    let b = is_object_of_type(content, condition, schema);
+                    println!(
+                        "is_object_of_type({condition})={b} for {}",
+                        serde_json::to_string(&content).unwrap(),
+                    );
+                    if is_object_of_type(content, condition, schema) {
+                        //output.deep_merge(execute_selection_set(schema, content, selections))
+                        if let Value::Object(selected) =
+                            execute_selection_set(input_content, selections, schema)
+                        {
+                            for (key, value) in selected.into_iter() {
+                                match output.entry(key) {
+                                    Entry::Vacant(e) => {
+                                        e.insert(value);
+                                    }
+                                    Entry::Occupied(e) => {
+                                        e.into_mut().deep_merge(value);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        }
+        println!(
+            "execute_selection_set: output is now: {}",
+            serde_json::to_string(&output).unwrap(),
+        );
+    }
+
+    Value::Object(output)
+}
+
+fn is_object_of_type(obj: &Object, condition: &str, schema: &Schema) -> bool {
+    let typename = match obj.get("__typename").and_then(|v| v.as_str()) {
+        None => return false,
+        Some(t) => t,
+    };
+
+    if condition == typename {
+        return true;
+    }
+
+    let object_type = match schema.definitions.types.get(typename) {
+        None => return false,
+        Some(t) => t,
+    };
+
+    let conditional_type = match schema.definitions.types.get(condition) {
+        None => return false,
+        Some(t) => t,
+    };
+
+    if conditional_type.is_interface() || conditional_type.is_union() {
+        return (object_type.is_object() || object_type.is_interface())
+            && schema.is_subtype(condition, typename);
+    }
+
+    false
+}
+/*
+
+export function isObjectOfType(
+  schema: GraphQLSchema,
+  obj: Record<string, any>,
+  typeCondition: string,
+  defaultOnUnknownObjectType: boolean = false,
+): boolean {
+  const objTypename = obj['__typename'];
+  if (!objTypename) {
+    return defaultOnUnknownObjectType;
+  }
+
+  if (typeCondition === objTypename) {
+    return true;
+  }
+
+  const type = schema.getType(objTypename);
+  if (!type) {
+    return false;
+  }
+
+  const conditionalType = schema.getType(typeCondition);
+  if (!conditionalType) {
+    return false;
+  }
+
+  if (isAbstractType(conditionalType)) {
+    return (isObjectType(type) || isInterfaceType(type)) && schema.isSubType(conditionalType, type);
+  }
+
+  return false;
+}
+*/
 pub(crate) fn select_object(
     content: &Object,
     selections: &[Selection],
@@ -161,13 +319,15 @@ mod tests {
         let res = Ok(Value::Array(
             values
                 .into_iter()
-                .flat_map(|value| match (value, selections) {
+                .map(|value| {
+                    execute_selection_set(value, selections, schema)
+                    /*match (value, selections) {
                     (Value::Object(content), requires) => {
                         select_object(content, requires, schema) //.transpose()
                     }
                     (_, _) => Err(FetchError::ExecutionInvalidContent {
                         reason: "not an object".to_string(),
-                    }),
+                    }),*/
                 })
                 .collect::<Vec<_>>(),
         ));
@@ -315,7 +475,7 @@ mod tests {
         ]);
         let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
 
-        let value = select_object(response.as_object().unwrap(), &selection, &schema);
+        let value = execute_selection_set(&response, &selection, &schema);
         println!(
             "response\n{}\nand selection\n{:?}\n returns:\n{}",
             serde_json::to_string_pretty(&response).unwrap(),
@@ -324,7 +484,7 @@ mod tests {
         );
 
         assert_eq!(
-            value.unwrap(),
+            value,
             bjson!({
                 "__typename": "MainObject",
                 "mainObjectList": [
