@@ -208,7 +208,7 @@ impl Drop for Telemetry {
         Self::safe_shutdown_meter_provider(&mut self.private_meter_provider);
         Self::safe_shutdown_meter_provider(&mut self.public_meter_provider);
         Self::safe_shutdown_meter_provider(&mut self.public_prometheus_meter_provider);
-        self.safe_shutown_tracer();
+        self.safe_shutdown_tracer();
         // If we have an apollo metrics receiver, let's wait for it to close down
         if let Some(receiver) = std::mem::take(&mut self.apollo_metrics_receiver_hdl) {
             if let Ok(rt) = Handle::try_current() {
@@ -1570,12 +1570,14 @@ impl Telemetry {
                     if let Err(e) = meter_provider.shutdown() {
                         ::tracing::error!(error = %e, "failed to shutdown meter provider")
                     }
-                });
+                })
+                .join()
+                .expect("shutdown_meter_provider thread joined");
             }
         }
     }
 
-    fn safe_shutown_tracer(&mut self) {
+    fn safe_shutdown_tracer(&mut self) {
         // If for some reason we didn't use the trace provider then safely discard it e.g. some other plugin failed `new`
         // To ensure we don't hang tracing providers are dropped in a blocking task.
         // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
@@ -1588,7 +1590,9 @@ impl Telemetry {
                 // This means that if the runtime is shutdown there is potentially a race where the provider may not be flushed.
                 // By using a thread it doesn't matter if the tokio runtime is shut down.
                 // This is likely to happen in tests due to the tokio runtime being destroyed when the test method exits.
-                thread::spawn(move || drop(tracer_provider));
+                thread::spawn(move || drop(tracer_provider))
+                    .join()
+                    .expect("shutdown tracer thread joined");
             }
         }
     }
