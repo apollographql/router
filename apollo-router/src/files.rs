@@ -58,20 +58,16 @@ fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()
                         | EventKind::Modify(ModifyKind::Data(DataChange::Any))
                 ) && event.paths.contains(&watched_path)
                 {
-                    loop {
-                        match watch_sender.try_send(()) {
-                            Ok(_) => break,
-                            Err(err) => {
-                                tracing::warn!(
-                                    "could not process file watch notification. {}",
-                                    err.to_string()
-                                );
-                                if err.is_full() {
-                                    std::thread::sleep(Duration::from_millis(50));
-                                } else {
-                                    panic!("event channel failed: {err}");
-                                }
-                            }
+                    // Issue a warning if event sending fails.
+                    // Ignore errors if the channel is full, since that will resolve itself at some
+                    // point. Panic otherwise.
+                    if let Err(err) = watch_sender.try_send(()) {
+                        tracing::warn!(
+                            "could not process file watch notification. {}",
+                            err.to_string()
+                        );
+                        if !err.is_full() {
+                            panic!("event channel failed: {err}");
                         }
                     }
                 }
