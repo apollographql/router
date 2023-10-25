@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::ByteString;
 use serde_json_bytes::Entry;
 
 use crate::json_ext::Object;
@@ -47,16 +48,19 @@ pub(crate) struct InlineFragment {
     pub(crate) selections: Vec<Selection>,
 }
 
-pub(crate) fn execute_selection_set(
-    input_content: &Value,
+pub(crate) fn execute_selection_set<'a>(
+    input_content: &'a Value,
     selections: &[Selection],
     schema: &Schema,
+    mut current_type: Option<&'a str>,
     //document: &ParsedDocument,
 ) -> Value {
     let content = match input_content.as_object() {
         Some(o) => o,
         None => return Value::Null,
     };
+
+    current_type = current_type.or_else(|| content.get("__typename").and_then(|v| v.as_str()));
 
     let mut output = Object::with_capacity(selections.len());
     for selection in selections {
@@ -71,32 +75,60 @@ pub(crate) fn execute_selection_set(
                 name,
                 selections,
             }) => {
-                let name = alias.as_deref().unwrap_or(name.as_str()); //node.alias ? node.alias : node.name;
+                let selection_name = alias.as_deref().unwrap_or(name.as_str());
+                let field_type = current_type.and_then(|t| {
+                    schema.definitions.types.get(t).and_then(|ty| match ty {
+                        apollo_compiler::schema::ExtendedType::Object(o) => o
+                            .fields
+                            .get(name.as_str())
+                            .map(|f| f.ty.inner_named_type().as_str()),
+                        apollo_compiler::schema::ExtendedType::Interface(i) => i
+                            .fields
+                            .get(name.as_str())
+                            .map(|f| f.ty.inner_named_type().as_str()),
+                        _ => None,
+                    })
+                });
 
-                match content.get_key_value(name) {
+                match content.get_key_value(selection_name) {
                     None => {
-                        /*
                         // the behaviour here does not align with the gateway: we should instead assume that
                         // data is in the correct shape, and return a null (or even no value at all) on
                         // missing fields. If a field was missing, it should have been nullified,
                         // and if it was non nullable, the parent object would have been nullified.
                         // Unfortunately, we don't validate subgraph responses yet
-                        continue;
-                        */
-                        return Value::Null;
+                        //continue;
+                        if name == "__typename" {
+                            // if the __typename field was missing but we can infer it, fill it
+                            if let Some(ty) = current_type {
+                                output.insert(
+                                    ByteString::from(selection_name.to_owned()),
+                                    Value::String(ByteString::from(ty.to_owned())),
+                                );
+                                continue;
+                            }
+                        }
+                        output.insert(ByteString::from(selection_name.to_owned()), Value::Null);
+
+                        //return Value::Null;
                     }
                     Some((key, value)) => {
                         if let Some(elements) = value.as_array() {
                             let selected = elements
                                 .iter()
                                 .map(|element| match selections {
-                                    Some(sels) => execute_selection_set(element, sels, schema),
+                                    Some(sels) => {
+                                        execute_selection_set(element, sels, schema, field_type)
+                                    }
                                     None => element.clone(),
                                 })
                                 .collect::<Vec<_>>();
                             output.insert(key.clone(), Value::Array(selected));
                         } else if let Some(sels) = selections {
-                            output.insert(key.clone(), execute_selection_set(value, sels, schema));
+                            output.insert(
+                                key.clone(),
+                                execute_selection_set(value, sels, schema, field_type),
+                            );
                         } else {
                             output.insert(key.clone(), value.clone());
                         }
@@ -109,15 +141,15 @@ pub(crate) fn execute_selection_set(
             }) => match type_condition {
                 None => continue,
                 Some(condition) => {
-                    let b = is_object_of_type(content, condition, schema);
+                    let b = is_object_of_type(current_type, condition, schema);
                     println!(
                         "is_object_of_type({condition})={b} for {}",
                         serde_json::to_string(&content).unwrap(),
                     );
-                    if is_object_of_type(content, condition, schema) {
+                    if is_object_of_type(current_type, condition, schema) {
                         //output.deep_merge(execute_selection_set(schema, content, selections))
                         if let Value::Object(selected) =
-                            execute_selection_set(input_content, selections, schema)
+                            execute_selection_set(input_content, selections, schema, current_type)
                         {
                             for (key, value) in selected.into_iter() {
                                 match output.entry(key) {
@@ -143,8 +175,8 @@ pub(crate) fn execute_selection_set(
     Value::Object(output)
 }
 
-fn is_object_of_type(obj: &Object, condition: &str, schema: &Schema) -> bool {
-    let typename = match obj.get("__typename").and_then(|v| v.as_str()) {
+fn is_object_of_type(typename: Option<&str>, condition: &str, schema: &Schema) -> bool {
+    let typename = match typename {
         None => return false,
         Some(t) => t,
     };
@@ -201,7 +233,7 @@ mod tests {
             values
                 .into_iter()
                 .map(|value| {
-                    execute_selection_set(value, selections, schema)
+                    execute_selection_set(value, selections, schema, None)
                     /*match (value, selections) {
                     (Value::Object(content), requires) => {
                         select_object(content, requires, schema) //.transpose()
@@ -356,7 +388,7 @@ mod tests {
         ]);
         let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
 
-        let value = execute_selection_set(&response, &selection, &schema);
+        let value = execute_selection_set(&response, &selection, &schema, None);
         println!(
             "response\n{}\nand selection\n{:?}\n returns:\n{}",
             serde_json::to_string_pretty(&response).unwrap(),

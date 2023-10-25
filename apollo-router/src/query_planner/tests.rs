@@ -1076,25 +1076,19 @@ async fn missing_typename_and_fragments_in_requires() {
         ).build()),
         ("sub2", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Stuff{aDetailsIsEnabled}}}",
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Stuff{isEnabled}}}",
                 "variables":{"representations": [
                     {
                         "__typename": "Stuff",
                         "id": "1",
-                        "details": [
-                            {
-                                "enabled": true
-                            },
-                            null,
-                            {
-                                "enabled": false
-                            }
-                        ]
+                        "thing": {
+                        "text": "aaa"
+                        }
                     }
                 ]}}},
             serde_json::json!{{"data": {
                 "_entities": [{
-                    "aDetailsIsEnabled": true
+                    "isEnabled": true
                 }]
             } }}
         ).build()),

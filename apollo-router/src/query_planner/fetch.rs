@@ -151,7 +151,7 @@ impl Variables {
                 if let Ok(mut value) =
                     select_object(content, requires, schema /* , document*/)
                 {*/
-                let mut value = execute_selection_set(value, requires, schema);
+                let mut value = execute_selection_set(value, requires, schema, None);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                     match values.get_index_of(&value) {
