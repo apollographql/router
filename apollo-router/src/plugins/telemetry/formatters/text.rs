@@ -18,6 +18,7 @@ use tracing_subscriber::fmt::FmtContext;
 use tracing_subscriber::registry::LookupSpan;
 
 use crate::plugins::telemetry::reload::IsSampled;
+use crate::plugins::telemetry::SubgraphRequestLogAttributes;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TextFormatter {
@@ -154,6 +155,51 @@ impl TextFormatter {
     }
 
     #[inline]
+    fn format_dyn_attributes<S, N>(
+        &self,
+        ctx: &FmtContext<'_, S, N>,
+        writer: &mut Writer<'_>,
+        event: &Event<'_>,
+    ) -> fmt::Result
+    where
+        S: Subscriber + for<'a> LookupSpan<'a>,
+        N: for<'a> FormatFields<'a> + 'static,
+    {
+        let span = event
+            .parent()
+            .and_then(|id| ctx.span(id))
+            .or_else(|| ctx.lookup_current());
+        if let Some(span) = span {
+            let ext = span.extensions();
+            match &ext.get::<SubgraphRequestLogAttributes>() {
+                Some(dyn_attributes) => {
+                    // if writer.has_ansi_escapes() {
+                    //     let style = Style::new().dimmed();
+                    //     write!(writer, "{}", style.prefix())?;
+                    //     write!(writer, "[trace_id={trace_id}]")?;
+                    //     write!(writer, "{}", style.suffix())?;
+                    // } else {
+                    let attrs: Vec<String> = dyn_attributes
+                        .0
+                        .iter()
+                        .map(|(key, val)| format!("{key}={val}"))
+                        .collect();
+                    write!(writer, "[attributes=[{}]]", attrs.join(", "))?;
+                    // }
+                    writer.write_char(' ')?;
+                }
+                None => {
+                    eprintln!(
+                        "Unable to find SubgraphRequestLogAttributes in extensions; this is a bug"
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[inline]
     fn format_request_id<S, N>(
         &self,
         ctx: &FmtContext<'_, S, N>,
@@ -215,7 +261,8 @@ where
         self.format_location(event, &mut writer)?;
 
         self.format_level(meta.level(), &mut writer)?;
-        self.format_request_id(ctx, &mut writer, event)?;
+        // self.format_request_id(ctx, &mut writer, event)?;
+        // self.format_dyn_attributes(ctx, &mut writer, event)?;
         if self.display_target {
             self.format_target(meta.target(), &mut writer)?;
         }

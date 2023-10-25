@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
@@ -37,6 +38,7 @@ use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
+use opentelemetry_api::trace::WithContext;
 use parking_lot::Mutex;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
@@ -48,8 +50,16 @@ use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tracing_core::callsite::DefaultCallsite;
+use tracing_core::Callsite;
+use tracing_core::Interest;
+use tracing_core::Kind;
+use tracing_core::Metadata;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::fmt::format::JsonFields;
+use tracing_subscriber::registry;
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::registry::SpanData;
 use tracing_subscriber::Layer;
 
 use self::apollo::ForwardValues;
@@ -125,6 +135,7 @@ pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
 mod config_new;
+pub(crate) mod dynamic_attribute_layer;
 mod endpoint;
 pub(crate) mod formatters;
 pub(crate) mod metrics;
@@ -210,6 +221,9 @@ impl Drop for Telemetry {
         self.safe_shutown_tracer();
     }
 }
+
+#[derive(Debug, Default)]
+pub(crate) struct SubgraphRequestLogAttributes(HashMap<String, String>);
 
 #[async_trait::async_trait]
 impl Plugin for Telemetry {
@@ -310,6 +324,9 @@ impl Plugin for Telemetry {
                     "apollo_private.http.request_headers" = filter_headers(request.router_request.headers(), &apollo.send_headers).as_str(),
                     "apollo_private.http.response_headers" = field::Empty
                 );
+                // TODO: find what parts of the request I should add in attributes using a key prefixed by `apollo_dynamic_attribute`
+                // span.set_attribute(String::from("apollo_dynamic_attribute.custom_attribute_header"), headers.get("host").and_then(|h| h.to_str().ok()).map(|h| h.to_string()).unwrap_or_default());
+                ::tracing::info!(apollo_dynamic_attribute.custom_attribute_header = "test");
                 span
             })
             .map_future(move |fut| {
@@ -543,6 +560,20 @@ impl Plugin for Telemetry {
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         self.custom_endpoints.clone()
+    }
+}
+
+struct LateCallsite {
+    callsite: std::sync::OnceLock<DefaultCallsite>,
+}
+
+impl Callsite for LateCallsite {
+    fn set_interest(&self, interest: Interest) {
+        self.callsite.get().unwrap().set_interest(interest);
+    }
+
+    fn metadata(&self) -> &Metadata<'_> {
+        self.callsite.get().unwrap().metadata()
     }
 }
 
