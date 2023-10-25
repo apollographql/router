@@ -77,26 +77,18 @@ pub(crate) fn execute_selection_set<'a>(
                 let selection_name = alias.as_deref().unwrap_or(name.as_str());
                 let field_type = current_type.and_then(|t| {
                     schema.definitions.types.get(t).and_then(|ty| match ty {
-                        apollo_compiler::schema::ExtendedType::Object(o) => o
-                            .fields
-                            .get(name.as_str())
-                            .map(|f| f.ty.inner_named_type().as_str()),
-                        apollo_compiler::schema::ExtendedType::Interface(i) => i
-                            .fields
-                            .get(name.as_str())
-                            .map(|f| f.ty.inner_named_type().as_str()),
+                        apollo_compiler::schema::ExtendedType::Object(o) => {
+                            o.fields.get(name.as_str()).map(|f| &f.ty)
+                        }
+                        apollo_compiler::schema::ExtendedType::Interface(i) => {
+                            i.fields.get(name.as_str()).map(|f| &f.ty)
+                        }
                         _ => None,
                     })
                 });
 
                 match content.get_key_value(selection_name) {
                     None => {
-                        // the behaviour here does not align with the gateway: we should instead assume that
-                        // data is in the correct shape, and return a null (or even no value at all) on
-                        // missing fields. If a field was missing, it should have been nullified,
-                        // and if it was non nullable, the parent object would have been nullified.
-                        // Unfortunately, we don't validate subgraph responses yet
-                        //continue;
                         if name == "__typename" {
                             // if the __typename field was missing but we can infer it, fill it
                             if let Some(ty) = current_type {
@@ -107,18 +99,34 @@ pub(crate) fn execute_selection_set<'a>(
                                 continue;
                             }
                         }
-                        output.insert(ByteString::from(selection_name.to_owned()), Value::Null);
-
-                        //return Value::Null;
+                        // the behaviour here does not align with the gateway: we should instead assume that
+                        // data is in the correct shape, and return a null (or even no value at all) on
+                        // missing fields. If a field was missing, it should have been nullified,
+                        // and if it was non nullable, the parent object would have been nullified.
+                        // Unfortunately, we don't validate subgraph responses yet
+                        if field_type
+                            .as_ref()
+                            .map(|ty| !ty.is_non_null())
+                            .unwrap_or(false)
+                        {
+                            output.insert(ByteString::from(selection_name.to_owned()), Value::Null);
+                        } else {
+                            return Value::Null;
+                        }
                     }
                     Some((key, value)) => {
                         if let Some(elements) = value.as_array() {
                             let selected = elements
                                 .iter()
                                 .map(|element| match selections {
-                                    Some(sels) => {
-                                        execute_selection_set(element, sels, schema, field_type)
-                                    }
+                                    Some(sels) => execute_selection_set(
+                                        element,
+                                        sels,
+                                        schema,
+                                        field_type
+                                            .as_ref()
+                                            .map(|ty| ty.inner_named_type().as_str()),
+                                    ),
                                     None => element.clone(),
                                 })
                                 .collect::<Vec<_>>();
@@ -126,7 +134,12 @@ pub(crate) fn execute_selection_set<'a>(
                         } else if let Some(sels) = selections {
                             output.insert(
                                 key.clone(),
-                                execute_selection_set(value, sels, schema, field_type),
+                                execute_selection_set(
+                                    value,
+                                    sels,
+                                    schema,
+                                    field_type.as_ref().map(|ty| ty.inner_named_type().as_str()),
+                                ),
                             );
                         } else {
                             output.insert(key.clone(), value.clone());
@@ -253,6 +266,7 @@ mod tests {
             let response = Response::builder()
                 .data($content)
                 .build();
+            // equivalent to "... on OtherStuffToIgnore {} ... on User { __typename id job { name } }"
             let stub = json!([
                 {
                     "kind": "InlineFragment",
