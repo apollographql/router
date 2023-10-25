@@ -11,7 +11,6 @@ use tracing::Instrument;
 use super::execution::ExecutionParameters;
 use super::rewrites;
 use super::selection::execute_selection_set;
-use super::selection::select_object;
 use super::selection::Selection;
 use crate::error::Error;
 use crate::error::FetchError;
@@ -132,6 +131,7 @@ impl Variables {
         request: &Arc<http::Request<Request>>,
         schema: &Schema,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
+        //document: &ParsedDocument,
     ) -> Option<Variables> {
         let body = request.body();
         if !requires.is_empty() {

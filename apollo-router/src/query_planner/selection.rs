@@ -1,9 +1,7 @@
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
 use serde_json_bytes::Entry;
 
-use crate::error::FetchError;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
@@ -173,91 +171,6 @@ fn is_object_of_type(obj: &Object, condition: &str, schema: &Schema) -> bool {
     false
 }
 
-pub(crate) fn select_object(
-    content: &Object,
-    selections: &[Selection],
-    schema: &Schema,
-) -> Result<Value, FetchError> {
-    let mut output = Object::with_capacity(selections.len());
-    for selection in selections {
-        match selection {
-            Selection::Field(field) => {
-                let (key, value) = select_field(content, field, schema)?;
-
-                if let Some(o) = output.get_mut(field.name.as_str()) {
-                    o.deep_merge(value);
-                } else {
-                    output.insert(
-                        key.map(|bytestring| bytestring.to_owned())
-                            .unwrap_or_else(|| field.name.as_str().to_owned().into()),
-                        value,
-                    );
-                }
-            }
-            Selection::InlineFragment(fragment) => {
-                if let Value::Object(value) = select_inline_fragment(content, fragment, schema)? {
-                    output.append(&mut value.to_owned())
-                }
-            }
-        };
-    }
-
-    Ok(Value::Object(output))
-}
-
-fn select_field<'a>(
-    content: &'a Object,
-    field: &Field,
-    schema: &Schema,
-) -> Result<(Option<&'a ByteString>, Value), FetchError> {
-    let res = match (
-        content.get_key_value(field.name.as_str()),
-        &field.selections,
-    ) {
-        (Some((k, v)), _) => select_value(v, field, schema).map(|opt| (Some(k), opt)), //opt.map(|v| (k, v))),
-        //FIXME: if this was a non nullable field, we should not return it
-        (None, _) => Ok((None, Value::Null)),
-        /*)Err(FetchError::ExecutionFieldNotFound {
-            field: field.name.to_owned(),
-        }),*/
-    };
-    res
-}
-
-fn select_inline_fragment(
-    content: &Object,
-    fragment: &InlineFragment,
-    schema: &Schema,
-) -> Result<Value, FetchError> {
-    match (&fragment.type_condition, &content.get("__typename")) {
-        (Some(condition), Some(Value::String(typename))) => {
-            if condition == typename || schema.is_subtype(condition, typename.as_str()) {
-                select_object(content, &fragment.selections, schema)
-            } else {
-                Ok(Value::Object(Object::new()))
-            }
-        }
-        (None, _) => select_object(content, &fragment.selections, schema),
-        (_, None) => Err(FetchError::ExecutionFieldNotFound {
-            field: "__typename".to_string(),
-        }),
-        (_, _) => Ok(Value::Object(Object::new())),
-    }
-}
-
-fn select_value(content: &Value, field: &Field, schema: &Schema) -> Result<Value, FetchError> {
-    match (content, &field.selections) {
-        (Value::Object(child), Some(selections)) => select_object(child, selections, schema),
-        (Value::Array(elements), Some(_)) => elements
-            .iter()
-            .map(|element| select_value(element, field, schema))
-            .collect::<Result<Vec<Value>, FetchError>>()
-            .map(|v| Value::Array(v)),
-        (value, None) => Ok(value.to_owned()),
-        _ => Ok(Value::Null),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -265,6 +178,7 @@ mod tests {
 
     use super::Selection;
     use super::*;
+    use crate::error::FetchError;
     use crate::graphql::Response;
     use crate::json_ext::Path;
 
