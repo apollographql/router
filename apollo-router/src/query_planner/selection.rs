@@ -172,40 +172,7 @@ fn is_object_of_type(obj: &Object, condition: &str, schema: &Schema) -> bool {
 
     false
 }
-/*
 
-export function isObjectOfType(
-  schema: GraphQLSchema,
-  obj: Record<string, any>,
-  typeCondition: string,
-  defaultOnUnknownObjectType: boolean = false,
-): boolean {
-  const objTypename = obj['__typename'];
-  if (!objTypename) {
-    return defaultOnUnknownObjectType;
-  }
-
-  if (typeCondition === objTypename) {
-    return true;
-  }
-
-  const type = schema.getType(objTypename);
-  if (!type) {
-    return false;
-  }
-
-  const conditionalType = schema.getType(typeCondition);
-  if (!conditionalType) {
-    return false;
-  }
-
-  if (isAbstractType(conditionalType)) {
-    return (isObjectType(type) || isInterfaceType(type)) && schema.isSubType(conditionalType, type);
-  }
-
-  return false;
-}
-*/
 pub(crate) fn select_object(
     content: &Object,
     selections: &[Selection],
