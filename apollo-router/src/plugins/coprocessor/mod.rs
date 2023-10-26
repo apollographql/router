@@ -20,8 +20,6 @@ use hyper::client::HttpConnector;
 use hyper::Body;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
-use hyper_trust_dns_connector::new_async_http_connector;
-use hyper_trust_dns_connector::AsyncHyperResolver;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -46,6 +44,8 @@ use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::router;
 use crate::services::subgraph;
+use crate::services::trust_dns_connector::new_async_http_connector;
+use crate::services::trust_dns_connector::AsyncHyperResolver;
 
 #[cfg(test)]
 mod test;
