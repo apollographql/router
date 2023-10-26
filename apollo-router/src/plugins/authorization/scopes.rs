@@ -236,14 +236,14 @@ impl<'a> ScopeFilteringVisitor<'a> {
         }
     }
 
-    fn parent_implementors_with_different_requirements(
+    fn implementors_with_different_requirements(
         &self,
         field_def: &ast::FieldDefinition,
         node: &ast::Field,
     ) -> bool {
         // we can request __typename outside of fragments even if the types have different
         // authorization requirements
-        if node.name() == TYPENAME {
+        if node.name.as_str() == TYPENAME {
             return false;
         }
 

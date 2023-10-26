@@ -16,4 +16,4 @@ filtered:
   test
 }
 
-paths: ["/itf/id"]
+paths: ["/itf"]
