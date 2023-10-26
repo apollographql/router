@@ -87,7 +87,7 @@ type Mutation {
 }
 ```
 
-You can define both directives&mdash;together or separately&mdash;at the field level to fine-tune your access controls.
+You can define both directives&mdash;together or separately&mdash;at the field level to fine-tune your access controls. When directives are declared both on a field and the field's type, they will all be tried, and the field will be removed if any of them does not authorize it.
 GraphOS [composes](#composition-and-federation) restrictions into the supergraph schema so that each subgraph's restrictions are respected.
 The router then enforces these directives on all incoming requests.
 
@@ -182,6 +182,13 @@ extend schema
   @link(
     url: "https://specs.apollo.dev/federation/v2.5",
     import: [..., "@requiresScopes"])
+```
+
+It is defined as follows:
+
+```graphql
+scalar federation__Scope
+directive @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
 
 #### Combining required scopes with `AND`/`OR` logic
@@ -284,6 +291,12 @@ extend schema
   @link(
     url: "https://specs.apollo.dev/federation/v2.5",
     import: [..., "@authenticated"])
+```
+
+It is defined as follows:
+
+```graphql
+directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
 
 #### Example `@authenticated` use case
