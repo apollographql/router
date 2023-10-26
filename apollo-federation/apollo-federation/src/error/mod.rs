@@ -1,17 +1,10 @@
-use std::fmt::{Display, Formatter, Write};
-
-use indexmap::IndexMap;
 use lazy_static::lazy_static;
-use strum::IntoEnumIterator;
-
-use crate::error::ast::AstNode;
-
-pub mod ast;
+use std::fmt::{Display, Formatter, Write};
 
 // What we really needed here was the string representations in enum form, this isn't meant to
 // replace AST components.
-#[derive(Clone, Debug, strum_macros::Display, strum_macros::IntoStaticStr)]
-pub enum SchemaRootKindEnum {
+#[derive(Clone, Debug, strum_macros::Display)]
+enum SchemaRootKind {
     #[strum(to_string = "query")]
     Query,
     #[strum(to_string = "mutation")]
@@ -20,23 +13,345 @@ pub enum SchemaRootKindEnum {
     Subscription,
 }
 
-impl From<SchemaRootKindEnum> for String {
-    fn from(value: SchemaRootKindEnum) -> Self {
+impl From<SchemaRootKind> for String {
+    fn from(value: SchemaRootKind) -> Self {
         value.to_string()
     }
 }
 
-// TODO: graphql-js writes information about the location of the node, if one exists. Ideally, we
-// should do something similar with AstNode, but will punt to later.
-#[derive(Debug, thiserror::Error)]
-#[error("{message}")]
-pub struct SingleFederationError {
-    pub code: String,
-    pub message: String,
-    pub nodes: Vec<AstNode>,
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum SingleFederationError {
+    #[error(
+        "An internal error has occurred, please report this bug to Apollo.\n\nDetails: {message}"
+    )]
+    Internal { message: String },
+    #[error("{message}")]
+    InvalidGraphQL { message: String },
+    #[error("{message}")]
+    DirectiveDefinitionInvalid { message: String },
+    #[error("{message}")]
+    TypeDefinitionInvalid { message: String },
+    #[error("{message}")]
+    UnsupportedLinkedFeature { message: String },
+    #[error("{message}")]
+    UnknownFederationLinkVersion { message: String },
+    #[error("{message}")]
+    UnknownLinkVersion { message: String },
+    #[error("{message}")]
+    KeyFieldsHasArgs { message: String },
+    #[error("{message}")]
+    ProvidesFieldsHasArgs { message: String },
+    #[error("{message}")]
+    ProvidesFieldsMissingExternal { message: String },
+    #[error("{message}")]
+    RequiresFieldsMissingExternal { message: String },
+    #[error("{message}")]
+    KeyUnsupportedOnInterface { message: String },
+    #[error("{message}")]
+    ProvidesUnsupportedOnInterface { message: String },
+    #[error("{message}")]
+    RequiresUnsupportedOnInterface { message: String },
+    #[error("{message}")]
+    KeyDirectiveInFieldsArgs { message: String },
+    #[error("{message}")]
+    ProvidesDirectiveInFieldsArgs { message: String },
+    #[error("{message}")]
+    RequiresDirectiveInFieldsArgs { message: String },
+    #[error("{message}")]
+    ExternalUnused { message: String },
+    #[error("{message}")]
+    TypeWithOnlyUnusedExternal { message: String },
+    #[error("{message}")]
+    ProvidesOnNonObjectField { message: String },
+    #[error("{message}")]
+    KeyInvalidFieldsType { message: String },
+    #[error("{message}")]
+    ProvidesInvalidFieldsType { message: String },
+    #[error("{message}")]
+    RequiresInvalidFieldsType { message: String },
+    #[error("{message}")]
+    KeyInvalidFields { message: String },
+    #[error("{message}")]
+    ProvidesInvalidFields { message: String },
+    #[error("{message}")]
+    RequiresInvalidFields { message: String },
+    #[error("{message}")]
+    KeyFieldsSelectInvalidType { message: String },
+    #[error("{message}")]
+    RootQueryUsed { message: String },
+    #[error("{message}")]
+    RootMutationUsed { message: String },
+    #[error("{message}")]
+    RootSubscriptionUsed { message: String },
+    #[error("{message}")]
+    InvalidSubgraphName { message: String },
+    #[error("{message}")]
+    NoQueries { message: String },
+    #[error("{message}")]
+    InterfaceFieldNoImplem { message: String },
+    #[error("{message}")]
+    TypeKindMismatch { message: String },
+    #[error("{message}")]
+    ExternalTypeMismatch { message: String },
+    #[error("{message}")]
+    ExternalCollisionWithAnotherDirective { message: String },
+    #[error("{message}")]
+    ExternalArgumentMissing { message: String },
+    #[error("{message}")]
+    ExternalArgumentTypeMismatch { message: String },
+    #[error("{message}")]
+    ExternalArgumentDefaultMismatch { message: String },
+    #[error("{message}")]
+    ExternalOnInterface { message: String },
+    #[error("{message}")]
+    MergedDirectiveApplicationOnExternal { message: String },
+    #[error("{message}")]
+    FieldTypeMismatch { message: String },
+    #[error("{message}")]
+    FieldArgumentTypeMismatch { message: String },
+    #[error("{message}")]
+    InputFieldDefaultMismatch { message: String },
+    #[error("{message}")]
+    FieldArgumentDefaultMismatch { message: String },
+    #[error("{message}")]
+    ExtensionWithNoBase { message: String },
+    #[error("{message}")]
+    ExternalMissingOnBase { message: String },
+    #[error("{message}")]
+    InvalidFieldSharing { message: String },
+    #[error("{message}")]
+    InvalidShareableUsage { message: String },
+    #[error("{message}")]
+    InvalidLinkDirectiveUsage { message: String },
+    #[error("{message}")]
+    InvalidLinkIdentifier { message: String },
+    #[error("{message}")]
+    LinkImportNameMismatch { message: String },
+    #[error("{message}")]
+    ReferencedInaccessible { message: String },
+    #[error("{message}")]
+    DefaultValueUsesInaccessible { message: String },
+    #[error("{message}")]
+    QueryRootTypeInaccessible { message: String },
+    #[error("{message}")]
+    RequiredInaccessible { message: String },
+    #[error("{message}")]
+    ImplementedByInaccessible { message: String },
+    #[error("{message}")]
+    DisallowedInaccessible { message: String },
+    #[error("{message}")]
+    OnlyInaccessibleChildren { message: String },
+    #[error("{message}")]
+    RequiredInputFieldMissingInSomeSubgraph { message: String },
+    #[error("{message}")]
+    RequiredArgumentMissingInSomeSubgraph { message: String },
+    #[error("{message}")]
+    EmptyMergedInputType { message: String },
+    #[error("{message}")]
+    EnumValueMismatch { message: String },
+    #[error("{message}")]
+    EmptyMergedEnumType { message: String },
+    #[error("{message}")]
+    ShareableHasMismatchedRuntimeTypes { message: String },
+    #[error("{message}")]
+    SatisfiabilityError { message: String },
+    #[error("{message}")]
+    OverrideFromSelfError { message: String },
+    #[error("{message}")]
+    OverrideSourceHasOverride { message: String },
+    #[error("{message}")]
+    OverrideCollisionWithAnotherDirective { message: String },
+    #[error("{message}")]
+    OverrideOnInterface { message: String },
+    #[error("{message}")]
+    UnsupportedFeature { message: String },
+    #[error("{message}")]
+    InvalidFederationSupergraph { message: String },
+    #[error("{message}")]
+    DownstreamServiceError { message: String },
+    #[error("{message}")]
+    DirectiveCompositionError { message: String },
+    #[error("{message}")]
+    InterfaceObjectUsageError { message: String },
+    #[error("{message}")]
+    InterfaceKeyNotOnImplementation { message: String },
+    #[error("{message}")]
+    InterfaceKeyMissingImplementationType { message: String },
 }
 
-#[derive(Debug, thiserror::Error)]
+impl SingleFederationError {
+    pub fn code(&self) -> ErrorCode {
+        match self {
+            SingleFederationError::Internal { .. } => ErrorCode::Internal,
+            SingleFederationError::InvalidGraphQL { .. } => ErrorCode::InvalidGraphQL,
+            SingleFederationError::DirectiveDefinitionInvalid { .. } => {
+                ErrorCode::DirectiveDefinitionInvalid
+            }
+            SingleFederationError::TypeDefinitionInvalid { .. } => ErrorCode::TypeDefinitionInvalid,
+            SingleFederationError::UnsupportedLinkedFeature { .. } => {
+                ErrorCode::UnsupportedLinkedFeature
+            }
+            SingleFederationError::UnknownFederationLinkVersion { .. } => {
+                ErrorCode::UnknownFederationLinkVersion
+            }
+            SingleFederationError::UnknownLinkVersion { .. } => ErrorCode::UnknownLinkVersion,
+            SingleFederationError::KeyFieldsHasArgs { .. } => ErrorCode::KeyFieldsHasArgs,
+            SingleFederationError::ProvidesFieldsHasArgs { .. } => ErrorCode::ProvidesFieldsHasArgs,
+            SingleFederationError::ProvidesFieldsMissingExternal { .. } => {
+                ErrorCode::ProvidesFieldsMissingExternal
+            }
+            SingleFederationError::RequiresFieldsMissingExternal { .. } => {
+                ErrorCode::RequiresFieldsMissingExternal
+            }
+            SingleFederationError::KeyUnsupportedOnInterface { .. } => {
+                ErrorCode::KeyUnsupportedOnInterface
+            }
+            SingleFederationError::ProvidesUnsupportedOnInterface { .. } => {
+                ErrorCode::ProvidesUnsupportedOnInterface
+            }
+            SingleFederationError::RequiresUnsupportedOnInterface { .. } => {
+                ErrorCode::RequiresUnsupportedOnInterface
+            }
+            SingleFederationError::KeyDirectiveInFieldsArgs { .. } => {
+                ErrorCode::KeyDirectiveInFieldsArgs
+            }
+            SingleFederationError::ProvidesDirectiveInFieldsArgs { .. } => {
+                ErrorCode::ProvidesDirectiveInFieldsArgs
+            }
+            SingleFederationError::RequiresDirectiveInFieldsArgs { .. } => {
+                ErrorCode::RequiresDirectiveInFieldsArgs
+            }
+            SingleFederationError::ExternalUnused { .. } => ErrorCode::ExternalUnused,
+            SingleFederationError::TypeWithOnlyUnusedExternal { .. } => {
+                ErrorCode::TypeWithOnlyUnusedExternal
+            }
+            SingleFederationError::ProvidesOnNonObjectField { .. } => {
+                ErrorCode::ProvidesOnNonObjectField
+            }
+            SingleFederationError::KeyInvalidFieldsType { .. } => ErrorCode::KeyInvalidFieldsType,
+            SingleFederationError::ProvidesInvalidFieldsType { .. } => {
+                ErrorCode::ProvidesInvalidFieldsType
+            }
+            SingleFederationError::RequiresInvalidFieldsType { .. } => {
+                ErrorCode::RequiresInvalidFieldsType
+            }
+            SingleFederationError::KeyInvalidFields { .. } => ErrorCode::KeyInvalidFields,
+            SingleFederationError::ProvidesInvalidFields { .. } => ErrorCode::ProvidesInvalidFields,
+            SingleFederationError::RequiresInvalidFields { .. } => ErrorCode::RequiresInvalidFields,
+            SingleFederationError::KeyFieldsSelectInvalidType { .. } => {
+                ErrorCode::KeyFieldsSelectInvalidType
+            }
+            SingleFederationError::RootQueryUsed { .. } => ErrorCode::RootQueryUsed,
+            SingleFederationError::RootMutationUsed { .. } => ErrorCode::RootMutationUsed,
+            SingleFederationError::RootSubscriptionUsed { .. } => ErrorCode::RootSubscriptionUsed,
+            SingleFederationError::InvalidSubgraphName { .. } => ErrorCode::InvalidSubgraphName,
+            SingleFederationError::NoQueries { .. } => ErrorCode::NoQueries,
+            SingleFederationError::InterfaceFieldNoImplem { .. } => {
+                ErrorCode::InterfaceFieldNoImplem
+            }
+            SingleFederationError::TypeKindMismatch { .. } => ErrorCode::TypeKindMismatch,
+            SingleFederationError::ExternalTypeMismatch { .. } => ErrorCode::ExternalTypeMismatch,
+            SingleFederationError::ExternalCollisionWithAnotherDirective { .. } => {
+                ErrorCode::ExternalCollisionWithAnotherDirective
+            }
+            SingleFederationError::ExternalArgumentMissing { .. } => {
+                ErrorCode::ExternalArgumentMissing
+            }
+            SingleFederationError::ExternalArgumentTypeMismatch { .. } => {
+                ErrorCode::ExternalArgumentTypeMismatch
+            }
+            SingleFederationError::ExternalArgumentDefaultMismatch { .. } => {
+                ErrorCode::ExternalArgumentDefaultMismatch
+            }
+            SingleFederationError::ExternalOnInterface { .. } => ErrorCode::ExternalOnInterface,
+            SingleFederationError::MergedDirectiveApplicationOnExternal { .. } => {
+                ErrorCode::MergedDirectiveApplicationOnExternal
+            }
+            SingleFederationError::FieldTypeMismatch { .. } => ErrorCode::FieldTypeMismatch,
+            SingleFederationError::FieldArgumentTypeMismatch { .. } => {
+                ErrorCode::FieldArgumentTypeMismatch
+            }
+            SingleFederationError::InputFieldDefaultMismatch { .. } => {
+                ErrorCode::InputFieldDefaultMismatch
+            }
+            SingleFederationError::FieldArgumentDefaultMismatch { .. } => {
+                ErrorCode::FieldArgumentDefaultMismatch
+            }
+            SingleFederationError::ExtensionWithNoBase { .. } => ErrorCode::ExtensionWithNoBase,
+            SingleFederationError::ExternalMissingOnBase { .. } => ErrorCode::ExternalMissingOnBase,
+            SingleFederationError::InvalidFieldSharing { .. } => ErrorCode::InvalidFieldSharing,
+            SingleFederationError::InvalidShareableUsage { .. } => ErrorCode::InvalidShareableUsage,
+            SingleFederationError::InvalidLinkDirectiveUsage { .. } => {
+                ErrorCode::InvalidLinkDirectiveUsage
+            }
+            SingleFederationError::InvalidLinkIdentifier { .. } => ErrorCode::InvalidLinkIdentifier,
+            SingleFederationError::LinkImportNameMismatch { .. } => {
+                ErrorCode::LinkImportNameMismatch
+            }
+            SingleFederationError::ReferencedInaccessible { .. } => {
+                ErrorCode::ReferencedInaccessible
+            }
+            SingleFederationError::DefaultValueUsesInaccessible { .. } => {
+                ErrorCode::DefaultValueUsesInaccessible
+            }
+            SingleFederationError::QueryRootTypeInaccessible { .. } => {
+                ErrorCode::QueryRootTypeInaccessible
+            }
+            SingleFederationError::RequiredInaccessible { .. } => ErrorCode::RequiredInaccessible,
+            SingleFederationError::ImplementedByInaccessible { .. } => {
+                ErrorCode::ImplementedByInaccessible
+            }
+            SingleFederationError::DisallowedInaccessible { .. } => {
+                ErrorCode::DisallowedInaccessible
+            }
+            SingleFederationError::OnlyInaccessibleChildren { .. } => {
+                ErrorCode::OnlyInaccessibleChildren
+            }
+            SingleFederationError::RequiredInputFieldMissingInSomeSubgraph { .. } => {
+                ErrorCode::RequiredInputFieldMissingInSomeSubgraph
+            }
+            SingleFederationError::RequiredArgumentMissingInSomeSubgraph { .. } => {
+                ErrorCode::RequiredArgumentMissingInSomeSubgraph
+            }
+            SingleFederationError::EmptyMergedInputType { .. } => ErrorCode::EmptyMergedInputType,
+            SingleFederationError::EnumValueMismatch { .. } => ErrorCode::EnumValueMismatch,
+            SingleFederationError::EmptyMergedEnumType { .. } => ErrorCode::EmptyMergedEnumType,
+            SingleFederationError::ShareableHasMismatchedRuntimeTypes { .. } => {
+                ErrorCode::ShareableHasMismatchedRuntimeTypes
+            }
+            SingleFederationError::SatisfiabilityError { .. } => ErrorCode::SatisfiabilityError,
+            SingleFederationError::OverrideFromSelfError { .. } => ErrorCode::OverrideFromSelfError,
+            SingleFederationError::OverrideSourceHasOverride { .. } => {
+                ErrorCode::OverrideSourceHasOverride
+            }
+            SingleFederationError::OverrideCollisionWithAnotherDirective { .. } => {
+                ErrorCode::OverrideCollisionWithAnotherDirective
+            }
+            SingleFederationError::OverrideOnInterface { .. } => ErrorCode::OverrideOnInterface,
+            SingleFederationError::UnsupportedFeature { .. } => ErrorCode::UnsupportedFeature,
+            SingleFederationError::InvalidFederationSupergraph { .. } => {
+                ErrorCode::InvalidFederationSupergraph
+            }
+            SingleFederationError::DownstreamServiceError { .. } => {
+                ErrorCode::DownstreamServiceError
+            }
+            SingleFederationError::DirectiveCompositionError { .. } => {
+                ErrorCode::DirectiveCompositionError
+            }
+            SingleFederationError::InterfaceObjectUsageError { .. } => {
+                ErrorCode::InterfaceObjectUsageError
+            }
+            SingleFederationError::InterfaceKeyNotOnImplementation { .. } => {
+                ErrorCode::InterfaceKeyNotOnImplementation
+            }
+            SingleFederationError::InterfaceKeyMissingImplementationType { .. } => {
+                ErrorCode::InterfaceKeyMissingImplementationType
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
 pub struct MultipleFederationErrors {
     pub errors: Vec<SingleFederationError>,
 }
@@ -58,7 +373,7 @@ impl Display for MultipleFederationErrors {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub struct AggregateFederationError {
     pub code: String,
     pub message: String,
@@ -67,7 +382,7 @@ pub struct AggregateFederationError {
 
 impl Display for AggregateFederationError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}] {}\ncaused by:", self.code, self.message)?;
+        write!(f, "[{}] {}\nCaused by:", self.code, self.message)?;
         for error in &self.causes {
             write!(f, "\n\n  - ")?;
             for c in error.to_string().chars() {
@@ -86,7 +401,7 @@ impl Display for AggregateFederationError {
 // of GraphQLErrors, or take a vector of GraphQLErrors and group them together under an
 // AggregateGraphQLError which itself would have a specific error message and code, and throw that.
 // We represent all these cases with an enum, and delegate to the members.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum FederationError {
     #[error(transparent)]
     SingleFederationError(#[from] SingleFederationError),
@@ -96,10 +411,8 @@ pub enum FederationError {
     AggregateFederationError(#[from] AggregateFederationError),
 }
 
-/*
- * We didn't track errors addition precisely pre-2.0 and tracking it now has an
- * unclear ROI, so we just mark all the error code that predates 2.0 as 0.x.
- */
+// We didn't track errors addition precisely pre-2.0 and tracking it now has an unclear ROI, so we
+// just mark all the error code that predates 2.0 as 0.x.
 const FED1_CODE: &str = "0.x";
 
 #[derive(Debug, Clone)]
@@ -126,15 +439,6 @@ impl ErrorCodeDefinition {
         }
     }
 
-    pub fn err(&self, message: String, nodes: Option<Vec<AstNode>>) -> SingleFederationError {
-        let nodes = nodes.unwrap_or_default();
-        SingleFederationError {
-            code: self.code.clone(),
-            message,
-            nodes,
-        }
-    }
-
     pub fn code(&self) -> &str {
         &self.code
     }
@@ -157,7 +461,7 @@ static DEFAULT_METADATA: ErrorCodeMetadata = ErrorCodeMetadata {
     replaces: &[],
 };
 
-pub struct ErrorCodeCategory<TElement: Clone + Into<String>> {
+struct ErrorCodeCategory<TElement: Clone + Into<String>> {
     // Fn(element: TElement) -> String
     extract_code: Box<dyn 'static + Send + Sync + Fn(TElement) -> String>,
     // Fn(element: TElement) -> String
@@ -186,12 +490,6 @@ impl<TElement: Clone + Into<String>> ErrorCodeCategory<TElement> {
             (self.make_doc_description)(element),
             Some(self.metadata.clone()),
         )
-    }
-
-    pub fn get(&self, element: TElement) -> &ErrorCodeDefinition {
-        let code = (self.extract_code)(element.clone());
-        let def = CODE_DEF_BY_CODE.get(&code);
-        def.unwrap_or_else(|| panic!("Unexpected element: {}", element.into()))
     }
 }
 
@@ -270,9 +568,9 @@ lazy_static! {
         }),
     );
 
-    static ref PROVIDES_MISSING_EXTERNAL: ErrorCodeDefinition =
+    static ref PROVIDES_FIELDS_MISSING_EXTERNAL: ErrorCodeDefinition =
         DIRECTIVE_FIELDS_MISSING_EXTERNAL.create_code("provides".to_owned());
-    static ref REQUIRES_MISSING_EXTERNAL: ErrorCodeDefinition =
+    static ref REQUIRES_FIELDS_MISSING_EXTERNAL: ErrorCodeDefinition =
         DIRECTIVE_FIELDS_MISSING_EXTERNAL.create_code("requires".to_owned());
 
     static ref DIRECTIVE_UNSUPPORTED_ON_INTERFACE: ErrorCodeCategory<String> = ErrorCodeCategory::new_federation_directive(
@@ -307,9 +605,9 @@ lazy_static! {
         }),
     );
 
-    static ref KEY_HAS_DIRECTIVE_IN_FIELDS_ARGS: ErrorCodeDefinition = DIRECTIVE_IN_FIELDS_ARG.create_code("key".to_owned());
-    static ref PROVIDES_HAS_DIRECTIVE_IN_FIELDS_ARGS: ErrorCodeDefinition = DIRECTIVE_IN_FIELDS_ARG.create_code("provides".to_owned());
-    static ref REQUIRES_HAS_DIRECTIVE_IN_FIELDS_ARGS: ErrorCodeDefinition = DIRECTIVE_IN_FIELDS_ARG.create_code("requires".to_owned());
+    static ref KEY_DIRECTIVE_IN_FIELDS_ARGS: ErrorCodeDefinition = DIRECTIVE_IN_FIELDS_ARG.create_code("key".to_owned());
+    static ref PROVIDES_DIRECTIVE_IN_FIELDS_ARGS: ErrorCodeDefinition = DIRECTIVE_IN_FIELDS_ARG.create_code("provides".to_owned());
+    static ref REQUIRES_DIRECTIVE_IN_FIELDS_ARGS: ErrorCodeDefinition = DIRECTIVE_IN_FIELDS_ARG.create_code("requires".to_owned());
 
     static ref EXTERNAL_UNUSED: ErrorCodeDefinition = ErrorCodeDefinition::new(
         "EXTERNAL_UNUSED".to_owned(),
@@ -371,7 +669,7 @@ lazy_static! {
         }),
     );
 
-    static ref ROOT_TYPE_USED: ErrorCodeCategory<SchemaRootKindEnum> = ErrorCodeCategory::new(
+    static ref ROOT_TYPE_USED: ErrorCodeCategory<SchemaRootKind> = ErrorCodeCategory::new(
         Box::new(|element| {
             let kind: String = element.into();
             format!("ROOT_{}_USED", kind.to_uppercase())
@@ -387,9 +685,9 @@ lazy_static! {
 
     );
 
-    static ref ROOT_QUERY_USED: ErrorCodeDefinition = ROOT_TYPE_USED.create_code(SchemaRootKindEnum::Query);
-    static ref ROOT_MUTATION_USED: ErrorCodeDefinition = ROOT_TYPE_USED.create_code(SchemaRootKindEnum::Mutation);
-    static ref ROOT_SUBSCRIPTION_USED: ErrorCodeDefinition = ROOT_TYPE_USED.create_code(SchemaRootKindEnum::Subscription);
+    static ref ROOT_QUERY_USED: ErrorCodeDefinition = ROOT_TYPE_USED.create_code(SchemaRootKind::Query);
+    static ref ROOT_MUTATION_USED: ErrorCodeDefinition = ROOT_TYPE_USED.create_code(SchemaRootKind::Mutation);
+    static ref ROOT_SUBSCRIPTION_USED: ErrorCodeDefinition = ROOT_TYPE_USED.create_code(SchemaRootKind::Subscription);
 
     static ref INVALID_SUBGRAPH_NAME: ErrorCodeDefinition = ErrorCodeDefinition::new(
         "INVALID_SUBGRAPH_NAME".to_owned(),
@@ -476,7 +774,7 @@ lazy_static! {
         }),
     );
 
-    static ref ARGUMENT_TYPE_MISMATCH: ErrorCodeDefinition = ErrorCodeDefinition::new(
+    static ref FIELD_ARGUMENT_TYPE_MISMATCH: ErrorCodeDefinition = ErrorCodeDefinition::new(
         "FIELD_ARGUMENT_TYPE_MISMATCH".to_owned(),
         "An argument (of a field/directive) has a type that is incompatible with that of other declarations of that same argument in other subgraphs.".to_owned(),
         Some(ErrorCodeMetadata {
@@ -491,7 +789,7 @@ lazy_static! {
         None,
     );
 
-    static ref ARGUMENT_DEFAULT_MISMATCH: ErrorCodeDefinition = ErrorCodeDefinition::new(
+    static ref FIELD_ARGUMENT_DEFAULT_MISMATCH: ErrorCodeDefinition = ErrorCodeDefinition::new(
         "FIELD_ARGUMENT_DEFAULT_MISMATCH".to_owned(),
         "An argument (of a field/directive) has a default value that is incompatible with that of other declarations of that same argument in other subgraphs.".to_owned(),
         None,
@@ -730,54 +1028,9 @@ lazy_static! {
     );
 }
 
-// PORT_NOTE: In the JS code, there's just one object named ERROR_CATEGORIES, but it has
-// heterogeneous type (some of the keys have type ErrorCodeDefinition<String>, others have type
-// ErrorCodeDefinition<SchemaRootKind>). We can't really represent that in Rust cleanly, so we just
-// separate them into different enums.
-#[derive(Debug)]
-pub enum FederationDirectiveErrorCategory {
-    DirectiveFieldsMissingExternal,
-    DirectiveUnsupportedOnInterface,
-    DirectiveInvalidFieldsType,
-    DirectiveInvalidFields,
-    FieldsHasArgs,
-    DirectiveInFieldsArg,
-}
-
-impl FederationDirectiveErrorCategory {
-    pub fn definition(&self) -> &'static ErrorCodeCategory<String> {
-        match self {
-            FederationDirectiveErrorCategory::DirectiveFieldsMissingExternal => {
-                &DIRECTIVE_FIELDS_MISSING_EXTERNAL
-            }
-            FederationDirectiveErrorCategory::DirectiveUnsupportedOnInterface => {
-                &DIRECTIVE_UNSUPPORTED_ON_INTERFACE
-            }
-            FederationDirectiveErrorCategory::DirectiveInvalidFieldsType => {
-                &DIRECTIVE_INVALID_FIELDS_TYPE
-            }
-            FederationDirectiveErrorCategory::DirectiveInvalidFields => &DIRECTIVE_INVALID_FIELDS,
-            FederationDirectiveErrorCategory::FieldsHasArgs => &FIELDS_HAS_ARGS,
-            FederationDirectiveErrorCategory::DirectiveInFieldsArg => &DIRECTIVE_IN_FIELDS_ARG,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum SchemaRootKindErrorCategory {
-    RootTypeUsed,
-}
-
-impl SchemaRootKindErrorCategory {
-    pub fn definition(&self) -> &'static ErrorCodeCategory<SchemaRootKindEnum> {
-        match self {
-            SchemaRootKindErrorCategory::RootTypeUsed => &ROOT_TYPE_USED,
-        }
-    }
-}
-
 #[derive(Debug, strum_macros::EnumIter)]
 pub enum ErrorCode {
+    Internal,
     InvalidGraphQL,
     DirectiveDefinitionInvalid,
     TypeDefinitionInvalid,
@@ -786,13 +1039,15 @@ pub enum ErrorCode {
     UnknownLinkVersion,
     KeyFieldsHasArgs,
     ProvidesFieldsHasArgs,
-    ProvidesMissingExternal,
-    RequiresMissingExternal,
+    ProvidesFieldsMissingExternal,
+    RequiresFieldsMissingExternal,
     KeyUnsupportedOnInterface,
     ProvidesUnsupportedOnInterface,
     RequiresUnsupportedOnInterface,
+    KeyDirectiveInFieldsArgs,
+    ProvidesDirectiveInFieldsArgs,
+    RequiresDirectiveInFieldsArgs,
     ExternalUnused,
-    ExternalCollisionWithAnotherDirective,
     TypeWithOnlyUnusedExternal,
     ProvidesOnNonObjectField,
     KeyInvalidFieldsType,
@@ -810,15 +1065,16 @@ pub enum ErrorCode {
     InterfaceFieldNoImplem,
     TypeKindMismatch,
     ExternalTypeMismatch,
+    ExternalCollisionWithAnotherDirective,
     ExternalArgumentMissing,
     ExternalArgumentTypeMismatch,
     ExternalArgumentDefaultMismatch,
     ExternalOnInterface,
     MergedDirectiveApplicationOnExternal,
     FieldTypeMismatch,
-    ArgumentTypeMismatch,
+    FieldArgumentTypeMismatch,
     InputFieldDefaultMismatch,
-    ArgumentDefaultMismatch,
+    FieldArgumentDefaultMismatch,
     ExtensionWithNoBase,
     ExternalMissingOnBase,
     InvalidFieldSharing,
@@ -830,26 +1086,23 @@ pub enum ErrorCode {
     DefaultValueUsesInaccessible,
     QueryRootTypeInaccessible,
     RequiredInaccessible,
-    DisallowedInaccessible,
     ImplementedByInaccessible,
+    DisallowedInaccessible,
     OnlyInaccessibleChildren,
-    RequiredArgumentMissingInSomeSubgraph,
     RequiredInputFieldMissingInSomeSubgraph,
+    RequiredArgumentMissingInSomeSubgraph,
     EmptyMergedInputType,
     EnumValueMismatch,
     EmptyMergedEnumType,
     ShareableHasMismatchedRuntimeTypes,
     SatisfiabilityError,
-    OverrideCollisionWithAnotherDirective,
     OverrideFromSelfError,
     OverrideSourceHasOverride,
+    OverrideCollisionWithAnotherDirective,
     OverrideOnInterface,
     UnsupportedFeature,
     InvalidFederationSupergraph,
     DownstreamServiceError,
-    KeyHasDirectiveInFieldsArgs,
-    ProvidesHasDirectiveInFieldsArgs,
-    RequiresHasDirectiveInFieldsArgs,
     DirectiveCompositionError,
     InterfaceObjectUsageError,
     InterfaceKeyNotOnImplementation,
@@ -859,6 +1112,8 @@ pub enum ErrorCode {
 impl ErrorCode {
     pub fn definition(&self) -> &'static ErrorCodeDefinition {
         match self {
+            // TODO: We should determine the code and doc info for internal errors.
+            ErrorCode::Internal => todo!(),
             ErrorCode::InvalidGraphQL => &INVALID_GRAPHQL,
             ErrorCode::DirectiveDefinitionInvalid => &DIRECTIVE_DEFINITION_INVALID,
             ErrorCode::TypeDefinitionInvalid => &TYPE_DEFINITION_INVALID,
@@ -867,11 +1122,14 @@ impl ErrorCode {
             ErrorCode::UnknownLinkVersion => &UNKNOWN_LINK_VERSION,
             ErrorCode::KeyFieldsHasArgs => &KEY_FIELDS_HAS_ARGS,
             ErrorCode::ProvidesFieldsHasArgs => &PROVIDES_FIELDS_HAS_ARGS,
-            ErrorCode::ProvidesMissingExternal => &PROVIDES_MISSING_EXTERNAL,
-            ErrorCode::RequiresMissingExternal => &REQUIRES_MISSING_EXTERNAL,
+            ErrorCode::ProvidesFieldsMissingExternal => &PROVIDES_FIELDS_MISSING_EXTERNAL,
+            ErrorCode::RequiresFieldsMissingExternal => &REQUIRES_FIELDS_MISSING_EXTERNAL,
             ErrorCode::KeyUnsupportedOnInterface => &KEY_UNSUPPORTED_ON_INTERFACE,
             ErrorCode::ProvidesUnsupportedOnInterface => &PROVIDES_UNSUPPORTED_ON_INTERFACE,
             ErrorCode::RequiresUnsupportedOnInterface => &REQUIRES_UNSUPPORTED_ON_INTERFACE,
+            ErrorCode::KeyDirectiveInFieldsArgs => &KEY_DIRECTIVE_IN_FIELDS_ARGS,
+            ErrorCode::ProvidesDirectiveInFieldsArgs => &PROVIDES_DIRECTIVE_IN_FIELDS_ARGS,
+            ErrorCode::RequiresDirectiveInFieldsArgs => &REQUIRES_DIRECTIVE_IN_FIELDS_ARGS,
             ErrorCode::ExternalUnused => &EXTERNAL_UNUSED,
             ErrorCode::ExternalCollisionWithAnotherDirective => {
                 &EXTERNAL_COLLISION_WITH_ANOTHER_DIRECTIVE
@@ -901,9 +1159,9 @@ impl ErrorCode {
                 &MERGED_DIRECTIVE_APPLICATION_ON_EXTERNAL
             }
             ErrorCode::FieldTypeMismatch => &FIELD_TYPE_MISMATCH,
-            ErrorCode::ArgumentTypeMismatch => &ARGUMENT_TYPE_MISMATCH,
+            ErrorCode::FieldArgumentTypeMismatch => &FIELD_ARGUMENT_TYPE_MISMATCH,
             ErrorCode::InputFieldDefaultMismatch => &INPUT_FIELD_DEFAULT_MISMATCH,
-            ErrorCode::ArgumentDefaultMismatch => &ARGUMENT_DEFAULT_MISMATCH,
+            ErrorCode::FieldArgumentDefaultMismatch => &FIELD_ARGUMENT_DEFAULT_MISMATCH,
             ErrorCode::ExtensionWithNoBase => &EXTENSION_WITH_NO_BASE,
             ErrorCode::ExternalMissingOnBase => &EXTERNAL_MISSING_ON_BASE,
             ErrorCode::InvalidFieldSharing => &INVALID_FIELD_SHARING,
@@ -915,14 +1173,14 @@ impl ErrorCode {
             ErrorCode::DefaultValueUsesInaccessible => &DEFAULT_VALUE_USES_INACCESSIBLE,
             ErrorCode::QueryRootTypeInaccessible => &QUERY_ROOT_TYPE_INACCESSIBLE,
             ErrorCode::RequiredInaccessible => &REQUIRED_INACCESSIBLE,
-            ErrorCode::DisallowedInaccessible => &DISALLOWED_INACCESSIBLE,
             ErrorCode::ImplementedByInaccessible => &IMPLEMENTED_BY_INACCESSIBLE,
+            ErrorCode::DisallowedInaccessible => &DISALLOWED_INACCESSIBLE,
             ErrorCode::OnlyInaccessibleChildren => &ONLY_INACCESSIBLE_CHILDREN,
-            ErrorCode::RequiredArgumentMissingInSomeSubgraph => {
-                &REQUIRED_ARGUMENT_MISSING_IN_SOME_SUBGRAPH
-            }
             ErrorCode::RequiredInputFieldMissingInSomeSubgraph => {
                 &REQUIRED_INPUT_FIELD_MISSING_IN_SOME_SUBGRAPH
+            }
+            ErrorCode::RequiredArgumentMissingInSomeSubgraph => {
+                &REQUIRED_ARGUMENT_MISSING_IN_SOME_SUBGRAPH
             }
             ErrorCode::EmptyMergedInputType => &EMPTY_MERGED_INPUT_TYPE,
             ErrorCode::EnumValueMismatch => &ENUM_VALUE_MISMATCH,
@@ -931,18 +1189,15 @@ impl ErrorCode {
                 &SHAREABLE_HAS_MISMATCHED_RUNTIME_TYPES
             }
             ErrorCode::SatisfiabilityError => &SATISFIABILITY_ERROR,
+            ErrorCode::OverrideFromSelfError => &OVERRIDE_FROM_SELF_ERROR,
+            ErrorCode::OverrideSourceHasOverride => &OVERRIDE_SOURCE_HAS_OVERRIDE,
             ErrorCode::OverrideCollisionWithAnotherDirective => {
                 &OVERRIDE_COLLISION_WITH_ANOTHER_DIRECTIVE
             }
-            ErrorCode::OverrideFromSelfError => &OVERRIDE_FROM_SELF_ERROR,
-            ErrorCode::OverrideSourceHasOverride => &OVERRIDE_SOURCE_HAS_OVERRIDE,
             ErrorCode::OverrideOnInterface => &OVERRIDE_ON_INTERFACE,
             ErrorCode::UnsupportedFeature => &UNSUPPORTED_FEATURE,
             ErrorCode::InvalidFederationSupergraph => &INVALID_FEDERATION_SUPERGRAPH,
             ErrorCode::DownstreamServiceError => &DOWNSTREAM_SERVICE_ERROR,
-            ErrorCode::KeyHasDirectiveInFieldsArgs => &KEY_HAS_DIRECTIVE_IN_FIELDS_ARGS,
-            ErrorCode::ProvidesHasDirectiveInFieldsArgs => &PROVIDES_HAS_DIRECTIVE_IN_FIELDS_ARGS,
-            ErrorCode::RequiresHasDirectiveInFieldsArgs => &REQUIRES_HAS_DIRECTIVE_IN_FIELDS_ARGS,
             ErrorCode::DirectiveCompositionError => &DIRECTIVE_COMPOSITION_ERROR,
             ErrorCode::InterfaceObjectUsageError => &INTERFACE_OBJECT_USAGE_ERROR,
             ErrorCode::InterfaceKeyNotOnImplementation => &INTERFACE_KEY_NOT_ON_IMPLEMENTATION,
@@ -951,13 +1206,4 @@ impl ErrorCode {
             }
         }
     }
-}
-
-lazy_static! {
-    static ref CODE_DEF_BY_CODE: IndexMap<String, &'static ErrorCodeDefinition> = ErrorCode::iter()
-        .map(|e| {
-            let def = e.definition();
-            (def.code.clone(), def)
-        })
-        .collect();
 }

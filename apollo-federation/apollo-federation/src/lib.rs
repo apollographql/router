@@ -1,3 +1,4 @@
+#![allow(dead_code)] // TODO: This is fine while we're iterating, but should be removed later.
 use apollo_compiler::ast::Directives;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Schema;
@@ -9,6 +10,8 @@ pub mod database;
 pub mod error;
 pub mod link;
 pub mod merge;
+pub mod query_graph;
+pub mod schema;
 pub mod subgraph;
 
 type MergeError = &'static str;

@@ -1,9 +1,9 @@
 //! Representation of Apollo `@link` specifications.
+use crate::error::{FederationError, SingleFederationError};
 use std::fmt;
 use std::str;
-use url;
-
 use thiserror::Error;
+use url;
 
 pub const APOLLO_SPEC_DOMAIN: &str = "https://specs.apollo.dev";
 
@@ -11,6 +11,16 @@ pub const APOLLO_SPEC_DOMAIN: &str = "https://specs.apollo.dev";
 pub enum SpecError {
     #[error("Parse error: {0}")]
     ParseError(String),
+}
+
+// TODO: Replace SpecError usages with FederationError.
+impl From<SpecError> for FederationError {
+    fn from(value: SpecError) -> Self {
+        SingleFederationError::InvalidLinkIdentifier {
+            message: value.to_string(),
+        }
+        .into()
+    }
 }
 
 /// Represents the identity of a `@link` specification, which uniquely identify a specification.
@@ -39,6 +49,13 @@ impl fmt::Display for Identity {
 }
 
 impl Identity {
+    pub fn core_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: "core".to_string(),
+        }
+    }
+
     pub fn link_identity() -> Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
@@ -50,6 +67,13 @@ impl Identity {
         Identity {
             domain: APOLLO_SPEC_DOMAIN.to_string(),
             name: "federation".to_string(),
+        }
+    }
+
+    pub fn join_identity() -> Identity {
+        Identity {
+            domain: APOLLO_SPEC_DOMAIN.to_string(),
+            name: "join".to_string(),
         }
     }
 }

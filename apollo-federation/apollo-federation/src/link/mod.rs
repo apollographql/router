@@ -1,15 +1,22 @@
-use std::fmt;
-use std::str;
-use std::{collections::HashMap, sync::Arc};
-
-use apollo_compiler::ast::{Directive, Value};
-use thiserror::Error;
-
+use crate::error::{FederationError, SingleFederationError};
+use crate::link::link_spec_definition::{LinkSpecDefinition, CORE_VERSIONS, LINK_VERSIONS};
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
+use crate::link::spec_definition::spec_definitions;
+use apollo_compiler::ast::{Directive, Value};
+use std::fmt;
+use std::ops::Deref;
+use std::str;
+use std::{collections::HashMap, sync::Arc};
+use thiserror::Error;
 
+mod argument;
 pub mod database;
+pub(crate) mod federation_spec_definition;
+pub(crate) mod join_spec_definition;
+pub(crate) mod link_spec_definition;
 pub mod spec;
+pub(crate) mod spec_definition;
 
 pub const DEFAULT_LINK_NAME: &str = "link";
 pub const DEFAULT_IMPORT_SCALAR_NAME: &str = "Import";
@@ -21,6 +28,16 @@ pub const DEFAULT_PURPOSE_ENUM_NAME: &str = "Purpose";
 pub enum LinkError {
     #[error("Invalid use of @link in schema: {0}")]
     BootstrapError(String),
+}
+
+// TODO: Replace LinkError usages with FederationError.
+impl From<LinkError> for FederationError {
+    fn from(value: LinkError) -> Self {
+        SingleFederationError::InvalidLinkDirectiveUsage {
+            message: value.to_string(),
+        }
+        .into()
+    }
 }
 
 #[derive(Eq, PartialEq, Debug)]
@@ -138,6 +155,14 @@ impl Import {
                 }
             },
             _ => Err(LinkError::BootstrapError("invalid sub-value for @link(import:) argument: values should be either strings or input object values of the form { name: \"<importedElement>\", as: \"<alias>\" }.".to_string()))
+        }
+    }
+
+    pub fn element_display_name(&self) -> String {
+        if self.is_directive {
+            format!("@{}", self.element)
+        } else {
+            self.element.clone()
         }
     }
 
@@ -289,6 +314,35 @@ pub struct LinksMetadata {
 }
 
 impl LinksMetadata {
+    pub(crate) fn link_spec_definition(
+        &self,
+    ) -> Result<&'static LinkSpecDefinition, FederationError> {
+        if let Some(link_link) = self.for_identity(&Identity::link_identity()) {
+            spec_definitions(LINK_VERSIONS.deref())?
+                .find(&link_link.url.version)
+                .ok_or_else(|| {
+                    SingleFederationError::Internal {
+                        message: format!("Unexpected link spec version {}", link_link.url.version),
+                    }
+                    .into()
+                })
+        } else if let Some(core_link) = self.for_identity(&Identity::core_identity()) {
+            spec_definitions(CORE_VERSIONS.deref())?
+                .find(&core_link.url.version)
+                .ok_or_else(|| {
+                    SingleFederationError::Internal {
+                        message: format!("Unexpected core spec version {}", core_link.url.version),
+                    }
+                    .into()
+                })
+        } else {
+            Err(SingleFederationError::Internal {
+                message: "Unexpectedly could not find core/link spec".to_owned(),
+            }
+            .into())
+        }
+    }
+
     pub fn all_links(&self) -> &[Arc<Link>] {
         return self.links.as_ref();
     }
