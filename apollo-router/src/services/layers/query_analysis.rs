@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use apollo_compiler::ApolloCompiler;
-use apollo_compiler::FileId;
-use apollo_compiler::HirDatabase;
+use apollo_compiler::ast;
+use apollo_compiler::ExecutableDocument;
 use http::StatusCode;
 use lru::LruCache;
 use tokio::sync::Mutex;
@@ -20,9 +19,9 @@ use crate::Context;
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub(crate) struct QueryAnalysisLayer {
-    schema: Arc<Schema>,
+    pub(crate) schema: Arc<Schema>,
     configuration: Arc<Configuration>,
-    cache: Arc<Mutex<LruCache<QueryAnalysisKey, (Context, Arc<Mutex<ApolloCompiler>>)>>>,
+    cache: Arc<Mutex<LruCache<QueryAnalysisKey, (Context, ParsedDocument)>>>,
     enable_authorization_directives: bool,
 }
 
@@ -51,8 +50,8 @@ impl QueryAnalysisLayer {
         }
     }
 
-    pub(crate) fn make_compiler(&self, query: &str) -> (ApolloCompiler, FileId) {
-        Query::make_compiler(query, self.schema.api_schema(), &self.configuration)
+    pub(crate) fn parse_document(&self, query: &str) -> ParsedDocument {
+        Query::parse_document(query, self.schema.api_schema(), &self.configuration)
     }
 
     pub(crate) async fn supergraph_request(
@@ -66,11 +65,12 @@ impl QueryAnalysisLayer {
                 .message("Must provide query string.".to_string())
                 .extension_code("MISSING_QUERY_STRING")
                 .build()];
-            tracing::error!(
-                monotonic_counter.apollo_router_http_requests_total = 1u64,
-                status = %StatusCode::BAD_REQUEST.as_u16(),
-                error = "Must provide query string",
-                "Must provide query string"
+            u64_counter!(
+                "apollo_router_http_requests_total",
+                "Total number of HTTP requests made.",
+                1,
+                status = StatusCode::BAD_REQUEST.as_u16() as i64,
+                error = "Must provide query string"
             );
 
             return Err(SupergraphResponse::builder()
@@ -98,20 +98,18 @@ impl QueryAnalysisLayer {
             })
             .cloned();
 
-        let (context, compiler) = match entry {
+        let (context, doc) = match entry {
             None => {
                 let span = tracing::info_span!("parse_query", "otel.kind" = "INTERNAL");
-                let (compiler, file_id) = span.in_scope(|| self.make_compiler(&query));
+                let doc = span.in_scope(|| self.parse_document(&query));
 
-                let compiler = Arc::new(Mutex::new(compiler));
                 let context = Context::new();
 
-                let operation_name = compiler
-                    .lock()
-                    .await
-                    .db
-                    .find_operation(file_id, op_name.clone())
-                    .and_then(|operation| operation.name().map(|s| s.to_owned()));
+                let operation_name = doc
+                    .executable
+                    .get_operation(op_name.as_deref())
+                    .ok()
+                    .and_then(|operation| operation.name().map(|s| s.as_str().to_owned()));
 
                 context.insert(OPERATION_NAME, operation_name).unwrap();
 
@@ -130,10 +128,10 @@ impl QueryAnalysisLayer {
                         query,
                         operation_name: op_name,
                     },
-                    (context.clone(), compiler.clone()),
+                    (context.clone(), doc.clone()),
                 );
 
-                (context, compiler)
+                (context, doc)
             }
             Some(c) => c,
         };
@@ -143,7 +141,7 @@ impl QueryAnalysisLayer {
             .context
             .private_entries
             .lock()
-            .insert(Compiler(compiler));
+            .insert::<ParsedDocument>(doc);
 
         Ok(SupergraphRequest {
             supergraph_request: request.supergraph_request,
@@ -152,4 +150,9 @@ impl QueryAnalysisLayer {
     }
 }
 
-pub(crate) struct Compiler(pub(crate) Arc<Mutex<ApolloCompiler>>);
+pub(crate) type ParsedDocument = Arc<ParsedDocumentInner>;
+
+pub(crate) struct ParsedDocumentInner {
+    pub(crate) ast: ast::Document,
+    pub(crate) executable: ExecutableDocument,
+}

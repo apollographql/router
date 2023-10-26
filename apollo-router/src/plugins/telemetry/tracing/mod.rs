@@ -26,7 +26,8 @@ pub(crate) mod reload;
 pub(crate) mod zipkin;
 
 pub(crate) trait TracingConfigurator {
-    fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError>;
+    fn enabled(&self) -> bool;
+    fn apply(&self, builder: Builder, common: &Trace) -> Result<Builder, BoxError>;
 }
 
 #[derive(Debug)]
@@ -114,10 +115,10 @@ pub(crate) struct BatchProcessorConfig {
     /// is 512.
     pub(crate) max_export_batch_size: usize,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
-    #[schemars(with = "String")]
     /// The maximum duration to export a batch of data.
     /// The default value is 30 seconds.
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String")]
     pub(crate) max_export_timeout: Duration,
 
     /// Maximum number of concurrent exports
