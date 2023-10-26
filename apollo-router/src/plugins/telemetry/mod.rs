@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
-use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
@@ -38,7 +37,6 @@ use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
-use opentelemetry_api::trace::WithContext;
 use parking_lot::Mutex;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
@@ -53,13 +51,9 @@ use tower::ServiceExt;
 use tracing_core::callsite::DefaultCallsite;
 use tracing_core::Callsite;
 use tracing_core::Interest;
-use tracing_core::Kind;
 use tracing_core::Metadata;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::fmt::format::JsonFields;
-use tracing_subscriber::registry;
-use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::registry::SpanData;
 use tracing_subscriber::Layer;
 
 use self::apollo::ForwardValues;
@@ -71,6 +65,7 @@ use self::apollo_exporter::Sender;
 use self::config::Conf;
 use self::config::Sampler;
 use self::config::SamplerOption;
+use self::dynamic_attribute_layer::DynAttribute;
 use self::formatters::text::TextFormatter;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
@@ -325,8 +320,8 @@ impl Plugin for Telemetry {
                     "apollo_private.http.response_headers" = field::Empty
                 );
                 // TODO: find what parts of the request I should add in attributes using a key prefixed by `apollo_dynamic_attribute`
-                // span.set_attribute(String::from("apollo_dynamic_attribute.custom_attribute_header"), headers.get("host").and_then(|h| h.to_str().ok()).map(|h| h.to_string()).unwrap_or_default());
-                ::tracing::info!(apollo_dynamic_attribute.custom_attribute_header = "test");
+                span.set_dyn_attribute(String::from("apollo_dynamic_attribute.custom_attribute_header"), headers.get("host").and_then(|h| h.to_str().ok()).map(|h| h.to_string()).unwrap_or_default());
+                // ::tracing::info!(apollo_dynamic_attribute.custom_attribute_header = "test");
                 span
             })
             .map_future(move |fut| {
@@ -338,6 +333,8 @@ impl Plugin for Telemetry {
 
                 async move {
                     let span = Span::current();
+                    ::tracing::info!("coucou");
+
                     let response: Result<router::Response, BoxError> = fut.await;
 
                     span.record(
@@ -985,7 +982,7 @@ impl Telemetry {
         subgraph_name: Arc<String>,
         sub_request: &mut Request,
     ) -> Option<CacheAttributes> {
-        let body = dbg!(sub_request.subgraph_request.body_mut());
+        let body = sub_request.subgraph_request.body_mut();
         let hashed_query = hash_request(body);
         let representations = body
             .variables
