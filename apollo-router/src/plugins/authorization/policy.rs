@@ -1284,8 +1284,28 @@ mod tests {
     #[test]
     fn interface_typename() {
         static SCHEMA: &str = r#"
-        directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
-        directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+        schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+      {
+        query: Query
+      }
+      directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+      directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+      directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+      scalar link__Import
+        enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
 
         type Query {
             post(id: ID!): Post
