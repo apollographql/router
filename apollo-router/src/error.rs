@@ -94,16 +94,6 @@ pub(crate) enum FetchError {
         reason: String,
     },
 
-    /// subquery requires field '{field}' but it was not found in the current response
-    ExecutionFieldNotFound {
-        /// The field that is not found.
-        field: String,
-    },
-
-    #[cfg(test)]
-    /// invalid content: {reason}
-    ExecutionInvalidContent { reason: String },
-
     /// could not find path: {reason}
     ExecutionPathNotFound { reason: String },
     /// could not compress request: {reason}
@@ -147,11 +137,6 @@ impl FetchError {
                         .entry("service")
                         .or_insert_with(|| service.clone().into());
                 }
-                FetchError::ExecutionFieldNotFound { field, .. } => {
-                    extensions
-                        .entry("field")
-                        .or_insert_with(|| field.clone().into());
-                }
                 FetchError::ValidationInvalidTypeVariable { name } => {
                     extensions
                         .entry("name")
@@ -189,11 +174,8 @@ impl ErrorExtension for FetchError {
             }
             FetchError::SubrequestHttpError { .. } => "SUBREQUEST_HTTP_ERROR",
             FetchError::SubrequestWsError { .. } => "SUBREQUEST_WEBSOCKET_ERROR",
-            FetchError::ExecutionFieldNotFound { .. } => "EXECUTION_FIELD_NOT_FOUND",
             FetchError::ExecutionPathNotFound { .. } => "EXECUTION_PATH_NOT_FOUND",
             FetchError::CompressionError { .. } => "COMPRESSION_ERROR",
-            #[cfg(test)]
-            FetchError::ExecutionInvalidContent { .. } => "EXECUTION_INVALID_CONTENT",
             FetchError::MalformedRequest { .. } => "MALFORMED_REQUEST",
             FetchError::MalformedResponse { .. } => "MALFORMED_RESPONSE",
         }
