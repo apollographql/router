@@ -27,7 +27,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
 use super::config::SamplerOption;
-use super::dynamic_attribute_layer::DynAttributeLayer;
+use super::dynamic_attribute::DynAttributeLayer;
 use super::metrics::span_metrics_exporter::SpanMetricsLayer;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::metrics::layer::MetricsLayer;

@@ -17,8 +17,8 @@ use tracing_subscriber::fmt::time::SystemTime;
 use tracing_subscriber::fmt::FmtContext;
 use tracing_subscriber::registry::LookupSpan;
 
+use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::reload::IsSampled;
-use crate::plugins::telemetry::SubgraphRequestLogAttributes;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TextFormatter {
@@ -171,16 +171,17 @@ impl TextFormatter {
             .or_else(|| ctx.lookup_current());
         if let Some(span) = span {
             let ext = span.extensions();
-            match &ext.get::<SubgraphRequestLogAttributes>() {
+            match &ext.get::<LogAttributes>() {
                 Some(dyn_attributes) => {
+                    // TODO: put it in a method
+                    let attributes = dyn_attributes.get_attributes();
                     // if writer.has_ansi_escapes() {
                     //     let style = Style::new().dimmed();
                     //     write!(writer, "{}", style.prefix())?;
                     //     write!(writer, "[trace_id={trace_id}]")?;
                     //     write!(writer, "{}", style.suffix())?;
                     // } else {
-                    let attrs: Vec<String> = dyn_attributes
-                        .0
+                    let attrs: Vec<String> = attributes
                         .iter()
                         .map(|(key, val)| format!("{key}={val}"))
                         .collect();
@@ -189,9 +190,7 @@ impl TextFormatter {
                     writer.write_char(' ')?;
                 }
                 None => {
-                    eprintln!(
-                        "Unable to find SubgraphRequestLogAttributes in extensions; this is a bug"
-                    );
+                    eprintln!("Unable to find LogAttributes in extensions; this is a bug");
                 }
             }
         }

@@ -65,7 +65,7 @@ use self::apollo_exporter::Sender;
 use self::config::Conf;
 use self::config::Sampler;
 use self::config::SamplerOption;
-use self::dynamic_attribute_layer::DynAttribute;
+use self::dynamic_attribute::DynAttribute;
 use self::formatters::text::TextFormatter;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
@@ -130,7 +130,7 @@ pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
 mod config_new;
-pub(crate) mod dynamic_attribute_layer;
+pub(crate) mod dynamic_attribute;
 mod endpoint;
 pub(crate) mod formatters;
 pub(crate) mod metrics;
@@ -216,9 +216,6 @@ impl Drop for Telemetry {
         self.safe_shutown_tracer();
     }
 }
-
-#[derive(Debug, Default)]
-pub(crate) struct SubgraphRequestLogAttributes(HashMap<String, String>);
 
 #[async_trait::async_trait]
 impl Plugin for Telemetry {
@@ -319,11 +316,13 @@ impl Plugin for Telemetry {
                     "apollo_private.http.request_headers" = filter_headers(request.router_request.headers(), &apollo.send_headers).as_str(),
                     "apollo_private.http.response_headers" = field::Empty
                 );
-                // TODO: find what parts of the request I should add in attributes using a key prefixed by `apollo_dynamic_attribute`
-                span.set_dyn_attribute(String::from("apollo_dynamic_attribute.custom_attribute_header"), headers.get("host").and_then(|h| h.to_str().ok()).map(|h| h.to_string()).unwrap_or_default());
-                // ::tracing::info!(apollo_dynamic_attribute.custom_attribute_header = "test");
+                // TODO add support of set_attribute for the span
+                // It doesn't need to be prefixed now.
+                span.set_dyn_attribute(String::from("custom_attribute_header"), headers.get("host").and_then(|h| h.to_str().ok()).map(|h| h.to_string()).unwrap_or_default());
+
                 span
             })
+            // TODO add map_future_with_request_data to log the request
             .map_future(move |fut| {
                 let start = Instant::now();
                 let config = config_later.clone();
@@ -334,6 +333,7 @@ impl Plugin for Telemetry {
                 async move {
                     let span = Span::current();
                     ::tracing::info!("coucou");
+
 
                     let response: Result<router::Response, BoxError> = fut.await;
 
