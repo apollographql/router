@@ -144,14 +144,9 @@ impl ApolloExporter {
 
             loop {
                 tokio::select! {
-                    single_report = rx.next() => {
-                        if let Some(r) = single_report {
-                            report += r;
-                        } else {
-                            tracing::debug!("terminating apollo exporter");
-                            break;
-                        }
-                       },
+                    // If you run this example without `biased;`, the polling order is
+                    // pseudo-random and may never choose the timeout tick
+                    biased;
                     _ = timeout.tick() => {
                         match self.submit_report(std::mem::take(&mut report)).await {
                             Ok(_) => backoff_warn = true,
@@ -169,6 +164,14 @@ impl ApolloExporter {
                             }
                         }
                     }
+                    single_report = rx.next() => {
+                        if let Some(r) = single_report {
+                            report += r;
+                        } else {
+                            tracing::debug!("terminating apollo exporter");
+                            break;
+                        }
+                    },
                 };
             }
 
