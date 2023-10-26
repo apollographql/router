@@ -1167,7 +1167,6 @@ mod tests {
         @link(url: "https://specs.apollo.dev/OtherAuthenticated/v0.1", import: ["@authenticated"])
       {
         query: Query
-        mutation: Mutation
       }
       directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
       directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
