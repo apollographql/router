@@ -749,7 +749,7 @@ impl SpanExporter for Exporter {
         let exporter = self.report_exporter.clone();
         let fut = async move {
             exporter
-                .submit_report(report, 5)
+                .submit_report(report)
                 .map_err(|e| TraceError::ExportFailed(Box::new(e)))
                 .await
         };

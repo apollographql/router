@@ -147,7 +147,7 @@ impl ApolloExporter {
                     // pseudo-random and may never choose the timeout tick
                     biased;
                     _ = timeout.tick() => {
-                        match self.submit_report(std::mem::take(&mut report), 1).await {
+                        match self.submit_report(std::mem::take(&mut report)).await {
                             Ok(_) => backoff_warn = true,
                             Err(err) => {
                                 match err {
@@ -174,23 +174,14 @@ impl ApolloExporter {
                 };
             }
 
-            if let Err(e) = self.submit_report(std::mem::take(&mut report), 1).await {
+            if let Err(e) = self.submit_report(std::mem::take(&mut report)).await {
                 tracing::error!("failed to submit Apollo report: {}", e)
             }
         });
         Sender::Apollo(tx)
     }
 
-    // The retry parameter exists because we want different behaviour for traces and metrics.
-    // We don't want to do any retrying for metrics because we need submit_report to execute
-    // quickly.
-    // We do want retries for traces, since execution speed isn't so important but trying hard to
-    // deliver is.
-    pub(crate) async fn submit_report(
-        &self,
-        report: Report,
-        retries: usize,
-    ) -> Result<(), ApolloExportError> {
+    pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
         // We may be sending traces but with no operation count
         if report.licensed_operation_count_by_type.is_empty() && report.traces_per_query.is_empty()
         {
@@ -262,6 +253,9 @@ impl ApolloExporter {
                 }
             }
         }
+
+        // We want to retry if we have traces...
+        let retries = if has_traces { 5 } else { 1 };
 
         for i in 0..retries {
             // We know these requests can be cloned
