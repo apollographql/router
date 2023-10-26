@@ -28,6 +28,8 @@ use tracing_subscriber::Registry;
 
 use super::config::SamplerOption;
 use super::dynamic_attribute::DynAttributeLayer;
+use super::formatters::json::Json;
+use super::formatters::json::JsonFields;
 use super::metrics::span_metrics_exporter::SpanMetricsLayer;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::metrics::layer::MetricsLayer;
@@ -92,16 +94,14 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
             .boxed()
     } else {
         tracing_subscriber::fmt::Layer::new()
-            .json()
-            .map_event_format(|e| {
-                FilteringFormatter::new(
-                    e.json()
-                        .with_current_span(true)
-                        .with_span_list(true)
-                        .flatten_event(true),
-                    filter_metric_events,
-                )
-            })
+            .event_format(FilteringFormatter::new(
+                Json::default()
+                    .with_current_span(true)
+                    .with_span_list(true)
+                    .flatten_event(true),
+                filter_metric_events,
+            ))
+            .map_fmt_fields(|_f| JsonFields {})
             .fmt_fields(NullFieldFormatter)
             .boxed()
     };

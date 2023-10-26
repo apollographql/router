@@ -15,8 +15,6 @@ use crate::metrics::layer::METRIC_PREFIX_HISTOGRAM;
 use crate::metrics::layer::METRIC_PREFIX_MONOTONIC_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_VALUE;
 
-pub(crate) const TRACE_ID_FIELD_NAME: &str = "trace_id";
-
 /// `FilteringFormatter` is useful if you want to not filter the entire event but only want to not display it
 /// ```ignore
 /// use tracing_core::Event;

@@ -123,7 +123,7 @@ impl DynAttribute for ::tracing::Span {
                                 attributes.insert(s.name(), key, value);
                             }
                             None => {
-                                eprintln!("no SubgraphRequestLogAttributes, this is a bug");
+                                eprintln!("no LogAttributes, this is a bug");
                             }
                         }
                     }

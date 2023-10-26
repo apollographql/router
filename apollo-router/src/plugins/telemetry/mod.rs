@@ -53,7 +53,6 @@ use tracing_core::Callsite;
 use tracing_core::Interest;
 use tracing_core::Metadata;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use tracing_subscriber::fmt::format::JsonFields;
 use tracing_subscriber::Layer;
 
 use self::apollo::ForwardValues;
@@ -66,6 +65,8 @@ use self::config::Conf;
 use self::config::Sampler;
 use self::config::SamplerOption;
 use self::dynamic_attribute::DynAttribute;
+use self::formatters::json::Json;
+use self::formatters::json::JsonFields;
 use self::formatters::text::TextFormatter;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
@@ -316,14 +317,18 @@ impl Plugin for Telemetry {
                     "apollo_private.http.request_headers" = filter_headers(request.router_request.headers(), &apollo.send_headers).as_str(),
                     "apollo_private.http.response_headers" = field::Empty
                 );
-                // TODO add support of set_attribute for the span
-                // It doesn't need to be prefixed now.
-                span.set_dyn_attribute(String::from("custom_attribute_header"), headers.get("host").and_then(|h| h.to_str().ok()).map(|h| h.to_string()).unwrap_or_default());
+
+                // TODO The part where we add dynamic attribute for logs and spans
+                span.set_attribute(String::from("custom_router_attribute_header"), headers.get("host").and_then(|h| h.to_str().ok()).map(|h| h.to_string()).unwrap_or_default());
+                // Add dyn attribute for logs
+                span.set_dyn_attribute(String::from("custom_router_attribute_header"), headers.get("host").and_then(|h| h.to_str().ok()).map(|h| h.to_string()).unwrap_or_default());
 
                 span
             })
             // TODO add map_future_with_request_data to log the request
-            .map_future(move |fut| {
+            .map_future_with_request_data(|_request: &router::Request| {
+                // TODO fetch attributes for request
+            }, move |_: (), fut| {
                 let start = Instant::now();
                 let config = config_later.clone();
 
@@ -706,21 +711,18 @@ impl Telemetry {
                 .fmt_fields(NullFieldFormatter)
                 .boxed(),
             config::LoggingFormat::Json => tracing_subscriber::fmt::layer()
-                .json()
-                .with_file(logging.display_filename)
-                .with_line_number(logging.display_line_number)
-                .with_target(logging.display_target)
-                .map_event_format(|e| {
-                    FilteringFormatter::new(
-                        e.json()
-                            .with_current_span(true)
-                            .with_span_list(true)
-                            .flatten_event(true),
-                        filter_metric_events,
-                    )
-                })
+                .event_format(FilteringFormatter::new(
+                    Json::default()
+                        .with_file(logging.display_filename)
+                        .with_line_number(logging.display_line_number)
+                        .with_target(logging.display_target)
+                        .with_current_span(true)
+                        .with_span_list(true)
+                        .flatten_event(true),
+                    filter_metric_events,
+                ))
                 .fmt_fields(NullFieldFormatter)
-                .map_fmt_fields(|_f| JsonFields::default())
+                .map_fmt_fields(|_f| JsonFields {})
                 .boxed(),
         };
         fmt
@@ -755,6 +757,13 @@ impl Telemetry {
             {
                 span.record("graphql.operation.name", operation_name);
             }
+            // TODO The part where we add dynamic attribute for logs and spans
+            span.set_attribute(String::from("custom_router_attribute_header"), "test");
+            // set dyn attribute for logs
+            span.set_dyn_attribute(
+                String::from("custom_router_attribute_header"),
+                "test".to_string(),
+            );
 
             span
         }
