@@ -4,18 +4,15 @@ use serde::Serialize;
 
 /// Persisted Queries (PQ) configuration
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct PersistedQueries {
     /// Activates Persisted Queries (disabled by default)
-    #[serde(default = "default_pq")]
     pub enabled: bool,
 
     /// Enabling this field configures the router to log any freeform GraphQL request that is not in the persisted query list
-    #[serde(default = "default_log_unknown")]
     pub log_unknown: bool,
 
     /// Restricts execution of operations that are not found in the Persisted Query List
-    #[serde(default)]
     pub safelist: PersistedQueriesSafelist,
 }
 
@@ -38,14 +35,12 @@ impl PersistedQueries {
 
 /// Persisted Queries (PQ) Safelisting configuration
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub struct PersistedQueriesSafelist {
     /// Enables using the persisted query list as a safelist (disabled by default)
-    #[serde(default = "default_safelist")]
     pub enabled: bool,
 
     /// Enabling this field configures the router to reject any request that does not include the persisted query ID
-    #[serde(default = "default_require_id")]
     pub require_id: bool,
 }
 

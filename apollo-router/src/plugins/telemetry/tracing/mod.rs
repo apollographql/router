@@ -13,7 +13,6 @@ use opentelemetry::Context;
 use opentelemetry::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::Trace;
@@ -27,7 +26,8 @@ pub(crate) mod reload;
 pub(crate) mod zipkin;
 
 pub(crate) trait TracingConfigurator {
-    fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError>;
+    fn enabled(&self) -> bool;
+    fn apply(&self, builder: Builder, common: &Trace) -> Result<Builder, BoxError>;
 }
 
 #[derive(Debug)]
@@ -96,7 +96,7 @@ where
 }
 
 /// Batch processor configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(default)]
 pub(crate) struct BatchProcessorConfig {
     #[serde(deserialize_with = "humantime_serde::deserialize")]
@@ -115,10 +115,10 @@ pub(crate) struct BatchProcessorConfig {
     /// is 512.
     pub(crate) max_export_batch_size: usize,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
-    #[schemars(with = "String")]
     /// The maximum duration to export a batch of data.
     /// The default value is 30 seconds.
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String")]
     pub(crate) max_export_timeout: Duration,
 
     /// Maximum number of concurrent exports

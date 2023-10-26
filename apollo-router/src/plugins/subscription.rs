@@ -7,6 +7,8 @@ use bytes::Buf;
 use futures::future::BoxFuture;
 use hmac::Hmac;
 use hmac::Mac;
+use http::HeaderName;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use multimap::MultiMap;
@@ -46,6 +48,8 @@ pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN_NAME: &str = "subscription";
 pub(crate) static SUBSCRIPTION_CALLBACK_HMAC_KEY: OnceCell<String> = OnceCell::new();
 pub(crate) const SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS: &str =
     "apollo.subscription.custom_connection_params";
+const CALLBACK_SUBSCRIPTION_HEADER_NAME: &str = "subscription-protocol";
+const CALLBACK_SUBSCRIPTION_HEADER_VALUE: &str = "callback/1.0";
 
 #[derive(Debug, Clone)]
 pub(crate) struct Subscription {
@@ -64,7 +68,6 @@ pub(crate) struct SubscriptionConfig {
     pub(crate) mode: SubscriptionModeConfig,
     /// Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode)
     /// (default: true)
-    #[serde(default = "enable_deduplication_default")]
     pub(crate) enable_deduplication: bool,
     /// This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.
     pub(crate) max_opened_subscriptions: Option<usize>,
@@ -72,16 +75,12 @@ pub(crate) struct SubscriptionConfig {
     pub(crate) queue_capacity: Option<usize>,
 }
 
-fn enable_deduplication_default() -> bool {
-    true
-}
-
 impl Default for SubscriptionConfig {
     fn default() -> Self {
         Self {
             enabled: true,
             mode: Default::default(),
-            enable_deduplication: enable_deduplication_default(),
+            enable_deduplication: true,
             max_opened_subscriptions: None,
             queue_capacity: None,
         }
@@ -469,6 +468,7 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NO_CONTENT)
+                                            .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
                                             .body::<hyper::Body>("".into())
                                             .map_err(BoxError::from)?,
                                         context: req.context,
@@ -477,6 +477,7 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
+                                            .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
                                             .body("suscription doesn't exist".into())
                                             .map_err(BoxError::from)?,
                                         context: req.context,
@@ -699,6 +700,12 @@ mod tests {
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
+        assert_eq!(
+            resp.headers()
+                .get(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME))
+                .unwrap(),
+            HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE)
+        );
 
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
@@ -917,6 +924,12 @@ mod tests {
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
+        assert_eq!(
+            resp.headers()
+                .get(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME))
+                .unwrap(),
+            HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE)
+        );
 
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"

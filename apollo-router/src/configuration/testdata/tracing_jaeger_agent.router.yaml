@@ -3,5 +3,6 @@ supergraph:
 telemetry:
   tracing:
     jaeger:
+      enabled: true
       agent:
         endpoint: default

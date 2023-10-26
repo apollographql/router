@@ -15,13 +15,17 @@ use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 lazy_static! {
-    static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://localhost:9411/api/v2/spans");
+    static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:9411/api/v2/spans");
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// Enable zipkin
+    pub(crate) enabled: bool,
+
     /// The endpoint to send to
+    #[serde(default)]
     pub(crate) endpoint: UriEndpoint,
 
     /// Batch processor configuration
@@ -30,12 +34,15 @@ pub(crate) struct Config {
 }
 
 impl TracingConfigurator for Config {
-    fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn apply(&self, builder: Builder, common: &Trace) -> Result<Builder, BoxError> {
         tracing::info!("configuring Zipkin tracing: {}", self.batch_processor);
 
         let exporter = opentelemetry_zipkin::new_pipeline()
-            .with_trace_config(trace_config.into())
-            .with_service_name(trace_config.service_name.clone())
+            .with_trace_config(common.into())
             .with(&self.endpoint.to_uri(&DEFAULT_ENDPOINT), |b, endpoint| {
                 b.with_collector_endpoint(endpoint.to_string())
             })

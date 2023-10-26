@@ -3,6 +3,8 @@ title: External coprocessing in the Apollo Router
 description: Customize your router's behavior in any language
 ---
 
+import CoprocTypicalConfig from '../../shared/coproc-typical-config.mdx';
+
 > ⚠️ **This is an [Enterprise feature](../enterprise-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
 >
 > If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](/graphos/org/plans/#enterprise-trials).
@@ -52,7 +54,7 @@ As shown in the diagram above, the `RouterService`, `SupergraphService` and `Sub
 
 Each supported service can send its coprocessor requests at two different **stages**:
 
-- As excecution proceeds "down" from the client to individual subgraphs
+- As execution proceeds "down" from the client to individual subgraphs
     - Here, the coprocessor can inspect and modify details of requests before  GraphQL operations are processed.
     - The coprocessor can also instruct the router to [_terminate_ a client request](#terminating-a-client-request) immediately.
 - As execution proceeds back "up" from subgraphs to the client
@@ -74,53 +76,7 @@ You configure external coprocessing in your router's [YAML config file](../confi
 
 This example configuration sends commonly used request and response details to your coprocessor (see the comments below for explanations of each field):
 
-```yaml title="router.yaml"
-coprocessor:
-  url: http://127.0.0.1:8081 # Required. Replace with the URL of your coprocessor's HTTP endpoint.
-  timeout: 2s # The timeout for all coprocessor requests. Defaults to 1 second (1s)
-  router: # This coprocessor hooks into the `RouterService`
-    request: # By including this key, the `RouterService` sends a coprocessor request whenever it first receives a client request.
-      headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
-      body: false
-      context: false
-      sdl: false
-      path: false
-      method: false
-    response: # By including this key, the `RouterService` sends a coprocessor request whenever it's about to send response data to a client (including incremental data via @defer).
-      headers: true
-      body: false
-      context: false
-      sdl: false
-      status_code: false
-  supergraph: # This coprocessor hooks into the `SupergraphService`
-    request: # By including this key, the `SupergraphService` sends a coprocessor request whenever it first receives a client request.
-      headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
-      body: false
-      context: false
-      sdl: false
-      method: false
-    response: # By including this key, the `SupergraphService` sends a coprocessor request whenever it's about to send response data to a client (including incremental data via @defer).
-      headers: true
-      body: false
-      context: false
-      sdl: false
-      status_code: false
-  subgraph:
-    all:
-      request: # By including this key, the `SubgraphService` sends a coprocessor request whenever it is about to make a request to a subgraph.
-        headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
-        body: false
-        context: false
-        uri: false
-        method: false
-        service_name: false
-      response: # By including this key, the `SubgraphService` sends a coprocessor request whenever receives a subgraph response.
-        headers: true
-        body: false
-        context: false
-        service_name: false
-        status_code: false
-```
+<CoprocTypicalConfig/>
 
 ### Minimal configuration
 
@@ -268,6 +224,97 @@ Properties of the JSON body are divided into two high-level categories:
   "statusCode": 200,
   "sdl": "..." // Omitted due to length
 }
+```
+
+</ExpansionPanel>
+
+#### `SupergraphRequest`
+
+<ExpansionPanel title="Click to expand">
+
+```json
+
+{
+  // Control properties
+  "version": 1,
+  "stage": "SupergraphRequest",
+  "control": "continue",
+
+  // Data properties
+  "headers": {
+    "cookie": [
+      "tasty_cookie=strawberry"
+    ],
+    "content-type": [
+      "application/json"
+    ],
+    "host": [
+      "127.0.0.1:4000"
+    ],
+    "apollo-federation-include-trace": [
+      "ftv1"
+    ],
+    "apollographql-client-name": [
+      "manual"
+    ],
+    "accept": [
+      "*/*"
+    ],
+    "user-agent": [
+      "curl/7.79.1"
+    ],
+    "content-length": [
+      "46"
+    ]
+  },
+  "body": {
+    "query": "query Long {\n  me {\n  name\n}\n}",
+    "operationName": "MyQuery"
+  },
+  "context": {
+    "entries": {
+      "accepts-json": false,
+      "accepts-wildcard": true,
+      "accepts-multipart": false,
+      "this-is-a-test-context": 42
+    }
+  },
+  "serviceName": "service name shouldn't change",
+  "uri": "http://thisurihaschanged"
+}
+
+```
+
+</ExpansionPanel>
+
+#### `SupergraphResponse`
+
+<ExpansionPanel title="Click to expand">
+
+```json
+
+{
+  // Control properties
+  "version": 1,
+  "stage": "SupergraphRequest",
+  "control": {
+    "break": 200
+  },
+
+  // Data properties
+  "body": {
+    "errors": [{ "message": "my error message" }]
+  },
+  "context": {
+    "entries": {
+      "testKey": true
+    }
+  },
+  "headers": {
+    "aheader": ["a value"]
+  }
+}
+
 ```
 
 </ExpansionPanel>
@@ -551,6 +598,8 @@ This value is one of the following:
 
 - `RouterRequest`: The `RouterService` has just received a client request.
 - `RouterResponse`: The `RouterService` is about to send response data to a client.
+- `SupergraphRequest`: The `SupergraphService` is about to send a GraphQL request.
+- `SupergraphResponse`: The `SupergraphService` has just received a GraphQL response.
 - `SubgraphRequest`: The `SubgraphService` is about to send a request to a subgraph.
 - `SubgraphResponse`: The `SubgraphService` has just received a subgraph response.
 
@@ -604,6 +653,7 @@ If your coprocessor [returns a _different_ value](#responding-to-coprocessor-req
 This field's type depends on the coprocessor request's [`stage`](#stage):
 
 - For `SubgraphService` stages, `body` is a JSON _object_.
+- For `SupergraphService` stages, `body` is a JSON _object_.
 - For `RouterService` stages, `body` is a JSON _string_.
   - This is necessary to support handling [deferred queries](#handling-deferred-query-responses).
   - If you modify `body` during the `RouterRequest` stage, the new value must be a valid string serialization of a JSON object. If it isn't, the router detects that the body is malformed and returns an error to the client.
@@ -632,6 +682,21 @@ This field's structure depends on whether the coprocessor request corresponds to
 An object representing the router's shared context for the corresponding client request.
 
 If your coprocessor [returns a _different_ value](#responding-to-coprocessor-requests) for `context`, the router replaces the existing context with that value.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `hasNext`
+
+`bool`
+
+</td>
+<td>
+
+When `stage` is `SupergraphResponse`, if present and `true` then there will be subsequent `SupergraphResponse` calls to the co-processor for each multi-part (`@defer`/subscriptions) response.
 
 </td>
 </tr>
@@ -679,7 +744,7 @@ The HTTP method that is used by the request.
 </td>
 <td>
 
-The `RouterService` path that this coprocessor request pertains to.
+The `RouterService` or `SupergraphService` path that this coprocessor request pertains to.
 
 </td>
 </tr>
@@ -755,6 +820,7 @@ When `stage` is `SubgraphRequest`, this is the full URI of the subgraph the rout
 
 </tbody>
 </table>
+
 
 ## Responding to coprocessor requests
 

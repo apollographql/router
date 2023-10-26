@@ -17,7 +17,7 @@ expression: schema
         "all": {
           "description": "options applying to all subgraphs",
           "default": {
-            "a": false,
+            "a": true,
             "b": 0
           },
           "type": "object",

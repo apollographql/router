@@ -35,10 +35,14 @@ lazy_static! {
     static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://localhost:8126/v0.4/traces");
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// Enable datadog
+    pub(crate) enabled: bool,
+
     /// The endpoint to send to
+    #[serde(default)]
     pub(crate) endpoint: UriEndpoint,
 
     /// batch processor configuration
@@ -51,10 +55,14 @@ pub(crate) struct Config {
 }
 
 impl TracingConfigurator for Config {
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
+
     fn apply(&self, builder: Builder, trace: &Trace) -> Result<Builder, BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
         let enable_span_mapping = self.enable_span_mapping.then_some(true);
-        let trace_config: sdk::trace::Config = trace.into();
+        let common: sdk::trace::Config = trace.into();
         let exporter = opentelemetry_datadog::new_pipeline()
             .with(&self.endpoint.to_uri(&DEFAULT_ENDPOINT), |builder, e| {
                 builder.with_agent_endpoint(e.to_string().trim_end_matches('/'))
@@ -74,7 +82,7 @@ impl TracingConfigurator for Config {
                     })
             })
             .with(
-                &trace_config.resource.get(SERVICE_NAME),
+                &common.resource.get(SERVICE_NAME),
                 |builder, service_name| {
                     // Datadog exporter incorrectly ignores the service name in the resource
                     // Set it explicitly here
@@ -82,13 +90,13 @@ impl TracingConfigurator for Config {
                 },
             )
             .with_version(
-                trace_config
+                common
                     .resource
                     .get(SERVICE_VERSION)
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
-            .with_trace_config(trace_config)
+            .with_trace_config(common)
             .build_exporter()?;
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)

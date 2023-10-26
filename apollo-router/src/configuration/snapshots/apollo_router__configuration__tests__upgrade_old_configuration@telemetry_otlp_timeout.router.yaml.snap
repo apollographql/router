@@ -9,4 +9,5 @@ telemetry:
       endpoint: default
       batch_processor:
         max_export_timeout: 5s
+      enabled: true
 

@@ -30,10 +30,14 @@ lazy_static! {
     static ref DEFAULT_HTTP_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:4318");
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// Enable otlp
+    pub(crate) enabled: bool,
+
     /// The endpoint to send data to
+    #[serde(default)]
     pub(crate) endpoint: UriEndpoint,
 
     /// The protocol to use when sending data
