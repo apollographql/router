@@ -61,7 +61,9 @@ We should analyze available data about customization mechanisms in use (and foll
 ## Consequences
 
 It should be clearer for developers that adding customization mechanisms is preferable to modifying the source code of the router.
+
 It should be clearer to customers what the pros and cons of using various customization mechanisms are.
+
 In future, if we consider adding additional forms of customization, the existence of this hierarchy will make it easier to decide where such a new mechanism may position itself in relation to existing mechanisms.
 
 ## Addendum
