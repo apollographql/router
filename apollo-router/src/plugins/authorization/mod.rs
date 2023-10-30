@@ -24,7 +24,6 @@ use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
 use self::scopes::REQUIRES_SCOPES_SPEC_URL;
 use crate::error::QueryPlannerError;
-use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::json_ext::Path;
@@ -61,7 +60,7 @@ pub(crate) struct CacheKeyMetadata {
 }
 
 /// Authorization plugin
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[allow(dead_code)]
 pub(crate) struct Conf {
     /// Reject unauthenticated requests
@@ -72,12 +71,32 @@ pub(crate) struct Conf {
     preview_directives: Directives,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[allow(dead_code)]
 pub(crate) struct Directives {
     /// enables the `@authenticated` and `@requiresScopes` directives
-    #[serde(default)]
+    #[serde(default = "default_enable_directives")]
     enabled: bool,
+    /// refuse a query entirely if any part would be filtered
+    #[serde(default)]
+    reject_unauthorized: bool,
+    /// Log authorization errors
+    #[serde(default = "enable_log_errors")]
+    log_errors: bool,
+}
+
+fn enable_log_errors() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct UnauthorizedPaths {
+    pub(crate) paths: Vec<Path>,
+    pub(crate) log_errors: bool,
+}
+
+fn default_enable_directives() -> bool {
+    true
 }
 
 pub(crate) struct AuthorizationPlugin {
@@ -96,20 +115,23 @@ impl AuthorizationPlugin {
             .find(|(s, _)| s.as_str() == "authorization")
             .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
             .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()));
+
         let has_authorization_directives = schema.has_spec(AUTHENTICATED_SPEC_URL)
             || schema.has_spec(REQUIRES_SCOPES_SPEC_URL)
             || schema.has_spec(POLICY_SPEC_URL);
 
-        match has_config {
-            Some(b) => Ok(b),
-            None => {
-                if has_authorization_directives {
-                    Err(ServiceBuildError::Schema(SchemaError::Api("cannot start the router on a schema with authorization directives without configuring the authorization plugin".to_string())))
-                } else {
-                    Ok(false)
-                }
-            }
-        }
+        Ok(has_config.unwrap_or(true) && has_authorization_directives)
+    }
+
+    pub(crate) fn log_errors(configuration: &Configuration) -> bool {
+        let has_config = configuration
+            .apollo_plugins
+            .plugins
+            .iter()
+            .find(|(s, _)| s.as_str() == "authorization")
+            .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
+            .and_then(|v| v.get("log_errors").and_then(|v| v.as_bool()));
+        has_config.unwrap_or(true)
     }
 
     pub(crate) async fn query_analysis(
@@ -212,9 +234,19 @@ impl AuthorizationPlugin {
     }
 
     pub(crate) fn filter_query(
+        configuration: &Configuration,
         key: &QueryKey,
         schema: &Schema,
     ) -> Result<Option<FilteredQuery>, QueryPlannerError> {
+        let reject_unauthorized = configuration
+            .apollo_plugins
+            .plugins
+            .iter()
+            .find(|(s, _)| s.as_str() == "authorization")
+            .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
+            .and_then(|v| v.get("reject_unauthorized").and_then(|v| v.as_bool()))
+            .unwrap_or(false);
+
         // The filtered query will then be used
         // to generate selections for response formatting, to execute introspection and
         // generating a query plan
@@ -282,6 +314,10 @@ impl AuthorizationPlugin {
                 filtered_doc
             }
         };
+
+        if reject_unauthorized && !unauthorized_paths.is_empty() {
+            return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
+        }
 
         if is_filtered {
             Ok(Some((unauthorized_paths, doc)))
@@ -438,7 +474,7 @@ impl Plugin for AuthorizationPlugin {
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
             .map_request(|request: execution::Request| {
-                let filtered = !request.query_plan.query.unauthorized_paths.is_empty();
+                let filtered = !request.query_plan.query.unauthorized.paths.is_empty();
                 let needs_authenticated = request.context.contains_key(AUTHENTICATED_KEY);
                 let needs_requires_scopes = request.context.contains_key(REQUIRED_SCOPES_KEY);
 

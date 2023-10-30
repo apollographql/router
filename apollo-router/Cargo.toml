@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.33.1"
+version = "1.33.2"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -45,6 +45,10 @@ console = ["tokio/tracing", "console-subscriber"]
 # "fake" feature to disable V8 usage when building on docs.rs
 # See https://github.com/apollographql/federation-rs/pull/185
 docs_rs = ["router-bridge/docs_rs"]
+
+# Enables the use of new telemetry features that are under development
+# and not yet ready for production use.
+telemetry_next = []
 
 [package.metadata.docs.rs]
 features = ["docs_rs"]
