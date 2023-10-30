@@ -34,3 +34,19 @@ This doesn't give us permission to not think about APIs we introduce, but it doe
 * Plugins external to the Router codebase cannot use the private API.
 * Plugins external to the router codebase can use the unstable API.
 * The new traits are documented appropriately.
+
+## Graduation criteria
+
+### Private to unstable
+Private APIs can be promoted to unstable if they have been used in the Router for an internal plugin and an additional DR is raised for approved by the team. 
+They do not need to be supported by all extensible aspects of the Router, for example: Rhai, coprocessors or telemetry. However, they should have documentation and tests.
+
+### Unstable to public
+Unstable APIs can be promoted to public if they have been used in the Router for an internal plugin and an additional DR is raised for approved by the team.
+To promote to public, and unstable API must:
+* Be supported in coprocessors (unless there is a really good reason not to).
+* Be supported in Rhai (unless there is a really good reason not to).
+* Have telemetry support.
+
+
+
