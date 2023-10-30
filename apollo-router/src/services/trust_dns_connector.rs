@@ -41,7 +41,7 @@ impl Service<Name> for AsyncHyperResolver {
     fn call(&mut self, name: Name) -> Self::Future {
         let resolver = self.0.clone();
 
-        let closure = || async move {
+        Box::pin(async move {
             Ok(resolver
                 .lookup_ip(name.as_str())
                 .await?
@@ -52,8 +52,7 @@ impl Service<Name> for AsyncHyperResolver {
                     Ok::<_, io::Error>(acc)
                 })?
                 .into_iter())
-        };
-        Box::pin(closure())
+        })
     }
 }
 
