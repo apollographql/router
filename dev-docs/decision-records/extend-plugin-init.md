@@ -35,6 +35,9 @@ pub struct PluginInit<T> {
     pub last_config: Option<T>,
     /// Router Supergraph Schema (schema definition language)
     pub supergraph_sdl: Arc<String>,
+
+    /// The root configuration object of the router.
+    pub (crate) root_configuration: Arc<Configuration>,
     /// True it the router was started with a valid license.
     pub (crate) licensed: bool,
     /// The parsed supergraph.
