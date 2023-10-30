@@ -506,7 +506,7 @@ impl BridgeQueryPlanner {
         mut doc: ParsedDocument,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let filter_res = if self.enable_authorization_directives {
-            match AuthorizationPlugin::filter_query(&key, &self.schema) {
+            match AuthorizationPlugin::filter_query(&self.configuration, &key, &self.schema) {
                 Err(QueryPlannerError::Unauthorized(unauthorized_paths)) => {
                     let response = graphql::Response::builder()
                         .data(Object::new())
