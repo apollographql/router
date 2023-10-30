@@ -1,11 +1,18 @@
 use std::collections::HashMap;
 
+use http::header::CONTENT_LENGTH;
+use http::header::USER_AGENT;
+use opentelemetry_api::Key;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::Schema;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tower::BoxError;
 
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::services::router;
+use crate::services::subgraph;
+use crate::services::supergraph;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[allow(dead_code)]
@@ -109,19 +116,21 @@ pub(crate) enum RouterCustomAttribute {
     RequestHeader {
         /// The name of the request header.
         request_header: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
     /// A header from the response
     ResponseHeader {
         /// The name of the request header.
         response_header: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
     /// The trace ID of the request.
     TraceId {
@@ -132,6 +141,7 @@ pub(crate) enum RouterCustomAttribute {
     ResponseContext {
         /// The response context key.
         response_context: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -141,15 +151,17 @@ pub(crate) enum RouterCustomAttribute {
     Baggage {
         /// The name of the baggage item.
         baggage: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
     /// A value from an environment variable.
     Env {
         /// The name of the environment variable
         env: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -181,6 +193,7 @@ pub(crate) enum SupergraphCustomAttribute {
     OperationName {
         /// The operation name from the query.
         operation_name: OperationName,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -189,6 +202,7 @@ pub(crate) enum SupergraphCustomAttribute {
     OperationKind {
         /// The operation kind from the query (query|mutation|subscription).
         operation_kind: OperationKind,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -197,6 +211,7 @@ pub(crate) enum SupergraphCustomAttribute {
     QueryVariable {
         /// The name of a graphql query variable.
         query_variable: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -205,6 +220,7 @@ pub(crate) enum SupergraphCustomAttribute {
     ResponseBody {
         /// Json Path into the response body
         response_body: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -213,6 +229,7 @@ pub(crate) enum SupergraphCustomAttribute {
     RequestHeader {
         /// The name of the request header.
         request_header: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -221,6 +238,7 @@ pub(crate) enum SupergraphCustomAttribute {
     ResponseHeader {
         /// The name of the response header.
         response_header: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -229,6 +247,7 @@ pub(crate) enum SupergraphCustomAttribute {
     RequestContext {
         /// The request context key.
         request_context: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -237,6 +256,7 @@ pub(crate) enum SupergraphCustomAttribute {
     ResponseContext {
         /// The response context key.
         response_context: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -245,6 +265,7 @@ pub(crate) enum SupergraphCustomAttribute {
     Baggage {
         /// The name of the baggage item.
         baggage: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -253,6 +274,7 @@ pub(crate) enum SupergraphCustomAttribute {
     Env {
         /// The name of the environment variable
         env: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -267,6 +289,7 @@ pub(crate) enum SubgraphCustomAttribute {
     SubgraphOperationName {
         /// The operation name from the subgraph query.
         subgraph_operation_name: OperationName,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -279,6 +302,7 @@ pub(crate) enum SubgraphCustomAttribute {
     SubgraphQueryVariable {
         /// The name of a subgraph query variable.
         subgraph_query_variable: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -287,6 +311,7 @@ pub(crate) enum SubgraphCustomAttribute {
     SubgraphResponseBody {
         /// The subgraph response body json path.
         subgraph_response_body: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -295,6 +320,7 @@ pub(crate) enum SubgraphCustomAttribute {
     SubgraphRequestHeader {
         /// The name of the subgraph request header.
         subgraph_request_header: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -303,6 +329,7 @@ pub(crate) enum SubgraphCustomAttribute {
     SubgraphResponseHeader {
         /// The name of the subgraph response header.
         subgraph_response_header: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -312,6 +339,7 @@ pub(crate) enum SubgraphCustomAttribute {
     SupergraphOperationName {
         /// The supergraph query operation name.
         supergraph_operation_name: OperationName,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -324,6 +352,7 @@ pub(crate) enum SubgraphCustomAttribute {
     SupergraphQueryVariable {
         /// The supergraph query variable name.
         supergraph_query_variable: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -332,6 +361,7 @@ pub(crate) enum SubgraphCustomAttribute {
     SupergraphResponseBody {
         /// The supergraph response body json path.
         supergraph_response_body: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -340,6 +370,7 @@ pub(crate) enum SubgraphCustomAttribute {
     SupergraphRequestHeader {
         /// The supergraph request header name.
         supergraph_request_header: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -348,6 +379,7 @@ pub(crate) enum SubgraphCustomAttribute {
     SupergraphResponseHeader {
         /// The supergraph response header name.
         supergraph_response_header: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -356,6 +388,7 @@ pub(crate) enum SubgraphCustomAttribute {
     RequestContext {
         /// The request context key.
         request_context: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -364,6 +397,7 @@ pub(crate) enum SubgraphCustomAttribute {
     ResponseContext {
         /// The response context key.
         response_context: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -372,6 +406,7 @@ pub(crate) enum SubgraphCustomAttribute {
     Baggage {
         /// The name of the baggage item.
         baggage: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -380,6 +415,7 @@ pub(crate) enum SubgraphCustomAttribute {
     Env {
         /// The name of the environment variable
         env: String,
+        #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -395,7 +431,8 @@ pub(crate) struct RouterAttributes {
     #[serde(flatten)]
     common: HttpCommonAttributes,
     /// Http server attributes from Open Telemetry semantic conventions.
-    #[serde(flatten)]
+    // TODO: unskip it and add it gradually
+    #[serde(flatten, skip)]
     server: HttpServerAttributes,
 }
 
@@ -470,14 +507,14 @@ pub(crate) struct HttpCommonAttributes {
     /// * 500
     /// Requirement level: Conditionally Required: If request has ended with an error.
     #[serde(rename = "error.type")]
-    error_type: Option<bool>,
+    pub(crate) error_type: Option<bool>,
 
     /// The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size.
     /// Examples:
     /// * 3495
     /// Requirement level: Recommended
     #[serde(rename = "http.request.body.size")]
-    http_request_body_size: Option<bool>,
+    pub(crate) http_request_body_size: Option<bool>,
 
     /// HTTP request method.
     /// Examples:
@@ -486,7 +523,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * HEAD
     /// Requirement level: Required
     #[serde(rename = "http.request.method")]
-    http_request_method: Option<bool>,
+    pub(crate) http_request_method: Option<bool>,
 
     /// Original HTTP method sent by the client in the request line.
     /// Examples:
@@ -495,21 +532,21 @@ pub(crate) struct HttpCommonAttributes {
     /// * foo
     /// Requirement level: Conditionally Required
     #[serde(rename = "http.request.method.original")]
-    http_request_method_original: Option<bool>,
+    pub(crate) http_request_method_original: Option<bool>,
 
     /// The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size.
     /// Examples:
     /// * 3495
     /// Requirement level: Recommended
     #[serde(rename = "http.response.body.size")]
-    http_response_body_size: Option<bool>,
+    pub(crate) http_response_body_size: Option<bool>,
 
     /// HTTP response status code.
     /// Examples:
     /// * 200
     /// Requirement level: Conditionally Required: If and only if one was received/sent.
     #[serde(rename = "http.response.status_code")]
-    http_response_status_code: Option<bool>,
+    pub(crate) http_response_status_code: Option<bool>,
 
     /// OSI application layer or non-OSI equivalent.
     /// Examples:
@@ -517,7 +554,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * spdy
     /// Requirement level: Recommended: if not default (http).
     #[serde(rename = "network.protocol.name")]
-    network_protocol_name: Option<bool>,
+    pub(crate) network_protocol_name: Option<bool>,
 
     /// Version of the protocol specified in network.protocol.name.
     /// Examples:
@@ -527,7 +564,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * 3
     /// Requirement level: Recommended
     #[serde(rename = "network.protocol.version")]
-    network_protocol_version: Option<bool>,
+    pub(crate) network_protocol_version: Option<bool>,
 
     /// OSI transport layer.
     /// Examples:
@@ -535,7 +572,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * udp
     /// Requirement level: Conditionally Required
     #[serde(rename = "network.transport")]
-    network_transport: Option<bool>,
+    pub(crate) network_transport: Option<bool>,
 
     /// OSI network layer or non-OSI equivalent.
     /// Examples:
@@ -543,7 +580,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * ipv6
     /// Requirement level: Recommended
     #[serde(rename = "network.type")]
-    network_type: Option<bool>,
+    pub(crate) network_type: Option<bool>,
 
     /// Value of the HTTP User-Agent header sent by the client.
     /// Examples:
@@ -551,7 +588,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * libwww/2.17b3
     /// Requirement level: Recommended
     #[serde(rename = "user_agent.original")]
-    user_agent_original: Option<bool>,
+    pub(crate) user_agent_original: Option<bool>,
 }
 
 /// Attributes for Http servers
@@ -696,3 +733,223 @@ pub(crate) struct HttpClientAttributes {
     #[serde(rename = "url.full")]
     url_full: Option<bool>,
 }
+
+pub(crate) trait GetAttributes<Request, Response> {
+    fn on_request(&self, request: &Request) -> HashMap<Key, AttributeValue>;
+    fn on_response(&self, response: &Response) -> HashMap<Key, AttributeValue>;
+    fn on_error(&self, error: &BoxError) -> HashMap<Key, AttributeValue>;
+}
+
+pub(crate) trait GetAttribute<Request, Response> {
+    fn on_request(&self, request: &Request) -> Option<AttributeValue>;
+    fn on_response(&self, response: &Response) -> Option<AttributeValue>;
+}
+
+impl<A, E, Request, Response> GetAttributes<Request, Response> for Extendable<A, E>
+where
+    A: Default + GetAttributes<Request, Response>,
+    E: GetAttribute<Request, Response>,
+{
+    fn on_request(&self, request: &Request) -> HashMap<Key, AttributeValue> {
+        let mut attrs = self.attributes.on_request(request);
+        let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
+            value
+                .on_request(request)
+                .map(|v| (Key::from(key.clone()), v))
+        });
+        attrs.extend(custom_attributes);
+
+        attrs
+    }
+
+    fn on_response(&self, response: &Response) -> HashMap<Key, AttributeValue> {
+        let mut attrs = self.attributes.on_response(response);
+        let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
+            value
+                .on_response(response)
+                .map(|v| (Key::from(key.clone()), v))
+        });
+        attrs.extend(custom_attributes);
+
+        attrs
+    }
+
+    fn on_error(&self, error: &BoxError) -> HashMap<Key, AttributeValue> {
+        self.attributes.on_error(error)
+    }
+}
+
+impl GetAttribute<router::Request, router::Response> for RouterCustomAttribute {
+    fn on_request(&self, request: &router::Request) -> Option<AttributeValue> {
+        match self {
+            RouterCustomAttribute::RequestHeader {
+                request_header,
+                default,
+                ..
+            } => request
+                .router_request
+                .headers()
+                .get(request_header)
+                .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
+                .or_else(|| default.clone()),
+            RouterCustomAttribute::Env { env, default, .. } => std::env::var(env)
+                .ok()
+                .map(AttributeValue::String)
+                .or_else(|| default.clone().map(AttributeValue::String)),
+            RouterCustomAttribute::TraceId { trace_id } => todo!(),
+            RouterCustomAttribute::Baggage {
+                baggage,
+                redact,
+                default,
+            } => todo!(),
+            // Related to Response
+            _ => None,
+        }
+    }
+
+    fn on_response(&self, response: &router::Response) -> Option<AttributeValue> {
+        match self {
+            RouterCustomAttribute::ResponseHeader {
+                response_header,
+                default,
+                ..
+            } => response
+                .response
+                .headers()
+                .get(response_header)
+                .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
+                .or_else(|| default.clone()),
+            RouterCustomAttribute::ResponseContext {
+                response_context,
+                default,
+                ..
+            } => response
+                .context
+                .get(response_context)
+                .ok()
+                .flatten()
+                .or_else(|| default.clone()),
+            RouterCustomAttribute::Env { env, default, .. } => std::env::var(env)
+                .ok()
+                .map(AttributeValue::String)
+                .or_else(|| default.clone().map(AttributeValue::String)),
+            RouterCustomAttribute::TraceId { trace_id } => todo!(),
+            RouterCustomAttribute::Baggage {
+                baggage,
+                redact,
+                default,
+            } => todo!(),
+            RouterCustomAttribute::RequestHeader {
+                request_header,
+                redact,
+                default,
+            } => None,
+        }
+    }
+}
+
+impl GetAttributes<router::Request, router::Response> for RouterAttributes {
+    fn on_request(&self, request: &router::Request) -> HashMap<Key, AttributeValue> {
+        let mut attrs = self.common.on_request(request);
+
+        attrs
+    }
+
+    fn on_response(&self, response: &router::Response) -> HashMap<Key, AttributeValue> {
+        let mut attrs = self.common.on_response(response);
+        attrs
+    }
+
+    fn on_error(&self, error: &BoxError) -> HashMap<Key, AttributeValue> {
+        let mut attrs = self.common.on_error(error);
+        attrs
+    }
+}
+
+impl GetAttributes<router::Request, router::Response> for HttpCommonAttributes {
+    fn on_request(&self, request: &router::Request) -> HashMap<Key, AttributeValue> {
+        let mut attrs = HashMap::new();
+        if let Some(true) = &self.http_request_body_size {
+            if let Some(content_length) = request
+                .router_request
+                .headers()
+                .get(&CONTENT_LENGTH)
+                .and_then(|h| h.to_str().ok())
+            {
+                attrs.insert(
+                    "http.request.body.size".into(),
+                    AttributeValue::String(content_length.to_string()),
+                );
+            }
+        }
+        if let Some(true) = &self.network_protocol_name {
+            attrs.insert(
+                "network.protocol.name".into(),
+                AttributeValue::String("http".to_string()),
+            );
+        }
+        if let Some(true) = &self.network_protocol_version {
+            attrs.insert(
+                "network.protocol.version".into(),
+                AttributeValue::String(format!("{:?}", request.router_request.version())),
+            );
+        }
+        if let Some(true) = &self.network_transport {
+            attrs.insert(
+                "network.protocol.transport".into(),
+                AttributeValue::String("tcp".to_string()),
+            );
+        }
+        if let Some(true) = &self.user_agent_original {
+            if let Some(user_agent) = request
+                .router_request
+                .headers()
+                .get(&USER_AGENT)
+                .and_then(|h| h.to_str().ok())
+            {
+                attrs.insert(
+                    "user_agent.original".into(),
+                    AttributeValue::String(user_agent.to_string()),
+                );
+            }
+        }
+
+        attrs
+    }
+
+    fn on_response(&self, response: &router::Response) -> HashMap<Key, AttributeValue> {
+        let mut attrs = HashMap::new();
+        if let Some(true) = &self.http_response_body_size {
+            if let Some(content_length) = response
+                .response
+                .headers()
+                .get(&CONTENT_LENGTH)
+                .and_then(|h| h.to_str().ok())
+            {
+                attrs.insert(
+                    "http.response.body.size".into(),
+                    AttributeValue::String(content_length.to_string()),
+                );
+            }
+        }
+        if let Some(true) = &self.http_response_status_code {
+            attrs.insert(
+                "http.response.status_code".into(),
+                AttributeValue::String(response.response.status().to_string()),
+            );
+        }
+        attrs
+    }
+
+    fn on_error(&self, error: &BoxError) -> HashMap<Key, AttributeValue> {
+        let mut attrs = HashMap::new();
+        if let Some(true) = &self.error_type {
+            attrs.insert("error.type".into(), AttributeValue::I64(500));
+        }
+
+        attrs
+    }
+}
+
+// Implet get on *CustomAttribute which returns Option<Value>
+// Implement the same trait on Extendable and RouterAttributes

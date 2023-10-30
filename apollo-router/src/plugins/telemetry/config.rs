@@ -71,7 +71,6 @@ pub(crate) struct Conf {
     #[cfg(feature = "telemetry_next")]
     /// Event configuration
     pub(crate) events: config_new::events::Events,
-    #[cfg(feature = "telemetry_next")]
     /// Span configuration
     pub(crate) spans: config_new::spans::Spans,
     #[cfg(feature = "telemetry_next")]
@@ -457,6 +456,7 @@ pub(crate) enum AttributeValue {
     F64(f64),
     /// String values
     String(String),
+    // TODO add static string type support
     /// Array of homogeneous values
     Array(AttributeArray),
 }

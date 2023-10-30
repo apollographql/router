@@ -112,6 +112,7 @@ pub(crate) trait DynAttribute {
 
 impl DynAttribute for ::tracing::Span {
     fn set_dyn_attribute(&self, key: String, value: String) {
+        // TODO match if the span is sampled by otel then put it in oteldata, if not in LogAttributes
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
@@ -135,6 +136,7 @@ impl DynAttribute for ::tracing::Span {
     }
 
     fn set_dyn_attributes(&self, attributes: HashMap<String, String>) {
+        // TODO match if the span is sampled by otel then put it in oteldata, if not in LogAttributes
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {

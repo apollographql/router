@@ -92,6 +92,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::config_new::attributes::GetAttributes;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
@@ -263,6 +264,7 @@ impl Plugin for Telemetry {
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let config = self.config.clone();
         let config_later = self.config.clone();
+        let config_request = self.config.clone();
 
         ServiceBuilder::new()
             .map_response(|response: router::Response|{
@@ -305,9 +307,7 @@ impl Plugin for Telemetry {
                     .and_then(|h| h.to_str().ok())
                     .unwrap_or("");
                 let span = ::tracing::info_span!(ROUTER_SPAN_NAME,
-                    "http.method" = %router_request.method(),
                     "http.route" = %router_request.uri(),
-                    "http.flavor" = ?router_request.version(),
                     "trace_id" = %trace_id,
                     "client.name" = client_name,
                     "client.version" = client_version,
@@ -326,9 +326,12 @@ impl Plugin for Telemetry {
                 span
             })
             // TODO add map_future_with_request_data to log the request
-            .map_future_with_request_data(|_request: &router::Request| {
+            .map_future_with_request_data(move |request: &router::Request| {
+                let custom_attributes = config_request.spans.router.attributes.on_request(request);
                 // TODO fetch attributes for request
-            }, move |_: (), fut| {
+
+                custom_attributes
+            }, move |mut custom_attributes: HashMap<opentelemetry_api::Key, AttributeValue>, fut| {
                 let start = Instant::now();
                 let config = config_later.clone();
 
@@ -350,6 +353,7 @@ impl Plugin for Telemetry {
 
                     let expose_trace_id = &config.tracing.response_trace_id;
                     if let Ok(response) = &response {
+                        custom_attributes.extend(config.spans.router.attributes.on_response(response));
                         if expose_trace_id.enabled {
                             if let Some(header_name) = &expose_trace_id.header_name {
                                 let mut headers: HashMap<String, Vec<String>> = HashMap::new();
@@ -367,6 +371,12 @@ impl Plugin for Telemetry {
                             span.record("otel.status_code", "Ok");
                         }
 
+                    } else if let Err(err) = &response {
+                        custom_attributes.extend(config.spans.router.attributes.on_error(err));
+                    }
+                    // TODO use a better method to add it once and not iterate
+                    for (key, value) in custom_attributes {
+                        span.set_attribute(key, value);
                     }
                     response
                 }
@@ -434,6 +444,7 @@ impl Plugin for Telemetry {
                     let start = Instant::now();
 
                     async move {
+                        // TODO call set_attribute here
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
                         result = Self::update_otel_metrics(
                             config.clone(),
@@ -543,6 +554,7 @@ impl Plugin for Telemetry {
                     // Using Instant because it is guaranteed to be monotonically increasing.
                     let now = Instant::now();
                     f.map(move |result: Result<SubgraphResponse, BoxError>| {
+                        // TODO set_attribute on span
                         Self::store_subgraph_response_attributes(
                             &context,
                             subgraph_attribute,
