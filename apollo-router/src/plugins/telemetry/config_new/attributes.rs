@@ -1,3 +1,4 @@
+use std::any::type_name;
 use std::collections::HashMap;
 
 use schemars::gen::SchemaGenerator;
@@ -37,7 +38,11 @@ where
     E: JsonSchema,
 {
     fn schema_name() -> String {
-        "extendable_attribute".to_string()
+        format!(
+            "extendable_attribute_{}_{}",
+            type_name::<A>(),
+            type_name::<E>()
+        )
     }
 
     fn json_schema(gen: &mut SchemaGenerator) -> Schema {
@@ -169,6 +174,14 @@ pub(crate) enum OperationName {
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum Query {
+    /// The raw query kind.
+    String,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationKind {
     /// The raw operation kind.
     String,
@@ -189,6 +202,14 @@ pub(crate) enum SupergraphCustomAttribute {
     OperationKind {
         /// The operation kind from the query (query|mutation|subscription).
         operation_kind: OperationKind,
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<String>,
+    },
+    Query {
+        /// The graphql query.
+        query: Query,
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -275,6 +296,14 @@ pub(crate) enum SubgraphCustomAttribute {
     SubgraphOperationKind {
         /// The kind of the subgraph operation (query|mutation|subscription).
         subgraph_operation_kind: OperationKind,
+    },
+    SubgraphQuery {
+        /// The graphql query to the subgraph.
+        subgraph_query: Query,
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<String>,
     },
     SubgraphQueryVariable {
         /// The name of a subgraph query variable.
