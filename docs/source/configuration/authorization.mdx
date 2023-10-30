@@ -416,7 +416,7 @@ The `@policy` directive marks fields and types as restricted based on authorizat
 The directive should include a `policies` argument that defines an array of the required policies.
 
 ```graphql
-@policy(policies: ["claims[`roles`].contains(`support`)"])
+@policy(policies: [[]"claims[`roles`].contains(`support`)"]])
 ```
 
 The preceding example includes one policy that requires all roles from the claims object to include the string `"support"`.
@@ -424,8 +424,6 @@ The preceding example includes one policy that requires all roles from the claim
 The Apollo Router extracts the list of policies relevant to a request from the schema. It then stores them in the request's context in `apollo_authorization::policies::required` as a map `policy -> null|true|false`. This process happens at the [`RouterService` level](../customizations/overview#the-request-lifecycle).
 
 You need to provide a Rhai script or a coprocessor at the `SupergraphService` level that evaluates the map, setting the value to `true` if the policy is validated and `false` if not. After that, the router filters the requests' types and fields to only those where the policy is `true`.
-
-> If the `policies` array contains multiple elements, _only one must be successful for the policy to be `true`_.
 
 Like the efficiencies gained via the other authorization directives, if every field on a particular subgraph query is unauthorized because none of its policies pass, this can eliminate entire subgraph requests.
 
@@ -440,7 +438,42 @@ extend schema
     import: [..., "@policy"])
 ```
 
+It is defined as follows:
+
+```graphql
+scalar federation__Policy
+directive @policy(scopes: [[federation__Policy!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+```
+
 Using the `@policy` directive requires a [Supergraph plugin](../customizations/overview) to evaluate the authorization policies. You can do this with a [Rhai script](../customizations/rhai/), [coprocessor](../customizations/coprocessor), or [native plugin](../customizations/native). Refer to the following Rhai script and coprocessor examples for more information.
+
+
+#### Combining policies with `AND`/`OR` logic
+
+A request must include _all_ elements in the inner-level `policies` array to resolve the associated field or type. In other words, the authorization validation uses **AND** logic between the elements in the inner-level `policies` array.
+
+```graphql
+@requiresScopes(policies: [["policy1", "policy2", "policy3"]])
+```
+
+For the preceding example, a request would need `policy1` **AND** `policy2` **AND** `policy3` to be authorized.
+
+You can use nested arrays to introduce **OR** logic:
+
+```graphql
+@requiresScopes(policies: [["policy1"], ["policy2"], ["policy3"]])
+```
+
+For the preceding example, a request would need `policy1` **OR** `policy2` **OR** `policy3` to be authorized.
+
+You can nest arrays and elements as needed to achieve your desired logic. For example:
+
+```graphql
+@policy(policies: [["policy", "policy2"], ["policy3"]])
+```
+
+This syntax requires requests to have either (`policy1` **AND** `policy2`) **OR** just `policy3` to be authorized.
+
 
 ##### Usage with a Rhai script
 
@@ -452,7 +485,7 @@ As an example, the following schema defines policies as boolean expressions that
 
 ```graphql
 type Query {
-  me: User @join__field(graph: ACCOUNTS) @policy(policies: ["claims[`kind`] == `user`"])
+  me: User @join__field(graph: ACCOUNTS) @policy(policies: [["claims[`kind`] == `user`"]])
 }
 
 type User
@@ -460,7 +493,7 @@ type User
   @join__type(graph: ACCOUNTS, key: "id") {
   id: ID! @join__field(graph: ACCOUNTS)
   username: String @join__field(graph: ACCOUNTS)
-  username: String @join__field(graph: ACCOUNTS) @policy(policies: ["claims[`roles`].contains(`support`)"])
+  username: String @join__field(graph: ACCOUNTS) @policy(policies: [["claims[`roles`].contains(`support`)"]])
 }
 ```
 
@@ -495,7 +528,7 @@ Suppose you only want a user with a `read_profile` policy to have access to thei
 
 ```graphql
 type Query {
-  me: User @join__field(graph: ACCOUNTS) @policy(policies: ["read_profile"])
+  me: User @join__field(graph: ACCOUNTS) @policy(policies: [["read_profile"]])
 }
 
 type User
@@ -503,7 +536,7 @@ type User
   @join__type(graph: ACCOUNTS, key: "id") {
   id: ID! @join__field(graph: ACCOUNTS)
   username: String @join__field(graph: ACCOUNTS)
-  credit_card: String @join__field(graph: ACCOUNTS) @policy(policies: ["read_credit_card"])
+  credit_card: String @join__field(graph: ACCOUNTS) @policy(policies: [["read_credit_card"]])
 }
 ```
 
