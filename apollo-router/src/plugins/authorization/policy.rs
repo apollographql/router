@@ -409,10 +409,10 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
             .get(&node.type_condition)
             .is_some_and(|ty| self.is_type_authorized(ty));
 
-        if !fragment_is_authorized && !self.dry_run {
-            Ok(None)
-        } else {
+        if fragment_is_authorized || self.dry_run {
             transform::fragment_definition(self, node)
+        } else {
+            Ok(None)
         }
     }
 

@@ -338,10 +338,10 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
             .get(&node.type_condition)
             .is_some_and(|type_definition| self.is_type_authenticated(type_definition));
 
-        if fragment_requires_authentication && !self.dry_run {
-            Ok(None)
-        } else {
+        if !fragment_requires_authentication || self.dry_run {
             transform::fragment_definition(self, node)
+        } else {
+            Ok(None)
         }
     }
 

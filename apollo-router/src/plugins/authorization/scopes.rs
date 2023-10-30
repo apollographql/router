@@ -464,10 +464,11 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
         // If we modified the transform visitor implementation to modify the fragment definitions before the
         // operations, we would be able to store the list of unauthorized paths per fragment, and at the point
         // of application, generate unauthorized paths starting at the operation root
-        if !fragment_is_authorized && !self.dry_run {
-            Ok(None)
-        } else {
+
+        if fragment_is_authorized || self.dry_run {
             transform::fragment_definition(self, node)
+        } else {
+            Ok(None)
         }
     }
 
