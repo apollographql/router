@@ -16,16 +16,14 @@ use crate::services::supergraph;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[allow(dead_code)]
-#[derive(Clone, Deserialize, Debug)]
-#[serde(default)]
+#[derive(Clone, Deserialize, Debug, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Extendable<A, E>
 where
     A: Default,
 {
-    #[serde(flatten)]
     attributes: A,
 
-    #[serde(flatten)]
     custom: HashMap<String, E>,
 }
 
@@ -35,29 +33,6 @@ impl Extendable<(), ()> {
         A: Default,
     {
         Default::default()
-    }
-}
-
-impl<A, E> JsonSchema for Extendable<A, E>
-where
-    A: Default + JsonSchema,
-    E: JsonSchema,
-{
-    fn schema_name() -> String {
-        "extendable_attribute".to_string()
-    }
-
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        let mut attributes = gen.subschema_for::<A>();
-        let custom = gen.subschema_for::<HashMap<String, E>>();
-        if let Schema::Object(schema) = &mut attributes {
-            if let Some(object) = &mut schema.object {
-                object.additional_properties =
-                    custom.into_object().object().additional_properties.clone();
-            }
-        }
-
-        attributes
     }
 }
 
