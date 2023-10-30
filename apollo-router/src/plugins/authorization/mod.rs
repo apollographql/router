@@ -77,6 +77,9 @@ pub(crate) struct Directives {
     /// enables the `@authenticated` and `@requiresScopes` directives
     #[serde(default = "default_enable_directives")]
     enabled: bool,
+    /// refuse a query entirely if any part would be filtered
+    #[serde(default)]
+    reject_unauthorized: bool,
     /// Log authorization errors
     #[serde(default = "enable_log_errors")]
     log_errors: bool,
@@ -234,9 +237,19 @@ impl AuthorizationPlugin {
     }
 
     pub(crate) fn filter_query(
+        configuration: &Configuration,
         key: &QueryKey,
         schema: &Schema,
     ) -> Result<Option<FilteredQuery>, QueryPlannerError> {
+        let reject_unauthorized = configuration
+            .apollo_plugins
+            .plugins
+            .iter()
+            .find(|(s, _)| s.as_str() == "authorization")
+            .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
+            .and_then(|v| v.get("reject_unauthorized").and_then(|v| v.as_bool()))
+            .unwrap_or(false);
+
         // The filtered query will then be used
         // to generate selections for response formatting, to execute introspection and
         // generating a query plan
@@ -304,6 +317,10 @@ impl AuthorizationPlugin {
                 filtered_doc
             }
         };
+
+        if reject_unauthorized && !unauthorized_paths.is_empty() {
+            return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
+        }
 
         if is_filtered {
             Ok(Some((unauthorized_paths, doc)))

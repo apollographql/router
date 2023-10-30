@@ -532,6 +532,11 @@ expression: "&schema"
               "description": "Log authorization errors",
               "default": true,
               "type": "boolean"
+            },
+            "reject_unauthorized": {
+              "description": "refuse a query entirely if any part would be filtered",
+              "default": false,
+              "type": "boolean"
             }
           }
         },
