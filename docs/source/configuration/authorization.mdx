@@ -87,7 +87,7 @@ type Mutation {
 }
 ```
 
-You can define both directives&mdash;together or separately&mdash;at the field level to fine-tune your access controls.
+You can define both directives&mdash;together or separately&mdash;at the field level to fine-tune your access controls. When directives are declared both on a field and the field's type, they will all be tried, and the field will be removed if any of them does not authorize it.
 GraphOS [composes](#composition-and-federation) restrictions into the supergraph schema so that each subgraph's restrictions are respected.
 The router then enforces these directives on all incoming requests.
 
@@ -182,6 +182,13 @@ extend schema
   @link(
     url: "https://specs.apollo.dev/federation/v2.5",
     import: [..., "@requiresScopes"])
+```
+
+It is defined as follows:
+
+```graphql
+scalar federation__Scope
+directive @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
 
 #### Combining required scopes with `AND`/`OR` logic
@@ -284,6 +291,12 @@ extend schema
   @link(
     url: "https://specs.apollo.dev/federation/v2.5",
     import: [..., "@authenticated"])
+```
+
+It is defined as follows:
+
+```graphql
+directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
 
 #### Example `@authenticated` use case
@@ -610,3 +623,28 @@ You can enable [query deduplication](../configuration/traffic-shaping/#query-ded
 Introspection is turned off in the router by default, [as is best production practice](https://www.apollographql.com/blog/graphql/security/why-you-should-disable-graphql-introspection-in-production/). If you've chosen to [enable it](./overview/#introspection), keep in mind that **authorization directives don't affect introspection**. All fields that require authorization remain visible. However, directives applied to fields _aren't_ visible. If introspection might reveal too much information about internal types, then be sure it hasn't been enabled in your router configuration.
 
 With introspection turned off, you can use GraphOS's [schema registry](/graphos/delivery/) to explore your supergraph schema and empower your teammates to do the same. If you want to completely remove fields from a graph rather than just preventing access (even with introspection on), consider building a [contract graph](/graphos/delivery/contracts/).
+
+## Configuration options
+
+The authorization plugin behaviour can be modified with various options.
+
+### reject_unauthorized
+
+```yaml title="router.yaml"
+authorization:
+  preview_directives:
+    enabled: true
+    reject_unauthorized: true # default: false
+```
+
+This option will entirely reject queries that would have some parts filtered by authorization directives. The response will contain the list of paths that are affected.
+
+### log_errors
+
+```yaml title="router.yaml"
+authorization:
+  preview_directives:
+    log_errors: true
+```
+
+By default, when part of a query is filtered by authorization, the list of filtered paths is added to the response and logged by the router. Filtering parts of a query according to the client's rights may be seen as normal operation, and not warrant investigation by platform operators, so those logs can be disabled.

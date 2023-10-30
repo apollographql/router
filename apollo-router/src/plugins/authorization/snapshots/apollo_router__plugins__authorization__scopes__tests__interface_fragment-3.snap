@@ -22,7 +22,7 @@ query:
 extracted_scopes: {"read:user", "read:username"}
 request scopes: ["read:user", "read:username"]
 filtered:
-query {
+{
   topProducts {
     type
   }
@@ -31,6 +31,7 @@ query {
     ...F
   }
 }
+
 fragment F on User {
   id2: id
   name

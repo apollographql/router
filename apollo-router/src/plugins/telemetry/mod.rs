@@ -124,6 +124,7 @@ use crate::ListenAddr;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
+mod config_new;
 mod endpoint;
 pub(crate) mod formatters;
 pub(crate) mod metrics;
@@ -1776,6 +1777,13 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
     #[cfg(test)]
     let threshold = Duration::from_millis(100);
 
+    // For now we have to suppress Metrics error: reader is shut down or not registered
+    // https://github.com/open-telemetry/opentelemetry-rust/issues/1244
+    if let opentelemetry::global::Error::Metric(err) = &err {
+        if err.to_string() == "Metrics error: reader is shut down or not registered" {
+            return;
+        }
+    }
     // Copy here so that we don't retain a mutable reference into the dashmap and lock the shard
     let now = Instant::now();
     let last_logged = *last_logged_map
@@ -1793,9 +1801,7 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
                 ::tracing::error!("OpenTelemetry trace error occurred: {}", err)
             }
             opentelemetry::global::Error::Metric(err) => {
-                if err.to_string() != "Metrics error: reader is shut down or not registered" {
-                    ::tracing::error!("OpenTelemetry metric error occurred: {}", err)
-                }
+                ::tracing::error!("OpenTelemetry metric error occurred: {}", err)
             }
             opentelemetry::global::Error::Other(err) => {
                 ::tracing::error!("OpenTelemetry error occurred: {}", err)
