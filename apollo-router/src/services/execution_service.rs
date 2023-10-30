@@ -236,14 +236,14 @@ impl ExecutionService {
 
         tracing::debug_span!("format_response").in_scope(|| {
             let mut paths = Vec::new();
+            if ! query.unauthorized.paths.is_empty() {
+                if query.unauthorized.log_errors {
+                    let unauthorized_paths = query.unauthorized.paths.iter().map(|path| path.to_string()).collect::<Vec<_>>();
 
-            if ! query.unauthorized_paths.is_empty() {
-                let unauthorized_paths = query.unauthorized_paths.iter().map(|path| path.to_string()).collect::<Vec<_>>();
-                if !unauthorized_paths.is_empty() {
                     event!(Level::ERROR, unauthorized_query_paths = ?unauthorized_paths, "Authorization error",);
                 }
 
-                for path in &query.unauthorized_paths {
+                for path in &query.unauthorized.paths {
                     response.errors.push(Error::builder()
                     .message("Unauthorized field or type")
                     .path(path.clone())

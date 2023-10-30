@@ -639,14 +639,24 @@ authorization:
 
 This option will entirely reject queries that would have some parts filtered by authorization directives. The response will contain the list of paths that are affected.
 
+### log_errors
+
+```yaml title="router.yaml"
+authorization:
+  preview_directives:
+    enabled: true
+    log_errors: true
+```
+
+By default, when part of a query is filtered by authorization, the list of filtered paths is added to the response and logged by the router. Filtering parts of a query according to the client's rights may be seen as normal operation, and not warrant investigation by platform operators, so those logs can be disabled.
+
 ### dry_run
 
 ```yaml title="router.yaml"
 authorization:
   preview_directives:
     enabled: true
-    dry_run: true # default: false
+  dry_run: true # default: false
 ```
 
 This option executes the authorization directives without modifying the query: it only generates the list of unauthorized paths and returns it as part of the response. This is a way to evaluate the impact of authorization policies without breaking existing traffic.
-
