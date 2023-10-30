@@ -1,9 +1,8 @@
 ---
 title: Apollo Router support for @defer
 description: Improve performance by delivering fields incrementally
+minVersion: 1.8.0
 ---
-
-> 📣 **Defer support is generally available as of Apollo Router v1.8.0.** [Learn more about launch stages.](/resources/product-launch-stages)
 
 Queries sent to the Apollo Router can use the `@defer` directive to enable the incremental delivery of response data. By deferring data for some fields, the router can resolve and return data for the query's _other_ fields more quickly, improving responsiveness.
 

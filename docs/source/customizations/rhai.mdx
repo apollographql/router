@@ -3,15 +3,15 @@ title: Rhai scripts for the Apollo Router
 description: Add custom functionality directly to your router
 ---
 
-You can customize the Apollo Router's behavior with scripts that use the [Rhai scripting language](https://rhai.rs/book/). Rhai is ideal for performing common scripting tasks (manipulating strings, processing headers, etc.) in a Rust-based project.
+You can customize the Apollo Router's behavior with scripts that use the [Rhai scripting language](https://rhai.rs/book/). In a Rust-based project, Rhai is ideal for performing common scripting tasks such as manipulating strings and processing headers. Your Rhai scripts can also hook into multiple stages of the router's [request handling lifecycle](#router-request-lifecycle).
 
-> To start familiarizing yourself with Rhai, see the [language reference](https://rhai.rs/book/language/) and some basic [syntax examples](https://rhai.rs/book/start/examples/scripts.html).
+## Rhai language reference
 
-Your Rhai scripts can hook into multiple stages of the Apollo Router's [request-handling lifecycle](#router-request-lifecycle).
+To learn about Rhai, see the [Rhai language reference](https://rhai.rs/book/language/) and some [example scripts](https://rhai.rs/book/start/examples/scripts.html).
 
 ## Use cases
 
-Common use cases for Apollo Router Rhai scripts include:
+Common use cases for Rhai scripts in Apollo Router include:
 
 * Modifying the details of HTTP requests and responses. This includes requests sent from clients to your router, along with requests sent from your router to your subgraphs. You can modify any combination of the following:
     * Request and response bodies
