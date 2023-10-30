@@ -10,16 +10,14 @@ use crate::plugins::telemetry::config::AttributeValue;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[allow(dead_code)]
-#[derive(Clone, Deserialize, Debug)]
-#[serde(default)]
+#[derive(Clone, Deserialize, Debug, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Extendable<A, E>
 where
     A: Default,
 {
-    #[serde(flatten)]
     attributes: A,
 
-    #[serde(flatten)]
     custom: HashMap<String, E>,
 }
 
@@ -32,32 +30,6 @@ impl Extendable<(), ()> {
     }
 }
 
-impl<A, E> JsonSchema for Extendable<A, E>
-where
-    A: Default + JsonSchema,
-    E: JsonSchema,
-{
-    fn schema_name() -> String {
-        format!(
-            "extendable_attribute_{}_{}",
-            type_name::<A>(),
-            type_name::<E>()
-        )
-    }
-
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        let mut attributes = gen.subschema_for::<A>();
-        let custom = gen.subschema_for::<HashMap<String, E>>();
-        if let Schema::Object(schema) = &mut attributes {
-            if let Some(object) = &mut schema.object {
-                object.additional_properties =
-                    custom.into_object().object().additional_properties.clone();
-            }
-        }
-
-        attributes
-    }
-}
 
 impl<A, E> Default for Extendable<A, E>
 where
