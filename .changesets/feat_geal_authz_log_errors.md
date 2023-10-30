@@ -2,7 +2,7 @@
 
 Authorization errors can be seen as common usage of the service when filtering fields from queries depending on the client's rights, so they might not warrant error logs to be analyzed by the router operators
 
-THos logs can be disabled in the configuration:
+Those logs can be disabled in the configuration:
 
 ```yaml
 authorization:
