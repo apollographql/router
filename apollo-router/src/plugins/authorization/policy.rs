@@ -3,7 +3,8 @@
 //! Implementation of the `@policy` directive:
 //!
 //! ```graphql
-//! directive @policy(policies: [String!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+//! scalar federation__Policy
+//! directive @policy(policies: [[federation__Policy!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 //! ```
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -66,8 +67,12 @@ fn policy_argument(
 ) -> impl Iterator<Item = String> + '_ {
     opt_directive
         .and_then(|directive| directive.as_ref().argument_by_name("policies"))
+        // outer array
         .and_then(|value| value.as_list())
         .into_iter()
+        .flatten()
+        // inner array
+        .filter_map(|value| value.as_list())
         .flatten()
         .filter_map(|v| v.as_str().map(str::to_owned))
 }
@@ -147,6 +152,25 @@ pub(crate) struct PolicyFilteringVisitor<'a> {
     policy_directive_name: String,
 }
 
+fn policies_sets_argument(
+    directive: &ast::Directive,
+) -> impl Iterator<Item = HashSet<String>> + '_ {
+    directive
+        .argument_by_name("policies")
+        // outer array
+        .and_then(|value| value.as_list())
+        .into_iter()
+        .flatten()
+        // inner array
+        .filter_map(|value| {
+            value.as_list().map(|list| {
+                list.iter()
+                    .filter_map(|value| value.as_str().map(str::to_owned))
+                    .collect()
+            })
+        })
+}
+
 impl<'a> PolicyFilteringVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
@@ -171,18 +195,20 @@ impl<'a> PolicyFilteringVisitor<'a> {
     }
 
     fn is_field_authorized(&mut self, field: &schema::FieldDefinition) -> bool {
-        let field_policies = policy_argument(field.directives.get(&self.policy_directive_name))
-            .collect::<HashSet<_>>();
+        if let Some(directive) = field.directives.get(&self.policy_directive_name) {
+            let mut field_policies_sets = policies_sets_argument(directive);
 
-        // The field is authorized if any of the policies succeeds
-        if !field_policies.is_empty()
-            && self
-                .request_policies
-                .intersection(&field_policies)
-                .next()
-                .is_none()
-        {
-            return false;
+            // The outer array acts like a logical OR: if any of the inner arrays of policies matches, the field
+            // is authorized.
+            // On an empty set, all returns true, so we must check that case separately
+            let mut empty = true;
+            if field_policies_sets.all(|policies_set| {
+                empty = false;
+                !self.request_policies.is_superset(&policies_set)
+            }) && !empty
+            {
+                return false;
+            }
         }
 
         if let Some(ty) = self.schema.types.get(field.ty.inner_named_type()) {
@@ -193,15 +219,23 @@ impl<'a> PolicyFilteringVisitor<'a> {
     }
 
     fn is_type_authorized(&self, ty: &schema::ExtendedType) -> bool {
-        let type_policies = policy_argument(ty.directives().get(&self.policy_directive_name))
-            .collect::<HashSet<_>>();
-        // The field is authorized if any of the policies succeeds
-        type_policies.is_empty()
-            || self
-                .request_policies
-                .intersection(&type_policies)
-                .next()
-                .is_some()
+        match ty.directives().get(&self.policy_directive_name) {
+            None => true,
+            Some(directive) => {
+                let mut type_policies_sets = policies_sets_argument(directive);
+
+                // The outer array acts like a logical OR: if any of the inner arrays of policies matches, the field
+                // is authorized.
+                // On an empty set, any returns false, so we must check that case separately
+                let mut empty = true;
+                let res = type_policies_sets.any(|policies_set| {
+                    empty = false;
+                    self.request_policies.is_superset(&policies_set)
+                });
+
+                empty || res
+            }
+        }
     }
 
     fn implementors_with_different_requirements(
@@ -235,7 +269,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
         t: &schema::ExtendedType,
     ) -> bool {
         if t.is_interface() {
-            let mut policies: Option<Vec<String>> = None;
+            let mut policies_sets: Option<Vec<Vec<String>>> = None;
 
             for ty in self
                 .implementers_map
@@ -244,23 +278,29 @@ impl<'a> PolicyFilteringVisitor<'a> {
                 .flatten()
                 .filter_map(|ty| self.schema.types.get(ty))
             {
-                // aggregate the list of scope sets
+                // aggregate the list of policies sets
                 // we transform to a common representation of sorted vectors because the element order
                 // of hashsets is not stable
-                let field_policies = ty
+                let ty_policies_sets = ty
                     .directives()
                     .get(&self.policy_directive_name)
                     .map(|directive| {
-                        let mut v = policy_argument(Some(directive)).collect::<Vec<_>>();
+                        let mut v = policies_sets_argument(directive)
+                            .map(|h| {
+                                let mut v = h.into_iter().collect::<Vec<_>>();
+                                v.sort();
+                                v
+                            })
+                            .collect::<Vec<_>>();
                         v.sort();
                         v
                     })
                     .unwrap_or_default();
 
-                match &policies {
-                    None => policies = Some(field_policies),
+                match &policies_sets {
+                    None => policies_sets = Some(ty_policies_sets),
                     Some(other_policies) => {
-                        if field_policies != *other_policies {
+                        if ty_policies_sets != *other_policies {
                             return true;
                         }
                     }
@@ -278,25 +318,31 @@ impl<'a> PolicyFilteringVisitor<'a> {
     ) -> bool {
         if let Some(t) = self.schema.types.get(parent_type) {
             if t.is_interface() {
-                let mut policies: Option<Vec<String>> = None;
+                let mut policies_sets: Option<Vec<Vec<String>>> = None;
 
                 for ty in self.implementers_map.get(parent_type).into_iter().flatten() {
                     if let Ok(f) = self.schema.type_field(ty, &field.name) {
-                        // aggregate the list of scope sets
+                        // aggregate the list of policies sets
                         // we transform to a common representation of sorted vectors because the element order
                         // of hashsets is not stable
                         let field_policies = f
                             .directives
                             .get(&self.policy_directive_name)
                             .map(|directive| {
-                                let mut v = policy_argument(Some(directive)).collect::<Vec<_>>();
+                                let mut v = policies_sets_argument(directive)
+                                    .map(|h| {
+                                        let mut v = h.into_iter().collect::<Vec<_>>();
+                                        v.sort();
+                                        v
+                                    })
+                                    .collect::<Vec<_>>();
                                 v.sort();
                                 v
                             })
                             .unwrap_or_default();
 
-                        match &policies {
-                            None => policies = Some(field_policies),
+                        match &policies_sets {
+                            None => policies_sets = Some(field_policies),
                             Some(other_policies) => {
                                 if field_policies != *other_policies {
                                     return true;
@@ -321,14 +367,18 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
             match ty.directives.get(&self.policy_directive_name) {
                 None => true,
                 Some(directive) => {
-                    let type_policies = policy_argument(Some(directive)).collect::<HashSet<_>>();
-                    // The field is authorized if any of the policies succeeds
-                    type_policies.is_empty()
-                        || self
-                            .request_policies
-                            .intersection(&type_policies)
-                            .next()
-                            .is_some()
+                    let mut type_policies_sets = policies_sets_argument(directive);
+
+                    // The outer array acts like a logical OR: if any of the inner arrays of policies matches, the field
+                    // is authorized.
+                    // On an empty set, any returns false, so we must check that case separately
+                    let mut empty = true;
+                    let res = type_policies_sets.any(|policies_set| {
+                        empty = false;
+                        self.request_policies.is_superset(&policies_set)
+                    });
+
+                    empty || res
                 }
             }
         } else {
@@ -501,7 +551,7 @@ mod tests {
       mutation: Mutation
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-    directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @policy(policies: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
     scalar link__Import
       enum link__Purpose {
     """
@@ -517,13 +567,13 @@ mod tests {
 
     type Query {
       topProducts: Product
-      customer: User
-      me: User @policy(policies: ["profile"])
+      customer: User @policy(policies: [["read user", "internal"], ["admin"]])
+      me: User @policy(policies: [["profile"]])
       itf: I
     }
 
-    type Mutation @policy(policies: ["mut"]) {
-        ping: User @policy(policies: ["ping"])
+    type Mutation @policy(policies: [["mut"]]) {
+        ping: User @policy(policies: [["ping"]])
         other: String
     }
 
@@ -539,16 +589,16 @@ mod tests {
       publicReviews: [Review]
     }
 
-    scalar Internal @policy(policies: ["internal"]) @specifiedBy(url: "http///example.com/test")
+    scalar Internal @policy(policies: [["internal"]]) @specifiedBy(url: "http///example.com/test")
 
-    type Review @policy(policies: ["review"]) {
+    type Review @policy(policies: [["review"]]) {
         body: String
         author: User
     }
 
-    type User implements I @policy(policies: ["read user"]) {
+    type User implements I @policy(policies: [["read user"]]) {
       id: ID
-      name: String @policy(policies: ["read username"])
+      name: String @policy(policies: [["read username"]])
     }
     "#;
 
@@ -908,6 +958,74 @@ mod tests {
         });
     }
 
+    #[test]
+    fn or_and() {
+        static QUERY: &str = r#"
+        {
+            customer {
+                id
+            }
+        }
+        "#;
+
+        let extracted_policies = extract(BASIC_SCHEMA, QUERY);
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
+            result: doc,
+            paths
+        });
+
+        let (doc, paths) = filter(
+            BASIC_SCHEMA,
+            QUERY,
+            ["read user".to_string(), "internal".to_string()]
+                .into_iter()
+                .collect(),
+        );
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: ["read user".to_string(), "internal".to_string()]
+                .into_iter()
+                .collect(),
+            result: doc,
+            paths
+        });
+
+        let (doc, paths) = filter(
+            BASIC_SCHEMA,
+            QUERY,
+            ["read user".to_string()].into_iter().collect(),
+        );
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: ["read user".to_string(),].into_iter().collect(),
+            result: doc,
+            paths
+        });
+
+        let (doc, paths) = filter(
+            BASIC_SCHEMA,
+            QUERY,
+            ["admin".to_string(), "read user".to_string()]
+                .into_iter()
+                .collect(),
+        );
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: ["admin".to_string(), "read user".to_string()]
+                .into_iter()
+                .collect(),
+            result: doc,
+            paths
+        });
+    }
+
     static INTERFACE_SCHEMA: &str = r#"
     schema
       @link(url: "https://specs.apollo.dev/link/v1.0")
@@ -917,7 +1035,7 @@ mod tests {
       query: Query
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-    directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @policy(policies: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
     directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
     scalar link__Import
       enum link__Purpose {
@@ -936,14 +1054,14 @@ mod tests {
         test: String
         itf: I!
     }
-    interface I @policy(policies: ["itf"]) {
+    interface I @policy(policies: [["itf"]]) {
         id: ID
     }
-    type A implements I @policy(policies: ["a"]) {
+    type A implements I @policy(policies: [["a"]]) {
         id: ID
         a: String
     }
-    type B implements I @policy(policies: ["b"]) {
+    type B implements I @policy(policies: [["b"]]) {
         id: ID
         b: String
     }
@@ -1043,7 +1161,7 @@ mod tests {
       query: Query
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-    directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @policy(policies: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
     directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
     scalar link__Import
       enum link__Purpose {
@@ -1067,12 +1185,12 @@ mod tests {
         other: String
     }
     type A implements I {
-        id: ID @policy(policies: ["a"])
+        id: ID @policy(policies: [["a"]])
         other: String
         a: String
     }
     type B implements I {
-        id: ID @policy(policies: ["b"])
+        id: ID @policy(policies: [["b"]])
         other: String
         b: String
     }
@@ -1138,7 +1256,7 @@ mod tests {
           query: Query
         }
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-        directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+        directive @policy(policies: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
         directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
         scalar link__Import
           enum link__Purpose {
@@ -1158,10 +1276,10 @@ mod tests {
             uni: I!
         }
         union I = A | B
-        type A @policy(policies: ["a"]) {
+        type A @policy(policies: [["a"]]) {
             id: ID
         }
-        type B @policy(policies: ["b"]) {
+        type B @policy(policies: [["b"]]) {
             id: ID
         }
         "#;
@@ -1205,7 +1323,7 @@ mod tests {
           mutation: Mutation
       }
       directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-      directive @policies(policies: [String!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+      directive @policies(policies: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
       scalar link__Import
         enum link__Purpose {
       """
@@ -1222,11 +1340,11 @@ mod tests {
       type Query {
         topProducts: Product
         customer: User
-        me: User @policies(policies: ["profile"])
+        me: User @policies(policies: [["profile"]])
         itf: I
       }
-      type Mutation @policies(policies: ["mut"]) {
-          ping: User @policies(policies: ["ping"])
+      type Mutation @policies(policies: [["mut"]]) {
+          ping: User @policies(policies: [["ping"]])
           other: String
       }
       interface I {
@@ -1239,14 +1357,14 @@ mod tests {
         internal: Internal
         publicReviews: [Review]
       }
-      scalar Internal @policies(policies: ["internal", "test"]) @specifiedBy(url: "http///example.com/test")
+      scalar Internal @policies(policies: [["internal"], ["test"]]) @specifiedBy(url: "http///example.com/test")
       type Review @policies(policies: ["review"]) {
           body: String
           author: User
       }
-      type User implements I @policies(policies: ["read:user"]) {
+      type User implements I @policies(policies: [["read:user"]]) {
         id: ID
-        name: String @policies(policies: ["read:username"])
+        name: String @policies(policies: [["read:username"]])
       }
       "#;
 

@@ -3,7 +3,8 @@
 //! Implementation of the `@requiresScopes` directive:
 //!
 //! ```graphql
-//! directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+//! scalar federation__Scope
+//! directive @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 //! ```
 use std::collections::HashMap;
 use std::collections::HashSet;
