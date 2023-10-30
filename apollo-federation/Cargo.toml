@@ -1,12 +1,5 @@
 [workspace]
 
-members = [
-  "apollo-federation",
-  "apollo-harness",
-]
-
-default-members = [
-  "apollo-federation",
-]
+members = ["apollo-federation"]
 
 resolver = "2"
