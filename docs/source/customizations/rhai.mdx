@@ -493,6 +493,10 @@ The Apollo Router requires that its Rhai engine implements the [sync feature](ht
 
 This is particularly risky when using closures within callbacks while referencing external data. Take particular care to avoid this kind of situation by making copies of data when required. The [examples/surrogate-cache-key directory](https://github.com/apollographql/router/tree/main/examples/surrogate-cache-key) contains an example of this, where "closing over" `response.headers` would cause a deadlock. To avoid this, a local copy of the required data is obtained and used in the closure.
 
+### Services
+
+Callbacks of `router_service` cannot access the body of a request or response. At the router service stage, a request or response body is an opaque sequence of bytes.
+
 ## Debugging
 
 ### Understanding errors
@@ -505,4 +509,4 @@ Syntax highlighting can make it easier to spot errors in a script. We recommend 
 
 ### Logging
 
-For tracking down runtime errors, insert [logging](/docs/router/customizations/rhai-api#logging) statements to narrow down the issue.
+For tracking down runtime errors, insert [logging](./rhai-api#logging) statements to narrow down the issue.

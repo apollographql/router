@@ -54,7 +54,7 @@ As shown in the diagram above, the `RouterService`, `SupergraphService` and `Sub
 
 Each supported service can send its coprocessor requests at two different **stages**:
 
-- As excecution proceeds "down" from the client to individual subgraphs
+- As execution proceeds "down" from the client to individual subgraphs
     - Here, the coprocessor can inspect and modify details of requests before  GraphQL operations are processed.
     - The coprocessor can also instruct the router to [_terminate_ a client request](#terminating-a-client-request) immediately.
 - As execution proceeds back "up" from subgraphs to the client
