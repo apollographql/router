@@ -12,7 +12,7 @@ We will promote hook points from private to unstable to public as we gain confid
 
 ## Hook points that could be introduced
 
-1. Query planning - Allows plugins tom implement caching, or other optimizations.
+1. Query planning - Allows plugins to implement caching, or other optimizations.
 2. Validation - Allows plugins to place additional constraints on the query before hitting the query planner.
 3. Parse - Allows plugins to modify the query before it is parsed. e.g. APQ or persisted queries.
 4. Http subgraph request - Allows signing of subgraph requests to take place.
