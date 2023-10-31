@@ -37,6 +37,7 @@ use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
+use opentelemetry_api::Key;
 use parking_lot::Mutex;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
@@ -64,7 +65,6 @@ use self::apollo_exporter::Sender;
 use self::config::Conf;
 use self::config::Sampler;
 use self::config::SamplerOption;
-use self::dynamic_attribute::DynAttribute;
 use self::formatters::json::Json;
 use self::formatters::json::JsonFields;
 use self::formatters::text::TextFormatter;
@@ -318,11 +318,6 @@ impl Plugin for Telemetry {
                     "apollo_private.http.response_headers" = field::Empty
                 );
 
-                // TODO The part where we add dynamic attribute for logs and spans
-                span.set_attribute(String::from("custom_router_attribute_header"), headers.get("host").and_then(|h| h.to_str().ok()).map(|h| h.to_string()).unwrap_or_default());
-                // Add dyn attribute for logs
-                span.set_dyn_attribute(String::from("custom_router_attribute_header"), headers.get("host").and_then(|h| h.to_str().ok()).map(|h| h.to_string()).unwrap_or_default());
-
                 span
             })
             // TODO add map_future_with_request_data to log the request
@@ -433,7 +428,7 @@ impl Plugin for Telemetry {
                     Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
                     (req.context.clone(), custom_attributes)
                 },
-                move |(ctx, mut custom_attributes): (Context, HashMap<opentelemetry_api::Key, AttributeValue>), fut| {
+                move |(ctx, mut custom_attributes): (Context, HashMap<Key, AttributeValue>), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -493,6 +488,8 @@ impl Plugin for Telemetry {
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+        let config = self.config.clone();
+        let conf = self.config.clone();
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
@@ -502,25 +499,9 @@ impl Plugin for Telemetry {
         let name = name.to_owned();
         let subgraph_name_arc = Arc::new(name.to_owned());
         ServiceBuilder::new()
-            .instrument(move |req: &SubgraphRequest| {
-                let query = req
-                    .subgraph_request
-                    .body()
-                    .query
-                    .as_deref()
-                    .unwrap_or_default();
-                let operation_name = req
-                    .subgraph_request
-                    .body()
-                    .operation_name
-                    .as_deref()
-                    .unwrap_or_default();
-
+            .instrument(move |_req: &SubgraphRequest| {
                 info_span!(
                     SUBGRAPH_SPAN_NAME,
-                    "apollo.subgraph.name" = name.as_str(),
-                    graphql.document = query,
-                    graphql.operation.name = operation_name,
                     "otel.kind" = "INTERNAL",
                     "apollo_private.ftv1" = field::Empty
                 )
@@ -543,18 +524,41 @@ impl Plugin for Telemetry {
                         sub_request,
                     );
                     let cache_attributes = sub_request.context.private_entries.lock().remove();
+                    let custom_attributes =
+                        config.spans.subgraph.attributes.on_request(sub_request);
 
-                    (sub_request.context.clone(), cache_attributes)
+                    (
+                        sub_request.context.clone(),
+                        cache_attributes,
+                        custom_attributes,
+                    )
                 },
-                move |(context, cache_attributes): (Context, Option<CacheAttributes>),
+                move |(context, cache_attributes, mut custom_attributes): (
+                    Context,
+                    Option<CacheAttributes>,
+                    HashMap<Key, AttributeValue>,
+                ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let subgraph_attribute = subgraph_attribute.clone();
                     let subgraph_metrics_conf = subgraph_metrics_conf_resp.clone();
                     let counter = counter.clone();
+                    let conf = conf.clone();
                     // Using Instant because it is guaranteed to be monotonically increasing.
                     let now = Instant::now();
                     f.map(move |result: Result<SubgraphResponse, BoxError>| {
-                        // TODO set_attribute on span
+                        let span = Span::current();
+                        match &result {
+                            Ok(resp) => custom_attributes
+                                .extend(conf.spans.subgraph.attributes.on_response(resp)),
+                            Err(err) => custom_attributes
+                                .extend(conf.spans.subgraph.attributes.on_error(err)),
+                        }
+
+                        // TODO use a better method to add it once and not iterate
+                        for (key, value) in custom_attributes {
+                            span.set_attribute(key, value);
+                        }
+
                         Self::store_subgraph_response_attributes(
                             &context,
                             subgraph_attribute,

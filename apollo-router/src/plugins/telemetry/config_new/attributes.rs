@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use access_json::JSONQuery;
 use http::header::CONTENT_LENGTH;
 use http::header::USER_AGENT;
 use opentelemetry_api::Key;
@@ -10,10 +11,12 @@ use tower::BoxError;
 
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
+use crate::plugin::serde::deserialize_json_query;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::tracer::TraceId;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[allow(dead_code)]
@@ -181,8 +184,6 @@ pub(crate) enum SupergraphCustomAttribute {
         #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
     },
     QueryVariable {
         /// The name of a graphql query variable.
@@ -273,16 +274,18 @@ pub(crate) enum SubgraphCustomAttribute {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
     SubgraphResponseBody {
         /// The subgraph response body json path.
-        subgraph_response_body: String,
+        #[schemars(with = "String")]
+        #[serde(deserialize_with = "deserialize_json_query")]
+        subgraph_response_body: JSONQuery,
         #[serde(skip)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
     SubgraphRequestHeader {
         /// The name of the subgraph request header.
@@ -291,7 +294,7 @@ pub(crate) enum SubgraphCustomAttribute {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
     SubgraphResponseHeader {
         /// The name of the subgraph response header.
@@ -300,7 +303,7 @@ pub(crate) enum SubgraphCustomAttribute {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
 
     SupergraphOperationName {
@@ -323,16 +326,7 @@ pub(crate) enum SubgraphCustomAttribute {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<String>,
-    },
-    SupergraphResponseBody {
-        /// The supergraph response body json path.
-        supergraph_response_body: String,
-        #[serde(skip)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
     SupergraphRequestHeader {
         /// The supergraph request header name.
@@ -341,7 +335,7 @@ pub(crate) enum SubgraphCustomAttribute {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
     SupergraphResponseHeader {
         /// The supergraph response header name.
@@ -350,7 +344,7 @@ pub(crate) enum SubgraphCustomAttribute {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
     RequestContext {
         /// The request context key.
@@ -438,19 +432,19 @@ pub(crate) struct SubgraphAttributes {
     /// * products
     /// Requirement level: Required
     #[serde(rename = "graphql.federation.subgraph.name")]
-    graphql_federation_subgraph_name: Option<bool>,
+    pub(crate) graphql_federation_subgraph_name: Option<bool>,
     /// The GraphQL document being executed.
     /// Examples:
     /// * query findBookById { bookById(id: ?) { name } }
     /// Requirement level: Recommended
     #[serde(rename = "graphql.document")]
-    graphql_document: Option<bool>,
+    pub(crate) graphql_document: Option<bool>,
     /// The name of the operation being executed.
     /// Examples:
     /// * findBookById
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.name")]
-    graphql_operation_name: Option<bool>,
+    pub(crate) graphql_operation_name: Option<bool>,
     /// The type of the operation being executed.
     /// Examples:
     /// * query
@@ -458,7 +452,7 @@ pub(crate) struct SubgraphAttributes {
     /// * mutation
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.type")]
-    graphql_operation_type: Option<bool>,
+    pub(crate) graphql_operation_type: Option<bool>,
 }
 
 /// Common attributes for http server and client.
@@ -763,11 +757,18 @@ impl GetAttribute<router::Request, router::Response> for RouterCustomAttribute {
                 .ok()
                 .map(AttributeValue::String)
                 .or_else(|| default.clone().map(AttributeValue::String)),
-            RouterCustomAttribute::TraceId { trace_id } => todo!(),
+            RouterCustomAttribute::TraceId {
+                trace_id: trace_id_format,
+            } => {
+                let trace_id = TraceId::maybe_new()?;
+                match trace_id_format {
+                    TraceIdFormat::OpenTelemetry => AttributeValue::String(trace_id.to_string()),
+                    TraceIdFormat::Datadog => AttributeValue::U128(trace_id.to_u128()),
+                }
+                .into()
+            }
             RouterCustomAttribute::Baggage {
-                baggage,
-                redact,
-                default,
+                baggage, default, ..
             } => todo!(),
             // Related to Response
             _ => None,
@@ -796,11 +797,8 @@ impl GetAttribute<router::Request, router::Response> for RouterCustomAttribute {
                 .ok()
                 .flatten()
                 .or_else(|| default.clone()),
-            RouterCustomAttribute::TraceId { trace_id } => todo!(),
             RouterCustomAttribute::Baggage {
-                baggage,
-                redact,
-                default,
+                baggage, default, ..
             } => todo!(),
             _ => None,
         }
@@ -809,19 +807,15 @@ impl GetAttribute<router::Request, router::Response> for RouterCustomAttribute {
 
 impl GetAttributes<router::Request, router::Response> for RouterAttributes {
     fn on_request(&self, request: &router::Request) -> HashMap<Key, AttributeValue> {
-        let mut attrs = self.common.on_request(request);
-
-        attrs
+        self.common.on_request(request)
     }
 
     fn on_response(&self, response: &router::Response) -> HashMap<Key, AttributeValue> {
-        let mut attrs = self.common.on_response(response);
-        attrs
+        self.common.on_response(response)
     }
 
     fn on_error(&self, error: &BoxError) -> HashMap<Key, AttributeValue> {
-        let mut attrs = self.common.on_error(error);
-        attrs
+        self.common.on_error(error)
     }
 }
 
@@ -900,7 +894,7 @@ impl GetAttributes<router::Request, router::Response> for HttpCommonAttributes {
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> HashMap<Key, AttributeValue> {
+    fn on_error(&self, _error: &BoxError) -> HashMap<Key, AttributeValue> {
         let mut attrs = HashMap::new();
         if let Some(true) = &self.error_type {
             attrs.insert("error.type".into(), AttributeValue::I64(500));
@@ -926,12 +920,9 @@ impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphCusto
                     OperationName::Hash => todo!(),
                 }
             }
-            SupergraphCustomAttribute::OperationKind { default, .. } => request
-                .context
-                .get(OPERATION_KIND)
-                .ok()
-                .flatten()
-                .or_else(|| default.clone().map(AttributeValue::String)),
+            SupergraphCustomAttribute::OperationKind { .. } => {
+                request.context.get(OPERATION_KIND).ok().flatten()
+            }
             SupergraphCustomAttribute::QueryVariable {
                 query_variable,
                 default,
@@ -989,6 +980,152 @@ impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphCusto
                 .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
                 .or_else(|| default.clone()),
             SupergraphCustomAttribute::ResponseContext {
+                response_context,
+                default,
+                ..
+            } => response
+                .context
+                .get(response_context)
+                .ok()
+                .flatten()
+                .or_else(|| default.clone()),
+            // For request
+            _ => None,
+        }
+    }
+}
+
+impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphCustomAttribute {
+    fn on_request(&self, request: &subgraph::Request) -> Option<AttributeValue> {
+        match self {
+            SubgraphCustomAttribute::SubgraphOperationName {
+                subgraph_operation_name,
+                default,
+                ..
+            } => {
+                let op_name = request.subgraph_request.body().operation_name.clone();
+                match subgraph_operation_name {
+                    OperationName::String => op_name
+                        .map(AttributeValue::String)
+                        .or_else(|| default.clone().map(AttributeValue::String)),
+                    OperationName::Hash => todo!(),
+                }
+            }
+            SubgraphCustomAttribute::SupergraphOperationName {
+                supergraph_operation_name,
+                default,
+                ..
+            } => {
+                let op_name = request.context.get(OPERATION_NAME).ok().flatten();
+                match supergraph_operation_name {
+                    OperationName::String => {
+                        op_name.or_else(|| default.clone().map(AttributeValue::String))
+                    }
+                    OperationName::Hash => todo!(),
+                }
+            }
+            SubgraphCustomAttribute::SubgraphOperationKind { .. } => AttributeValue::String(
+                request
+                    .operation_kind
+                    .as_apollo_operation_type()
+                    .to_string(),
+            )
+            .into(),
+            SubgraphCustomAttribute::SupergraphOperationKind { .. } => {
+                request.context.get(OPERATION_KIND).ok().flatten()
+            }
+            SubgraphCustomAttribute::SubgraphQueryVariable {
+                subgraph_query_variable,
+                default,
+                ..
+            } => request
+                .subgraph_request
+                .body()
+                .variables
+                .get(&ByteString::from(subgraph_query_variable.as_str()))
+                .and_then(|v| serde_json::to_string(v).ok())
+                .map(AttributeValue::String)
+                .or_else(|| default.clone()),
+            SubgraphCustomAttribute::SupergraphQueryVariable {
+                supergraph_query_variable,
+                default,
+                ..
+            } => request
+                .supergraph_request
+                .body()
+                .variables
+                .get(&ByteString::from(supergraph_query_variable.as_str()))
+                .and_then(|v| serde_json::to_string(v).ok())
+                .map(AttributeValue::String)
+                .or_else(|| default.clone()),
+            SubgraphCustomAttribute::SubgraphRequestHeader {
+                subgraph_request_header,
+                default,
+                ..
+            } => request
+                .subgraph_request
+                .headers()
+                .get(subgraph_request_header)
+                .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
+                .or_else(|| default.clone()),
+            SubgraphCustomAttribute::SupergraphRequestHeader {
+                supergraph_request_header,
+                default,
+                ..
+            } => request
+                .supergraph_request
+                .headers()
+                .get(supergraph_request_header)
+                .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
+                .or_else(|| default.clone()),
+            SubgraphCustomAttribute::RequestContext {
+                request_context,
+                default,
+                ..
+            } => request
+                .context
+                .get(request_context)
+                .ok()
+                .flatten()
+                .or_else(|| default.clone()),
+            SubgraphCustomAttribute::Baggage {
+                baggage, default, ..
+            } => todo!(),
+            SubgraphCustomAttribute::Env { env, default, .. } => std::env::var(env)
+                .ok()
+                .map(AttributeValue::String)
+                .or_else(|| default.clone().map(AttributeValue::String)),
+            // For response
+            _ => None,
+        }
+    }
+
+    fn on_response(&self, response: &subgraph::Response) -> Option<AttributeValue> {
+        match self {
+            SubgraphCustomAttribute::SubgraphResponseHeader {
+                subgraph_response_header,
+                default,
+                ..
+            } => response
+                .response
+                .headers()
+                .get(subgraph_response_header)
+                .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
+                .or_else(|| default.clone()),
+            SubgraphCustomAttribute::SubgraphResponseBody {
+                subgraph_response_body,
+                default,
+                ..
+            } => {
+                let output = subgraph_response_body
+                    .execute(response.response.body())
+                    .ok()
+                    .flatten()?;
+                AttributeValue::try_from(output)
+                    .ok()
+                    .or_else(|| default.clone())
+            }
+            SubgraphCustomAttribute::ResponseContext {
                 response_context,
                 default,
                 ..

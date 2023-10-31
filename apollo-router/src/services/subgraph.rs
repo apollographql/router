@@ -39,6 +39,8 @@ pub struct Request {
 
     pub context: Context,
 
+    /// Name of the subgraph, it's an Option to not introduce breaking change
+    pub(crate) subgraph_name: Option<String>,
     /// Channel to send the subscription stream to listen on events coming from subgraph in a task
     pub(crate) subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
     /// Channel triggered when the client connection has been dropped
@@ -56,6 +58,7 @@ impl Request {
         subgraph_request: http::Request<graphql::Request>,
         operation_kind: OperationKind,
         context: Context,
+        subgraph_name: Option<String>,
         subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
     ) -> Request {
@@ -64,6 +67,7 @@ impl Request {
             subgraph_request,
             operation_kind,
             context,
+            subgraph_name,
             subscription_stream,
             connection_closed_signal,
         }
@@ -80,6 +84,7 @@ impl Request {
         subgraph_request: Option<http::Request<graphql::Request>>,
         operation_kind: Option<OperationKind>,
         context: Option<Context>,
+        subgraph_name: Option<String>,
         subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
     ) -> Request {
@@ -88,6 +93,7 @@ impl Request {
             subgraph_request.unwrap_or_default(),
             operation_kind.unwrap_or(OperationKind::Query),
             context.unwrap_or_default(),
+            subgraph_name,
             subscription_stream,
             connection_closed_signal,
         )
@@ -119,6 +125,7 @@ impl Clone for Request {
             subgraph_request,
             operation_kind: self.operation_kind,
             context: self.context.clone(),
+            subgraph_name: self.subgraph_name.clone(),
             subscription_stream: self.subscription_stream.clone(),
             connection_closed_signal: self
                 .connection_closed_signal

@@ -19,6 +19,7 @@ use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphCustomAttribute;
 use crate::query_planner::OperationKind;
 use crate::services::router;
+use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::tracer::TraceId;
 
@@ -113,15 +114,11 @@ impl GetAttributes<router::Request, router::Response> for RouterAttributes {
     }
 
     fn on_response(&self, response: &router::Response) -> HashMap<Key, AttributeValue> {
-        let attrs = self.common.on_response(response);
-        // TODO add support for server
-        attrs
+        self.common.on_response(response)
     }
 
     fn on_error(&self, error: &BoxError) -> HashMap<Key, AttributeValue> {
-        let attrs = self.common.on_error(error);
-        // TODO add support for server
-        attrs
+        self.common.on_error(error)
     }
 }
 
@@ -161,6 +158,58 @@ impl GetAttributes<supergraph::Request, supergraph::Response> for SupergraphAttr
     }
 
     fn on_response(&self, _response: &supergraph::Response) -> HashMap<Key, AttributeValue> {
+        HashMap::with_capacity(0)
+    }
+
+    fn on_error(&self, _error: &BoxError) -> HashMap<Key, AttributeValue> {
+        HashMap::with_capacity(0)
+    }
+}
+
+impl GetAttributes<subgraph::Request, subgraph::Response> for SubgraphAttributes {
+    fn on_request(&self, request: &subgraph::Request) -> HashMap<Key, AttributeValue> {
+        let mut attrs = HashMap::new();
+        if let Some(true) = &self.graphql_document {
+            if let Some(query) = &request.supergraph_request.body().query {
+                attrs.insert(
+                    "graphql.document".into(),
+                    AttributeValue::String(query.clone()),
+                );
+            }
+        }
+        if let Some(true) = &self.graphql_operation_name {
+            if let Some(op_name) = &request.supergraph_request.body().operation_name {
+                attrs.insert(
+                    "graphql.operation.name".into(),
+                    AttributeValue::String(op_name.clone()),
+                );
+            }
+        }
+        if let Some(true) = &self.graphql_operation_type {
+            let operation_kind: OperationKind = request
+                .context
+                .get(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            attrs.insert(
+                "graphql.operation.type".into(),
+                AttributeValue::String(operation_kind.as_apollo_operation_type().to_string()),
+            );
+        }
+        if let Some(true) = &self.graphql_federation_subgraph_name {
+            if let Some(subgraph_name) = &request.subgraph_name {
+                attrs.insert(
+                    "graphql.federation.subgraph.name".into(),
+                    AttributeValue::String(subgraph_name.clone()),
+                );
+            }
+        }
+
+        attrs
+    }
+
+    fn on_response(&self, _response: &subgraph::Response) -> HashMap<Key, AttributeValue> {
         HashMap::with_capacity(0)
     }
 

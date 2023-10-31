@@ -244,6 +244,7 @@ impl SubscriptionNode {
             )
             .operation_kind(OperationKind::Subscription)
             .context(parameters.context.clone())
+            .subgraph_name(self.service_name.clone())
             .subscription_stream(tx_gql)
             .and_connection_closed_signal(parameters.subscription_handle.as_ref().map(|s| s.closed_signal.resubscribe()))
             .build();

@@ -1887,6 +1887,7 @@ mod tests {
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Subscription,
                 context: Context::new(),
+                subgraph_name: String::from("test").into(),
                 subscription_stream: Some(tx),
                 connection_closed_signal: None,
             })
@@ -1934,6 +1935,7 @@ mod tests {
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
+                subgraph_name: String::from("test").into(),
                 subscription_stream: None,
                 connection_closed_signal: None,
             })
@@ -1976,6 +1978,7 @@ mod tests {
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
+                subgraph_name: String::from("test").into(),
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
@@ -2019,6 +2022,7 @@ mod tests {
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
+                subgraph_name: String::from("test").into(),
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
@@ -2067,6 +2071,7 @@ mod tests {
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
+                subgraph_name: String::from("test").into(),
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
@@ -2120,6 +2125,7 @@ mod tests {
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
+                subgraph_name: String::from("test").into(),
                 subscription_stream: None,
                 connection_closed_signal: None,
             })
@@ -2177,6 +2183,7 @@ mod tests {
                             .build(),
                     )
                     .expect("expecting valid request"),
+                subgraph_name: String::from("test").into(),
                 operation_kind: OperationKind::Subscription,
                 context: Context::new(),
                 subscription_stream: Some(tx),
@@ -2240,6 +2247,7 @@ mod tests {
                             .build(),
                     )
                     .expect("expecting valid request"),
+                subgraph_name: String::from("test").into(),
                 operation_kind: OperationKind::Subscription,
                 context: Context::new(),
                 subscription_stream: Some(tx),
@@ -2286,6 +2294,7 @@ mod tests {
                     .uri(url)
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
+                subgraph_name: String::from("test").into(),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2337,6 +2346,7 @@ mod tests {
                     .uri(url)
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
+                subgraph_name: String::from("test").into(),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2386,6 +2396,7 @@ mod tests {
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
+                subgraph_name: String::from("test").into(),
                 subscription_stream: None,
                 connection_closed_signal: None,
             })
@@ -2435,6 +2446,7 @@ mod tests {
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
+                subgraph_name: String::from("test").into(),
                 subscription_stream: None,
                 connection_closed_signal: None,
             })
@@ -2484,6 +2496,7 @@ mod tests {
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
+                subgraph_name: String::from("test").into(),
                 subscription_stream: None,
                 connection_closed_signal: None,
             })
@@ -2538,6 +2551,7 @@ mod tests {
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
+                subgraph_name: String::from("test").into(),
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
@@ -2588,6 +2602,7 @@ mod tests {
                     .uri(url)
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
+                subgraph_name: String::from("test").into(),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2639,6 +2654,7 @@ mod tests {
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
+                subgraph_name: String::from("test").into(),
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
@@ -2689,6 +2705,7 @@ mod tests {
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
+                subgraph_name: String::from("test").into(),
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
@@ -2739,6 +2756,7 @@ mod tests {
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
+                subgraph_name: String::from("test").into(),
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
@@ -2836,6 +2854,7 @@ mod tests {
                     .uri(url)
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
+                subgraph_name: String::from("test").into(),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2892,6 +2911,7 @@ mod tests {
                     .uri(url)
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
+                subgraph_name: String::from("test").into(),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -3001,6 +3021,7 @@ mod tests {
                     .uri(url)
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
+                subgraph_name: String::from("test").into(),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -3070,6 +3091,7 @@ mod tests {
                     .uri(url)
                     .body(Request::builder().query("query").build())
                     .expect("expecting valid request"),
+                subgraph_name: String::from("test").into(),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
