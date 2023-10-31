@@ -1,10 +1,19 @@
-# Extend PluginInit
 
-PluginInit was created to allow us to add new public and private information to plugin initialization in a non breaking way.
+# Title [ADR-3]
+
+Extend the `PluginInit` structure
+
+## Status
+
+Approved
+
+## Context
+
+`PluginInit` was created to allow us to add new public and private information to plugin initialization in a non breaking way.
 
 We currently have some code that would benefit from extending the current information on PluginInit, allowing a cleaner separation of concerns.
 
-## Areas that could be improved
+### Areas that could be improved
 
 1. Some plugins need to know when to change global resources. Currently, plugins cannot know when this needs to happen as they are unaware of the configuration pre reload.
 2. Plugins are not aware of if licensed functionality is available.
@@ -12,7 +21,7 @@ We currently have some code that would benefit from extending the current inform
 4. Plugins do not have access to parsed supergraph.
 
 
-## Current plugin init
+### Current Structure
 
 ```rust 
 pub struct PluginInit<T> {
@@ -25,7 +34,11 @@ pub struct PluginInit<T> {
 }
 ```
 
-## Proposed
+## Decision
+
+Let's extend the structure to address the areas requiring improvement.
+
+### Updated Structure
 
 ```rust 
 pub struct PluginInit<T> {
@@ -53,5 +66,8 @@ pub struct PluginInit<T> {
 }
 ```
 
+## Consequences
 
-Notes:
+Plugins can now access the information which they require to operate effectively.
+Various hacks/workaround can be replaces with cleaner implementations.
+
