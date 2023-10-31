@@ -1,26 +1,32 @@
 use std::any::type_name;
 use std::collections::HashMap;
+use std::fmt::Debug;
 
 use schemars::gen::SchemaGenerator;
 use schemars::schema::Schema;
 use schemars::JsonSchema;
+use serde::de::Error;
+use serde::de::MapAccess;
+use serde::de::Visitor;
 use serde::Deserialize;
+use serde::Deserializer;
+#[cfg(test)]
+use serde::Serialize;
+use serde_json::Map;
+use serde_json::Value;
 
 use crate::plugins::telemetry::config::AttributeValue;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[allow(dead_code)]
-#[derive(Clone, Deserialize, Debug)]
-#[serde(default)]
-pub(crate) struct Extendable<A, E>
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
+pub(crate) struct Extendable<Att, Ext>
 where
-    A: Default,
+    Att: Default,
 {
-    #[serde(flatten)]
-    attributes: A,
-
-    #[serde(flatten)]
-    custom: HashMap<String, E>,
+    attributes: Att,
+    custom: HashMap<String, Ext>,
 }
 
 impl Extendable<(), ()> {
@@ -29,6 +35,61 @@ impl Extendable<(), ()> {
         A: Default,
     {
         Default::default()
+    }
+}
+
+/// Custom Deserializer for attributes that will deserializse into a custom field if possible, but otherwise into one of the pre-defined attributes.
+impl<'de, Att, Ext> Deserialize<'de> for Extendable<Att, Ext>
+where
+    Att: Default + Deserialize<'de> + Debug + Sized,
+    Ext: Deserialize<'de> + Debug + Sized,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ExtendableVisitor<Att, Ext> {
+            _phantom: std::marker::PhantomData<(Att, Ext)>,
+        }
+        impl<'de, Att, Ext> Visitor<'de> for ExtendableVisitor<Att, Ext>
+        where
+            Att: Default + Deserialize<'de> + Debug,
+            Ext: Deserialize<'de> + Debug,
+        {
+            type Value = Extendable<Att, Ext>;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(formatter, "a map structure")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut attributes: Map<String, Value> = Map::new();
+                let mut custom: HashMap<String, Ext> = HashMap::new();
+                while let Some(key) = map.next_key()? {
+                    let value: Value = map.next_value()?;
+                    match Ext::deserialize(value.clone()) {
+                        Ok(value) => {
+                            custom.insert(key, value);
+                        }
+                        Err(_err) => {
+                            // We didn't manage to deserialize as a custom attribute, so stash the value and we'll try again later
+                            attributes.insert(key, value);
+                        }
+                    }
+                }
+
+                let attributes =
+                    Att::deserialize(Value::Object(attributes)).map_err(A::Error::custom)?;
+
+                Ok(Extendable { attributes, custom })
+            }
+        }
+
+        deserializer.deserialize_map(ExtendableVisitor::<Att, Ext> {
+            _phantom: Default::default(),
+        })
     }
 }
 
@@ -163,6 +224,7 @@ pub(crate) enum RouterCustomAttribute {
 }
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationName {
     /// The raw operation name.
@@ -173,6 +235,7 @@ pub(crate) enum OperationName {
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Query {
     /// The raw query kind.
@@ -181,6 +244,7 @@ pub(crate) enum Query {
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationKind {
     /// The raw operation kind.
@@ -189,6 +253,7 @@ pub(crate) enum OperationKind {
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum SupergraphCustomAttribute {
     OperationName {
@@ -418,7 +483,7 @@ pub(crate) enum SubgraphCustomAttribute {
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct RouterAttributes {
     /// Http attributes from Open Telemetry semantic conventions.
     #[serde(flatten)]
@@ -430,7 +495,8 @@ pub(crate) struct RouterAttributes {
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(default)]
+#[cfg_attr(test, derive(Serialize))]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct SupergraphAttributes {
     /// The GraphQL document being executed.
     /// Examples:
@@ -456,7 +522,7 @@ pub(crate) struct SupergraphAttributes {
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphAttributes {
     /// The name of the subgraph
     /// Examples:
@@ -724,4 +790,52 @@ pub(crate) struct HttpClientAttributes {
     /// Requirement level: Required
     #[serde(rename = "url.full")]
     url_full: Option<bool>,
+}
+
+#[cfg(test)]
+mod test {
+    use insta::assert_yaml_snapshot;
+
+    use crate::plugins::telemetry::config_new::attributes::Extendable;
+    use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
+    use crate::plugins::telemetry::config_new::attributes::SupergraphCustomAttribute;
+
+    #[test]
+    fn test_extendable_serde() {
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.bind(|| {
+            let o = serde_json::from_value::<
+                Extendable<SupergraphAttributes, SupergraphCustomAttribute>,
+            >(serde_json::json!({
+                    "graphql.operation.name": true,
+                    "graphql.operation.type": true,
+                    "custom_1": {
+                        "operation_name": "string"
+                    },
+                    "custom_2": {
+                        "operation_name": "string"
+                    }
+            }))
+            .unwrap();
+            assert_yaml_snapshot!(o);
+        });
+    }
+
+    #[test]
+    fn test_extendable_serde_fail() {
+        serde_json::from_value::<Extendable<SupergraphAttributes, SupergraphCustomAttribute>>(
+            serde_json::json!({
+                    "graphql.operation": true,
+                    "graphql.operation.type": true,
+                    "custom_1": {
+                        "operation_name": "string"
+                    },
+                    "custom_2": {
+                        "operation_name": "string"
+                    }
+            }),
+        )
+        .expect_err("Should have errored");
+    }
 }

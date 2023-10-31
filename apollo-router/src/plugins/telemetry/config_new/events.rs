@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -77,7 +79,8 @@ pub(crate) enum EventLevel {
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 pub(crate) struct Event<A, E>
 where
-    A: Default,
+    A: Default + Debug,
+    E: Debug,
 {
     /// The log level of the event.
     level: EventLevel,
