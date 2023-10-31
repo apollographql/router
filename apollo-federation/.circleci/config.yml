@@ -58,6 +58,14 @@ workflows:
             parameters:
               platform: [linux, macos]
               rust_channel: [stable]
+  wasm:
+    jobs:
+      - wasm:
+          name: Compile to wasm (stable rust on linux)
+          matrix:
+            parameters:
+              platform: [linux]
+              rust_channel: [stable]
   release:
     jobs:
       - test:
@@ -127,6 +135,24 @@ jobs:
       - run:
           name: Run cargo test
           command: cargo test --all-features
+
+  wasm:
+    parameters:
+      rust_channel:
+        type: enum
+        enum: ["stable", "nightly"]
+        default: stable
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - install_system_deps:
+          rust_channel: << parameters.rust_channel >>
+          platform: << parameters.platform >>
+      - run:
+          name: Build to wasm target
+          command: rustup target add wasm32-unknown-unknown && cargo build --target wasm32-unknown-unknown
 
   publish:
     parameters:
