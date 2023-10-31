@@ -463,6 +463,19 @@ pub(crate) enum AttributeValue {
     Array(AttributeArray),
 }
 
+impl std::fmt::Display for AttributeValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AttributeValue::Bool(val) => write!(f, "{val}"),
+            AttributeValue::I64(val) => write!(f, "{val}"),
+            AttributeValue::U128(val) => write!(f, "{val}"),
+            AttributeValue::F64(val) => write!(f, "{val}"),
+            AttributeValue::String(val) => write!(f, "{val}"),
+            AttributeValue::Array(val) => write!(f, "{val}"),
+        }
+    }
+}
+
 impl TryFrom<serde_json::Value> for AttributeValue {
     type Error = ();
     fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
@@ -527,6 +540,18 @@ impl From<AttributeValue> for opentelemetry::Value {
     }
 }
 
+impl From<opentelemetry::Value> for AttributeValue {
+    fn from(value: opentelemetry::Value) -> Self {
+        match value {
+            opentelemetry::Value::Bool(v) => AttributeValue::Bool(v),
+            opentelemetry::Value::I64(v) => AttributeValue::I64(v),
+            opentelemetry::Value::F64(v) => AttributeValue::F64(v),
+            opentelemetry::Value::String(v) => AttributeValue::String(v.into()),
+            opentelemetry::Value::Array(v) => AttributeValue::Array(v.into()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(untagged, deny_unknown_fields)]
 pub(crate) enum AttributeArray {
@@ -540,6 +565,17 @@ pub(crate) enum AttributeArray {
     String(Vec<String>),
 }
 
+impl std::fmt::Display for AttributeArray {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AttributeArray::Bool(val) => write!(f, "{val:?}"),
+            AttributeArray::I64(val) => write!(f, "{val:?}"),
+            AttributeArray::F64(val) => write!(f, "{val:?}"),
+            AttributeArray::String(val) => write!(f, "{val:?}"),
+        }
+    }
+}
+
 impl From<AttributeArray> for opentelemetry::Array {
     fn from(array: AttributeArray) -> Self {
         match array {
@@ -547,6 +583,19 @@ impl From<AttributeArray> for opentelemetry::Array {
             AttributeArray::I64(v) => Array::I64(v),
             AttributeArray::F64(v) => Array::F64(v),
             AttributeArray::String(v) => Array::String(v.into_iter().map(|v| v.into()).collect()),
+        }
+    }
+}
+
+impl From<opentelemetry::Array> for AttributeArray {
+    fn from(array: opentelemetry::Array) -> Self {
+        match array {
+            opentelemetry::Array::Bool(v) => AttributeArray::Bool(v),
+            opentelemetry::Array::I64(v) => AttributeArray::I64(v),
+            opentelemetry::Array::F64(v) => AttributeArray::F64(v),
+            opentelemetry::Array::String(v) => {
+                AttributeArray::String(v.into_iter().map(|v| v.into()).collect())
+            }
         }
     }
 }

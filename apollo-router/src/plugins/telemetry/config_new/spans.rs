@@ -105,8 +105,7 @@ impl GetAttributes<router::Request, router::Response> for RouterAttributes {
         }
         if let Some(true) = &self.datadog_trace_id {
             if let Some(trace_id) = TraceId::maybe_new().map(|t| t.to_u128()) {
-                // TODO: fix it and use u128
-                attrs.insert("dd.trace_id".into(), AttributeValue::I64(trace_id as i64));
+                attrs.insert("dd.trace_id".into(), AttributeValue::U128(trace_id));
             }
         }
 

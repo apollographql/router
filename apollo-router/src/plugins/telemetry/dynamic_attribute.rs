@@ -1,23 +1,28 @@
 use std::collections::HashMap;
 
+use opentelemetry_api::Key;
+use opentelemetry_api::Value;
+use tracing_opentelemetry::OtelData;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 
+use super::config::AttributeValue;
+use super::reload::IsSampled;
 use super::ROUTER_SPAN_NAME;
 use super::SUBGRAPH_SPAN_NAME;
 use super::SUPERGRAPH_SPAN_NAME;
 
 #[derive(Debug)]
 pub(crate) enum LogAttributes {
-    Router(HashMap<String, String>),
-    Supergraph(HashMap<String, String>),
-    Subgraph(HashMap<String, String>),
+    Router(HashMap<Key, AttributeValue>),
+    Supergraph(HashMap<Key, AttributeValue>),
+    Subgraph(HashMap<Key, AttributeValue>),
 }
 
 impl LogAttributes {
-    pub(crate) fn get_attributes(&self) -> &HashMap<String, String> {
+    pub(crate) fn get_attributes(&self) -> &HashMap<Key, AttributeValue> {
         match self {
             LogAttributes::Router(attributes)
             | LogAttributes::Subgraph(attributes)
@@ -25,7 +30,7 @@ impl LogAttributes {
         }
     }
 
-    fn insert(&mut self, span_name: &str, key: String, value: String) {
+    fn insert(&mut self, span_name: &str, key: Key, value: AttributeValue) {
         match span_name {
             ROUTER_SPAN_NAME => {
                 if let Self::Router(attributes) = self {
@@ -47,7 +52,7 @@ impl LogAttributes {
             }
         }
     }
-    fn extend(&mut self, span_name: &str, val: impl IntoIterator<Item = (String, String)>) {
+    fn extend(&mut self, span_name: &str, val: impl IntoIterator<Item = (Key, AttributeValue)>) {
         match span_name {
             ROUTER_SPAN_NAME => {
                 if let Self::Router(attributes) = self {
@@ -106,25 +111,47 @@ impl DynAttributeLayer {
 }
 
 pub(crate) trait DynAttribute {
-    fn set_dyn_attribute(&self, key: String, value: String);
-    fn set_dyn_attributes(&self, attributes: HashMap<String, String>);
+    fn set_dyn_attribute(&self, key: Key, value: AttributeValue);
+    fn set_dyn_attributes(&self, attributes: HashMap<Key, AttributeValue>);
 }
 
 impl DynAttribute for ::tracing::Span {
-    fn set_dyn_attribute(&self, key: String, value: String) {
+    fn set_dyn_attribute(&self, key: Key, value: AttributeValue) {
         // TODO match if the span is sampled by otel then put it in oteldata, if not in LogAttributes
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
                     None => eprintln!("no spanref, this is a bug"),
                     Some(s) => {
-                        let mut extensions = s.extensions_mut();
-                        match extensions.get_mut::<LogAttributes>() {
-                            Some(attributes) => {
-                                attributes.insert(s.name(), key, value);
+                        if s.is_sampled() {
+                            let mut extensions = s.extensions_mut();
+                            match extensions.get_mut::<OtelData>() {
+                                Some(otel_data) => {
+                                    if otel_data.builder.attributes.is_none() {
+                                        otel_data.builder.attributes =
+                                            Some([(key, Value::from(value))].into_iter().collect());
+                                    } else {
+                                        otel_data
+                                            .builder
+                                            .attributes
+                                            .as_mut()
+                                            .unwrap()
+                                            .insert(key, Value::from(value));
+                                    }
+                                }
+                                None => {
+                                    eprintln!("no OtelData, this is a bug");
+                                }
                             }
-                            None => {
-                                eprintln!("no LogAttributes, this is a bug");
+                        } else {
+                            let mut extensions = s.extensions_mut();
+                            match extensions.get_mut::<LogAttributes>() {
+                                Some(attributes) => {
+                                    attributes.insert(s.name(), key, value);
+                                }
+                                None => {
+                                    eprintln!("no LogAttributes, this is a bug");
+                                }
                             }
                         }
                     }
@@ -135,20 +162,45 @@ impl DynAttribute for ::tracing::Span {
         });
     }
 
-    fn set_dyn_attributes(&self, attributes: HashMap<String, String>) {
+    fn set_dyn_attributes(&self, attributes: HashMap<Key, AttributeValue>) {
         // TODO match if the span is sampled by otel then put it in oteldata, if not in LogAttributes
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
                     None => eprintln!("no spanref, this is a bug"),
                     Some(s) => {
-                        let mut extensions = s.extensions_mut();
-                        match extensions.get_mut::<LogAttributes>() {
-                            Some(registered_attributes) => {
-                                registered_attributes.extend(s.name(), attributes);
+                        if s.is_sampled() {
+                            let mut extensions = s.extensions_mut();
+                            match extensions.get_mut::<OtelData>() {
+                                Some(otel_data) => {
+                                    if otel_data.builder.attributes.is_none() {
+                                        otel_data.builder.attributes = Some(
+                                            attributes
+                                                .into_iter()
+                                                .map(|(k, v)| (k, Value::from(v)))
+                                                .collect(),
+                                        );
+                                    } else {
+                                        otel_data.builder.attributes.as_mut().unwrap().extend(
+                                            attributes
+                                                .into_iter()
+                                                .map(|(k, v)| (k, Value::from(v))),
+                                        );
+                                    }
+                                }
+                                None => {
+                                    eprintln!("no OtelData, this is a bug");
+                                }
                             }
-                            None => {
-                                eprintln!("no LogAttributes, this is a bug");
+                        } else {
+                            let mut extensions = s.extensions_mut();
+                            match extensions.get_mut::<LogAttributes>() {
+                                Some(registered_attributes) => {
+                                    registered_attributes.extend(s.name(), attributes);
+                                }
+                                None => {
+                                    eprintln!("no LogAttributes, this is a bug");
+                                }
                             }
                         }
                     }

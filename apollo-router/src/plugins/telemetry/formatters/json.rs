@@ -142,7 +142,7 @@ where
                 let custom_attributes = ext.get::<LogAttributes>().map(|attrs| attrs.get_attributes());
                 if let Some(custom_attributes) = custom_attributes {
                     for (key, value) in custom_attributes {
-                        serializer.serialize_entry(key.as_str(), value.as_str())?;
+                        serializer.serialize_entry(key.as_str(), value)?;
                     }
                 }
             }

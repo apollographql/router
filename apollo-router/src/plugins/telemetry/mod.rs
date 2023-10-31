@@ -94,6 +94,7 @@ use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::config_new::attributes::GetAttributes;
+use crate::plugins::telemetry::dynamic_attribute::DynAttribute;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
@@ -323,7 +324,7 @@ impl Plugin for Telemetry {
             // TODO add map_future_with_request_data to log the request
             .map_future_with_request_data(move |request: &router::Request| {
                 config_request.spans.router.attributes.on_request(request)
-            }, move |mut custom_attributes: HashMap<opentelemetry_api::Key, AttributeValue>, fut| {
+            }, move |custom_attributes: HashMap<opentelemetry_api::Key, AttributeValue>, fut| {
                 let start = Instant::now();
                 let config = config_later.clone();
 
@@ -332,6 +333,10 @@ impl Plugin for Telemetry {
 
                 async move {
                     let span = Span::current();
+                    span.set_dyn_attributes(custom_attributes);
+
+                    ::tracing::info!("coucou");
+
                     let response: Result<router::Response, BoxError> = fut.await;
 
                     span.record(
@@ -342,7 +347,7 @@ impl Plugin for Telemetry {
 
                     let expose_trace_id = &config.tracing.response_trace_id;
                     if let Ok(response) = &response {
-                        custom_attributes.extend(config.spans.router.attributes.on_response(response));
+                        span.set_dyn_attributes(config.spans.router.attributes.on_response(response));
                         if expose_trace_id.enabled {
                             if let Some(header_name) = &expose_trace_id.header_name {
                                 let mut headers: HashMap<String, Vec<String>> = HashMap::new();
@@ -361,12 +366,9 @@ impl Plugin for Telemetry {
                         }
 
                     } else if let Err(err) = &response {
-                        custom_attributes.extend(config.spans.router.attributes.on_error(err));
+                        span.set_dyn_attributes(config.spans.router.attributes.on_error(err));
                     }
-                    // TODO use a better method to add it once and not iterate
-                    for (key, value) in custom_attributes {
-                        span.set_attribute(key, value);
-                    }
+
                     response
                 }
             })
@@ -428,21 +430,18 @@ impl Plugin for Telemetry {
                     Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
                     (req.context.clone(), custom_attributes)
                 },
-                move |(ctx, mut custom_attributes): (Context, HashMap<Key, AttributeValue>), fut| {
+                move |(ctx, custom_attributes): (Context, HashMap<Key, AttributeValue>), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
 
                     async move {
                         let span = Span::current();
+                        span.set_dyn_attributes(custom_attributes);
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
                         match &result {
-                            Ok(resp) => custom_attributes.extend(config.spans.supergraph.attributes.on_response(resp)),
-                            Err(err) => custom_attributes.extend(config.spans.supergraph.attributes.on_error(err)),
-                        }
-                        // TODO use a better method to add it once and not iterate
-                        for (key, value) in custom_attributes {
-                            span.set_attribute(key, value);
+                            Ok(resp) => span.set_dyn_attributes(config.spans.supergraph.attributes.on_response(resp)),
+                            Err(err) => span.set_dyn_attributes(config.spans.supergraph.attributes.on_error(err)),
                         }
                         result = Self::update_otel_metrics(
                             config.clone(),
@@ -533,7 +532,7 @@ impl Plugin for Telemetry {
                         custom_attributes,
                     )
                 },
-                move |(context, cache_attributes, mut custom_attributes): (
+                move |(context, cache_attributes, custom_attributes): (
                     Context,
                     Option<CacheAttributes>,
                     HashMap<Key, AttributeValue>,
@@ -545,18 +544,16 @@ impl Plugin for Telemetry {
                     let conf = conf.clone();
                     // Using Instant because it is guaranteed to be monotonically increasing.
                     let now = Instant::now();
-                    f.map(move |result: Result<SubgraphResponse, BoxError>| {
+                    async move {
                         let span = Span::current();
+                        span.set_dyn_attributes(custom_attributes);
+                        let result: Result<SubgraphResponse, BoxError> = f.await;
                         match &result {
-                            Ok(resp) => custom_attributes
-                                .extend(conf.spans.subgraph.attributes.on_response(resp)),
-                            Err(err) => custom_attributes
-                                .extend(conf.spans.subgraph.attributes.on_error(err)),
-                        }
-
-                        // TODO use a better method to add it once and not iterate
-                        for (key, value) in custom_attributes {
-                            span.set_attribute(key, value);
+                            Ok(resp) => span.set_dyn_attributes(
+                                conf.spans.subgraph.attributes.on_response(resp),
+                            ),
+                            Err(err) => span
+                                .set_dyn_attributes(conf.spans.subgraph.attributes.on_error(err)),
                         }
 
                         Self::store_subgraph_response_attributes(
@@ -569,7 +566,32 @@ impl Plugin for Telemetry {
                             &result,
                         );
                         result
-                    })
+                    }
+                    // f.map(move |result: Result<SubgraphResponse, BoxError>| {
+                    //     let span = Span::current();
+                    //     match &result {
+                    //         Ok(resp) => custom_attributes
+                    //             .extend(conf.spans.subgraph.attributes.on_response(resp)),
+                    //         Err(err) => custom_attributes
+                    //             .extend(conf.spans.subgraph.attributes.on_error(err)),
+                    //     }
+
+                    //     // TODO use a better method to add it once and not iterate
+                    //     for (key, value) in custom_attributes {
+                    //         span.set_attribute(key, value);
+                    //     }
+
+                    //     Self::store_subgraph_response_attributes(
+                    //         &context,
+                    //         subgraph_attribute,
+                    //         subgraph_metrics_conf.as_ref(),
+                    //         now,
+                    //         counter,
+                    //         cache_attributes,
+                    //         &result,
+                    //     );
+                    //     result
+                    // })
                 },
             )
             .service(service)

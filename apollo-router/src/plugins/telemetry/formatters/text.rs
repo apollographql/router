@@ -173,20 +173,19 @@ impl TextFormatter {
             let ext = span.extensions();
             match &ext.get::<LogAttributes>() {
                 Some(dyn_attributes) => {
-                    // TODO: put it in a method
                     let attributes = dyn_attributes.get_attributes();
-                    // if writer.has_ansi_escapes() {
-                    //     let style = Style::new().dimmed();
-                    //     write!(writer, "{}", style.prefix())?;
-                    //     write!(writer, "[trace_id={trace_id}]")?;
-                    //     write!(writer, "{}", style.suffix())?;
-                    // } else {
                     let attrs: Vec<String> = attributes
                         .iter()
                         .map(|(key, val)| format!("{key}={val}"))
                         .collect();
-                    write!(writer, "[attributes=[{}]]", attrs.join(", "))?;
-                    // }
+                    if writer.has_ansi_escapes() {
+                        let style = Style::new().dimmed();
+                        write!(writer, "{}", style.prefix())?;
+                        write!(writer, "[attributes=[{}]]", attrs.join(", "))?;
+                        write!(writer, "{}", style.suffix())?;
+                    } else {
+                        write!(writer, "[attributes=[{}]]", attrs.join(", "))?;
+                    }
                     writer.write_char(' ')?;
                 }
                 None => {}

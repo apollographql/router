@@ -3,11 +3,14 @@ use std::collections::HashMap;
 use access_json::JSONQuery;
 use http::header::CONTENT_LENGTH;
 use http::header::USER_AGENT;
+use opentelemetry_api::baggage::BaggageExt;
 use opentelemetry_api::Key;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::ByteString;
 use tower::BoxError;
+use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -237,7 +240,7 @@ pub(crate) enum SupergraphCustomAttribute {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
     Env {
         /// The name of the environment variable
@@ -371,7 +374,7 @@ pub(crate) enum SubgraphCustomAttribute {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
     Env {
         /// The name of the environment variable
@@ -768,8 +771,19 @@ impl GetAttribute<router::Request, router::Response> for RouterCustomAttribute {
                 .into()
             }
             RouterCustomAttribute::Baggage {
-                baggage, default, ..
-            } => todo!(),
+                baggage: baggage_name,
+                default,
+                ..
+            } => {
+                let span = Span::current();
+                let span_context = span.context();
+                // I must clone the key because the otel API is bad
+                let baggage = span_context.baggage().get(baggage_name.clone()).cloned();
+                match baggage {
+                    Some(baggage) => AttributeValue::from(baggage).into(),
+                    None => default.clone(),
+                }
+            }
             // Related to Response
             _ => None,
         }
@@ -798,8 +812,19 @@ impl GetAttribute<router::Request, router::Response> for RouterCustomAttribute {
                 .flatten()
                 .or_else(|| default.clone()),
             RouterCustomAttribute::Baggage {
-                baggage, default, ..
-            } => todo!(),
+                baggage: baggage_name,
+                default,
+                ..
+            } => {
+                let span = Span::current();
+                let span_context = span.context();
+                // I must clone the key because the otel API is bad
+                let baggage = span_context.baggage().get(baggage_name.clone()).cloned();
+                match baggage {
+                    Some(baggage) => AttributeValue::from(baggage).into(),
+                    None => default.clone(),
+                }
+            }
             _ => None,
         }
     }
@@ -956,8 +981,19 @@ impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphCusto
                 .flatten()
                 .or_else(|| default.clone()),
             SupergraphCustomAttribute::Baggage {
-                baggage, default, ..
-            } => todo!(),
+                baggage: baggage_name,
+                default,
+                ..
+            } => {
+                let span = Span::current();
+                let span_context = span.context();
+                // I must clone the key because the otel API is bad
+                let baggage = span_context.baggage().get(baggage_name.clone()).cloned();
+                match baggage {
+                    Some(baggage) => AttributeValue::from(baggage).into(),
+                    None => default.clone(),
+                }
+            }
             SupergraphCustomAttribute::Env { env, default, .. } => std::env::var(env)
                 .ok()
                 .map(AttributeValue::String)
@@ -1089,8 +1125,19 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphCustomAttri
                 .flatten()
                 .or_else(|| default.clone()),
             SubgraphCustomAttribute::Baggage {
-                baggage, default, ..
-            } => todo!(),
+                baggage: baggage_name,
+                default,
+                ..
+            } => {
+                let span = Span::current();
+                let span_context = span.context();
+                // I must clone the key because the otel API is bad
+                let baggage = span_context.baggage().get(baggage_name.clone()).cloned();
+                match baggage {
+                    Some(baggage) => AttributeValue::from(baggage).into(),
+                    None => default.clone(),
+                }
+            }
             SubgraphCustomAttribute::Env { env, default, .. } => std::env::var(env)
                 .ok()
                 .map(AttributeValue::String)
