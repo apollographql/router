@@ -16,7 +16,6 @@ use dashmap::DashMap;
 use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream::once;
-use futures::FutureExt;
 use futures::StreamExt;
 use http::header;
 use http::HeaderMap;
