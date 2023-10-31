@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -76,7 +78,8 @@ struct SubgraphInstruments {
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 pub(crate) struct Instrument<A, E>
 where
-    A: Default,
+    A: Default + Debug,
+    E: Debug,
 {
     /// The type of instrument.
     #[serde(rename = "type")]
