@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "router.labels" . | nindent 4 }}
     {{- if .Values.extraLabels }}
-    {{- include "common.templatizeExtraLabels" . | trim | nindent 4 }}
+    {{- include "apollographql.templatizeExtraLabels" . | trim | nindent 4 }}
     {{- end }}
   {{/* There may not be much configuration so check that there is something */}}
   {{- if (((((.Values.router).configuration).telemetry).metrics).prometheus).enabled }}
@@ -34,7 +34,7 @@ spec:
       labels:
         {{- include "router.selectorLabels" . | nindent 8 }}
         {{- if .Values.extraLabels }}
-        {{- include "common.templatizeExtraLabels" . | trim | nindent 8 }}
+        {{- include "apollographql.templatizeExtraLabels" . | trim | nindent 8 }}
         {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
@@ -46,7 +46,7 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         {{- if .Values.extraContainers }}
-          {{- include "common.tplvalues.render" (dict "value" .Values.extraContainers "context" $) | nindent 8 }}
+          {{- include "apollographql.tplvalues.render" (dict "value" .Values.extraContainers "context" $) | nindent 8 }}
         {{- end }}
         - name: {{ .Chart.Name }}
           securityContext:
@@ -126,12 +126,12 @@ spec:
               readOnly: true
             {{- end }}
             {{- if .Values.extraVolumeMounts }}
-              {{- include "common.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
+              {{- include "apollographql.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
             {{- end }}
           {{- end }}
       {{- if .Values.initContainers }}
       initContainers:
-        {{- include "common.tplvalues.render" (dict "value" .Values.initContainers "context" $) | nindent 8 }}
+        {{- include "apollographql.tplvalues.render" (dict "value" .Values.initContainers "context" $) | nindent 8 }}
       {{- end }}
       {{- if or .Values.router.configuration .Values.extraVolumes }}
       volumes:
@@ -141,7 +141,7 @@ spec:
             name: {{ include "router.fullname" . }}
         {{- end }}
         {{- if .Values.extraVolumes }}
-          {{- include "common.tplvalues.render" ( dict "value" .Values.extraVolumes "context" $) | nindent 8 }}
+          {{- include "apollographql.tplvalues.render" ( dict "value" .Values.extraVolumes "context" $) | nindent 8 }}
         {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}

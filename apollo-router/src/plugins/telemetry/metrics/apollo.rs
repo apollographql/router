@@ -177,8 +177,9 @@ mod test {
     use std::future::Future;
     use std::time::Duration;
 
-    use futures::stream::StreamExt;
     use http::header::HeaderName;
+    use tokio_stream::wrappers::ReceiverStream;
+    use tokio_stream::StreamExt;
     use tower::ServiceExt;
     use url::Url;
 
@@ -347,7 +348,7 @@ mod test {
         let _ = tracing_subscriber::fmt::try_init();
         let mut plugin = create_plugin().await?;
         // Replace the apollo metrics sender so we can test metrics collection.
-        let (tx, rx) = futures::channel::mpsc::channel(100);
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
         plugin.apollo_metrics_sender = Sender::Apollo(tx);
         let mut request_builder = SupergraphRequest::fake_builder()
             .header("name_header", "test_client")
@@ -375,7 +376,7 @@ mod test {
             .unwrap();
 
         let default_latency = Duration::from_millis(100);
-        let results = rx
+        let results = ReceiverStream::new(rx)
             .collect::<Vec<_>>()
             .await
             .into_iter()

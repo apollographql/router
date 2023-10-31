@@ -334,8 +334,6 @@ impl Plugin for Telemetry {
                     let span = Span::current();
                     span.set_dyn_attributes(custom_attributes);
 
-                    ::tracing::info!("coucou");
-
                     let response: Result<router::Response, BoxError> = fut.await;
 
                     span.record(

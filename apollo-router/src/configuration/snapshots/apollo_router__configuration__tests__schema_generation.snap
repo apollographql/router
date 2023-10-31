@@ -523,9 +523,24 @@ expression: "&schema"
           "description": "`@authenticated` and `@requiresScopes` directives",
           "type": "object",
           "properties": {
+            "dry_run": {
+              "description": "generates the authorization error messages without modying the query",
+              "default": false,
+              "type": "boolean"
+            },
             "enabled": {
               "description": "enables the `@authenticated` and `@requiresScopes` directives",
               "default": true,
+              "type": "boolean"
+            },
+            "log_errors": {
+              "description": "Log authorization errors",
+              "default": true,
+              "type": "boolean"
+            },
+            "reject_unauthorized": {
+              "description": "refuse a query entirely if any part would be filtered",
+              "default": false,
               "type": "boolean"
             }
           }
