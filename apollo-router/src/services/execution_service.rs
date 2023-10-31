@@ -237,7 +237,7 @@ impl ExecutionService {
         tracing::debug_span!("format_response").in_scope(|| {
             let mut paths = Vec::new();
             if let Some(filtered_query) = query.filtered_query.as_ref() {
-                if query.unauthorized.log_errors && !query.unauthorized.paths.is_empty() {
+                if query.unauthorized.errors.log && !query.unauthorized.paths.is_empty() {
                     let unauthorized_paths = query.unauthorized.paths.iter().map(|path| path.to_string()).collect::<Vec<_>>();
 
                     event!(Level::ERROR, unauthorized_query_paths = ?unauthorized_paths, "Authorization error",);
@@ -251,11 +251,26 @@ impl ExecutionService {
                     variables_set,
                 );
 
-                for path in &query.unauthorized.paths {
-                    response.errors.push(Error::builder()
-                    .message("Unauthorized field or type")
-                    .path(path.clone())
-                    .extension_code("UNAUTHORIZED_FIELD_OR_TYPE").build());
+                match query.unauthorized.errors.response {
+                    crate::plugins::authorization::ErrorLocation::Errors => for path in &query.unauthorized.paths {
+                        response.errors.push(Error::builder()
+                        .message("Unauthorized field or type")
+                        .path(path.clone())
+                        .extension_code("UNAUTHORIZED_FIELD_OR_TYPE").build());
+                    },
+                    crate::plugins::authorization::ErrorLocation::Extensions =>{
+                        if !query.unauthorized.paths.is_empty() {
+                            let mut v = vec![];
+                            for path in &query.unauthorized.paths{
+                                v.push(serde_json_bytes::to_value(Error::builder()
+                                .message("Unauthorized field or type")
+                                .path(path.clone())
+                                .extension_code("UNAUTHORIZED_FIELD_OR_TYPE").build()).expect("error serialization should not fail"));
+                            }
+                            response.extensions.insert("authorizationErrors", Value::Array(v));
+                        }
+                    },
+                    crate::plugins::authorization::ErrorLocation::Disabled => {},
                 }
             }
 

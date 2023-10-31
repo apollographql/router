@@ -768,3 +768,85 @@ async fn scopes_directive_reject_unauthorized() {
 
     insta::assert_json_snapshot!(response);
 }
+
+#[tokio::test]
+async fn errors_in_extensions() {
+    let subgraphs = MockedSubgraphs([
+    ("user", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                "variables": {"representations": [{ "__typename": "User", "id":0 }],}
+            }},
+            serde_json::json! {{ "data": { "_entities":[{"name":"Ada"}] } }},
+        ).with_json(
+            serde_json::json!{{
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name phone}}}",
+                "variables": {"representations": [{ "__typename": "User", "id":0 }],}
+            }},
+            serde_json::json! {{ "data": { "_entities":[{"name":"Ada", "phone": "1234"}] } }},
+        ).build()),
+    ("orga", MockSubgraph::builder().with_json(
+        serde_json::json!{{"query":"{orga(id:1){id}}"}},
+        serde_json::json!{{"data": {"orga": { "id": 1 }}}}
+    ).with_json(
+        serde_json::json!{{"query":"{orga(id:1){id creatorUser{__typename id}}}"}},
+        serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": { "__typename": "User", "id": 0 } }}}}
+    ).with_json(
+        serde_json::json!{{"query":"{orga(id:1){id creatorUser{id name}}}"}},
+        serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": { "id": 0, "name":"Ada" } }}}}
+    )
+    .with_json(
+        serde_json::json!{{"query":"{orga(id:1){id creatorUser{id name phone}}}"}},
+        serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": { "id": 0, "name":"Ada", "phone": "1234" } }}}}
+    )
+    .build())
+].into_iter().collect());
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+        "include_subgraph_errors": {
+            "all": true
+        },
+        "authorization": {
+            "preview_directives": {
+                "enabled": true,
+                "errors": {
+                    "response": "extensions"
+                }
+            }
+        }}))
+        .unwrap()
+        .schema(SCOPES_SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_router()
+        .await
+        .unwrap();
+
+    let req = graphql::Request {
+        query: Some("query { orga(id: 1) { id creatorUser { id name phone } } }".to_string()),
+        ..Default::default()
+    };
+    let request = router::Request {
+        context: Context::new(),
+        router_request: http::Request::builder()
+            .method("POST")
+            .header(CONTENT_TYPE, "application/json")
+            .header(ACCEPT, "application/json")
+            .body(serde_json::to_vec(&req).unwrap().into())
+            .unwrap(),
+    };
+
+    let response = service
+        .clone()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await
+        .next()
+        .await
+        .unwrap()
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
