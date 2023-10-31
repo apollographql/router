@@ -20,7 +20,11 @@ The Apollo Router generates spans that include the various phases of serving a r
 
 Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/), which can assemble spans into a gantt chart for analysis.
 
-> To get the most out of distributed tracing, _all_ components in your system should be instrumented.
+<Tip>
+
+To get the most out of distributed tracing, _all_ components in your system should be instrumented.
+
+</Tip>
 
 ## Common configuration
 
@@ -55,7 +59,7 @@ telemetry:
         "environment.namespace": "{env.MY_K8_NAMESPACE_ENV_VARIABLE}"
 ```
 
-> [See OpenTelemetry conventions for resources.](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/README.md)
+[See OpenTelemetry conventions for resources.](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/README.md)
 
 ### Sampling
 
@@ -125,8 +129,7 @@ telemetry:
 
 ## Trace ID
 
-> This is part of an experimental feature, it means any time until it's stabilized (without the prefix `experimental_`) we might change the configuration shape or adding/removing features.
-> If you want to give feedback or participate in that feature feel free to join [this discussion on GitHub](https://github.com/apollographql/router/discussions/2147).
+<ExperimentalFeature appendText="You can also give feedback in the [discussion on GitHub](https://github.com/apollographql/router/discussions/2147)." />
 
 If you want to expose in response headers the generated trace ID or the one you provided using propagation headers you can use this configuration:
 
