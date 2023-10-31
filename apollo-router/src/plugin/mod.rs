@@ -66,8 +66,8 @@ pub struct PluginInit<T> {
     pub config: T,
     /// Router Supergraph Schema (schema definition language)
     pub supergraph_sdl: Arc<String>,
-
-    pub(crate) notify: Notify<String, graphql::Response>,
+    /// Pubsub for subscriptions
+    pub notify: Notify<String, graphql::Response>,
 }
 
 impl<T> PluginInit<T>
@@ -168,7 +168,8 @@ where
 /// Factories for plugin schema and configuration.
 #[derive(Clone)]
 pub struct PluginFactory {
-    pub(crate) name: String,
+    /// The name of the plugin.
+    pub name: String,
     instance_factory: InstanceFactory,
     schema_factory: SchemaFactory,
     pub(crate) type_id: TypeId,
@@ -212,8 +213,9 @@ impl PluginFactory {
             type_id: TypeId::of::<P>(),
         }
     }
-
-    pub(crate) async fn create_instance(
+    
+    /// Create a plugin factory.
+    pub async fn create_instance(
         &self,
         configuration: &serde_json::Value,
         supergraph_sdl: Arc<String>,
@@ -237,7 +239,7 @@ impl PluginFactory {
 
 // If we wanted to create a custom subset of plugins, this is where we would do it
 /// Get a copy of the registered plugin factories.
-pub(crate) fn plugins() -> impl Iterator<Item = &'static Lazy<PluginFactory>> {
+pub fn plugins() -> impl Iterator<Item = &'static Lazy<PluginFactory>> {
     PLUGINS.iter()
 }
 
@@ -324,7 +326,7 @@ fn get_type_of<T>(_: &T) -> &'static str {
 /// The trait also provides a default implementations for each hook, which returns the associated service unmodified.
 /// For more information about the plugin lifecycle please check this documentation <https://www.apollographql.com/docs/router/customizations/native/#plugin-lifecycle>
 #[async_trait]
-pub(crate) trait DynPlugin: Send + Sync + 'static {
+pub trait DynPlugin: Send + Sync + 'static {
     /// This service runs at the very beginning and very end of the request lifecycle.
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
