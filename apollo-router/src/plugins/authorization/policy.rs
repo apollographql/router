@@ -145,6 +145,7 @@ pub(crate) struct PolicyFilteringVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
     implementers_map: &'a HashMap<Name, HashSet<Name>>,
+    dry_run: bool,
     request_policies: HashSet<String>,
     pub(crate) query_requires_policies: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
@@ -177,11 +178,13 @@ impl<'a> PolicyFilteringVisitor<'a> {
         executable: &'a ast::Document,
         implementers_map: &'a HashMap<Name, HashSet<Name>>,
         successful_policies: HashSet<String>,
+        dry_run: bool,
     ) -> Option<Self> {
         Some(Self {
             schema,
             fragments: transform::collect_fragments(executable),
             implementers_map,
+            dry_run,
             request_policies: successful_policies,
             query_requires_policies: false,
             unauthorized_paths: vec![],
@@ -390,7 +393,12 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
         } else {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_policies = true;
-            Ok(None)
+
+            if self.dry_run {
+                transform::operation(self, root_type, node)
+            } else {
+                Ok(None)
+            }
         }
     }
 
@@ -425,7 +433,12 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
         } else {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_policies = true;
-            Ok(None)
+
+            if self.dry_run {
+                transform::field(self, field_def, node)
+            } else {
+                Ok(None)
+            }
         };
 
         if is_field_list {
@@ -446,10 +459,10 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
             .get(&node.type_condition)
             .is_some_and(|ty| self.is_type_authorized(ty));
 
-        if !fragment_is_authorized {
-            Ok(None)
-        } else {
+        if fragment_is_authorized || self.dry_run {
             transform::fragment_definition(self, node)
+        } else {
+            Ok(None)
         }
     }
 
@@ -475,7 +488,11 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
             self.query_requires_policies = true;
             self.unauthorized_paths.push(self.current_path.clone());
 
-            Ok(None)
+            if self.dry_run {
+                transform::fragment_spread(self, node)
+            } else {
+                Ok(None)
+            }
         } else {
             transform::fragment_spread(self, node)
         };
@@ -509,7 +526,12 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
                 let res = if !fragment_is_authorized {
                     self.query_requires_policies = true;
                     self.unauthorized_paths.push(self.current_path.clone());
-                    Ok(None)
+
+                    if self.dry_run {
+                        transform::inline_fragment(self, parent_type, node)
+                    } else {
+                        Ok(None)
+                    }
                 } else {
                     transform::inline_fragment(self, parent_type, node)
                 };
@@ -639,7 +661,8 @@ mod tests {
         schema.validate().unwrap();
         doc.to_executable(&schema).validate(&schema).unwrap();
         let map = schema.implementers_map();
-        let mut visitor = PolicyFilteringVisitor::new(&schema, &doc, &map, policies).unwrap();
+        let mut visitor =
+            PolicyFilteringVisitor::new(&schema, &doc, &map, policies, false).unwrap();
         (
             transform::document(&mut visitor, &doc).unwrap(),
             visitor.unauthorized_paths,

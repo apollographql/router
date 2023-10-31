@@ -167,6 +167,7 @@ pub(crate) struct ScopeFilteringVisitor<'a> {
     pub(crate) unauthorized_paths: Vec<Path>,
     current_path: Path,
     requires_scopes_directive_name: String,
+    dry_run: bool,
 }
 
 impl<'a> ScopeFilteringVisitor<'a> {
@@ -175,12 +176,14 @@ impl<'a> ScopeFilteringVisitor<'a> {
         executable: &'a ast::Document,
         implementers_map: &'a HashMap<Name, HashSet<Name>>,
         scopes: HashSet<String>,
+        dry_run: bool,
     ) -> Option<Self> {
         Some(Self {
             schema,
             fragments: transform::collect_fragments(executable),
             implementers_map,
             request_scopes: scopes,
+            dry_run,
             query_requires_scopes: false,
             unauthorized_paths: vec![],
             current_path: Path::default(),
@@ -390,7 +393,12 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
         } else {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_scopes = true;
-            Ok(None)
+
+            if self.dry_run {
+                transform::operation(self, root_type, node)
+            } else {
+                Ok(None)
+            }
         }
     }
 
@@ -426,7 +434,12 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
         } else {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_scopes = true;
-            Ok(None)
+
+            if self.dry_run {
+                transform::field(self, field_def, node)
+            } else {
+                Ok(None)
+            }
         };
 
         if is_field_list {
@@ -452,10 +465,11 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
         // If we modified the transform visitor implementation to modify the fragment definitions before the
         // operations, we would be able to store the list of unauthorized paths per fragment, and at the point
         // of application, generate unauthorized paths starting at the operation root
-        if !fragment_is_authorized {
-            Ok(None)
-        } else {
+
+        if fragment_is_authorized || self.dry_run {
             transform::fragment_definition(self, node)
+        } else {
+            Ok(None)
         }
     }
 
@@ -481,7 +495,11 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
             self.query_requires_scopes = true;
             self.unauthorized_paths.push(self.current_path.clone());
 
-            Ok(None)
+            if self.dry_run {
+                transform::fragment_spread(self, node)
+            } else {
+                Ok(None)
+            }
         } else {
             transform::fragment_spread(self, node)
         };
@@ -515,7 +533,12 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
                 let res = if !fragment_is_authorized {
                     self.query_requires_scopes = true;
                     self.unauthorized_paths.push(self.current_path.clone());
-                    Ok(None)
+
+                    if self.dry_run {
+                        transform::inline_fragment(self, parent_type, node)
+                    } else {
+                        Ok(None)
+                    }
                 } else {
                     transform::inline_fragment(self, parent_type, node)
                 };
@@ -647,7 +670,7 @@ mod tests {
         doc.to_executable(&schema).validate(&schema).unwrap();
 
         let map = schema.implementers_map();
-        let mut visitor = ScopeFilteringVisitor::new(&schema, &doc, &map, scopes).unwrap();
+        let mut visitor = ScopeFilteringVisitor::new(&schema, &doc, &map, scopes, false).unwrap();
         (
             transform::document(&mut visitor, &doc).unwrap(),
             visitor.unauthorized_paths,

@@ -131,6 +131,7 @@ pub(crate) struct AuthenticatedVisitor<'a> {
     pub(crate) unauthorized_paths: Vec<Path>,
     current_path: Path,
     authenticated_directive_name: String,
+    dry_run: bool,
 }
 
 impl<'a> AuthenticatedVisitor<'a> {
@@ -138,11 +139,13 @@ impl<'a> AuthenticatedVisitor<'a> {
         schema: &'a schema::Schema,
         executable: &'a ast::Document,
         implementers_map: &'a HashMap<Name, HashSet<Name>>,
+        dry_run: bool,
     ) -> Option<Self> {
         Some(Self {
             schema,
             fragments: transform::collect_fragments(executable),
             implementers_map,
+            dry_run,
             query_requires_authentication: false,
             unauthorized_paths: Vec::new(),
             current_path: Path::default(),
@@ -267,7 +270,11 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         if operation_requires_authentication {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_authentication = true;
-            Ok(None)
+            if self.dry_run {
+                transform::operation(self, root_type, node)
+            } else {
+                Ok(None)
+            }
         } else {
             transform::operation(self, root_type, node)
         }
@@ -303,7 +310,12 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_authentication = true;
-            Ok(None)
+
+            if self.dry_run {
+                transform::field(self, field_def, node)
+            } else {
+                Ok(None)
+            }
         } else {
             transform::field(self, field_def, node)
         };
@@ -326,10 +338,10 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
             .get(&node.type_condition)
             .is_some_and(|type_definition| self.is_type_authenticated(type_definition));
 
-        if fragment_requires_authentication {
-            Ok(None)
-        } else {
+        if !fragment_requires_authentication || self.dry_run {
             transform::fragment_definition(self, node)
+        } else {
+            Ok(None)
         }
     }
 
@@ -355,7 +367,11 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
             self.query_requires_authentication = true;
             self.unauthorized_paths.push(self.current_path.clone());
 
-            Ok(None)
+            if self.dry_run {
+                transform::fragment_spread(self, node)
+            } else {
+                Ok(None)
+            }
         } else {
             transform::fragment_spread(self, node)
         };
@@ -389,7 +405,12 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
                 let res = if fragment_requires_authentication {
                     self.query_requires_authentication = true;
                     self.unauthorized_paths.push(self.current_path.clone());
-                    Ok(None)
+
+                    if self.dry_run {
+                        transform::inline_fragment(self, parent_type, node)
+                    } else {
+                        Ok(None)
+                    }
                 } else {
                     transform::inline_fragment(self, parent_type, node)
                 };
@@ -500,7 +521,7 @@ mod tests {
         doc.to_executable(&schema).validate(&schema).unwrap();
 
         let map = schema.implementers_map();
-        let mut visitor = AuthenticatedVisitor::new(&schema, &doc, &map).unwrap();
+        let mut visitor = AuthenticatedVisitor::new(&schema, &doc, &map, false).unwrap();
 
         (
             transform::document(&mut visitor, &doc).unwrap(),
