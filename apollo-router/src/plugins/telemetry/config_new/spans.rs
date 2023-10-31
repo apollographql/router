@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use http::header::CONTENT_LENGTH;
 use opentelemetry_api::Key;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
 use super::attributes::GetAttributes;
+use crate::context::OPERATION_KIND;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::Extendable;
@@ -17,7 +17,9 @@ use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphCustomAttribute;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphCustomAttribute;
+use crate::query_planner::OperationKind;
 use crate::services::router;
+use crate::services::supergraph;
 use crate::tracer::TraceId;
 
 #[allow(dead_code)]
@@ -81,7 +83,7 @@ pub(crate) struct RouterAttributes {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SupergraphSpans {
     /// Custom attributes that are attached to the supergraph span.
-    attributes: Extendable<SupergraphAttributes, SupergraphCustomAttribute>,
+    pub(crate) attributes: Extendable<SupergraphAttributes, SupergraphCustomAttribute>,
 }
 
 #[allow(dead_code)]
@@ -89,7 +91,7 @@ pub(crate) struct SupergraphSpans {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphSpans {
     /// Custom attributes that are attached to the subgraph span.
-    attributes: Extendable<SubgraphAttributes, SubgraphCustomAttribute>,
+    pub(crate) attributes: Extendable<SubgraphAttributes, SubgraphCustomAttribute>,
 }
 
 impl GetAttributes<router::Request, router::Response> for RouterAttributes {
@@ -106,31 +108,63 @@ impl GetAttributes<router::Request, router::Response> for RouterAttributes {
                 attrs.insert("dd.trace_id".into(), AttributeValue::I64(trace_id as i64));
             }
         }
-        // if let Some(true) = &self.server.client_address {
-        //     todo!();
-        // }
-        // if let Some(true) = &self.server.client_port {
-        //     todo!();
-        // }
-        // if let Some(true) = &self.server.http_route {
-        //     todo!();
-        // }
-        // if let Some(true) = &self.server.network_peer_address {
-        //     todo!();
-        // }
-        // TODO: take other ones
 
         attrs
     }
 
     fn on_response(&self, response: &router::Response) -> HashMap<Key, AttributeValue> {
-        let mut attrs = self.common.on_response(response);
+        let attrs = self.common.on_response(response);
+        // TODO add support for server
         attrs
     }
 
     fn on_error(&self, error: &BoxError) -> HashMap<Key, AttributeValue> {
-        let mut attrs = self.common.on_error(error);
+        let attrs = self.common.on_error(error);
+        // TODO add support for server
+        attrs
+    }
+}
+
+impl GetAttributes<supergraph::Request, supergraph::Response> for SupergraphAttributes {
+    fn on_request(&self, request: &supergraph::Request) -> HashMap<Key, AttributeValue> {
+        let mut attrs = HashMap::new();
+        if let Some(true) = &self.graphql_document {
+            if let Some(query) = &request.supergraph_request.body().query {
+                attrs.insert(
+                    "graphql.document".into(),
+                    AttributeValue::String(query.clone()),
+                );
+            }
+        }
+        if let Some(true) = &self.graphql_operation_name {
+            if let Some(op_name) = &request.supergraph_request.body().operation_name {
+                attrs.insert(
+                    "graphql.operation.name".into(),
+                    AttributeValue::String(op_name.clone()),
+                );
+            }
+        }
+        if let Some(true) = &self.graphql_operation_type {
+            let operation_kind: OperationKind = request
+                .context
+                .get(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            attrs.insert(
+                "graphql.operation.type".into(),
+                AttributeValue::String(operation_kind.as_apollo_operation_type().to_string()),
+            );
+        }
 
         attrs
+    }
+
+    fn on_response(&self, _response: &supergraph::Response) -> HashMap<Key, AttributeValue> {
+        HashMap::with_capacity(0)
+    }
+
+    fn on_error(&self, _error: &BoxError) -> HashMap<Key, AttributeValue> {
+        HashMap::with_capacity(0)
     }
 }

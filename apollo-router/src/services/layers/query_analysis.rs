@@ -6,8 +6,10 @@ use http::StatusCode;
 use lru::LruCache;
 use tokio::sync::Mutex;
 
+use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugins::authorization::AuthorizationPlugin;
+use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
@@ -105,13 +107,16 @@ impl QueryAnalysisLayer {
 
                 let context = Context::new();
 
-                let operation_name = doc
-                    .executable
-                    .get_operation(op_name.as_deref())
-                    .ok()
+                let operation = doc.executable.get_operation(op_name.as_deref()).ok();
+                let operation_name = operation
+                    .as_ref()
                     .and_then(|operation| operation.name().map(|s| s.as_str().to_owned()));
 
                 context.insert(OPERATION_NAME, operation_name).unwrap();
+                let operation_kind = operation.map(|op| OperationKind::from(op.operation_type));
+                context
+                    .insert(OPERATION_KIND, operation_kind.unwrap_or_default())
+                    .expect("cannot insert operation kind in the context; this is a bug");
 
                 if self.enable_authorization_directives {
                     AuthorizationPlugin::query_analysis(

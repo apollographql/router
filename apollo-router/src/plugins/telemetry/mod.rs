@@ -79,6 +79,7 @@ use super::traffic_shaping::cache::hash_request;
 use super::traffic_shaping::cache::hash_vary_headers;
 use super::traffic_shaping::cache::REPRESENTATIONS;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
+use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::layers::ServiceBuilderExt;
 use crate::metrics::aggregation::MeterProviderType;
@@ -150,7 +151,6 @@ pub(crate) const EXECUTION_SPAN_NAME: &str = "execution";
 const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
-pub(crate) const OPERATION_KIND: &str = "apollo_telemetry::operation_kind";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
@@ -327,10 +327,7 @@ impl Plugin for Telemetry {
             })
             // TODO add map_future_with_request_data to log the request
             .map_future_with_request_data(move |request: &router::Request| {
-                let custom_attributes = config_request.spans.router.attributes.on_request(request);
-                // TODO fetch attributes for request
-
-                custom_attributes
+                config_request.spans.router.attributes.on_request(request)
             }, move |mut custom_attributes: HashMap<opentelemetry_api::Key, AttributeValue>, fut| {
                 let start = Instant::now();
                 let config = config_later.clone();
@@ -340,9 +337,6 @@ impl Plugin for Telemetry {
 
                 async move {
                     let span = Span::current();
-                    ::tracing::info!("coucou");
-
-
                     let response: Result<router::Response, BoxError> = fut.await;
 
                     span.record(
@@ -435,17 +429,26 @@ impl Plugin for Telemetry {
             })
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
+                    let custom_attributes = config.spans.supergraph.attributes.on_request(req);
                     Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
-                    req.context.clone()
+                    (req.context.clone(), custom_attributes)
                 },
-                move |ctx: Context, fut| {
+                move |(ctx, mut custom_attributes): (Context, HashMap<opentelemetry_api::Key, AttributeValue>), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
 
                     async move {
-                        // TODO call set_attribute here
+                        let span = Span::current();
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
+                        match &result {
+                            Ok(resp) => custom_attributes.extend(config.spans.supergraph.attributes.on_response(resp)),
+                            Err(err) => custom_attributes.extend(config.spans.supergraph.attributes.on_error(err)),
+                        }
+                        // TODO use a better method to add it once and not iterate
+                        for (key, value) in custom_attributes {
+                            span.set_attribute(key, value);
+                        }
                         result = Self::update_otel_metrics(
                             config.clone(),
                             ctx.clone(),
@@ -471,9 +474,6 @@ impl Plugin for Telemetry {
                     .query
                     .operation(req.supergraph_request.body().operation_name.as_deref())
                     .map(|op| *op.kind());
-                let _ = req
-                    .context
-                    .insert(OPERATION_KIND, operation_kind.unwrap_or_default());
 
                 match operation_kind {
                     Some(operation_kind) => {
@@ -746,13 +746,8 @@ impl Telemetry {
     ) -> impl Fn(&SupergraphRequest) -> Span + Clone {
         let send_variable_values = config.send_variable_values.clone();
         move |request: &SupergraphRequest| {
-            let http_request = &request.supergraph_request;
-            let query = http_request.body().query.as_deref().unwrap_or_default();
             let span = info_span!(
                 SUPERGRAPH_SPAN_NAME,
-                graphql.document = query,
-                // TODO add graphql.operation.type
-                graphql.operation.name = field::Empty,
                 otel.kind = "INTERNAL",
                 apollo_private.field_level_instrumentation_ratio =
                     field_level_instrumentation_ratio,
@@ -761,20 +756,6 @@ impl Telemetry {
                     &request.supergraph_request.body().variables,
                     &send_variable_values,
                 ),
-            );
-            if let Some(operation_name) = request
-                .context
-                .get::<_, String>(OPERATION_NAME)
-                .unwrap_or_default()
-            {
-                span.record("graphql.operation.name", operation_name);
-            }
-            // TODO The part where we add dynamic attribute for logs and spans
-            span.set_attribute(String::from("custom_router_attribute_header"), "test");
-            // set dyn attribute for logs
-            span.set_dyn_attribute(
-                String::from("custom_router_attribute_header"),
-                "test".to_string(),
             );
 
             span

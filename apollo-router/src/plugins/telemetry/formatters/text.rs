@@ -189,9 +189,7 @@ impl TextFormatter {
                     // }
                     writer.write_char(' ')?;
                 }
-                None => {
-                    eprintln!("Unable to find LogAttributes in extensions; this is a bug");
-                }
+                None => {}
             }
         }
 

@@ -452,6 +452,8 @@ pub(crate) enum AttributeValue {
     Bool(bool),
     /// i64 values
     I64(i64),
+    /// i64 values
+    U128(u128),
     /// f64 values
     F64(f64),
     /// String values
@@ -470,6 +472,9 @@ impl TryFrom<serde_json::Value> for AttributeValue {
             serde_json::Value::Number(v) if v.is_i64() => {
                 Ok(AttributeValue::I64(v.as_i64().expect("i64 checked")))
             }
+            serde_json::Value::Number(v) if v.is_u64() => Ok(AttributeValue::U128(
+                v.as_u64().expect("u64 checked") as u128,
+            )),
             serde_json::Value::Number(v) if v.is_f64() => {
                 Ok(AttributeValue::F64(v.as_f64().expect("f64 checked")))
             }
@@ -514,6 +519,7 @@ impl From<AttributeValue> for opentelemetry::Value {
         match value {
             AttributeValue::Bool(v) => Value::Bool(v),
             AttributeValue::I64(v) => Value::I64(v),
+            AttributeValue::U128(v) => Value::I64(v as i64),
             AttributeValue::F64(v) => Value::F64(v),
             AttributeValue::String(v) => Value::String(v.into()),
             AttributeValue::Array(v) => Value::Array(v.into()),

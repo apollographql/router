@@ -3,12 +3,13 @@ use std::collections::HashMap;
 use http::header::CONTENT_LENGTH;
 use http::header::USER_AGENT;
 use opentelemetry_api::Key;
-use schemars::gen::SchemaGenerator;
-use schemars::schema::Schema;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json_bytes::ByteString;
 use tower::BoxError;
 
+use crate::context::OPERATION_KIND;
+use crate::context::OPERATION_NAME;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::services::router;
 use crate::services::subgraph;
@@ -190,16 +191,7 @@ pub(crate) enum SupergraphCustomAttribute {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<String>,
-    },
-    ResponseBody {
-        /// Json Path into the response body
-        response_body: String,
-        #[serde(skip)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
     RequestHeader {
         /// The name of the request header.
@@ -208,7 +200,7 @@ pub(crate) enum SupergraphCustomAttribute {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
     ResponseHeader {
         /// The name of the response header.
@@ -217,7 +209,7 @@ pub(crate) enum SupergraphCustomAttribute {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
     RequestContext {
         /// The request context key.
@@ -420,13 +412,13 @@ pub(crate) struct SupergraphAttributes {
     /// * query findBookById { bookById(id: ?) { name } }
     /// Requirement level: Recommended
     #[serde(rename = "graphql.document")]
-    graphql_document: Option<bool>,
+    pub(crate) graphql_document: Option<bool>,
     /// The name of the operation being executed.
     /// Examples:
     /// * findBookById
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.name")]
-    graphql_operation_name: Option<bool>,
+    pub(crate) graphql_operation_name: Option<bool>,
     /// The type of the operation being executed.
     /// Examples:
     /// * query
@@ -434,7 +426,7 @@ pub(crate) struct SupergraphAttributes {
     /// * mutation
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.type")]
-    graphql_operation_type: Option<bool>,
+    pub(crate) graphql_operation_type: Option<bool>,
 }
 
 #[allow(dead_code)]
@@ -804,21 +796,13 @@ impl GetAttribute<router::Request, router::Response> for RouterCustomAttribute {
                 .ok()
                 .flatten()
                 .or_else(|| default.clone()),
-            RouterCustomAttribute::Env { env, default, .. } => std::env::var(env)
-                .ok()
-                .map(AttributeValue::String)
-                .or_else(|| default.clone().map(AttributeValue::String)),
             RouterCustomAttribute::TraceId { trace_id } => todo!(),
             RouterCustomAttribute::Baggage {
                 baggage,
                 redact,
                 default,
             } => todo!(),
-            RouterCustomAttribute::RequestHeader {
-                request_header,
-                redact,
-                default,
-            } => None,
+            _ => None,
         }
     }
 }
@@ -926,5 +910,96 @@ impl GetAttributes<router::Request, router::Response> for HttpCommonAttributes {
     }
 }
 
-// Implet get on *CustomAttribute which returns Option<Value>
-// Implement the same trait on Extendable and RouterAttributes
+impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphCustomAttribute {
+    fn on_request(&self, request: &supergraph::Request) -> Option<AttributeValue> {
+        match self {
+            SupergraphCustomAttribute::OperationName {
+                operation_name,
+                default,
+                ..
+            } => {
+                let op_name = request.context.get(OPERATION_NAME).ok().flatten();
+                match operation_name {
+                    OperationName::String => {
+                        op_name.or_else(|| default.clone().map(AttributeValue::String))
+                    }
+                    OperationName::Hash => todo!(),
+                }
+            }
+            SupergraphCustomAttribute::OperationKind { default, .. } => request
+                .context
+                .get(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .or_else(|| default.clone().map(AttributeValue::String)),
+            SupergraphCustomAttribute::QueryVariable {
+                query_variable,
+                default,
+                ..
+            } => request
+                .supergraph_request
+                .body()
+                .variables
+                .get(&ByteString::from(query_variable.as_str()))
+                .and_then(|v| serde_json::to_string(v).ok())
+                .map(AttributeValue::String)
+                .or_else(|| default.clone()),
+            SupergraphCustomAttribute::RequestHeader {
+                request_header,
+                default,
+                ..
+            } => request
+                .supergraph_request
+                .headers()
+                .get(request_header)
+                .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
+                .or_else(|| default.clone()),
+            SupergraphCustomAttribute::RequestContext {
+                request_context,
+                default,
+                ..
+            } => request
+                .context
+                .get(request_context)
+                .ok()
+                .flatten()
+                .or_else(|| default.clone()),
+            SupergraphCustomAttribute::Baggage {
+                baggage, default, ..
+            } => todo!(),
+            SupergraphCustomAttribute::Env { env, default, .. } => std::env::var(env)
+                .ok()
+                .map(AttributeValue::String)
+                .or_else(|| default.clone().map(AttributeValue::String)),
+            // For response
+            _ => None,
+        }
+    }
+
+    fn on_response(&self, response: &supergraph::Response) -> Option<AttributeValue> {
+        match self {
+            SupergraphCustomAttribute::ResponseHeader {
+                response_header,
+                default,
+                ..
+            } => response
+                .response
+                .headers()
+                .get(response_header)
+                .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
+                .or_else(|| default.clone()),
+            SupergraphCustomAttribute::ResponseContext {
+                response_context,
+                default,
+                ..
+            } => response
+                .context
+                .get(response_context)
+                .ok()
+                .flatten()
+                .or_else(|| default.clone()),
+            // For request
+            _ => None,
+        }
+    }
+}
