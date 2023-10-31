@@ -3,14 +3,8 @@ title: Writing native Rust plugins for the Apollo Router
 description: Extend the Apollo Router with custom Rust code
 ---
 
-> ⚠️ **Native Rust plugins are an advanced feature of the Apollo Router.** We _do not recommend_ creating them for the following reasons:
->
-> - Native plugins require familiarity with programming in Rust.
-> - Native plugins require compiling a custom router binary from source, which can introduce unexpected behavior in your router that's difficult to diagnose and support.
->
-> **For most router customizations,** we recommend instead creating a [Rhai script](./rhai/) or [external coprocessor](./coprocessor/). Both of these customization types provide strong separation of concerns and fault isolation.
->
-> **If a native plugin seems necessary for your use case,** please [open an issue](https://github.com/apollographql/router/issues) so we can investigate adding the required functionality to the stock router binary.
+import ElasticNotice from '../../shared/elastic-notice.mdx';
+import NativePluginNotice from '../../shared/native-plugin-notice.mdx';
 
 Your federated graph might have specific requirements that aren't supported by the Apollo Router's built-in [configuration options](../configuration/overview/). For example, you might need to further customize the behavior of:
 
@@ -20,7 +14,9 @@ Your federated graph might have specific requirements that aren't supported by t
 
 In these cases, you can create custom plugins for the Apollo Router.
 
-> Note: The Apollo Router is made available under the Elastic License v2.0 (ELv2). This applies to its source code and all distributions, including any embedded usage. Read [our licensing page](https://www.apollographql.com/docs/resources/elastic-license-v2-faq/) for more details.
+<NativePluginNotice />
+
+<ElasticNotice />
 
 ## Planning a plugin
 
