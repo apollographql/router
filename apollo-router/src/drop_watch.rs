@@ -18,7 +18,7 @@ pub(crate) struct DropWatch {
 
 impl DropWatch {
     /// Create a DropWatch which will execute the supplied closure then wait for notification
-    pub(crate) fn new_notify_after<F: FnOnce() + Send + 'static>(watched: F) -> Self {
+    pub(crate) fn run_and_wait<F: FnOnce() + Send + 'static>(watched: F) -> Self {
         let park_flag = Arc::new(AtomicBool::new(false));
         let watching_flag = park_flag.clone();
         let watcher_handle = std::thread::spawn(move || {
@@ -38,7 +38,7 @@ impl DropWatch {
     }
 
     /// Create a DropWatch which will wait for notification before executing the supplied closure
-    pub(crate) fn new_notify_before<F: FnOnce() + Send + 'static>(watched: F) -> Self {
+    pub(crate) fn wait_and_run<F: FnOnce() + Send + 'static>(watched: F) -> Self {
         let park_flag = Arc::new(AtomicBool::new(false));
         let watching_flag = park_flag.clone();
         let watcher_handle = std::thread::spawn(move || {

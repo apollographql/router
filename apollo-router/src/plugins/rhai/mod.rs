@@ -205,7 +205,7 @@ impl Plugin for Rhai {
                 .unwrap_or_else(|_| panic!("could not watch: {watched_path:?}"));
         };
 
-        let watcher = DropWatch::new_notify_after(watcher_handle);
+        let watcher = DropWatch::run_and_wait(watcher_handle);
 
         Ok(Self { block, watcher })
     }

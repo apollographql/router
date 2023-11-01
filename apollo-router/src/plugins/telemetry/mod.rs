@@ -237,7 +237,12 @@ impl Plugin for Telemetry {
         let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
 
         let tp = tracer_provider.clone();
-        let watcher = DropWatch::new_notify_before(move || drop(tp));
+        let watcher = DropWatch::wait_and_run(move || {
+            // To ensure we don't hang, tracing providers are dropped in a thread.
+            // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
+            // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
+            drop(tp)
+        });
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
@@ -574,16 +579,13 @@ impl Telemetry {
             );
             hot_tracer.reload(tracer);
 
-            // To ensure we don't hang, tracing providers are dropped in a thread.
-            // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
-            // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
-            // Note: It's safe to join our thread here, since we are not in an async context.
-            std::thread::spawn(move || {
+            let _ = DropWatch::run_and_wait(move || {
+                // To ensure we don't hang, tracing providers are dropped in a thread.
+                // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
+                // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
                 let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
                 drop(last_provider);
-            })
-            .join()
-            .expect("tracer provider update");
+            });
 
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
         }
