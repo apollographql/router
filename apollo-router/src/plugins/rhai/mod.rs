@@ -3,8 +3,6 @@
 use std::fmt;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -40,6 +38,7 @@ use tower::ServiceExt;
 
 use self::engine::RhaiService;
 use self::engine::SharedMut;
+use crate::drop_watch::DropWatch;
 use crate::error::Error;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -103,8 +102,9 @@ impl EngineBlock {
 /// we'll use ArcSwap to accomplish our goal.
 struct Rhai {
     block: Arc<ArcSwap<EngineBlock>>,
-    park_flag: Arc<AtomicBool>,
-    watcher_handle: Option<std::thread::JoinHandle<()>>,
+    // We need to keep this until this struct is dropped.
+    #[allow(dead_code)]
+    watcher: DropWatch,
 }
 
 /// Configuration for the Rhai Plugin
@@ -146,10 +146,7 @@ impl Plugin for Rhai {
         )?));
         let watched_block = block.clone();
 
-        let park_flag = Arc::new(AtomicBool::new(false));
-        let watching_flag = park_flag.clone();
-
-        let watcher_handle = std::thread::spawn(move || {
+        let watcher_handle = move || {
             let watching_path = watched_path.clone();
             let config = Config::default()
                 .with_poll_interval(Duration::from_secs(3))
@@ -206,20 +203,11 @@ impl Plugin for Rhai {
             watcher
                 .watch(&watched_path, RecursiveMode::Recursive)
                 .unwrap_or_else(|_| panic!("could not watch: {watched_path:?}"));
-            // Park the thread until this Rhai instance is dropped (see Drop impl)
-            // We may actually unpark() before this code executes or exit from park() spuriously.
-            // Use the watching_flag to control a loop which waits from the flag to be updated
-            // from Drop.
-            while !watching_flag.load(Ordering::Acquire) {
-                std::thread::park();
-            }
-        });
+        };
 
-        Ok(Self {
-            block,
-            park_flag,
-            watcher_handle: Some(watcher_handle),
-        })
+        let watcher = DropWatch::new_notify_after(watcher_handle);
+
+        Ok(Self { block, watcher })
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -292,16 +280,6 @@ impl Plugin for Rhai {
             tracing::error!("service callback failed: {error}");
         }
         shared_service.take_unwrap()
-    }
-}
-
-impl Drop for Rhai {
-    fn drop(&mut self) {
-        if let Some(wh) = self.watcher_handle.take() {
-            self.park_flag.store(true, Ordering::Release);
-            wh.thread().unpark();
-            wh.join().expect("rhai file watcher thread terminating");
-        }
     }
 }
 

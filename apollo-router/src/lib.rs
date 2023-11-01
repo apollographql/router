@@ -54,6 +54,7 @@ pub(crate) mod axum_factory;
 mod cache;
 mod configuration;
 mod context;
+mod drop_watch;
 mod error;
 mod executable;
 mod files;
