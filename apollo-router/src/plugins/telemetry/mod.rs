@@ -241,7 +241,7 @@ impl Plugin for Telemetry {
             // To ensure we don't hang, tracing providers are dropped in a thread.
             // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
             // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
-            drop(tp)
+            drop(tp);
         });
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
@@ -1548,18 +1548,24 @@ impl Telemetry {
 
         metrics_layer().clear();
 
-        for (meter_provider_type, meter_provider) in old_meter_providers {
-            if let Err(e) = meter_provider.shutdown() {
-                ::tracing::error!(error = %e, meter_provider_type = ?meter_provider_type, "failed to shutdown meter provider")
+        let _ = DropWatch::run_and_wait(move || {
+            for (meter_provider_type, meter_provider) in old_meter_providers {
+                // This has to be done in a thread since we are calling this from an async context
+                if let Err(e) = meter_provider.shutdown() {
+                    ::tracing::error!(error = %e, meter_provider_type = ?meter_provider_type, "failed to shutdown meter provider")
+                }
             }
-        }
+        });
     }
 
     fn safe_shutdown_meter_provider(meter_provider: &mut Option<FilterMeterProvider>) {
         if let Some(meter_provider) = meter_provider.take() {
-            if let Err(e) = meter_provider.shutdown() {
-                ::tracing::error!(error = %e, "failed to shutdown meter provider")
-            }
+            // This has to be done in a thread since we may be calling this from an async context
+            let _ = DropWatch::run_and_wait(move || {
+                if let Err(e) = meter_provider.shutdown() {
+                    ::tracing::error!(error = %e, "failed to shutdown meter provider")
+                }
+            });
         }
     }
 }
