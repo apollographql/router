@@ -574,7 +574,7 @@ impl Telemetry {
             );
             hot_tracer.reload(tracer);
 
-            // To ensure we don't hang, tracing providers are dropped in a blocking task.
+            // To ensure we don't hang, tracing providers are dropped in a thread.
             // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
             // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
             // Note: It's safe to join our thread here, since we are not in an async context.
