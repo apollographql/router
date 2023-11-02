@@ -237,7 +237,7 @@ impl ExecutionService {
         tracing::debug_span!("format_response").in_scope(|| {
             let mut paths = Vec::new();
             if !query.unauthorized.paths.is_empty() {
-                if query.unauthorized.log_errors {
+                if query.unauthorized.errors.log {
                     let unauthorized_paths = query.unauthorized.paths.iter().map(|path| path.to_string()).collect::<Vec<_>>();
 
                     event!(Level::ERROR, unauthorized_query_paths = ?unauthorized_paths, "Authorization error",);
