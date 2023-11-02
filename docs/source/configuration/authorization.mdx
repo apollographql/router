@@ -647,7 +647,6 @@ By default, when part of a query is filtered by authorization, the list of filte
 
 By enabling the option, you can choose if query filtering will result in a log event being output.
 
-
 ```yaml title="router.yaml"
 authorization:
   preview_directives:
@@ -672,3 +671,14 @@ authorization:
     errors:
       response: "errors" # possible values: "errors" (default), "extensions", "disabled"
 ```
+
+### dry_run
+
+```yaml title="router.yaml"
+authorization:
+  preview_directives:
+    enabled: true
+    dry_run: true # default: false
+```
+
+This option executes the authorization directives without modifying the query: it only generates the list of unauthorized paths and returns it as part of the response. This is a way to evaluate the impact of authorization policies without breaking existing traffic.
