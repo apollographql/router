@@ -10,69 +10,31 @@ use tracing_subscriber::Registry;
 
 use super::config::AttributeValue;
 use super::reload::IsSampled;
-use super::ROUTER_SPAN_NAME;
-use super::SUBGRAPH_SPAN_NAME;
-use super::SUPERGRAPH_SPAN_NAME;
 
 #[derive(Debug)]
-pub(crate) enum LogAttributes {
-    Router(HashMap<Key, AttributeValue>),
-    Supergraph(HashMap<Key, AttributeValue>),
-    Subgraph(HashMap<Key, AttributeValue>),
+pub(crate) struct LogAttributes {
+    attributes: HashMap<Key, AttributeValue>,
+}
+
+impl Default for LogAttributes {
+    fn default() -> Self {
+        Self {
+            attributes: HashMap::with_capacity(0),
+        }
+    }
 }
 
 impl LogAttributes {
-    pub(crate) fn get_attributes(&self) -> &HashMap<Key, AttributeValue> {
-        match self {
-            LogAttributes::Router(attributes)
-            | LogAttributes::Subgraph(attributes)
-            | LogAttributes::Supergraph(attributes) => attributes,
-        }
+    pub(crate) fn attributes(&self) -> &HashMap<Key, AttributeValue> {
+        &self.attributes
     }
 
-    fn insert(&mut self, span_name: &str, key: Key, value: AttributeValue) {
-        match span_name {
-            ROUTER_SPAN_NAME => {
-                if let Self::Router(attributes) = self {
-                    attributes.insert(key, value);
-                }
-            }
-            SUBGRAPH_SPAN_NAME => {
-                if let Self::Subgraph(attributes) = self {
-                    attributes.insert(key, value);
-                }
-            }
-            SUPERGRAPH_SPAN_NAME => {
-                if let Self::Supergraph(attributes) = self {
-                    attributes.insert(key, value);
-                }
-            }
-            _ => {
-                eprintln!("cannot add custom attributes to this span '{span_name}', it's only available on router/supergraph/subgraph spans");
-            }
-        }
+    fn insert(&mut self, key: Key, value: AttributeValue) {
+        self.attributes.insert(key, value);
     }
-    fn extend(&mut self, span_name: &str, val: impl IntoIterator<Item = (Key, AttributeValue)>) {
-        match span_name {
-            ROUTER_SPAN_NAME => {
-                if let Self::Router(attributes) = self {
-                    attributes.extend(val);
-                }
-            }
-            SUBGRAPH_SPAN_NAME => {
-                if let Self::Subgraph(attributes) = self {
-                    attributes.extend(val);
-                }
-            }
-            SUPERGRAPH_SPAN_NAME => {
-                if let Self::Supergraph(attributes) = self {
-                    attributes.extend(val);
-                }
-            }
-            _ => {
-                eprintln!("cannot add custom attributes to this span '{span_name}', it's only available on router/supergraph/subgraph spans");
-            }
-        }
+
+    fn extend(&mut self, val: impl IntoIterator<Item = (Key, AttributeValue)>) {
+        self.attributes.extend(val);
     }
 }
 
@@ -89,17 +51,9 @@ where
         ctx: Context<'_, S>,
     ) {
         let span = ctx.span(id).expect("Span not found, this is a bug");
-        let custom_attributes = match span.name() {
-            ROUTER_SPAN_NAME => LogAttributes::Router(HashMap::new()),
-            SUBGRAPH_SPAN_NAME => LogAttributes::Subgraph(HashMap::new()),
-            SUPERGRAPH_SPAN_NAME => LogAttributes::Supergraph(HashMap::new()),
-            _ => {
-                return;
-            }
-        };
         let mut extensions = span.extensions_mut();
         if extensions.get_mut::<LogAttributes>().is_none() {
-            extensions.insert(custom_attributes);
+            extensions.insert(LogAttributes::default());
         }
     }
 }
@@ -112,12 +66,11 @@ impl DynAttributeLayer {
 
 pub(crate) trait DynAttribute {
     fn set_dyn_attribute(&self, key: Key, value: AttributeValue);
-    fn set_dyn_attributes(&self, attributes: HashMap<Key, AttributeValue>);
+    fn set_dyn_attributes(&self, attributes: impl IntoIterator<Item = (Key, AttributeValue)>);
 }
 
 impl DynAttribute for ::tracing::Span {
     fn set_dyn_attribute(&self, key: Key, value: AttributeValue) {
-        // TODO match if the span is sampled by otel then put it in oteldata, if not in LogAttributes
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
@@ -147,7 +100,7 @@ impl DynAttribute for ::tracing::Span {
                             let mut extensions = s.extensions_mut();
                             match extensions.get_mut::<LogAttributes>() {
                                 Some(attributes) => {
-                                    attributes.insert(s.name(), key, value);
+                                    attributes.insert(key, value);
                                 }
                                 None => {
                                     eprintln!("no LogAttributes, this is a bug");
@@ -162,8 +115,7 @@ impl DynAttribute for ::tracing::Span {
         });
     }
 
-    fn set_dyn_attributes(&self, attributes: HashMap<Key, AttributeValue>) {
-        // TODO match if the span is sampled by otel then put it in oteldata, if not in LogAttributes
+    fn set_dyn_attributes(&self, attributes: impl IntoIterator<Item = (Key, AttributeValue)>) {
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
@@ -196,7 +148,7 @@ impl DynAttribute for ::tracing::Span {
                             let mut extensions = s.extensions_mut();
                             match extensions.get_mut::<LogAttributes>() {
                                 Some(registered_attributes) => {
-                                    registered_attributes.extend(s.name(), attributes);
+                                    registered_attributes.extend(attributes);
                                 }
                                 None => {
                                     eprintln!("no LogAttributes, this is a bug");

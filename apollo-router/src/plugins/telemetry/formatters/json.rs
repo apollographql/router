@@ -142,7 +142,7 @@ where
                     }
                 }
                 // Get custom dynamic attributes
-                let custom_attributes = ext.get::<LogAttributes>().map(|attrs| attrs.get_attributes());
+                let custom_attributes = ext.get::<LogAttributes>().map(|attrs| attrs.attributes());
                 if let Some(custom_attributes) = custom_attributes {
                     for (key, value) in custom_attributes {
                         serializer.serialize_entry(key.as_str(), value)?;
