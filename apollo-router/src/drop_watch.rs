@@ -69,3 +69,72 @@ impl Drop for DropWatch {
         wh.join().expect("drop watcher thread terminating");
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    use std::sync::mpsc;
+    use std::sync::Arc;
+
+    use super::DropWatch;
+
+    #[test]
+    fn it_runs_and_waits_when_dropped() {
+        let value = Arc::new(AtomicU8::new(0));
+        let shared_value = value.clone();
+        let (tx, rx) = mpsc::channel();
+
+        let _ = DropWatch::run_and_wait(move || {
+            shared_value.fetch_add(1, Ordering::Relaxed);
+            tx.send(()).unwrap();
+        });
+        let _ = rx.recv();
+        assert_eq!(value.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn it_runs_and_waits_when_alive() {
+        let value = Arc::new(AtomicU8::new(0));
+        let shared_value = value.clone();
+        let (tx, rx) = mpsc::channel();
+
+        let watcher = DropWatch::run_and_wait(move || {
+            shared_value.fetch_add(1, Ordering::Relaxed);
+            tx.send(()).unwrap();
+        });
+        let _ = rx.recv();
+        assert_eq!(value.load(Ordering::Relaxed), 1);
+        drop(watcher);
+        assert_eq!(value.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn it_waits_and_runs_when_dropped() {
+        let value = Arc::new(AtomicU8::new(0));
+        let shared_value = value.clone();
+        let (tx, rx) = mpsc::channel();
+
+        let _ = DropWatch::wait_and_run(move || {
+            shared_value.fetch_add(1, Ordering::Relaxed);
+            tx.send(()).unwrap();
+        });
+        let _ = rx.recv();
+        assert_eq!(value.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn it_waits_and_runs_when_alive() {
+        let value = Arc::new(AtomicU8::new(0));
+        let shared_value = value.clone();
+        let (tx, rx) = mpsc::channel();
+
+        let watcher = DropWatch::wait_and_run(move || {
+            shared_value.fetch_add(1, Ordering::Relaxed);
+            tx.send(()).unwrap();
+        });
+        assert_eq!(value.load(Ordering::Relaxed), 0);
+        drop(watcher);
+        let _ = rx.recv();
+        assert_eq!(value.load(Ordering::Relaxed), 1);
+    }
+}
