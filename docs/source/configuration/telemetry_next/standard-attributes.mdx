@@ -1,0 +1,85 @@
+---
+title: Open Telemetry Standard attributes
+---
+
+## Open Telemetry Standard attributes
+
+[Open Telemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/) define a set of standard attributes 
+that can be attached to [spans](spans.mdx), [instruments](instruments.mdx) and [events](events.mdx). These attributes are used to filter and group data in your APM.
+
+The attributes available depend on the stage of the Router pipeline.
+
+Here is an example of a standard attribute on the router span:
+
+```yaml title="router.yaml"
+telemetry:
+  spans:
+    router:
+      attributes:
+        # Standard attributes
+        http.response.status_code: true
+```
+
+### Configuration reference 
+
+#### Router
+This Router stage is the initial entrypoint for all requests. It is HTTP centric and deals with bytes.
+
+| Attribute                      | Value                               | Description                                                                                                                                        |
+|--------------------------------|-------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `error.type`                   |                                     | Describes a class of error the operation ended with.                                                                                               |
+| `http.request.body.size`       |                                     | The size of the request payload body in bytes.                                                                                                     |
+| `http.request.method`          |                                     | HTTP request method.                                                                                                                               |
+| `http.request.method.original` |                                     | Original HTTP method sent by the client in the request line.                                                                                       |
+| `http.response.body.size`      |                                     | The size of the response payload body in bytes.                                                                                                    |
+| `http.response.status_code`    |                                     | HTTP response status code.                                                                                                                         |
+| `network.protocol.name`        |                                     | OSI application layer or non-OSI equivalent.                                                                                                       |
+| `network.protocol.version`     |                                     | Version of the protocol specified in network.protocol.name.                                                                                        |
+| `network.transport`            |                                     | OSI transport layer.                                                                                                                               |
+| `network.type`                 |                                     | OSI network layer or non-OSI equivalent.                                                                                                           |
+| `user_agent.original`          |                                     | Value of the HTTP User-Agent header sent by the client.                                                                                            |
+| `client.address`               |                                     | Client address - domain name if available without reverse DNS lookup, otherwise IP address or Unix domain socket name.                             |
+| `client.port`                  |                                     | The port of the original client behind all proxies, if known (e.g. from Forwarded or a similar header). Otherwise, the immediate client peer port. |
+| `http.route`                   |                                     | The matched route (path template in the format used by the respective server framework).                                                           |
+| `network.local.address`        |                                     | Local socket address. Useful in case of a multi-IP host.                                                                                           |
+| `network.local.port`           |                                     | Local socket port. Useful in case of a multi-port host.                                                                                            |
+| `network.peer.address`         |                                     | Peer address of the network connection - IP address or Unix domain socket name.                                                                    |
+| `network.peer.port`            |                                     | Peer port number of the network connection.                                                                                                        |
+| `server.address`               |                                     | Name of the local HTTP server that received the request.                                                                                           |
+| `server.port`                  |                                     | Port of the local HTTP server that received the request.                                                                                           |
+| `url.path`                     |                                     | The URI path component                                                                                                                             |
+| `url.query`                    |                                     | The URI query component                                                                                                                            |
+| `url.scheme`                   |                                     | The scheme portion of the URL, such as "https" or "http".                                                                                          |
+
+Note that: `http.request.header.<key>` and `http.response.header.<key>` are not available as standard attributes, bu can be configured using a custom attribute.
+
+For instance, to configure an attribute for `x-my-header` on router spans:
+```yaml title="router.yaml"
+telemetry:
+  spans:
+    router:
+      attributes:
+        "http.request.header.x-my-header":
+          request_header: "x-my-header"
+```
+
+#### Supergraph
+The Supergraph stage is executed after query parse but before query execution. It is Graphql centric and deals with GraphQL queries and responses.
+
+| Attribute                   | Value                               | Description                                 |
+|-----------------------------|-------------------------------------|---------------------------------------------|
+| `graphql.operation.name`    |                                     | The operation name from the graphql query   |
+| `graphql.operation.type`    | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query  |
+| `graphql.document`          |                                     | The graphql query to the subgraph           |
+
+
+#### Subgraph
+The subgraph stage executed multiple times during query execution each representing a call to a single subgraph.
+It is Graphql centric and deals with GraphQL queries and responses.
+
+| Attribute                          | Value                               | Description                                    |
+|------------------------------------|-------------------------------------|------------------------------------------------|
+| `subgraph.name`                    |                                     | The name of the subgraph                       |
+| `subgraph.graphql.operation.name`  |                                     | The operation name from the subgraph query     |
+| `subgraph.graphql.operation.type`  | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query     |
+| `subgraph.graphql.document`        |                                     | The graphql query to the subgraph              |

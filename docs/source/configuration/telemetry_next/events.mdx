@@ -1,0 +1,189 @@
+---
+title: Events
+---
+
+## Events
+
+Events are used to signal that something happened in the Router pipeline. They are output to both logs and traces.
+
+The Router has three major pipeline stages:
+* router - The incoming request, before it is parsed, bytes focused.
+* supergraph - The request after it has been parsed and before it is sent to the subgraph, graphql focused.
+* subgraph - The request after it has been sent to the subgraph, graphql focused.
+
+Each within each stage you may configure custom events that will be triggered via `router.yaml`.
+
+### Configuration
+
+```yaml title="router.yaml"
+telemetry:
+  events:
+    router:
+      # Standard events
+      request: info
+      response: info
+      error: info
+
+      # Custom events
+      my.event:
+        message: "my event message"
+        level: info
+        on: request
+        attributes:
+          http.response.body.size: false
+        # Only log when the x-log-request header is `log` 
+        condition:
+          eq:
+            - "log"
+            - request_header: "x-log-request"
+        
+    supergraph:
+      attributes:
+        # ...
+    subgraph:
+      attributes:
+        # ...
+        
+```
+
+### Configuration
+
+#### `router`|`supergraph`|`subgraph`
+
+The `router`, `supergraph` and `subgraph` sections are used to define custom event configuration for the `router`, `supergraph` and `subgraph` stages respectively.
+
+```yaml title="router.yaml"
+telemetry:
+  events:
+    router:
+      # ...     
+    supergraph:
+      # ...
+    subgraph:
+      # ...
+```
+
+Each stage has a set of standard events that can be configured:
+* `request` - The request has been received.
+* `response` - The response has been sent.
+* `error` - An error has occurred.
+
+To configure these events, set the level to `trace`, `info`, `warn`, `error` or `off` (default).
+
+You can enable these via router.yaml:
+```yaml title="router.yaml"
+telemetry:
+  events:
+    router:
+      request: off (default)
+      response: off (default)
+      error: error (default)
+      # ...
+```
+Note that error only applies to pipeline errors, and not graphql errors.
+
+
+In addition, for each stage you can configure custom events.
+
+```yaml title="router.yaml"
+telemetry:
+  events:
+    router:
+      # Custom events
+      my.event: # This key will automatically be added as a 'type' attribute of the event
+        # Custom event configuration
+```
+
+#### `message`
+
+Each custom event must have a message. This is a fixed value, and custom attributes should be used to add additional information.
+
+```yaml title="desc.router.yaml"
+telemetry:
+  events:
+    router:
+      acme.event:
+        message: "my event message"
+        # ...
+```
+
+#### `on`
+
+Each custom event event must indicate when it should be triggered. This can be `request`, `response` or `error`.
+
+```yaml title="desc.router.yaml"
+telemetry:
+  events:
+    router:
+      acme.event:
+        on: request # request, response, error
+        # ...
+```
+
+Note that error only applies to pipeline errors, and not graphql errors. 
+
+#### `level`
+
+Custom events have a level, `trace`, `info`, `warn` or `error`. The level determines the severity of the event.
+
+To set the level:
+```yaml title="desc.router.yaml"
+telemetry:
+  events:
+    router:
+      acme.event:
+        level: info # trace, info, warn, error
+        # ...
+```
+
+#### `condition`
+
+Custom events can be configured to emit under certain conditions. For example, only if the response status code is 200.
+
+To do this use a condition:
+```yaml title="desc.router.yaml"
+telemetry:
+  events:
+    router:
+      acme.event:
+        # ...
+        condition:
+          eq:
+            - 200
+            - response_header: Status
+```
+
+#### `attributes`
+
+Custom events may have attributes attached to them from the Router pipeline. These attributes are used to filter and group spans in your APM.
+
+Attributes may be drawn from [standard attributes](standard-attributes.mdx) or [selectors](selectors.mdx).
+The attributes available depend on the stage of the pipeline.
+
+```yaml title="desc.router.yaml"
+telemetry:
+  events:
+    router:
+      my.event:
+        # ...
+        attributes:
+          # Standard attributes
+          http.response.status_code: true
+          # Custom attributes
+          "my_attribute":
+            response_header: "x-my-header"
+```
+
+### Configuration reference
+| Option             | Values                                                                       | Default | Description                                                 |
+|--------------------|------------------------------------------------------------------------------|---------|-------------------------------------------------------------|
+| `<attribute-name>` |                                                                              |         | The name of the custom attribute.                           |
+| `attributes`       | [standard attributes](standard-attributes.mdx) or [selectors](selectors.mdx) |         | The attributes of the custom log event.                     |
+| `condition`        | [conditions](conditions.mdx)                                                 |         | The condition that must be met for the event to be emitted. |
+| `error`            | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the error log event.                           |
+| `level`            | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the custom log event.                          |
+| `message`          |                                                                              |         | The message of the custom log event.                        |
+| `on`               | `request`\|`response`\|`error`                                               |         | When to trigger the event.                                  |
+| `request`          | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the request log event.                         |
+| `response`         | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the response log event.                        |
+

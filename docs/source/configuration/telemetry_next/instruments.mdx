@@ -1,0 +1,271 @@
+---
+title: Instruments
+---
+
+## Instruments
+
+An instrument is used to collect data for sending to a metric backend. The Apollo Router supports counters, gauges and histograms configured via yaml.
+
+### Standard instruments
+
+Open Telemetry semantic conventions define several standard instruments.
+
+```yaml title="router.yaml"
+telemetry:
+  instruments:
+    router:
+      http.server.active_requests: true # (default false)
+      http.server.request.body.size: true # (default false)
+      http.server.request.duration: true # (default false)
+      http.server.response.body.size: true # (default false)
+```
+
+* `http.server.active_requests` - The number of active requests in flight.
+* `http.server.request.body.size` - A histogram of request body sizes for requests handled by the Router.
+* `http.server.request.duration` - A histogram of request durations for requests handled by the Router.
+* `http.server.response.body.size` - A histogram of response body sizes for requests handled by the Router.
+
+See the [Open Telemetry semantic conventions for http metrics](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/) for more information.
+
+Standard instruments can be customized attaching or removing attributes.
+
+```yaml title="router.yaml"
+telemetry:
+  instruments:
+    default_attribute_requirement_level: required
+    router:
+      http.server.active_requests: 
+        attributes:
+          # Standard attributes
+          http.response.status_code: false
+          # Custom attribute
+          "acme.my_attribute":
+            response_header: "x-my-header"
+```
+
+See the [attributes](#attributes) configuration for more information.
+
+### Custom instruments
+
+It is possible to define custom instruments on the router, supergraph and subgraph stages.
+
+When defining a custom instrument make sure to read the [Open Telemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/).
+This will help you:
+* Choose a good name for your instrument.
+* See which standard attributes can be attached to your instrument. 
+
+In this example three custom instruments are defined, one for each stage of the Router pipeline.
+```yaml title="router.yaml"
+telemetry:
+  instruments:
+    router:
+      http.server.active_requests: true
+      acme.request.duration:
+        value: duration
+        type: counter
+        unit: kb
+        description: "my description"
+        attributes:
+          http.response.status_code: true
+          "my_attribute":
+            response_header: "x-my-header"
+
+    supergraph:
+      acme.graphql.requests:
+        value: unit
+        event: on_error
+        type: counter
+        unit: count
+        description: "supergraph re"
+        
+    subgraph:
+      acme.graphql.subgraph.errors:
+        value: unit
+        event: on_error
+        type: counter
+        unit: count
+        description: "my description"
+```
+
+### Configuration
+
+#### `default_attribute_requirement_level`
+The default attributes that will be attached to standard instruments as defined by Open Telemetry semantic conventions.
+
+Valid values are:
+* `recommended` - recommended attributes will be attached to standard instruments by default.
+* `required` - (default) required will be attached to standard instruments by default.
+
+Note that the Open Telemetry spec defines some attributes as `opt-in`, these attributes must be individually enabled.
+Individual attribute configuration will always override the default attribute requirement level, in this way it is possible to disable `required` attributes.
+
+```yaml title="router.yaml"
+telemetry:
+  instruments:
+    default_attribute_requirement_level: required
+```
+
+See the [Open Telemetry attribute requirement level documentation](https://opentelemetry.io/docs/specs/otel/common/attribute-requirement-level/) for more information.
+
+#### `router`|`supergraph`|`subgraph`
+
+The `router`, `supergraph` and `subgraph` sections are used to define custom instruments for the `router`, `supergraph` and `subgraph` stages respectively.
+
+To define a custom instrument place a new key in your yaml.
+
+```yaml title="router.yaml"
+telemetry:
+  instruments:
+    router:
+      acme.metric: # The name of your custom metric
+        value: duration
+        type: counter
+        unit: s
+        description: "my description"
+```
+
+In this example `acme.request.duration` is introduced as a custom instrument.
+
+It is important to name your metrics in line with conventions. Make sure to read the [Open Telemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/).
+
+In particular:
+* Do not include the unit name in the metric name. e.g. `size_kb` should be `size` and the unit should be `kb`.
+* Do not include `_total` as a suffix. e.g. `http.server.active_requests` not `http.server.active_requests_total`.
+* Use dot notation to separate namespaces in the metric name. e.g. `http.server.active_requests` not `http_server_active_requests`.
+
+#### `value`
+
+The value which will be drawn from.
+This can be one of the following:
+* duration - the duration of the pipeline stage.
+* unit - the number of times the pipeline stage has been executed.
+* active - the number of in-progress requests in the pipeline stage.
+* custom - a custom value extracted from the pipeline stage. See [selectors](selectors.mdx) for more information.
+
+```yaml title="router.yaml"
+telemetry:
+  instruments:
+    router:
+      acme.metric:
+        # ...
+        value: duration
+```
+
+Custom metric values can be extracted from the pipeline using [custom attributes](custom-attributes.mdx). For example to sum the contents of a request header:
+```yaml title="router.yaml"
+telemetry:
+  instruments:
+    router:
+      acme.metric:
+        # ...
+        type: counter
+        value:
+         request_header: "x-my-header"
+```
+
+Note: The value must be of the expected type for the instrument. For example, a counter must have a numeric value.
+
+#### `type`
+Instruments come in four different types:
+* `counter` - A counter that only ever goes up e.g. requests served, tasks completed, errors occurred, etc.
+* `up_down_counter` - A counter that is modified by delta, e.g. the number of items in a queue.   
+* `gauge` - A value that is sampled at a specific point in time, e.g. active requests or CPU usage. 
+* `histogram` - A histogram of values, e.g. request durations or response body sizes.
+
+```yaml title="desc.router.yaml"
+telemetry:
+  instruments:
+    router:
+      acme.metric: 
+        # ...
+        type: counter # counter, up_down_counter, gauge, histogram
+```
+
+#### `unit`
+
+A free format unit that will be displayed in your APM.
+It is recommended to use SI units and definitions from [The Unified Code for Units of Measure](https://ucum.org/ucum).
+
+```yaml title="desc.router.yaml"
+telemetry:
+  instruments:
+    router:
+      acme.metric: 
+        # ...
+        unit: s # seconds
+```
+
+#### `description`
+
+A free format description of the instrument that will be displayed in your APM.
+
+```yaml title="desc.router.yaml"
+telemetry:
+  instruments:
+    router:
+      acme.metric: 
+        # ...
+        description: "my description"
+```
+
+#### `condition`
+
+You may only want to mutate an instrument under certain conditions. For example, you may only want to increment a counter if the response status code is 200.
+
+To do this use a condition:
+```yaml title="desc.router.yaml"
+telemetry:
+  instruments:
+    router:
+      acme.metric:
+        # ...
+        condition:
+          eq:
+            - 200
+            - response_header: Status
+        
+
+```
+
+#### `attributes`
+
+Instruments may have attributes attached to them from the Router pipeline. These attributes are used to filter and group metrics in your APM. 
+
+Attributes may be drawn from [standard attributes](../standard-attributes.mdx) or [selectors](selectors.mdx).
+The attributes available depend on the stage of the pipeline.
+
+
+```yaml title="desc.router.yaml"
+telemetry:
+  instruments:
+    router:
+      # Standard metrics
+      http.server.active_requests:
+        attributes:
+          # Standard attributes
+          http.response.status_code: false
+          # Custom attribute
+          "acme.my_attribute":
+            response_header: "x-my-header"
+      # Custom metric 
+      acme.metric: 
+        attributes:
+          http.response.status_code: true
+          "my_attribute":
+            # ...
+            response_header: "x-my-header"
+```
+
+### Configuration reference
+| Option                                | Values                                                                       | Default    | Description                                  |
+|---------------------------------------|------------------------------------------------------------------------------|------------|----------------------------------------------|
+| `<attribute-name>`                    |                                                                              |            | The name of the custom attribute.            |
+| `<instrument-name>`                   |                                                                              |            | The name of the custom instrument.           |
+| `attributes`                          | [standard attributes](standard-attributes.mdx) or [selectors](selectors.mdx) |            | The attributes of the custom instrument.     |
+| `condition`                           | [conditions](conditions.mdx)                                                 |            | The a condition for mutating the instrument. |
+| `default_attribute_requirement_level` | `required`\|`recommended`                                                    | `required` | The default attribute requirement level.     |
+| `type`                                | `counter`\|`up_down_counter`\|`gauge`\|`histogram`                           |            | The name of the custom instrument.           |
+| `unit`                                |                                                                              |            | A unit name e.g. `By` or `{request}`.        |
+| `description`                         |                                                                              |            | The description of the custom instrument.    |
+| `value`                               | `unit`\|`duration`\|`active`\|`<custom>`                                     |            | The value of the instrument.                 |
+

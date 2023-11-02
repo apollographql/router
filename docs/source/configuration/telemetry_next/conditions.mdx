@@ -1,0 +1,98 @@
+---
+title: Selectors
+---
+
+## Conditions
+
+Conditions are used to define when an [instruments](instruments.mdx) or [events](events.mdx) should happen.
+
+Here is an example of a condition on a custom instrument:
+
+```yaml title="router.yaml"
+telemetry:
+  instruments:
+    router:
+      my.instrument:
+        # ...
+        # This instrument will only be mutated if the condition evaluates to true
+        condition:
+          all:
+            - any:
+                - eq:
+                    - "val"
+                    - request_header: x-req-header
+            - eq:
+                - "foo"
+                - response_header: x-resp-header
+```
+
+### Configuration
+A condition is one of `all`, `any`, `not` or `eq`. With these building blocks you can create complex conditions.  
+
+#### `all`
+`all` is a list of conditions that must all be true for the condition to be true.
+
+For example, the following condition checks the values of `x-req-header1` and `x-req-header2` all of which must be true:
+```yaml
+all:
+  - eq:
+      - "val1"
+      - request_header: x-req-header1
+  - eq:
+      - "val2"
+      - request_header: x-req-header2
+```
+
+#### `any`
+`any` is a list of conditions of which at least one must be true for the condition to be true.
+
+For example, the following condition checks the values of `x-req-header1` and `x-req-header2` one of which must be true:
+```yaml
+any:
+  - eq:
+      - "val2"
+      - request_header: x-req-header1
+  - eq:
+      - "val2"
+      - request_header: x-req-header2
+```
+
+#### `eq`
+`eq` is an equality test between [selectors](selectors.mdx) or values.
+
+For example, the following condition checks the value of `x-req-header` is equal to `val`:
+```yaml
+eq:
+  - "val"
+  - request_header: x-req-header
+```
+
+You may use selectors on both sides of the equality test:
+```yaml
+eq:
+  - request_header: x-req-header1
+  - request_header: x-req-header2
+```
+
+Values may be of types `string`, `number` or `boolean`.
+
+#### `not`
+`not` is a negation of the nested condition.
+
+For example, the following condition checks the value of `x-req-header` is not equal to `val1`:
+```yaml
+not:
+  eq:
+    - "val1"
+    - request_header: x-req-header2
+```
+
+### Configuration reference
+
+| Selector | Description                                              |
+|----------|----------------------------------------------------------|
+| `all`    | A list of conditions that must all be true.              |
+| `any`    | A list of conditions of which at least one must be true. |
+| `eq`     | An equality test between selectors or values.            |
+| `not`    | The nested condition must not be true.                   |
+

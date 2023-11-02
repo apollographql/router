@@ -1,0 +1,20 @@
+---
+title: Tracing in the Apollo Router
+description: Collect tracing information
+---
+
+import { Link } from "gatsby";
+
+## Zipkin
+
+The Apollo Router can be configured to export tracing data to either the default collector address or a URL:
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    zipkin:
+      enabled: true
+
+      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:9411/api/v2/spans)
+      endpoint: "http://${env.ZIPKIN_HOST}:9411/api/v2/spans}"   
+```

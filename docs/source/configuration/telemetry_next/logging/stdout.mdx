@@ -1,0 +1,52 @@
+---
+title: Logging to stdout
+---
+
+## Logging to Stdout
+
+To log to stdout enable the `stdout` logger in your `router.yaml`:
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    stdout:
+      enabled: true
+```
+
+### Configuration
+
+#### `enabled`
+
+To enable stdout logging set the `enabled` option to `true`:
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    stdout:
+      enabled: true
+```
+#### `format`
+
+Stdout logging can be configured to use a variety of different formats.
+
+The default format depends on how the router is run:
+* `text` - interactive shell.
+* `json` - non-interactive shell.
+
+The format can be explicitly set in the `router.yaml`:
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    stdout:
+      enabled: true
+      format: text
+```
+There are many format specific configuration options. See the [format documentation](format.mdx) for more information.
+
+### Configuration reference
+| Option                | Values                     | Default         | Description                                          |
+|-----------------------|----------------------------|-----------------|------------------------------------------------------|
+| `enabled`             | `true`\|`false`            | `false`         | Enable or disable stdout logging.                    |
+| `format`              |                            | `text`\|`json`  | See the [format documentation](#format) for details. |
+

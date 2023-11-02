@@ -1,0 +1,127 @@
+---
+title: Spans
+---
+
+## Spans
+
+A span contains contextual that can be used when displaying logs and traces in your APM.
+
+The Router has three major pipeline stages:
+* router - The incoming request, before it is parsed, bytes focused.
+* supergraph - The request after it has been parsed and before it is sent to the subgraph, graphql focused.
+* subgraph - The request after it has been sent to the subgraph, graphql focused.
+
+Each stage has a corresponding span, which can be configured using the `router.yaml`.
+
+### Span customization
+
+```yaml title="router.yaml"
+telemetry:
+  spans:
+    default_attribute_requirement_level: required
+    legacy_request_span: true
+    router:
+      attributes:
+        # Standard attributes (http)
+        dd.trace_id: false
+        http.request.body.size: false
+        http.response.body.size: false
+        http.request.method: false
+        # ...
+
+        # Custom attributes
+        "acme.custom_1":
+          trace_id: datadog
+        "acme.custom_2":
+          response_header: "X-CUSTOM2"
+          default: "unknown"
+        "acme.custom_3":
+          env: "ENV_VAR"
+          # ...
+        
+    supergraph:
+      attributes:
+        # ...
+    subgraph:
+      attributes:
+        # ...
+        
+```
+
+### Configuration
+
+#### `default_attribute_requirement_level`
+The default attributes that will be attached to spans as defined by Open Telemetry semantic conventions.
+
+Valid values are:
+* `required` (default)
+* `recommended`
+
+```yaml title="router.yaml"
+telemetry:
+  spans:
+    default_attribute_requirement_level: required
+```
+
+Note that the Open Telemetry spec defines some attributes as `opt-in`, these attributes must be individually enabled.
+Individual attribute configuration will always override the default attribute requirement level, in this way it is possible to disable `required` attributes.
+
+#### `legacy_request_span`
+
+The router previously emitted a span called `request` that was a parent of the `router` span. 
+This is now deprecated and removed. If you wish to restore the previous behavior, set `legacy_request_span` to `true`. 
+
+```yaml title="router.yaml"
+telemetry:
+  spans:
+    legacy_request_span: true
+```
+
+The legacy request span is not configurable, and will be removed in a future release.
+
+#### `router`|`supergraph`|`subgraph`
+
+The `router`, `supergraph` and `subgraph` sections are used to define custom span configuration for the `router`, `supergraph` and `subgraph` stages respectively.
+
+```yaml title="router.yaml"
+telemetry:
+  spans:
+    router:
+      attributes:
+        # ...     
+    supergraph:
+      attributes:
+        # ...
+    subgraph:
+      attributes:
+        # ...
+        
+```
+
+#### `attributes`
+
+Spans may have attributes attached to them from the Router pipeline. These attributes are used to filter and group spans in your APM.
+
+Attributes may be drawn from [standard attributes](standard-attributes.mdx) or [selectors](selectors.mdx). 
+The attributes available depend on the stage of the pipeline.
+
+```yaml title="desc.router.yaml"
+telemetry:
+  spans:
+    router:
+      attributes:
+        # Standard attributes
+        http.response.status_code: true
+        # Custom attributes
+        "my_attribute":
+          response_header: "x-my-header"
+```
+
+### Configuration reference
+| Option                                 | Values                                                                        | Default    | Description                                 |
+|----------------------------------------|-------------------------------------------------------------------------------|------------|---------------------------------------------|
+| `<attribute-name>`                     |                                                                               |            | The name of the custom attribute.           |
+| `attributes`                           | [standard attributes](standard-attributes.mdx) or [selectors](selectors.mdx)  |            | The attributes of the stan.                 |
+| `default_attribute_requirement_level`  | `required`\|`recommended`                                                     | `required` | The default attribute requirement level.    |
+| `legacy_request_span`                  | `true`\|`false`                                                               |            | Include the `request` span in traces.       |
+

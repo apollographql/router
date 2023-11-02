@@ -1,0 +1,19 @@
+---
+title: Collecting metrics in the Apollo Router
+---
+
+
+## Using Prometheus
+
+You can use [Prometheus and Grafana](https://prometheus.io/docs/visualization/grafana/) to collect metrics and visualize the router metrics.
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    prometheus:
+      # By setting this endpoint you enable the Prometheus exporter
+      # All our endpoints exposed by plugins are namespaced by the name of the plugin
+      enabled: true
+      listen: 127.0.0.1:9090
+      path: /metrics
+```
