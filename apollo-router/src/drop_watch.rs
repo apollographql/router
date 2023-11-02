@@ -2,8 +2,8 @@
 //!
 //! Accept a FnOnce and carefully watch over it until we are dropped.
 //!
-//! Useful when we want to join threads which will ultimately be terminated within an asynchronous
-//! context.
+//! Useful when we want to join threads which will ultimately be terminated
+//! within an asynchronous context.
 
 use std::mem::ManuallyDrop;
 use std::sync::atomic::AtomicBool;
