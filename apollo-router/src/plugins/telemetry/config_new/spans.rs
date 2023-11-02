@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
 use opentelemetry_api::Key;
+use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
+use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_NAME;
+use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_TYPE;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -100,12 +103,18 @@ impl GetAttributes<router::Request, router::Response> for RouterAttributes {
         let mut attrs = self.common.on_request(request);
         if let Some(true) = &self.trace_id {
             if let Some(trace_id) = TraceId::maybe_new().map(|t| t.to_string()) {
-                attrs.insert("trace_id".into(), AttributeValue::String(trace_id));
+                attrs.insert(
+                    Key::from_static_str("trace_id"),
+                    AttributeValue::String(trace_id),
+                );
             }
         }
         if let Some(true) = &self.datadog_trace_id {
             if let Some(trace_id) = TraceId::maybe_new().map(|t| t.to_u128()) {
-                attrs.insert("dd.trace_id".into(), AttributeValue::U128(trace_id));
+                attrs.insert(
+                    Key::from_static_str("dd.trace_id"),
+                    AttributeValue::U128(trace_id),
+                );
             }
         }
 
@@ -126,16 +135,13 @@ impl GetAttributes<supergraph::Request, supergraph::Response> for SupergraphAttr
         let mut attrs = HashMap::new();
         if let Some(true) = &self.graphql_document {
             if let Some(query) = &request.supergraph_request.body().query {
-                attrs.insert(
-                    "graphql.document".into(),
-                    AttributeValue::String(query.clone()),
-                );
+                attrs.insert(GRAPHQL_DOCUMENT, AttributeValue::String(query.clone()));
             }
         }
         if let Some(true) = &self.graphql_operation_name {
             if let Some(op_name) = &request.supergraph_request.body().operation_name {
                 attrs.insert(
-                    "graphql.operation.name".into(),
+                    GRAPHQL_OPERATION_NAME,
                     AttributeValue::String(op_name.clone()),
                 );
             }
@@ -148,7 +154,7 @@ impl GetAttributes<supergraph::Request, supergraph::Response> for SupergraphAttr
                 .flatten()
                 .unwrap_or_default();
             attrs.insert(
-                "graphql.operation.type".into(),
+                GRAPHQL_OPERATION_TYPE,
                 AttributeValue::String(operation_kind.as_apollo_operation_type().to_string()),
             );
         }
@@ -170,16 +176,13 @@ impl GetAttributes<subgraph::Request, subgraph::Response> for SubgraphAttributes
         let mut attrs = HashMap::new();
         if let Some(true) = &self.graphql_document {
             if let Some(query) = &request.supergraph_request.body().query {
-                attrs.insert(
-                    "graphql.document".into(),
-                    AttributeValue::String(query.clone()),
-                );
+                attrs.insert(GRAPHQL_DOCUMENT, AttributeValue::String(query.clone()));
             }
         }
         if let Some(true) = &self.graphql_operation_name {
             if let Some(op_name) = &request.supergraph_request.body().operation_name {
                 attrs.insert(
-                    "graphql.operation.name".into(),
+                    GRAPHQL_OPERATION_NAME,
                     AttributeValue::String(op_name.clone()),
                 );
             }
@@ -192,14 +195,14 @@ impl GetAttributes<subgraph::Request, subgraph::Response> for SubgraphAttributes
                 .flatten()
                 .unwrap_or_default();
             attrs.insert(
-                "graphql.operation.type".into(),
+                GRAPHQL_OPERATION_TYPE,
                 AttributeValue::String(operation_kind.as_apollo_operation_type().to_string()),
             );
         }
         if let Some(true) = &self.graphql_federation_subgraph_name {
             if let Some(subgraph_name) = &request.subgraph_name {
                 attrs.insert(
-                    "graphql.federation.subgraph.name".into(),
+                    Key::from_static_str("graphql.federation.subgraph.name"),
                     AttributeValue::String(subgraph_name.clone()),
                 );
             }

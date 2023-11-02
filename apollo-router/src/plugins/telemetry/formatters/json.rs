@@ -127,14 +127,17 @@ where
 
         match serde_json::from_str::<serde_json::Value>(data) {
             Ok(serde_json::Value::Object(fields)) => {
-                // TODO we need to do some filtering here
                 for field in fields.into_iter().filter(|(key, _)| !key.starts_with("apollo_private.")) {
                     serializer.serialize_entry(&field.0, &field.1)?;
                 }
                 // Get otel attributes
                 let otel_attributes = ext.get::<OtelData>().and_then(|otel_data| otel_data.builder.attributes.as_ref());
                 if let Some(otel_attributes) = otel_attributes {
-                    for (key, value) in otel_attributes {
+                    for (key, value) in otel_attributes.iter().filter(|(k, _)| {
+                        let key_name = k.as_str();
+                        !key_name.starts_with("apollo_private.") && !["code.filepath", "code.namespace", "code.lineno", "thread.id", "thread.name"].contains(&key_name)
+                    }) {
+                        
                         serializer.serialize_entry(key.as_str(), &value.as_str())?;
                     }
                 }
@@ -404,12 +407,23 @@ impl<'a> field::Visit for JsonVisitor<'a> {
 
     /// Visit a string value.
     fn record_str(&mut self, field: &Field, value: &str) {
-        self.values
-            .insert(field.name(), serde_json::Value::from(value));
+        let field_name = field.name();
+        match field_name {
+            "code.filepath" | "code.namespace" | "code.lineno" | "thread.id" | "thread.name" => {
+                println!("!!!!!!!!!!!!!!!!!!!!!");
+            }
+            field_name => {
+                self.values
+                    .insert(field_name, serde_json::Value::from(value));
+            }
+        }
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         match field.name() {
+            "code.filepath" | "code.namespace" | "code.lineno" | "thread.id" | "thread.name" => {
+                println!("!!!!!!!!!!!!!!!!!!!!!");
+            }
             name if name.starts_with("r#") => {
                 self.values
                     .insert(&name[2..], serde_json::Value::from(format!("{:?}", value)));

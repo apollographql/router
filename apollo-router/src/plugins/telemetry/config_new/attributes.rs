@@ -7,6 +7,13 @@ use http::header::CONTENT_LENGTH;
 use http::header::USER_AGENT;
 use opentelemetry_api::baggage::BaggageExt;
 use opentelemetry_api::Key;
+use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE;
+use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_BODY_SIZE;
+use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE;
+use opentelemetry_semantic_conventions::trace::NETWORK_PROTOCOL_NAME;
+use opentelemetry_semantic_conventions::trace::NETWORK_PROTOCOL_VERSION;
+use opentelemetry_semantic_conventions::trace::NETWORK_TRANSPORT;
+use opentelemetry_semantic_conventions::trace::USER_AGENT_ORIGINAL;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::Schema;
 use schemars::JsonSchema;
@@ -977,28 +984,25 @@ impl GetAttributes<router::Request, router::Response> for HttpCommonAttributes {
                 .and_then(|h| h.to_str().ok())
             {
                 attrs.insert(
-                    "http.request.body.size".into(),
+                    HTTP_REQUEST_BODY_SIZE,
                     AttributeValue::String(content_length.to_string()),
                 );
             }
         }
         if let Some(true) = &self.network_protocol_name {
             attrs.insert(
-                "network.protocol.name".into(),
+                NETWORK_PROTOCOL_NAME,
                 AttributeValue::String("http".to_string()),
             );
         }
         if let Some(true) = &self.network_protocol_version {
             attrs.insert(
-                "network.protocol.version".into(),
+                NETWORK_PROTOCOL_VERSION,
                 AttributeValue::String(format!("{:?}", request.router_request.version())),
             );
         }
         if let Some(true) = &self.network_transport {
-            attrs.insert(
-                "network.protocol.transport".into(),
-                AttributeValue::String("tcp".to_string()),
-            );
+            attrs.insert(NETWORK_TRANSPORT, AttributeValue::String("tcp".to_string()));
         }
         if let Some(true) = &self.user_agent_original {
             if let Some(user_agent) = request
@@ -1008,7 +1012,7 @@ impl GetAttributes<router::Request, router::Response> for HttpCommonAttributes {
                 .and_then(|h| h.to_str().ok())
             {
                 attrs.insert(
-                    "user_agent.original".into(),
+                    USER_AGENT_ORIGINAL,
                     AttributeValue::String(user_agent.to_string()),
                 );
             }
@@ -1027,14 +1031,14 @@ impl GetAttributes<router::Request, router::Response> for HttpCommonAttributes {
                 .and_then(|h| h.to_str().ok())
             {
                 attrs.insert(
-                    "http.response.body.size".into(),
+                    HTTP_RESPONSE_BODY_SIZE,
                     AttributeValue::String(content_length.to_string()),
                 );
             }
         }
         if let Some(true) = &self.http_response_status_code {
             attrs.insert(
-                "http.response.status_code".into(),
+                HTTP_RESPONSE_STATUS_CODE,
                 AttributeValue::String(response.response.status().to_string()),
             );
         }
@@ -1044,7 +1048,7 @@ impl GetAttributes<router::Request, router::Response> for HttpCommonAttributes {
     fn on_error(&self, _error: &BoxError) -> HashMap<Key, AttributeValue> {
         let mut attrs = HashMap::new();
         if let Some(true) = &self.error_type {
-            attrs.insert("error.type".into(), AttributeValue::I64(500));
+            attrs.insert(Key::from_static_str("error.type"), AttributeValue::I64(500));
         }
 
         attrs
