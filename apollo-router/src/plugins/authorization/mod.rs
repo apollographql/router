@@ -97,6 +97,7 @@ pub(crate) struct ErrorConfig {
     #[serde(default = "enable_log_errors")]
     pub(crate) log: bool,
     /// location of authorization errors in the GraphQL response
+    #[serde(default)]
     pub(crate) response: ErrorLocation,
 }
 
