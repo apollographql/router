@@ -234,7 +234,7 @@ impl BridgeQueryPlanner {
             filtered_query: None,
             unauthorized: UnauthorizedPaths {
                 paths: vec![],
-                log_errors: AuthorizationPlugin::log_errors(&self.configuration),
+                errors: AuthorizationPlugin::log_errors(&self.configuration),
             },
             subselections,
             defer_stats,

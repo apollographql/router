@@ -533,10 +533,47 @@ expression: "&schema"
               "default": true,
               "type": "boolean"
             },
-            "log_errors": {
-              "description": "Log authorization errors",
-              "default": true,
-              "type": "boolean"
+            "errors": {
+              "description": "authorization errors behaviour",
+              "default": {
+                "log": true,
+                "response": "errors"
+              },
+              "type": "object",
+              "properties": {
+                "log": {
+                  "description": "log authorization errors",
+                  "default": true,
+                  "type": "boolean"
+                },
+                "response": {
+                  "description": "location of authorization errors in the GraphQL response",
+                  "default": "errors",
+                  "oneOf": [
+                    {
+                      "description": "store authorization errors in the response errors",
+                      "type": "string",
+                      "enum": [
+                        "errors"
+                      ]
+                    },
+                    {
+                      "description": "store authorization errors in the response extensions",
+                      "type": "string",
+                      "enum": [
+                        "extensions"
+                      ]
+                    },
+                    {
+                      "description": "do not add the authorization errors to the GraphQL response",
+                      "type": "string",
+                      "enum": [
+                        "disabled"
+                      ]
+                    }
+                  ]
+                }
+              }
             },
             "reject_unauthorized": {
               "description": "refuse a query entirely if any part would be filtered",

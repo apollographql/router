@@ -74,7 +74,7 @@ flowchart LR;
     }
     ```
 
-   - **The client does _not_ use a WebSocket protocol!** Instead, it receives updates via [multipart HTTP responses](./subscription-multipart-protocol/).
+   - **The client does _not_ use a WebSocket protocol.** Instead, it receives updates via [multipart HTTP responses](./subscription-multipart-protocol/).
    - By using HTTP for subscriptions, clients can execute _all_ GraphQL operation types over HTTP instead of using two different protocols.
    - Apollo Client for [Web](/react/data/subscriptions#http), [Kotlin](/kotlin/essentials/subscriptions#configuring-http-subscriptions), and [iOS](/ios/fetching/subscriptions#http) all support GraphQL subscriptions over HTTP with minimal configuration. See each library's documentation for details.
 
@@ -146,11 +146,11 @@ subscription:
   mode:
     passthrough:
       all: # The router uses these subscription settings UNLESS overridden per-subgraph
-        path: /subscriptions # The URL path to use for subgraph subscription endpoints (Default: /ws)
+        path: /subscriptions # The absolute URL path to use for subgraph subscription endpoints (Default: /ws)
       subgraphs: # Overrides subscription settings for individual subgraphs
         reviews: # Overrides settings for the 'reviews' subgraph
-          path: /ws # Overrides '/subscriptions' defined above
-          protocol: graphql_transport_ws # The WebSocket-based subprotocol to use for subscription communication (Default: graphql_ws)
+          path: /ws # Absolute path that overrides '/subscriptions' defined above
+          protocol: graphql_ws # The WebSocket-based subprotocol to use for subscription communication (Default: graphql_ws)
 ```
 
 This example enables subscriptions in **passthrough mode**, which uses long-lived WebSocket connections.
@@ -158,21 +158,27 @@ This example enables subscriptions in **passthrough mode**, which uses long-live
 The router supports the following WebSocket subprotocols, specified via the `protocol` option:
 
 - `graphql_ws`
-  - Legacy subprotocol used by the [`subscriptions-transport-ws` library](https://github.com/apollographql/subscriptions-transport-ws), which is **unmaintained**
-  - For backward compatibility, this is the default value.
-- `graphql_transport_ws`
   - Used by the [graphql-ws](https://github.com/enisdenjo/graphql-ws) library
-  - This subprotocol is recommended for GraphQL server libraries implementing WebSocket-based subscriptions.
+  - This subprotocol is the **default value** and is recommended for GraphQL server libraries implementing WebSocket-based subscriptions.
+- `graphql_transport_ws`
+  - Legacy subprotocol used by the [`subscriptions-transport-ws` library](https://github.com/apollographql/subscriptions-transport-ws), which is **unmaintained** but provided for backward compatibility. 
 
-Your router must use whichever subprotocol is expected by each of your subgraphs.
-
-By default, the router uses `graphql_ws` for all subgraphs. You can change this global default and/or override it for individual subgraphs by setting the `protocol` key as shown above.
+By default, the router uses the `graphql_ws` protocol option for all subgraphs. You can change this global default and/or override it for individual subgraphs by setting the `protocol` key as shown above.
 
 Your router creates a separate WebSocket connection for each client subscription, _unless_ it can perform [subscription deduplication](#subscription-deduplication).
 
 ### HTTP callback setup
 
 <PreviewFeature />
+
+<Note>
+  
+* Your router must use whichever subprotocol is expected by each of your subgraphs.
+* To disambiguate between `graph-ws` and `graph_ws`:
+  * `graph-ws` (with a hyphen `-`) is the name of the [library](https://github.com/enisdenjo/graphql-ws) that uses the recommended `graphql_ws` (with un underscore `_`) WebSocket subprotocol. 
+* Each `path` must be set as an _absolute path_. For example, given `http://localhost:8080/foo/bar/graphql/ws`, set the absolute path as `path: "/foo/bar/graphql/ws"`.
+
+</Note>
 
 The Apollo Router provides preview support for receiving subgraph subscription events via HTTP callbacks, _instead of_ over a persistent WebSocket connection. This **callback mode** provides the following advantages over WebSocket-based subscriptions:
 
@@ -213,7 +219,7 @@ subscription:
       subgraphs:
         reviews: #highlight-line
           path: /ws
-          protocol: graphql_transport_ws
+          protocol: graphql_ws
     preview_callback:
       public_url: http://public_url_of_my_router_instance:4000
       listen: 0.0.0.0:4000
@@ -265,7 +271,7 @@ type Review {
 
 </CodeColumns>
 
-Now, let's say a client executes the following subscription against our router ([over HTTP!](#how-it-works)):
+Now, let's say a client executes the following subscription against our router ([over HTTP](#how-it-works)):
 
 ```graphql
 subscription OnProductPriceChanged {
@@ -274,7 +280,7 @@ subscription OnProductPriceChanged {
     name
     price
     reviews {
-      # Defined in Reviews subgraph!
+      # Defined in Reviews subgraph
       score
     }
   }
@@ -289,7 +295,7 @@ subscription {
     id # Added for entity fetching
     name
     price
-    # Reviews fields removed!
+    # Reviews fields removed
   }
 }
 ```
@@ -301,7 +307,7 @@ subscription {
 
 </Note>
 
-At any point after the subscription is initiated, the Products subgraph might send updated data to our router. Whenever this happens, the router _does not_ immediately return this data to the client, because it's missing requested fields from the Reviews subgraph!
+At any point after the subscription is initiated, the Products subgraph might send updated data to our router. Whenever this happens, the router _does not_ immediately return this data to the client, because it's missing requested fields from the Reviews subgraph.
 
 Instead, our router executes a standard GraphQL _query_ against the Reviews subgraph to fetch the missing entity fields:
 
