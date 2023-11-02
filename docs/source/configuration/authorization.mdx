@@ -641,15 +641,34 @@ This option will entirely reject queries that would have some parts filtered by 
 
 ### errors
 
+By default, when part of a query is filtered by authorization, the list of filtered paths is added to the response and logged by the router. This is behavior can be customized for your needs.
+
+#### log
+
+By enabling the option, you can choose if query filtering will result in a log event being output.
+
+
 ```yaml title="router.yaml"
 authorization:
   preview_directives:
     errors:
-      log: true # default: true
-      response: "errors" # possible values: "errors" (default), "extensions", "disabled"
+      log: false # default: true
 ```
 
-By default, when part of a query is filtered by authorization, the list of filtered paths is added to the response and logged by the router. We may need more flexibility in reporting errors, for various reasons:
-- filtering parts of a query according to the client's rights may be seen as normal operation, and not warrant investigation by platform operators, so logs should be disabled
-- when testing authorization, we may not want the clients to raise exceptions if authorization errors are present in the response's `errors` field, so we can put them in `extensions` instead
-- we may not want to give the clients any information about authorization errors, so they can be disabled entirely
+If filtering parts of a query according to the client's rights may be seen as normal operation, and not warrant investigation by platform operators, logging should be disabled.
+
+#### response
+
+By default, filtered paths are placed in the errors part of the graphql response.
+
+You can configure response to carry them in:
+- `errors` (default) : place filtered paths in graphql errors
+- `extensions`: place filtered paths in extensions. Useful to suppress exceptions on the client side while still giving information that parts of the query were filtered
+- `disabled`: suppress all information that the query was filtered.
+
+```yaml title="router.yaml"
+authorization:
+  preview_directives:
+    errors:
+      response: "errors" # possible values: "errors" (default), "extensions", "disabled"
+```
