@@ -24,6 +24,7 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
+const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub(crate) struct Json {
@@ -127,7 +128,7 @@ where
 
         match serde_json::from_str::<serde_json::Value>(data) {
             Ok(serde_json::Value::Object(fields)) => {
-                for field in fields.into_iter().filter(|(key, _)| !key.starts_with("apollo_private.")) {
+                for field in fields.into_iter().filter(|(key, _)| !key.starts_with(APOLLO_PRIVATE_PREFIX)) {
                     serializer.serialize_entry(&field.0, &field.1)?;
                 }
                 // Get otel attributes
@@ -135,9 +136,8 @@ where
                 if let Some(otel_attributes) = otel_attributes {
                     for (key, value) in otel_attributes.iter().filter(|(k, _)| {
                         let key_name = k.as_str();
-                        !key_name.starts_with("apollo_private.") && !["code.filepath", "code.namespace", "code.lineno", "thread.id", "thread.name"].contains(&key_name)
+                        !key_name.starts_with(APOLLO_PRIVATE_PREFIX) && !["code.filepath", "code.namespace", "code.lineno", "thread.id", "thread.name"].contains(&key_name)
                     }) {
-                        
                         serializer.serialize_entry(key.as_str(), &value.as_str())?;
                     }
                 }

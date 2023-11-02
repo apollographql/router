@@ -17,7 +17,6 @@ use tracing_subscriber::fmt::time::SystemTime;
 use tracing_subscriber::fmt::FmtContext;
 use tracing_subscriber::registry::LookupSpan;
 
-use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::reload::IsSampled;
 
 #[derive(Debug, Clone)]
@@ -154,46 +153,46 @@ impl TextFormatter {
         writer.write_char(' ')
     }
 
-    #[inline]
-    fn format_dyn_attributes<S, N>(
-        &self,
-        ctx: &FmtContext<'_, S, N>,
-        writer: &mut Writer<'_>,
-        event: &Event<'_>,
-    ) -> fmt::Result
-    where
-        S: Subscriber + for<'a> LookupSpan<'a>,
-        N: for<'a> FormatFields<'a> + 'static,
-    {
-        let span = event
-            .parent()
-            .and_then(|id| ctx.span(id))
-            .or_else(|| ctx.lookup_current());
-        if let Some(span) = span {
-            let ext = span.extensions();
-            match &ext.get::<LogAttributes>() {
-                Some(dyn_attributes) => {
-                    let attributes = dyn_attributes.get_attributes();
-                    let attrs: Vec<String> = attributes
-                        .iter()
-                        .map(|(key, val)| format!("{key}={val}"))
-                        .collect();
-                    if writer.has_ansi_escapes() {
-                        let style = Style::new().dimmed();
-                        write!(writer, "{}", style.prefix())?;
-                        write!(writer, "[attributes=[{}]]", attrs.join(", "))?;
-                        write!(writer, "{}", style.suffix())?;
-                    } else {
-                        write!(writer, "[attributes=[{}]]", attrs.join(", "))?;
-                    }
-                    writer.write_char(' ')?;
-                }
-                None => {}
-            }
-        }
+    // #[inline]
+    // fn format_dyn_attributes<S, N>(
+    //     &self,
+    //     ctx: &FmtContext<'_, S, N>,
+    //     writer: &mut Writer<'_>,
+    //     event: &Event<'_>,
+    // ) -> fmt::Result
+    // where
+    //     S: Subscriber + for<'a> LookupSpan<'a>,
+    //     N: for<'a> FormatFields<'a> + 'static,
+    // {
+    //     let span = event
+    //         .parent()
+    //         .and_then(|id| ctx.span(id))
+    //         .or_else(|| ctx.lookup_current());
+    //     if let Some(span) = span {
+    //         let ext = span.extensions();
+    //         match &ext.get::<LogAttributes>() {
+    //             Some(dyn_attributes) => {
+    //                 let attributes = dyn_attributes.get_attributes();
+    //                 let attrs: Vec<String> = attributes
+    //                     .iter()
+    //                     .map(|(key, val)| format!("{key}={val}"))
+    //                     .collect();
+    //                 if writer.has_ansi_escapes() {
+    //                     let style = Style::new().dimmed();
+    //                     write!(writer, "{}", style.prefix())?;
+    //                     write!(writer, "[attributes=[{}]]", attrs.join(", "))?;
+    //                     write!(writer, "{}", style.suffix())?;
+    //                 } else {
+    //                     write!(writer, "[attributes=[{}]]", attrs.join(", "))?;
+    //                 }
+    //                 writer.write_char(' ')?;
+    //             }
+    //             None => {}
+    //         }
+    //     }
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     #[inline]
     fn format_request_id<S, N>(
