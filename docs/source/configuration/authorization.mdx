@@ -832,16 +832,38 @@ authorization:
 
 This option will entirely reject queries that would have some parts filtered by authorization directives. The response will contain the list of paths that are affected.
 
-### log_errors
+### errors
+
+By default, when part of a query is filtered by authorization, the list of filtered paths is added to the response and logged by the router. This is behavior can be customized for your needs.
+
+#### log
+
+By enabling the option, you can choose if query filtering will result in a log event being output.
 
 ```yaml title="router.yaml"
 authorization:
   preview_directives:
-    enabled: true
-    log_errors: true
+    errors:
+      log: false # default: true
 ```
 
-By default, when part of a query is filtered by authorization, the list of filtered paths is added to the response as top-level errors and logged by the router. Filtering parts of a query according to the client's rights may be seen as normal operation, and not warrant investigation by platform operators, so those logs can be disabled.
+If filtering parts of a query according to the client's rights may be seen as normal operation, and not warrant investigation by platform operators, logging should be disabled.
+
+#### response
+
+By default, filtered paths are placed in the errors part of the graphql response.
+
+You can configure response to carry them in:
+- `errors` (default) : place filtered paths in graphql errors
+- `extensions`: place filtered paths in extensions. Useful to suppress exceptions on the client side while still giving information that parts of the query were filtered
+- `disabled`: suppress all information that the query was filtered.
+
+```yaml title="router.yaml"
+authorization:
+  preview_directives:
+    errors:
+      response: "errors" # possible values: "errors" (default), "extensions", "disabled"
+```
 
 ### dry_run
 
@@ -849,7 +871,7 @@ By default, when part of a query is filtered by authorization, the list of filte
 authorization:
   preview_directives:
     enabled: true
-  dry_run: true # default: false
+    dry_run: true # default: false
 ```
 
 This option executes the authorization directives without modifying the query: it only generates the list of unauthorized paths and returns it as part of the response. This is a way to evaluate the impact of authorization policies without breaking existing traffic.
