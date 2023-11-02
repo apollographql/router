@@ -540,9 +540,6 @@ expression: "&schema"
                 "response": "errors"
               },
               "type": "object",
-              "required": [
-                "response"
-              ],
               "properties": {
                 "log": {
                   "description": "log authorization errors",
@@ -551,6 +548,7 @@ expression: "&schema"
                 },
                 "response": {
                   "description": "location of authorization errors in the GraphQL response",
+                  "default": "errors",
                   "oneOf": [
                     {
                       "description": "store authorization errors in the response errors",
