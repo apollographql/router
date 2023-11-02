@@ -308,6 +308,7 @@ impl Plugin for Telemetry {
                     .unwrap_or("");
                 let span = ::tracing::info_span!(ROUTER_SPAN_NAME,
                     "http.route" = %router_request.uri(),
+                    "http.method" = %router_request.method(),
                     "trace_id" = %trace_id,
                     "client.name" = client_name,
                     "client.version" = client_version,
@@ -347,7 +348,7 @@ impl Plugin for Telemetry {
                         span.set_dyn_attributes(config.spans.router.attributes.on_response(response));
                         if expose_trace_id.enabled {
                             if let Some(header_name) = &expose_trace_id.header_name {
-                                let mut headers: HashMap<String, Vec<String>> = HashMap::new();
+                                let mut headers: HashMap<String, Vec<String>> = HashMap::with_capacity(1);
                                 if let Some(value) = response.response.headers().get(header_name) {
                                     headers.insert(header_name.to_string(), vec![value.to_str().unwrap_or_default().to_string()]);
                                     let response_headers = serde_json::to_string(&headers).unwrap_or_default();
@@ -498,6 +499,7 @@ impl Plugin for Telemetry {
             .instrument(move |_req: &SubgraphRequest| {
                 info_span!(
                     SUBGRAPH_SPAN_NAME,
+                    "apollo.subgraph.name" = name.as_str(),
                     "otel.kind" = "INTERNAL",
                     "apollo_private.ftv1" = field::Empty
                 )
@@ -772,6 +774,7 @@ impl Telemetry {
             let span = info_span!(
                 SUPERGRAPH_SPAN_NAME,
                 otel.kind = "INTERNAL",
+                graphql.operation.name = field::Empty,
                 apollo_private.field_level_instrumentation_ratio =
                     field_level_instrumentation_ratio,
                 apollo_private.operation_signature = field::Empty,
@@ -780,6 +783,14 @@ impl Telemetry {
                     &send_variable_values,
                 ),
             );
+
+            if let Some(operation_name) = request
+                .context
+                .get::<_, String>(OPERATION_NAME)
+                .unwrap_or_default()
+            {
+                span.record("graphql.operation.name", operation_name);
+            }
 
             span
         }

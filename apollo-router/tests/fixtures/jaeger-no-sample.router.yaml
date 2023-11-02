@@ -27,6 +27,12 @@ telemetry:
       - name: custom-header
         match: ^foo.*
         headers: true
+  spans:
+    supergraph:
+      attributes:
+        graphql.operation.name: true
+        graphql.operation.type: true
+        graphql.document: true
 override_subgraph_url:
   products: http://localhost:4005
 include_subgraph_errors:
