@@ -72,7 +72,8 @@ impl Drop for DropWatch {
 
 #[cfg(test)]
 mod test {
-    use std::sync::atomic::{AtomicU8, Ordering};
+    use std::sync::atomic::AtomicU8;
+    use std::sync::atomic::Ordering;
     use std::sync::mpsc;
     use std::sync::Arc;
 
