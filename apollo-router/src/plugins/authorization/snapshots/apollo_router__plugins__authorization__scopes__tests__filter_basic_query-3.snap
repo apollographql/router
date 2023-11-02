@@ -19,7 +19,7 @@ query:
 extracted_scopes: {"internal", "profile", "read:user", "read:username", "test"}
 request scopes: ["profile", "read:user", "internal", "test"]
 filtered:
-query {
+{
   topProducts {
     type
     internal

@@ -5,11 +5,11 @@ expression: stream.next().await.unwrap().unwrap()
 {
   "errors": [
     {
-      "message": "directive `@defer` is not defined",
+      "message": "compiler error: cannot find directive `defer` in this document",
       "locations": [
         {
           "line": 4,
-          "column": 9
+          "column": 20
         }
       ],
       "extensions": {

@@ -110,20 +110,21 @@ async fn api_schema_hides_field() {
 
     let (actual, _) = query_rust(request).await;
 
-    assert!(actual.errors[0]
-        .message
-        .as_str()
-        .contains(r#"cannot query field `inStock` on type `Product`"#));
+    let message = &actual.errors[0].message;
+    assert!(
+        message.contains("no field `inStock` in type `Product`"),
+        "{message}"
+    );
     assert_eq!(
         actual.errors[0].extensions["code"].as_str(),
-        Some("GRAPHQL_VALIDATION_FAILED"),
+        Some("PARSING_ERROR"),
     );
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn validation_errors_from_rust() {
     let request = supergraph::Request::fake_builder()
-        .query(r#"{ topProducts { name inStock } notAField }"#)
+        .query(r#"{ topProducts { name(notAnArg: true) } } fragment Unused on Product { upc }"#)
         .build()
         .expect("expecting valid request");
 
