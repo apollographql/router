@@ -227,7 +227,8 @@ impl Plugin for Telemetry {
         opentelemetry::global::set_error_handler(handle_error)
             .expect("otel error handler lock poisoned, fatal");
 
-        let config = init.config;
+        let mut config = init.config;
+        config.spans.update_defaults();
         config.logging.validate()?;
 
         let field_level_instrumentation_ratio =

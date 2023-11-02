@@ -4844,6 +4844,13 @@ expression: "&schema"
               "description": "The attributes to include by default in spans based on their level as specified in the otel semantic conventions and Apollo documentation.",
               "oneOf": [
                 {
+                  "description": "No default attributes set on spans, you have to set it one by one in the configuration to enable some attributes",
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ]
+                },
+                {
                   "description": "Attributes that are marked as required in otel semantic conventions and apollo documentation will be included (default)",
                   "type": "string",
                   "enum": [
@@ -4855,13 +4862,6 @@ expression: "&schema"
                   "type": "string",
                   "enum": [
                     "recommended"
-                  ]
-                },
-                {
-                  "description": "Attributes that are marked as required, recommended or opt-in in otel semantic conventions and apollo documentation will be included",
-                  "type": "string",
-                  "enum": [
-                    "opt_in"
                   ]
                 }
               ]
@@ -4899,7 +4899,7 @@ expression: "&schema"
                       "nullable": true
                     },
                     "http.request.method.original": {
-                      "description": "Original HTTP method sent by the client in the request line. Examples: * GeT * ACL * foo Requirement level: Conditionally Required",
+                      "description": "Original HTTP method sent by the client in the request line. Examples: * GeT * ACL * foo Requirement level: Conditionally Required (If and only if it’s different than http.request.method)",
                       "default": null,
                       "type": "boolean",
                       "nullable": true
