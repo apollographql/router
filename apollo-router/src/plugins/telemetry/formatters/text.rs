@@ -258,7 +258,7 @@ where
 
         self.format_level(meta.level(), &mut writer)?;
         self.format_request_id(ctx, &mut writer, event)?;
-        self.format_dyn_attributes(ctx, &mut writer, event)?;
+        // self.format_dyn_attributes(ctx, &mut writer, event)?;
         if self.display_target {
             self.format_target(meta.target(), &mut writer)?;
         }
