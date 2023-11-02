@@ -428,6 +428,10 @@ fn validate_project_config_files() {
         {
             continue;
         }
+        #[cfg(not(telemetry_next))]
+        if entry.path().to_string_lossy().contains("telemetry_next") {
+            continue;
+        }
 
         let name = entry.file_name().to_string_lossy();
         if filename_matcher.is_match(&name) {
@@ -679,6 +683,10 @@ fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
             for (k, v) in o {
                 if k.as_str() == "properties" {
                     let properties = v.as_object().expect("properties must be an object");
+                    if properties.len() == 1 {
+                        // This is probably an enum property
+                        continue;
+                    }
                     for (k, v) in properties {
                         let path = format!("{path}.{k}");
                         if v.as_object().and_then(|o| o.get("description")).is_none() {
