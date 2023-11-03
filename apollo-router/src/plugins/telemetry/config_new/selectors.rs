@@ -3,15 +3,13 @@ use crate::plugin::serde::deserialize_json_query;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::GetAttribute;
 use crate::services::{router, subgraph, supergraph};
-use crate::tracer::TraceId;
 use access_json::JSONQuery;
 use opentelemetry_api::baggage::BaggageExt;
+use opentelemetry_api::trace::TraceContextExt;
 use opentelemetry_api::Context;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json_bytes::ByteString;
-use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -367,12 +365,18 @@ impl GetAttribute<router::Request, router::Response> for RouterSelector {
             RouterSelector::TraceId {
                 trace_id: trace_id_format,
             } => {
-                let trace_id = TraceId::maybe_new()?;
-                match trace_id_format {
-                    TraceIdFormat::OpenTelemetry => AttributeValue::String(trace_id.to_string()),
-                    TraceIdFormat::Datadog => AttributeValue::U128(trace_id.to_u128()),
+                if Context::current().span().span_context().is_valid() {
+                    let id = Context::current().span().span_context().trace_id();
+                    match trace_id_format {
+                        TraceIdFormat::OpenTelemetry => AttributeValue::String(id.to_string()),
+                        TraceIdFormat::Datadog => {
+                            AttributeValue::U128(u128::from_be_bytes(id.to_bytes()))
+                        }
+                    }
+                    .into()
+                } else {
+                    None
                 }
-                .into()
             }
             RouterSelector::Baggage {
                 baggage: baggage_name,
@@ -691,15 +695,19 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
 #[cfg(test)]
 mod test {
     use crate::graphql;
+    use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::selectors::{
-        RouterSelector, SubgraphSelector, SupergraphSelector,
+        RouterSelector, SubgraphSelector, SupergraphSelector, TraceIdFormat,
     };
     use crate::plugins::telemetry::config_new::GetAttribute;
     use opentelemetry_api::baggage::BaggageExt;
+    use opentelemetry_api::trace::{
+        SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState,
+    };
     use opentelemetry_api::{Context, KeyValue};
     use serde_json::json;
     use std::sync::Arc;
-    use tracing::{span, subscriber, Span};
+    use tracing::{span, subscriber};
     use tracing_opentelemetry::OpenTelemetrySpanExt;
     use tracing_subscriber::layer::SubscriberExt;
 
@@ -1307,6 +1315,64 @@ mod test {
                     .on_request(&crate::services::SubgraphRequest::fake_builder().build())
                     .unwrap(),
                 "baggage_value".into()
+            );
+        });
+    }
+
+    #[test]
+    fn router_trace_id() {
+        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+
+        subscriber::with_default(subscriber, || {
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                TraceFlags::default(),
+                true,
+                TraceState::default(),
+            );
+            let span = span!(tracing::Level::INFO, "test");
+            let _guard = span.enter();
+            let selector = RouterSelector::TraceId {
+                trace_id: TraceIdFormat::OpenTelemetry,
+            };
+            // No span context
+            assert_eq!(
+                selector.on_request(
+                    &crate::services::RouterRequest::fake_builder()
+                        .build()
+                        .unwrap(),
+                ),
+                None
+            );
+            // Span context set
+            let _context = Context::current()
+                .with_remote_span_context(span_context)
+                .attach();
+            assert_eq!(
+                selector
+                    .on_request(
+                        &crate::services::RouterRequest::fake_builder()
+                            .build()
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                "0000000000000000000000000000002a".into()
+            );
+
+            let selector = RouterSelector::TraceId {
+                trace_id: TraceIdFormat::Datadog,
+            };
+
+            assert_eq!(
+                selector
+                    .on_request(
+                        &crate::services::RouterRequest::fake_builder()
+                            .build()
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                AttributeValue::U128(42)
             );
         });
     }
