@@ -148,13 +148,12 @@ pub(crate) enum RouterEvent {
 #[derive(Deserialize, JsonSchema, Clone, Debug, Default)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum DefaultAttributeRequirementLevel {
+    /// Attributes that are marked as required or recommended in otel semantic conventions and apollo documentation will be included
+    Recommended,
+
     /// Attributes that are marked as required in otel semantic conventions and apollo documentation will be included (default)
     #[default]
     Required,
-    /// Attributes that are marked as required or recommended in otel semantic conventions and apollo documentation will be included
-    Recommended,
-    /// Attributes that are marked as required, recommended or opt-in in otel semantic conventions and apollo documentation will be included
-    OptIn,
 }
 
 #[allow(dead_code)]
@@ -415,6 +414,14 @@ pub(crate) enum SubgraphCustomAttribute {
         /// The supergraph query operation kind (query|mutation|subscription).
         supergraph_operation_kind: OperationKind,
     },
+    SupergraphQuery {
+        /// The supergraph query to the subgraph.
+        supergraph_query: Query,
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<String>,
+    },
     SupergraphQueryVariable {
         /// The supergraph query variable name.
         supergraph_query_variable: String,
@@ -528,28 +535,28 @@ pub(crate) struct SubgraphAttributes {
     /// Examples:
     /// * products
     /// Requirement level: Required
-    #[serde(rename = "graphql.federation.subgraph.name")]
-    graphql_federation_subgraph_name: Option<bool>,
+    #[serde(rename = "subgraph.name")]
+    subgraph_name: Option<bool>,
     /// The GraphQL document being executed.
     /// Examples:
     /// * query findBookById { bookById(id: ?) { name } }
     /// Requirement level: Recommended
-    #[serde(rename = "graphql.document")]
-    graphql_document: Option<bool>,
+    #[serde(rename = "subgraph.graphql.document")]
+    subgraph_graphql_document: Option<bool>,
     /// The name of the operation being executed.
     /// Examples:
     /// * findBookById
     /// Requirement level: Recommended
-    #[serde(rename = "graphql.operation.name")]
-    graphql_operation_name: Option<bool>,
+    #[serde(rename = "subgraph.graphql.operation.name")]
+    subgraph_graphql_operation_name: Option<bool>,
     /// The type of the operation being executed.
     /// Examples:
     /// * query
     /// * subscription
     /// * mutation
     /// Requirement level: Recommended
-    #[serde(rename = "graphql.operation.type")]
-    graphql_operation_type: Option<bool>,
+    #[serde(rename = "subgraph.graphql.operation.type")]
+    subgraph_graphql_operation_type: Option<bool>,
 }
 
 /// Common attributes for http server and client.
@@ -737,7 +744,7 @@ pub(crate) struct HttpServerAttributes {
     url_scheme: Option<bool>,
 }
 
-/// Attrubtes for HTTP clients
+/// Attributes for HTTP clients
 /// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
