@@ -1,11 +1,7 @@
 use std::collections::HashMap;
 use std::ops::ControlFlow;
-use std::task::Context;
-use std::task::Poll;
 use std::time::Duration;
 
-use futures::future::BoxFuture;
-use futures::FutureExt;
 use http::header;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -15,8 +11,6 @@ use serde_json_bytes::Value;
 use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
-use tower::Layer;
-use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing::Level;
@@ -69,20 +63,33 @@ impl Plugin for EntityCache {
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let cache = self.storage.clone();
+        let cache2 = self.storage.clone();
         let name = name.to_string();
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(|request: subgraph::Request| async move {
-                if !request
-                    .subgraph_request
-                    .body()
-                    .variables
-                    .contains_key(REPRESENTATIONS)
-                {
-                    Ok(ControlFlow::Continue(request))
-                } else {
-                    cache_call(name, cache, request).await
+            .oneshot_checkpoint_async(move |request: subgraph::Request| {
+                let name = name.clone();
+                let cache = cache.clone();
+
+                async move {
+                    if !request
+                        .subgraph_request
+                        .body()
+                        .variables
+                        .contains_key(REPRESENTATIONS)
+                    {
+                        Ok(ControlFlow::Continue(request))
+                    } else {
+                        cache_call(name, cache, request).await
+                    }
                 }
-            }) //.map_response(f)
+            })
+            .map_future(move |fut| {
+                let cache = cache2.clone();
+                async move {
+                    let response: subgraph::Response = fut.await?;
+                    cache_store_from_response(cache, response).await
+                }
+            })
             .service(service)
             .boxed()
     }
@@ -118,6 +125,8 @@ async fn cache_call(
         body.variables
             .insert(REPRESENTATIONS, new_representations.into());
 
+        request.context.private_entries.lock().insert(result);
+
         Ok(ControlFlow::Continue(request))
     } else {
         let entities = insert_entities_in_result(&mut Vec::new(), &cache, &mut result).await?;
@@ -134,11 +143,16 @@ async fn cache_call(
     }
 }
 
-fn cache_store_from_response() {
-    /*
-
-    let mut response = service.oneshot(request).await?;
-
+async fn cache_store_from_response(
+    cache: RedisCacheStorage,
+    mut response: subgraph::Response,
+) -> Result<subgraph::Response, BoxError> {
+    if let Some(mut result_from_cache) = {
+        let mut entries = response.context.private_entries.lock();
+        let res = entries.remove::<Vec<IntermediateResult>>();
+        drop(entries);
+        res
+    } {
         let mut data = response.response.body_mut().data.take();
 
         if let Some(mut entities) = data
@@ -153,7 +167,7 @@ fn cache_store_from_response() {
                         reason: "expected an array of entities".to_string(),
                     })?,
                 &cache,
-                &mut result,
+                &mut result_from_cache,
             )
             .await?;
 
@@ -162,8 +176,9 @@ fn cache_store_from_response() {
                 .map(|o| o.insert(ENTITIES, new_entities.into()));
             response.response.body_mut().data = data;
         }
+    }
 
-        Ok(response) */
+    Ok(response)
 }
 
 pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
