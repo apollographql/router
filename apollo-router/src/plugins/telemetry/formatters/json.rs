@@ -272,8 +272,6 @@ impl Default for Json {
     }
 }
 
-// TODO: I think we can get rid of the code below
-
 /// The JSON [`FormatFields`] implementation.
 ///
 #[derive(Debug, Default)]
@@ -408,9 +406,7 @@ impl<'a> field::Visit for JsonVisitor<'a> {
     fn record_str(&mut self, field: &Field, value: &str) {
         let field_name = field.name();
         match field_name {
-            "code.filepath" | "code.namespace" | "code.lineno" | "thread.id" | "thread.name" => {
-                println!("!!!!!!!!!!!!!!!!!!!!!");
-            }
+            "code.filepath" | "code.namespace" | "code.lineno" | "thread.id" | "thread.name" => {}
             field_name => {
                 self.values
                     .insert(field_name, serde_json::Value::from(value));
@@ -420,9 +416,7 @@ impl<'a> field::Visit for JsonVisitor<'a> {
 
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         match field.name() {
-            "code.filepath" | "code.namespace" | "code.lineno" | "thread.id" | "thread.name" => {
-                println!("!!!!!!!!!!!!!!!!!!!!!");
-            }
+            "code.filepath" | "code.namespace" | "code.lineno" | "thread.id" | "thread.name" => {}
             name if name.starts_with("r#") => {
                 self.values
                     .insert(&name[2..], serde_json::Value::from(format!("{:?}", value)));
