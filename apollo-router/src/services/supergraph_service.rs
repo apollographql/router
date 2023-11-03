@@ -491,13 +491,6 @@ async fn subscription_task(
         }
     }
     drop(sender);
-    /*
-     * XXX I think this is just a drop now
-    if let Err(err) = sender.close().await {
-        tracing::trace!("cannot close the sender {err:?}");
-    }
-    */
-
     tracing::trace!("Leaving the task for subscription");
     if limit_is_set {
         OPENED_SUBSCRIPTIONS.fetch_sub(1, Ordering::Relaxed);
