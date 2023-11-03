@@ -24,20 +24,9 @@ use serde::Serialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::AttributeValue;
+
 use crate::plugins::telemetry::config_new::{DefaultForLevel, GetAttributes};
 use crate::services::router;
-
-#[allow(dead_code)]
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum RouterEvent {
-    /// When a service request occurs.
-    Request,
-    /// When a service response occurs.
-    Response,
-    /// When a service error occurs.
-    Error,
-}
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug, Default)]
@@ -50,45 +39,6 @@ pub(crate) enum DefaultAttributeRequirementLevel {
     Required,
     /// Attributes that are marked as required or recommended in otel semantic conventions and apollo documentation will be included
     Recommended,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum TraceIdFormat {
-    /// Open Telemetry trace ID, a hex string.
-    OpenTelemetry,
-    /// Datadog trace ID, a u64.
-    Datadog,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum OperationName {
-    /// The raw operation name.
-    String,
-    /// A hash of the operation name.
-    Hash,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum Query {
-    /// The raw query kind.
-    String,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum OperationKind {
-    /// The raw operation kind.
-    String,
 }
 
 #[allow(dead_code)]

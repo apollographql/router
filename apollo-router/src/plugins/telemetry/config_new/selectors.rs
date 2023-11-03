@@ -1,9 +1,6 @@
 use crate::context::{OPERATION_KIND, OPERATION_NAME};
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugins::telemetry::config::AttributeValue;
-use crate::plugins::telemetry::config_new::attributes::{
-    OperationKind, OperationName, Query, TraceIdFormat,
-};
 use crate::plugins::telemetry::config_new::GetAttribute;
 use crate::services::{router, subgraph, supergraph};
 use crate::tracer::TraceId;
@@ -664,4 +661,55 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
             _ => None,
         }
     }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum RouterEvent {
+    /// When a service request occurs.
+    Request,
+    /// When a service response occurs.
+    Response,
+    /// When a service error occurs.
+    Error,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum TraceIdFormat {
+    /// Open Telemetry trace ID, a hex string.
+    OpenTelemetry,
+    /// Datadog trace ID, a u64.
+    Datadog,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum OperationName {
+    /// The raw operation name.
+    String,
+    /// A hash of the operation name.
+    Hash,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum Query {
+    /// The raw query kind.
+    String,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum OperationKind {
+    /// The raw operation kind.
+    String,
 }
