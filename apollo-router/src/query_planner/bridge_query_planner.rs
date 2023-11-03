@@ -164,7 +164,7 @@ impl BridgeQueryPlanner {
                         }
                     }
                     tracing::debug!(
-                        "different API schema between apollo-federation and query-planner:\n{}",
+                        "different API schema between apollo-federation and router-bridge:\n{}",
                         output
                     );
                 } else {
