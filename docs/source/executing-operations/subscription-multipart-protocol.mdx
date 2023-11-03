@@ -17,7 +17,11 @@ The only difference is that the request should include the following `Accept` he
 Accept: multipart/mixed; boundary="graphql"; subscriptionSpec="1.0", application/json
 ```
 
-> At this time, the value for `boundary` should _always_ be `graphql`, and the value for `subscriptionSpec` should _always_ be `1.0`.
+<Tip>
+
+The value for `boundary` should _always_ be `graphql`, and the value for `subscriptionSpec` should _always_ be `1.0`.
+
+</Tip>
 
 As subscription events occur, the router sends back HTTP response "parts" that conform to the definition of multipart content specified in [RFC1341](https://www.w3.org/Protocols/rfc1341/7_2_Multipart.html).
 

@@ -456,6 +456,14 @@ pub(crate) enum SubgraphCustomAttribute {
         /// The supergraph query operation kind (query|mutation|subscription).
         supergraph_operation_kind: OperationKind,
     },
+    SupergraphQuery {
+        /// The supergraph query to the subgraph.
+        supergraph_query: Query,
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<String>,
+    },
     SupergraphQueryVariable {
         /// The supergraph query variable name.
         supergraph_query_variable: String,
@@ -568,19 +576,19 @@ pub(crate) struct SubgraphAttributes {
     /// Examples:
     /// * products
     /// Requirement level: Required
-    #[serde(rename = "graphql.federation.subgraph.name")]
+    #[serde(rename = "subgraph.name")]
     pub(crate) graphql_federation_subgraph_name: Option<bool>,
     /// The GraphQL document being executed.
     /// Examples:
     /// * query findBookById { bookById(id: ?) { name } }
     /// Requirement level: Recommended
-    #[serde(rename = "graphql.document")]
+    #[serde(rename = "subgraph.graphql.document")]
     pub(crate) graphql_document: Option<bool>,
     /// The name of the operation being executed.
     /// Examples:
     /// * findBookById
     /// Requirement level: Recommended
-    #[serde(rename = "graphql.operation.name")]
+    #[serde(rename = "subgraph.graphql.operation.name")]
     pub(crate) graphql_operation_name: Option<bool>,
     /// The type of the operation being executed.
     /// Examples:
@@ -588,7 +596,7 @@ pub(crate) struct SubgraphAttributes {
     /// * subscription
     /// * mutation
     /// Requirement level: Recommended
-    #[serde(rename = "graphql.operation.type")]
+    #[serde(rename = "subgraph.graphql.operation.type")]
     pub(crate) graphql_operation_type: Option<bool>,
 }
 
@@ -777,7 +785,7 @@ pub(crate) struct HttpServerAttributes {
     url_scheme: Option<bool>,
 }
 
-/// Attrubtes for HTTP clients
+/// Attributes for HTTP clients
 /// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]

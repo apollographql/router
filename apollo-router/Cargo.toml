@@ -58,6 +58,7 @@ askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.75"
 apollo-compiler = "=1.0.0-beta.4"
+apollo-federation = "0.0.1"
 arc-swap = "1.6.0"
 async-compression = { version = "0.4.4", features = [
     "tokio",
@@ -229,6 +230,7 @@ tracing-core = "0.1.31"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
 tracing-opentelemetry = "0.21.0"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter", "json"] }
+trust-dns-resolver = "0.23.2"
 url = { version = "2.4.1", features = ["serde"] }
 urlencoding = "2.1.3"
 uuid = { version = "1.4.1", features = ["serde", "v4"] }

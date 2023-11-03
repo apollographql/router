@@ -38,7 +38,11 @@ For more information on other configuration aspects, see the [GraphOS persisted 
 
 The router provides four configuration options that you can combine to create the recommended [security levels](#router-security-levels). This section details each configuration option. Refer to the [security levels](#router-security-levels) section for recommended combinations.
 
-> From version `1.25.0` to `1.32.0`, the `persisted_queries` configuration option was named `preview_persisted_queries`. Upgrade your router to version `1.32.0` or later to use the [generally available](/resources/product-launch-stages/#general-availability) version of the feature and the example configuration snippets below.
+<Note>
+
+From version `1.25.0` to `1.32.0`, the `persisted_queries` configuration option was named `preview_persisted_queries`. Upgrade your router to version `1.32.0` or later to use the [generally available](/resources/product-launch-stages/#general-availability) version of the feature and the example configuration snippets below.
+
+</Note>
 
 #### `persisted_queries`
 
@@ -74,7 +78,11 @@ apq:
   enabled: false
 ```
 
-> **Note:** To enable safelisting, you _must_ turn off [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly registered.
+<Note>
+
+To enable safelisting, you _must_ turn off [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly registered.
+
+</Note>
 
 By default, the [`require_id`](#required_id) suboption is `false`, meaning the router accepts both operation IDs and operation strings as long as the operation is registered.
 
@@ -94,4 +102,8 @@ apq:
   enabled: false
 ```
 
-> **Note:** To enable safelisting, you _must_ turn off [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly registered.
+<Note>
+
+To enable safelisting, you _must_ turn off [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly registered.
+
+</Note>
