@@ -6,6 +6,7 @@ use std::time::Duration;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use http::header;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
@@ -15,8 +16,10 @@ use sha2::Sha256;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing::Level;
+use url::Url;
 
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
@@ -24,12 +27,67 @@ use crate::cache::redis::RedisValue;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
 use crate::services::subgraph;
 use crate::spec::TYPENAME;
 
 const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 
+register_plugin!("apollo", "entity_cache", EntityCache);
+
+struct EntityCache {
+    storage: RedisCacheStorage,
+    //service_name: String,
+}
+
+/// Configuration for exposing errors that originate from subgraphs
+#[derive(Clone, Debug, JsonSchema, Default, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+struct Config {
+    urls: Vec<Url>,
+    ttl: Option<Duration>,
+    timeout: Option<Duration>,
+}
+
+#[async_trait::async_trait]
+impl Plugin for EntityCache {
+    type Config = Config;
+
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
+    where
+        Self: Sized,
+    {
+        let storage =
+            RedisCacheStorage::new(init.config.urls, init.config.ttl, init.config.timeout).await?;
+
+        Ok(Self { storage })
+    }
+
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+        service
+        /*ServiceBuilder::new()
+        .oneshot_checkpoint_async(|request: subgraph::Request| {
+            if !request
+                .subgraph_request
+                .body()
+                .variables
+                .contains_key(REPRESENTATIONS)
+            {
+                return service.oneshot(request).boxed();
+            } else {
+                let cache = self.storage.clone();
+                let name = name.to_string();
+                Box::pin(cache_call(service, name, cache, request))
+            }
+        })
+        .service(service)*/
+    }
+}
+
+/*
 #[derive(Clone)]
 pub(crate) struct SubgraphCacheLayer {
     storage: RedisCacheStorage,
@@ -59,8 +117,8 @@ impl<S: Clone> Layer<S> for SubgraphCacheLayer {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct SubgraphCache<S: Clone> {
+
+pub(crate) struct SubgraphCache<S> {
     storage: RedisCacheStorage,
     name: String,
     service: S,
@@ -69,7 +127,6 @@ pub(crate) struct SubgraphCache<S: Clone> {
 impl<S> Service<subgraph::Request> for SubgraphCache<S>
 where
     S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
-        + Clone
         + Send
         + 'static,
     <S as Service<subgraph::Request>>::Future: std::marker::Send,
@@ -104,7 +161,7 @@ where
         let name = self.name.clone();
         Box::pin(cache_call(service, name, cache, request))
     }
-}
+}*/
 
 async fn cache_call<S>(
     service: S,
@@ -114,7 +171,7 @@ async fn cache_call<S>(
 ) -> Result<<S as Service<subgraph::Request>>::Response, <S as Service<subgraph::Request>>::Error>
 where
     S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
-        + Clone
+        //        + Clone
         + Send
         + 'static,
     S::Error: Into<tower::BoxError> + std::fmt::Debug,

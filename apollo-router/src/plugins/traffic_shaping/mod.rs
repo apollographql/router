@@ -6,7 +6,6 @@
 //! * Compression
 //! * Rate limiting
 //!
-pub(crate) mod cache;
 mod deduplication;
 pub(crate) mod rate;
 mod retry;
@@ -30,7 +29,6 @@ use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use self::cache::SubgraphCacheLayer;
 use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
 pub(crate) use self::rate::RateLimited;
@@ -370,16 +368,13 @@ impl TrafficShaping {
         Future = Either<
             Either<
                 BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-                Either<
-                    BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-                    timeout::future::ResponseFuture<
-                        Oneshot<
-                            Either<
-                                Retry<RetryPolicy, Either<rate::service::RateLimit<S>, S>>,
-                                Either<rate::service::RateLimit<S>, S>,
-                            >,
-                            subgraph::Request,
+                timeout::future::ResponseFuture<
+                    Oneshot<
+                        Either<
+                            Retry<RetryPolicy, Either<rate::service::RateLimit<S>, S>>,
+                            Either<rate::service::RateLimit<S>, S>,
                         >,
+                        subgraph::Request,
                     >,
                 >,
             >,
@@ -401,20 +396,6 @@ impl TrafficShaping {
         let all_config = self.config.all.as_ref();
         let subgraph_config = self.config.subgraphs.get(name);
         let final_config = Self::merge_config(all_config, subgraph_config);
-        let entity_caching = if let (Some(storage), Some(caching_config)) = (
-            self.storage.clone(),
-            final_config
-                .as_ref()
-                .and_then(|c| c.experimental_entity_caching.as_ref()),
-        ) {
-            Some(SubgraphCacheLayer::new_with_storage(
-                name.to_string(),
-                storage,
-                caching_config.ttl,
-            ))
-        } else {
-            None
-        };
 
         if let Some(config) = final_config {
             let rate_limit = config
@@ -444,7 +425,6 @@ impl TrafficShaping {
             });
 
             Either::A(ServiceBuilder::new()
-            .option_layer(entity_caching)
 
                 .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(
                   QueryDeduplicationLayer::default
