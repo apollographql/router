@@ -6,17 +6,18 @@ use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
-use futures::channel::mpsc;
-use futures::channel::mpsc::Receiver;
-use futures::channel::mpsc::SendError;
-use futures::channel::mpsc::Sender;
 use futures::future::BoxFuture;
 use futures::stream::once;
-use futures::SinkExt;
 use futures::Stream;
 use futures::StreamExt;
 use serde_json_bytes::Value;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::error::TryRecvError;
+use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::Sender;
+use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -58,7 +59,7 @@ pub(crate) struct ExecutionService {
 
 type CloseSignal = broadcast::Sender<()>;
 // Used to detect when the stream is dropped and then when the client closed the connection
-pub(crate) struct StreamWrapper(pub(crate) Receiver<Response>, Option<CloseSignal>);
+pub(crate) struct StreamWrapper(pub(crate) ReceiverStream<Response>, Option<CloseSignal>);
 
 impl Stream for StreamWrapper {
     type Item = Response;
@@ -159,7 +160,9 @@ impl ExecutionService {
             // If it's a subscription event
             once(ready(first)).boxed()
         } else {
-            once(ready(first)).chain(receiver).boxed()
+            once(ready(first))
+                .chain(ReceiverStream::new(receiver))
+                .boxed()
         };
 
         if has_initial_data {
@@ -478,14 +481,14 @@ fn filter_stream(
     first: Response,
     mut stream: Receiver<Response>,
     stream_mode: StreamMode,
-) -> Receiver<Response> {
+) -> ReceiverStream<Response> {
     let (mut sender, receiver) = mpsc::channel(10);
 
     tokio::task::spawn(async move {
         let mut seen_last_message =
             consume_responses(first, &mut stream, &mut sender, stream_mode).await?;
 
-        while let Some(current_response) = stream.next().await {
+        while let Some(current_response) = stream.recv().await {
             seen_last_message =
                 consume_responses(current_response, &mut stream, &mut sender, stream_mode).await?;
         }
@@ -500,10 +503,10 @@ fn filter_stream(
             sender.send(res).await?;
         }
 
-        Ok::<_, SendError>(())
+        Ok::<_, SendError<Response>>(())
     });
 
-    receiver
+    receiver.into()
 }
 
 // returns Ok(true) when we saw the last message
@@ -512,33 +515,36 @@ async fn consume_responses(
     stream: &mut Receiver<Response>,
     sender: &mut Sender<Response>,
     stream_mode: StreamMode,
-) -> Result<bool, SendError> {
+) -> Result<bool, SendError<Response>> {
     loop {
-        match stream.try_next() {
-            // no messages available, but the channel is not closed
-            // this means more deferred responses can come
-            Err(_) => {
-                sender.send(current_response).await?;
-                return Ok(false);
-            }
+        match stream.try_recv() {
+            Err(err) => {
+                match err {
+                    // no messages available, but the channel is not closed
+                    // this means more deferred responses can come
+                    TryRecvError::Empty => {
+                        sender.send(current_response).await?;
+                        return Ok(false);
+                    }
+                    // the channel is closed
+                    // there will be no other deferred responses after that,
+                    // so we set `has_next` to `false`
+                    TryRecvError::Disconnected => {
+                        match stream_mode {
+                            StreamMode::Defer => current_response.has_next = Some(false),
+                            StreamMode::Subscription => current_response.subscribed = Some(false),
+                        }
 
+                        sender.send(current_response).await?;
+                        return Ok(true);
+                    }
+                }
+            }
             // there might be other deferred responses after this one,
             // so we should call `try_next` again
-            Ok(Some(response)) => {
+            Ok(response) => {
                 sender.send(current_response).await?;
                 current_response = response;
-            }
-            // the channel is closed
-            // there will be no other deferred responses after that,
-            // so we set `has_next` to `false`
-            Ok(None) => {
-                match stream_mode {
-                    StreamMode::Defer => current_response.has_next = Some(false),
-                    StreamMode::Subscription => current_response.subscribed = Some(false),
-                }
-
-                sender.send(current_response).await?;
-                return Ok(true);
             }
         }
     }
