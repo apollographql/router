@@ -31,7 +31,6 @@ use crate::tracer::TraceId;
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Spans {
-    #[serde(skip)]
     /// Whether to create a `request` span. This will be removed in future, and users should set this to false.
     pub(crate) legacy_request_span: bool,
 

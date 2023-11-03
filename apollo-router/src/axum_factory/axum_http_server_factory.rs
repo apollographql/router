@@ -383,6 +383,20 @@ impl HttpServerFactory for AxumHttpServerFactory {
     }
 }
 
+fn use_legacy_request_span(configuration: &Configuration) -> bool {
+    configuration
+        .apollo_plugins
+        .plugins
+        .iter()
+        .find(|(s, _)| s.as_str() == "telemetry")
+        .and_then(|(_, v)| v.get("spans").and_then(|v| v.as_object()))
+        .and_then(|v| {
+            v.get("legacy_request_span")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+        })
+        .unwrap_or_default()
+}
+
 fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
@@ -395,6 +409,7 @@ where
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
+    let use_legacy_request_span = use_legacy_request_span(configuration);
 
     let main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
@@ -406,7 +421,12 @@ where
         .layer(cors)
         // Telemetry layers MUST be last. This means that they will be hit first during execution of the pipeline
         // Adding layers after telemetry will cause us to lose metrics and spans.
-        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license }))
+        .layer(
+            TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan {
+                license,
+                use_legacy_request_span,
+            }),
+        )
         .layer(middleware::from_fn(metrics_handler));
 
     let route = endpoints_on_main_listener

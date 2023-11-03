@@ -24,8 +24,8 @@ use serde::Serialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::AttributeValue;
-
-use crate::plugins::telemetry::config_new::{DefaultForLevel, GetAttributes};
+use crate::plugins::telemetry::config_new::DefaultForLevel;
+use crate::plugins::telemetry::config_new::GetAttributes;
 use crate::services::router;
 
 #[allow(dead_code)]
@@ -432,7 +432,7 @@ impl GetAttributes<router::Request, router::Response> for HttpCommonAttributes {
         if let Some(true) = &self.http_response_status_code {
             attrs.insert(
                 HTTP_RESPONSE_STATUS_CODE,
-                AttributeValue::String(response.response.status().to_string()),
+                AttributeValue::I64(response.response.status().as_u16() as i64),
             );
         }
         attrs

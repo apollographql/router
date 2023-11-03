@@ -16,6 +16,7 @@ use tokio::io::AsyncWriteExt;
 use tower_http::trace::MakeSpan;
 use tracing::Span;
 
+use crate::plugins::telemetry::create_router_span;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
@@ -101,6 +102,7 @@ pub(super) async fn decompress_request_body(
 #[derive(Clone, Default)]
 pub(crate) struct PropagatingMakeSpan {
     pub(crate) license: LicenseState,
+    pub(crate) use_legacy_request_span: bool,
 }
 
 impl<B> MakeSpan<B> for PropagatingMakeSpan {
@@ -119,10 +121,18 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         {
             // We have a valid remote span, attach it to the current thread before creating the root span.
             let _context_guard = context.attach();
-            self.create_span(request)
+            if self.use_legacy_request_span {
+                self.create_span(request)
+            } else {
+                create_router_span(request)
+            }
         } else {
             // No remote span, we can go ahead and create the span without context.
-            self.create_span(request)
+            if self.use_legacy_request_span {
+                self.create_span(request)
+            } else {
+                create_router_span(request)
+            }
         }
     }
 }
