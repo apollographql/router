@@ -452,13 +452,12 @@ pub(crate) enum AttributeValue {
     Bool(bool),
     /// i64 values
     I64(i64),
-    /// i64 values
+    /// u128 values
     U128(u128),
     /// f64 values
     F64(f64),
     /// String values
     String(String),
-    // TODO add static string type support
     /// Array of homogeneous values
     Array(AttributeArray),
 }

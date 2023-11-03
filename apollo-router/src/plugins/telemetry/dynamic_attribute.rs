@@ -74,7 +74,7 @@ impl DynAttribute for ::tracing::Span {
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
-                    None => eprintln!("no spanref, this is a bug"),
+                    None => ::tracing::error!("no spanref, this is a bug"),
                     Some(s) => {
                         if s.is_sampled() {
                             let mut extensions = s.extensions_mut();
@@ -93,7 +93,7 @@ impl DynAttribute for ::tracing::Span {
                                     }
                                 }
                                 None => {
-                                    eprintln!("no OtelData, this is a bug");
+                                    ::tracing::error!("no OtelData, this is a bug");
                                 }
                             }
                         } else {
@@ -103,14 +103,14 @@ impl DynAttribute for ::tracing::Span {
                                     attributes.insert(key, value);
                                 }
                                 None => {
-                                    eprintln!("no LogAttributes, this is a bug");
+                                    ::tracing::error!("no LogAttributes, this is a bug");
                                 }
                             }
                         }
                     }
                 };
             } else {
-                eprintln!("no Registry, this is a bug");
+                ::tracing::error!("no Registry, this is a bug");
             }
         });
     }
@@ -119,7 +119,7 @@ impl DynAttribute for ::tracing::Span {
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
-                    None => eprintln!("no spanref, this is a bug"),
+                    None => ::tracing::error!("no spanref, this is a bug"),
                     Some(s) => {
                         if s.is_sampled() {
                             let mut extensions = s.extensions_mut();
@@ -141,7 +141,7 @@ impl DynAttribute for ::tracing::Span {
                                     }
                                 }
                                 None => {
-                                    eprintln!("no OtelData, this is a bug");
+                                    ::tracing::error!("no OtelData, this is a bug");
                                 }
                             }
                         } else {
@@ -151,14 +151,14 @@ impl DynAttribute for ::tracing::Span {
                                     registered_attributes.extend(attributes);
                                 }
                                 None => {
-                                    eprintln!("no LogAttributes, this is a bug");
+                                    ::tracing::error!("no LogAttributes, this is a bug");
                                 }
                             }
                         }
                     }
                 };
             } else {
-                eprintln!("no Registry, this is a bug");
+                ::tracing::error!("no Registry, this is a bug");
             }
         });
     }
