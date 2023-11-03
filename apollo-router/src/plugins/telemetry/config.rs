@@ -462,6 +462,12 @@ pub(crate) enum AttributeValue {
     Array(AttributeArray),
 }
 
+impl From<&'static str> for AttributeValue {
+    fn from(value: &'static str) -> Self {
+        AttributeValue::String(value.to_string())
+    }
+}
+
 impl std::fmt::Display for AttributeValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

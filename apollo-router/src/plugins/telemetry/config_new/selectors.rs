@@ -6,11 +6,50 @@ use crate::services::{router, subgraph, supergraph};
 use crate::tracer::TraceId;
 use access_json::JSONQuery;
 use opentelemetry_api::baggage::BaggageExt;
+use opentelemetry_api::Context;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json_bytes::ByteString;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum TraceIdFormat {
+    /// Open Telemetry trace ID, a hex string.
+    OpenTelemetry,
+    /// Datadog trace ID, a u64.
+    Datadog,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum OperationName {
+    /// The raw operation name.
+    String,
+    /// A hash of the operation name.
+    Hash,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum Query {
+    /// The raw query kind.
+    String,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum OperationKind {
+    /// The raw operation kind.
+    String,
+}
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -270,15 +309,6 @@ pub(crate) enum SubgraphSelector {
         /// Optional default value.
         default: Option<AttributeValue>,
     },
-    SupergraphResponseHeader {
-        /// The supergraph response header name.
-        supergraph_response_header: String,
-        #[serde(skip)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<AttributeValue>,
-    },
     RequestContext {
         /// The request context key.
         request_context: String,
@@ -349,12 +379,10 @@ impl GetAttribute<router::Request, router::Response> for RouterSelector {
                 default,
                 ..
             } => {
-                let span = Span::current();
-                let span_context = span.context();
-                // I must clone the key because the otel API is bad
-                let baggage = span_context.baggage().get(baggage_name.clone()).cloned();
-                match baggage {
-                    Some(baggage) => AttributeValue::from(baggage).into(),
+                let context = Context::current();
+                let baggage = context.baggage();
+                match baggage.get(baggage_name.to_string()) {
+                    Some(baggage) => AttributeValue::from(baggage.clone()).into(),
                     None => default.clone(),
                 }
             }
@@ -390,8 +418,7 @@ impl GetAttribute<router::Request, router::Response> for RouterSelector {
                 default,
                 ..
             } => {
-                let span = Span::current();
-                let span_context = span.context();
+                let span_context = Context::current();
                 // I must clone the key because the otel API is bad
                 let baggage = span_context.baggage().get(baggage_name.clone()).cloned();
                 match baggage {
@@ -460,12 +487,11 @@ impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphSelec
                 default,
                 ..
             } => {
-                let span = Span::current();
-                let span_context = span.context();
+                let span_context = Context::current();
                 // I must clone the key because the otel API is bad
                 let baggage = span_context.baggage().get(baggage_name.clone()).cloned();
                 match baggage {
-                    Some(baggage) => AttributeValue::from(baggage).into(),
+                    Some(baggage) => AttributeValue::from(baggage.clone()).into(),
                     None => default.clone(),
                 }
             }
@@ -604,8 +630,7 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
                 default,
                 ..
             } => {
-                let span = Span::current();
-                let span_context = span.context();
+                let span_context = Context::current();
                 // I must clone the key because the otel API is bad
                 let baggage = span_context.baggage().get(baggage_name.clone()).cloned();
                 match baggage {
@@ -663,53 +688,626 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
     }
 }
 
-#[allow(dead_code)]
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum RouterEvent {
-    /// When a service request occurs.
-    Request,
-    /// When a service response occurs.
-    Response,
-    /// When a service error occurs.
-    Error,
-}
+#[cfg(test)]
+mod test {
+    use crate::graphql;
+    use crate::plugins::telemetry::config_new::selectors::{
+        RouterSelector, SubgraphSelector, SupergraphSelector,
+    };
+    use crate::plugins::telemetry::config_new::GetAttribute;
+    use opentelemetry_api::baggage::BaggageExt;
+    use opentelemetry_api::{Context, KeyValue};
+    use serde_json::json;
+    use std::sync::Arc;
+    use tracing::{span, subscriber, Span};
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+    use tracing_subscriber::layer::SubscriberExt;
 
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum TraceIdFormat {
-    /// Open Telemetry trace ID, a hex string.
-    OpenTelemetry,
-    /// Datadog trace ID, a u64.
-    Datadog,
-}
+    #[test]
+    fn router_request_header() {
+        let selector = RouterSelector::RequestHeader {
+            request_header: "header_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::RouterRequest::fake_builder()
+                        .header("header_key", "header_value")
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "header_value".into()
+        );
 
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum OperationName {
-    /// The raw operation name.
-    String,
-    /// A hash of the operation name.
-    Hash,
-}
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::RouterRequest::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
 
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum Query {
-    /// The raw query kind.
-    String,
-}
+        assert_eq!(
+            selector.on_response(
+                &crate::services::RouterResponse::fake_builder()
+                    .context(crate::context::Context::default())
+                    .header("header_key", "header_value")
+                    .data(json!({}))
+                    .build()
+                    .unwrap()
+            ),
+            None
+        );
+    }
+    #[test]
+    fn router_response_header() {
+        let selector = RouterSelector::ResponseHeader {
+            response_header: "header_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::RouterResponse::fake_builder()
+                        .header("header_key", "header_value")
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "header_value".into()
+        );
 
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum OperationKind {
-    /// The raw operation kind.
-    String,
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::RouterResponse::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
+
+        assert_eq!(
+            selector.on_request(
+                &crate::services::RouterRequest::fake_builder()
+                    .header("header_key", "header_value")
+                    .build()
+                    .unwrap()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn supergraph_request_header() {
+        let selector = SupergraphSelector::RequestHeader {
+            request_header: "header_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SupergraphRequest::fake_builder()
+                        .header("header_key", "header_value")
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "header_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SupergraphRequest::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
+
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SupergraphResponse::fake_builder()
+                    .header("header_key", "header_value")
+                    .build()
+                    .unwrap()
+            ),
+            None
+        );
+    }
+    #[test]
+    fn supergraph_response_header() {
+        let selector = SupergraphSelector::ResponseHeader {
+            response_header: "header_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SupergraphResponse::fake_builder()
+                        .header("header_key", "header_value")
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "header_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SupergraphResponse::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
+
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SupergraphRequest::fake_builder()
+                    .header("header_key", "header_value")
+                    .build()
+                    .unwrap()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn subgraph_supergraph_request_header() {
+        let selector = SubgraphSelector::SupergraphRequestHeader {
+            supergraph_request_header: "header_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SubgraphRequest::fake_builder()
+                        .supergraph_request(Arc::new(
+                            http::Request::builder()
+                                .header("header_key", "header_value")
+                                .body(crate::request::Request::builder().build())
+                                .unwrap()
+                        ))
+                        .build()
+                )
+                .unwrap(),
+            "header_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_request(&crate::services::SubgraphRequest::fake_builder().build())
+                .unwrap(),
+            "defaulted".into()
+        );
+
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake2_builder()
+                    .header("header_key", "header_value")
+                    .build()
+                    .unwrap()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn subgraph_subgraph_request_header() {
+        let selector = SubgraphSelector::SubgraphRequestHeader {
+            subgraph_request_header: "header_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SubgraphRequest::fake_builder()
+                        .subgraph_request(
+                            http::Request::builder()
+                                .header("header_key", "header_value")
+                                .body(graphql::Request::fake_builder().build())
+                                .unwrap()
+                        )
+                        .build()
+                )
+                .unwrap(),
+            "header_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_request(&crate::services::SubgraphRequest::fake_builder().build())
+                .unwrap(),
+            "defaulted".into()
+        );
+
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake2_builder()
+                    .header("header_key", "header_value")
+                    .build()
+                    .unwrap()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn subgraph_subgraph_response_header() {
+        let selector = SubgraphSelector::SubgraphResponseHeader {
+            subgraph_response_header: "header_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake2_builder()
+                        .header("header_key", "header_value")
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "header_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake2_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
+
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .subgraph_request(
+                        http::Request::builder()
+                            .header("header_key", "header_value")
+                            .body(graphql::Request::fake_builder().build())
+                            .unwrap()
+                    )
+                    .build()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn router_response_context() {
+        let selector = RouterSelector::ResponseContext {
+            response_context: "context_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        let context = crate::context::Context::new();
+        let _ = context.insert("context_key".to_string(), "context_value".to_string());
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::RouterResponse::fake_builder()
+                        .context(context.clone())
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::RouterResponse::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
+        assert_eq!(
+            selector.on_request(
+                &crate::services::RouterRequest::fake_builder()
+                    .context(context)
+                    .build()
+                    .unwrap()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn supergraph_request_context() {
+        let selector = SupergraphSelector::RequestContext {
+            request_context: "context_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        let context = crate::context::Context::new();
+        let _ = context.insert("context_key".to_string(), "context_value".to_string());
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SupergraphRequest::fake_builder()
+                        .context(context.clone())
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SupergraphRequest::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SupergraphResponse::fake_builder()
+                    .context(context)
+                    .build()
+                    .unwrap()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn supergraph_response_context() {
+        let selector = SupergraphSelector::ResponseContext {
+            response_context: "context_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        let context = crate::context::Context::new();
+        let _ = context.insert("context_key".to_string(), "context_value".to_string());
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SupergraphResponse::fake_builder()
+                        .context(context.clone())
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SupergraphResponse::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SupergraphRequest::fake_builder()
+                    .context(context)
+                    .build()
+                    .unwrap()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn subgraph_request_context() {
+        let selector = SubgraphSelector::RequestContext {
+            request_context: "context_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        let context = crate::context::Context::new();
+        let _ = context.insert("context_key".to_string(), "context_value".to_string());
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SubgraphRequest::fake_builder()
+                        .context(context.clone())
+                        .build()
+                )
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_request(&crate::services::SubgraphRequest::fake_builder().build())
+                .unwrap(),
+            "defaulted".into()
+        );
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake2_builder()
+                    .context(context)
+                    .build()
+                    .unwrap()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn subgraph_response_context() {
+        let selector = SubgraphSelector::ResponseContext {
+            response_context: "context_key".to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        let context = crate::context::Context::new();
+        let _ = context.insert("context_key".to_string(), "context_value".to_string());
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake2_builder()
+                        .context(context.clone())
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake2_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "defaulted".into()
+        );
+
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .context(context)
+                    .build()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn router_baggage() {
+        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        subscriber::with_default(subscriber, || {
+            let span = span!(tracing::Level::INFO, "test");
+            let _guard = span.enter();
+            let selector = RouterSelector::Baggage {
+                baggage: "baggage_key".to_string(),
+                redact: None,
+                default: Some("defaulted".into()),
+            };
+            assert_eq!(
+                selector
+                    .on_request(
+                        &crate::services::RouterRequest::fake_builder()
+                            .build()
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                "defaulted".into()
+            );
+
+            let _outer_guard = span
+                .context()
+                .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
+                .attach();
+
+            assert_eq!(
+                selector
+                    .on_request(
+                        &crate::services::RouterRequest::fake_builder()
+                            .build()
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                "baggage_value".into()
+            );
+        });
+    }
+
+    #[test]
+    fn supergraph_baggage() {
+        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        subscriber::with_default(subscriber, || {
+            let span = span!(tracing::Level::INFO, "test");
+            let _guard = span.enter();
+            let selector = SupergraphSelector::Baggage {
+                baggage: "baggage_key".to_string(),
+                redact: None,
+                default: Some("defaulted".into()),
+            };
+            assert_eq!(
+                selector
+                    .on_request(
+                        &crate::services::SupergraphRequest::fake_builder()
+                            .build()
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                "defaulted".into()
+            );
+
+            let _outer_guard = span
+                .context()
+                .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
+                .attach();
+
+            assert_eq!(
+                selector
+                    .on_request(
+                        &crate::services::SupergraphRequest::fake_builder()
+                            .build()
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                "baggage_value".into()
+            );
+        });
+    }
+
+    #[test]
+    fn subgraph_baggage() {
+        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        subscriber::with_default(subscriber, || {
+            let span = span!(tracing::Level::INFO, "test");
+            let _guard = span.enter();
+            let selector = SubgraphSelector::Baggage {
+                baggage: "baggage_key".to_string(),
+                redact: None,
+                default: Some("defaulted".into()),
+            };
+            assert_eq!(
+                selector
+                    .on_request(&crate::services::SubgraphRequest::fake_builder().build())
+                    .unwrap(),
+                "defaulted".into()
+            );
+
+            let _outer_guard = span
+                .context()
+                .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
+                .attach();
+
+            assert_eq!(
+                selector
+                    .on_request(&crate::services::SubgraphRequest::fake_builder().build())
+                    .unwrap(),
+                "baggage_value".into()
+            );
+        });
+    }
 }

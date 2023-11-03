@@ -5,6 +5,7 @@ use std::sync::Arc;
 use futures::channel::mpsc;
 use http::StatusCode;
 use http::Version;
+use multimap::MultiMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
@@ -16,6 +17,7 @@ use tower::BoxError;
 
 use crate::error::Error;
 use crate::graphql;
+use crate::http_ext::{header_map, TryIntoHeaderName, TryIntoHeaderValue};
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::notification::HandleStream;
@@ -195,8 +197,8 @@ impl Response {
     /// This is the constructor (or builder) to use when constructing a "fake" Response.
     ///
     /// This does not enforce the provision of the data that is required for a fully functional
-    /// Response. It's usually enough for testing, when a fully consructed Response is
-    /// difficult to construct and not required for the pusposes of the test.
+    /// Response. It's usually enough for testing, when a fully constructed Response is
+    /// difficult to construct and not required for the purposes of the test.
     #[builder(visibility = "pub")]
     fn fake_new(
         label: Option<String>,
@@ -219,6 +221,36 @@ impl Response {
             context.unwrap_or_default(),
             headers,
         )
+    }
+
+    /// This is the constructor (or builder) to use when constructing a "fake" Response.
+    /// It differs from the existing fake_new because it allows easier passing of headers. However we can't change the original without breaking the public APIs.
+    ///
+    /// This does not enforce the provision of the data that is required for a fully functional
+    /// Response. It's usually enough for testing, when a fully constructed Response is
+    /// difficult to construct and not required for the purposes of the test.
+    #[builder(visibility = "pub (crate)")]
+    fn fake2_new(
+        label: Option<String>,
+        data: Option<Value>,
+        path: Option<Path>,
+        errors: Vec<Error>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        extensions: JsonMap<ByteString, Value>,
+        status_code: Option<StatusCode>,
+        context: Option<Context>,
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
+    ) -> Result<Response, BoxError> {
+        Ok(Response::new(
+            label,
+            data,
+            path,
+            errors,
+            extensions,
+            status_code,
+            context.unwrap_or_default(),
+            Some(header_map(headers)?),
+        ))
     }
 
     /// This is the constructor (or builder) to use when constructing a Response that represents a global error.
