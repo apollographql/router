@@ -8,19 +8,19 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
-use super::attributes::DefaultForLevel;
-use super::attributes::GetAttributes;
 use crate::context::OPERATION_KIND;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::attributes::Extendable;
 use crate::plugins::telemetry::config_new::attributes::HttpCommonAttributes;
 use crate::plugins::telemetry::config_new::attributes::HttpServerAttributes;
-use crate::plugins::telemetry::config_new::attributes::RouterCustomAttribute;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
-use crate::plugins::telemetry::config_new::attributes::SubgraphCustomAttribute;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
-use crate::plugins::telemetry::config_new::attributes::SupergraphCustomAttribute;
+use crate::plugins::telemetry::config_new::extendable::Extendable;
+use crate::plugins::telemetry::config_new::selectors::RouterSelector;
+use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
+use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
+use crate::plugins::telemetry::config_new::DefaultForLevel;
+use crate::plugins::telemetry::config_new::GetAttributes;
 use crate::query_planner::OperationKind;
 use crate::services::router;
 use crate::services::subgraph;
@@ -69,7 +69,7 @@ impl Spans {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct RouterSpans {
     /// Custom attributes that are attached to the router span.
-    pub(crate) attributes: Extendable<RouterAttributes, RouterCustomAttribute>,
+    pub(crate) attributes: Extendable<RouterAttributes, RouterSelector>,
 }
 
 #[allow(dead_code)]
@@ -100,7 +100,7 @@ pub(crate) struct RouterAttributes {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SupergraphSpans {
     /// Custom attributes that are attached to the supergraph span.
-    pub(crate) attributes: Extendable<SupergraphAttributes, SupergraphCustomAttribute>,
+    pub(crate) attributes: Extendable<SupergraphAttributes, SupergraphSelector>,
 }
 
 #[allow(dead_code)]
@@ -108,7 +108,7 @@ pub(crate) struct SupergraphSpans {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphSpans {
     /// Custom attributes that are attached to the subgraph span.
-    pub(crate) attributes: Extendable<SubgraphAttributes, SubgraphCustomAttribute>,
+    pub(crate) attributes: Extendable<SubgraphAttributes, SubgraphSelector>,
 }
 
 impl GetAttributes<router::Request, router::Response> for RouterAttributes {

@@ -92,7 +92,6 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
-use crate::plugins::telemetry::config_new::attributes::GetAttributes;
 use crate::plugins::telemetry::dynamic_attribute::DynAttribute;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
@@ -128,6 +127,7 @@ use crate::spec::TYPENAME;
 use crate::tracer::TraceId;
 use crate::Context;
 use crate::ListenAddr;
+use config_new::GetAttributes;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
