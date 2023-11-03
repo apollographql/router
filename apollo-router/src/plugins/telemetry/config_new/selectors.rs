@@ -1376,4 +1376,33 @@ mod test {
             );
         });
     }
+
+    #[test]
+    fn router_env() {
+        let selector = RouterSelector::Env {
+            env: "SELECTOR_ENV_VARIABLE".to_string(),
+            redact: None,
+            default: Some("defaulted".to_string()),
+        };
+        // No span context
+        assert_eq!(
+            selector.on_request(
+                &crate::services::RouterRequest::fake_builder()
+                    .build()
+                    .unwrap(),
+            ),
+            Some("defaulted".into())
+        );
+
+        std::env::set_var("SELECTOR_ENV_VARIABLE", "env_value");
+
+        assert_eq!(
+            selector.on_request(
+                &crate::services::RouterRequest::fake_builder()
+                    .build()
+                    .unwrap(),
+            ),
+            Some("env_value".into())
+        );
+    }
 }
