@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
@@ -67,116 +68,31 @@ impl Plugin for EntityCache {
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        service
-        /*ServiceBuilder::new()
-        .oneshot_checkpoint_async(|request: subgraph::Request| {
-            if !request
-                .subgraph_request
-                .body()
-                .variables
-                .contains_key(REPRESENTATIONS)
-            {
-                return service.oneshot(request).boxed();
-            } else {
-                let cache = self.storage.clone();
-                let name = name.to_string();
-                Box::pin(cache_call(service, name, cache, request))
-            }
-        })
-        .service(service)*/
-    }
-}
-
-/*
-#[derive(Clone)]
-pub(crate) struct SubgraphCacheLayer {
-    storage: RedisCacheStorage,
-    name: String,
-}
-
-impl SubgraphCacheLayer {
-    pub(crate) fn new_with_storage(
-        name: String,
-        mut storage: RedisCacheStorage,
-        ttl: Duration,
-    ) -> Self {
-        storage.set_ttl(Some(ttl));
-        SubgraphCacheLayer { storage, name }
-    }
-}
-
-impl<S: Clone> Layer<S> for SubgraphCacheLayer {
-    type Service = SubgraphCache<S>;
-
-    fn layer(&self, service: S) -> Self::Service {
-        SubgraphCache {
-            name: self.name.clone(),
-            storage: self.storage.clone(),
-            service,
-        }
-    }
-}
-
-
-pub(crate) struct SubgraphCache<S> {
-    storage: RedisCacheStorage,
-    name: String,
-    service: S,
-}
-
-impl<S> Service<subgraph::Request> for SubgraphCache<S>
-where
-    S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
-        + Send
-        + 'static,
-    <S as Service<subgraph::Request>>::Future: std::marker::Send,
-{
-    type Response = <S as Service<subgraph::Request>>::Response;
-    type Error = <S as Service<subgraph::Request>>::Error;
-    type Future = BoxFuture<
-        'static,
-        Result<
-            <S as Service<subgraph::Request>>::Response,
-            <S as Service<subgraph::Request>>::Error,
-        >,
-    >;
-
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, request: subgraph::Request) -> Self::Future {
-        let service = self.service.clone();
-
-        if !request
-            .subgraph_request
-            .body()
-            .variables
-            .contains_key(REPRESENTATIONS)
-        {
-            return service.oneshot(request).boxed();
-        }
-
         let cache = self.storage.clone();
-        let name = self.name.clone();
-        Box::pin(cache_call(service, name, cache, request))
+        let name = name.to_string();
+        ServiceBuilder::new()
+            .oneshot_checkpoint_async(|request: subgraph::Request| async move {
+                if !request
+                    .subgraph_request
+                    .body()
+                    .variables
+                    .contains_key(REPRESENTATIONS)
+                {
+                    Ok(ControlFlow::Continue(request))
+                } else {
+                    cache_call(name, cache, request).await
+                }
+            }) //.map_response(f)
+            .service(service)
+            .boxed()
     }
-}*/
+}
 
-async fn cache_call<S>(
-    service: S,
+async fn cache_call(
     name: String,
     cache: RedisCacheStorage,
     mut request: subgraph::Request,
-) -> Result<<S as Service<subgraph::Request>>::Response, <S as Service<subgraph::Request>>::Error>
-where
-    S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
-        //        + Clone
-        + Send
-        + 'static,
-    S::Error: Into<tower::BoxError> + std::fmt::Debug,
-    <S as Service<subgraph::Request>>::Future: std::marker::Send,
-{
+) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError> {
     let body = request.subgraph_request.body_mut();
     let query_hash = hash_request(body);
 
@@ -202,7 +118,26 @@ where
         body.variables
             .insert(REPRESENTATIONS, new_representations.into());
 
-        let mut response = service.oneshot(request).await?;
+        Ok(ControlFlow::Continue(request))
+    } else {
+        let entities = insert_entities_in_result(&mut Vec::new(), &cache, &mut result).await?;
+        let mut data = Object::default();
+        data.insert(ENTITIES, entities.into());
+
+        Ok(ControlFlow::Break(
+            subgraph::Response::builder()
+                .data(data)
+                .extensions(Object::new())
+                .context(request.context)
+                .build(),
+        ))
+    }
+}
+
+fn cache_store_from_response() {
+    /*
+
+    let mut response = service.oneshot(request).await?;
 
         let mut data = response.response.body_mut().data.take();
 
@@ -228,18 +163,7 @@ where
             response.response.body_mut().data = data;
         }
 
-        Ok(response)
-    } else {
-        let entities = insert_entities_in_result(&mut Vec::new(), &cache, &mut result).await?;
-        let mut data = Object::default();
-        data.insert(ENTITIES, entities.into());
-
-        Ok(subgraph::Response::builder()
-            .data(data)
-            .extensions(Object::new())
-            .context(request.context)
-            .build())
-    }
+        Ok(response) */
 }
 
 pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
