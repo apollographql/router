@@ -5,9 +5,7 @@ description: Customize your router's behavior in any language
 
 import CoprocTypicalConfig from '../../shared/coproc-typical-config.mdx';
 
-> ⚠️ **This is an [Enterprise feature](../enterprise-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
->
-> If your organization _doesn't_ currently have an Enterprise plan, you can test out this functionality by signing up for a free [Enterprise trial](/graphos/org/plans/#enterprise-trials).
+<EnterpriseFeature />
 
 With **external coprocessing**, you can hook into the Apollo Router's request-handling lifecycle by writing standalone code in any language and framework. This code (i.e., your **coprocessor**) can run anywhere on your network that's accessible to the router over HTTP.
 
@@ -48,7 +46,7 @@ flowchart TB;
   class client,subgraphs,coprocessing secondary;
 ```
 
-> This diagram shows request execution proceeding "down" from a client, through the router, to individual subgraphs. Execution then proceeds back "up" to the client in the reverse order.
+This diagram shows request execution proceeding "down" from a client, through the router, to individual subgraphs. Execution then proceeds back "up" to the client in the reverse order.
 
 As shown in the diagram above, the `RouterService`, `SupergraphService` and `SubgraphService` steps of the [request-handling lifecycle](./rhai/#router-request-lifecycle) can send these POST requests (also called **coprocessor requests**).
 
@@ -68,7 +66,7 @@ If your coprocessor hooks into your router's `SubgraphService`, the router sends
 
 ## Setup
 
-> **First, make sure your router is [connected to a GraphOS Enterprise organization](../enterprise-features/#enabling-enterprise-features).**
+First, make sure your router is [connected to a GraphOS Enterprise organization](../enterprise-features/#enabling-enterprise-features).
 
 You configure external coprocessing in your router's [YAML config file](../configuration/overview/#yaml-config-file), under the `coprocessor` key.
 
@@ -96,7 +94,11 @@ In this case, the `RouterService` only sends a coprocessor request whenever it r
 
 The router communicates with your coprocessor via HTTP POST requests (called **coprocessor requests**). The body of each coprocessor request is a JSON object with properties that describe either the current client request or the current router response.
 
-> **Body properties vary by the router's current execution stage.** [See example request bodies for each stage.](#example-requests-by-stage)
+<Note>
+
+**Body properties vary by the router's current execution stage.** [See example request bodies for each stage.](#example-requests-by-stage)
+
+</Note>
 
 Properties of the JSON body are divided into two high-level categories:
 
@@ -664,7 +666,7 @@ This field's structure depends on whether the coprocessor request corresponds to
 - **If a standard response,** `body` usually contains `data` and/or `errors` properties for the GraphQL operation result.
 - **If a response "chunk",** `body` contains `data` for _some_ of the operation fields.
 
-> By default, the `RouterResponse` stage returns _redacted_ errors within the `errors` field. To process subgraph errors manually in your coprocessor, enable [subgraph error inclusion](../configuration/subgraph-error-inclusion).
+By default, the `RouterResponse` stage returns _redacted_ errors within the `errors` field. To process subgraph errors manually in your coprocessor, enable [subgraph error inclusion](../configuration/subgraph-error-inclusion).
 
 </td>
 </tr>
@@ -830,15 +832,19 @@ In the response body, your coprocessor can return _modified values_ for certain 
 
 The router supports modifying the following properties from your coprocessor:
 
-> **Do not** modify other [control properties](#property-reference). Doing so can cause the client request to fail.
-
 - [`control`](#control)
     - Modify this property to immediately [terminate a client request](#terminating-a-client-request).
 - [`body`](#body)
 - [`headers`](#headers)
 - [`context`](#context)
 
-> If you omit a property from your response body entirely, the router uses its existing value for that property.
+<Caution>
+
+**Do not** modify other [control properties](#property-reference). Doing so can cause the client request to fail.
+
+</Caution>
+
+If you omit a property from your response body entirely, the router uses its existing value for that property.
 
 ### Terminating a client request
 
@@ -886,7 +892,11 @@ You can _also_ use this mechanism to immediately return a _successful_ response:
 }
 ```
 
-> ⚠️ If you return a successful response, make sure the structure of the `data` property matches the structure expected by the client query!
+<Note>
+
+If you return a successful response, make sure the structure of the `data` property matches the structure expected by the client query.
+
+</Note>
 
 ### Failed responses
 

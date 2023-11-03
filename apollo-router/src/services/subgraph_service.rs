@@ -29,7 +29,6 @@ use http::HeaderValue;
 use http::Request;
 use hyper::client::HttpConnector;
 use hyper::Body;
-use hyper::Client;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
 use mediatype::names::APPLICATION;
@@ -75,11 +74,16 @@ use crate::protocols::websocket::convert_websocket_stream;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
 use crate::services::layers::apq;
+use crate::services::trust_dns_connector::new_async_http_connector;
+use crate::services::trust_dns_connector::AsyncHyperResolver;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Configuration;
 use crate::Context;
 use crate::Notify;
+
+type HTTPClientService =
+    Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>;
 
 const PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_FOUND";
 const PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
@@ -141,7 +145,7 @@ pub(crate) struct SubgraphService {
     // Note: We use hyper::Client here in preference to reqwest to avoid expensive URL translation
     // in the hot path. We use reqwest elsewhere because it's convenient and some of the
     // opentelemetry crate require reqwest clients to work correctly (at time of writing).
-    client: Decompression<hyper::Client<HttpsConnector<HttpConnector>>>,
+    client: HTTPClientService,
     service: Arc<String>,
 
     /// Whether apq is enabled in the router for subgraph calls
@@ -215,14 +219,14 @@ impl SubgraphService {
                 )?,
         };
 
-        Ok(SubgraphService::new(
+        SubgraphService::new(
             name,
             enable_apq,
             http2,
             subscription_config,
             tls_client_config,
             configuration.notify.clone(),
-        ))
+        )
     }
 
     pub(crate) fn new(
@@ -232,8 +236,8 @@ impl SubgraphService {
         subscription_config: Option<SubscriptionConfig>,
         tls_config: ClientConfig,
         notify: Notify<String, graphql::Response>,
-    ) -> Self {
-        let mut http_connector = HttpConnector::new();
+    ) -> Result<Self, BoxError> {
+        let mut http_connector = new_async_http_connector()?;
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
@@ -253,7 +257,7 @@ impl SubgraphService {
             .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
             .http2_only(http2 == Http2Config::Http2Only)
             .build(connector);
-        Self {
+        Ok(Self {
             client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
                 .service(http_client),
@@ -261,7 +265,7 @@ impl SubgraphService {
             apq: Arc::new(<AtomicBool>::new(enable_apq)),
             subscription_config,
             notify,
-        }
+        })
     }
 }
 
@@ -681,7 +685,7 @@ async fn call_http(
     request: SubgraphRequest,
     body: graphql::Request,
     context: Context,
-    client: Decompression<Client<HttpsConnector<HttpConnector>>>,
+    client: HTTPClientService,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
     let SubgraphRequest {
@@ -927,7 +931,7 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
 }
 
 async fn do_fetch(
-    mut client: Decompression<Client<HttpsConnector<HttpConnector>>>,
+    mut client: HTTPClientService,
     context: &Context,
     service_name: &str,
     request: Request<Body>,
@@ -1859,7 +1863,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::builder().build(),
-        );
+        )
+        .expect("can create a SubgraphService");
         let (tx, _rx) = mpsc::channel(2);
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1915,7 +1920,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1959,7 +1965,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2003,7 +2010,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2052,7 +2060,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2105,7 +2114,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2156,7 +2166,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::builder().build(),
-        );
+        )
+        .expect("can create a SubgraphService");
         let (tx, mut rx) = mpsc::channel(2);
 
         let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
@@ -2220,7 +2231,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::builder().build(),
-        );
+        )
+        .expect("can create a SubgraphService");
         let (tx, _rx) = mpsc::channel(2);
 
         let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
@@ -2276,7 +2288,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2328,7 +2341,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2375,7 +2389,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -2426,7 +2441,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2473,7 +2489,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         assert!(subgraph_service.clone().apq.as_ref().load(Relaxed));
 
@@ -2529,7 +2546,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         assert!(subgraph_service.clone().apq.as_ref().load(Relaxed));
 
@@ -2583,7 +2601,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -2634,7 +2653,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -2685,7 +2705,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -2736,7 +2757,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -3073,7 +3095,8 @@ mod tests {
                 .with_native_roots()
                 .with_no_client_auth(),
             Notify::default(),
-        );
+        )
+        .expect("can create a SubgraphService");
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service

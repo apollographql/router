@@ -533,10 +533,47 @@ expression: "&schema"
               "default": true,
               "type": "boolean"
             },
-            "log_errors": {
-              "description": "Log authorization errors",
-              "default": true,
-              "type": "boolean"
+            "errors": {
+              "description": "authorization errors behaviour",
+              "default": {
+                "log": true,
+                "response": "errors"
+              },
+              "type": "object",
+              "properties": {
+                "log": {
+                  "description": "log authorization errors",
+                  "default": true,
+                  "type": "boolean"
+                },
+                "response": {
+                  "description": "location of authorization errors in the GraphQL response",
+                  "default": "errors",
+                  "oneOf": [
+                    {
+                      "description": "store authorization errors in the response errors",
+                      "type": "string",
+                      "enum": [
+                        "errors"
+                      ]
+                    },
+                    {
+                      "description": "store authorization errors in the response extensions",
+                      "type": "string",
+                      "enum": [
+                        "extensions"
+                      ]
+                    },
+                    {
+                      "description": "do not add the authorization errors to the GraphQL response",
+                      "type": "string",
+                      "enum": [
+                        "disabled"
+                      ]
+                    }
+                  ]
+                }
+              }
             },
             "reject_unauthorized": {
               "description": "refuse a query entirely if any part would be filtered",
@@ -1023,6 +1060,33 @@ expression: "&schema"
         }
       },
       "additionalProperties": false
+    },
+    "experimental_api_schema_generation_mode": {
+      "description": "Set the API schema generation implementation to use.",
+      "default": "legacy",
+      "oneOf": [
+        {
+          "description": "Use the new Rust-based implementation.",
+          "type": "string",
+          "enum": [
+            "new"
+          ]
+        },
+        {
+          "description": "Use the old JavaScript-based implementation.",
+          "type": "string",
+          "enum": [
+            "legacy"
+          ]
+        },
+        {
+          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
+          "type": "string",
+          "enum": [
+            "both"
+          ]
+        }
+      ]
     },
     "experimental_batching": {
       "description": "Batching configuration.",
