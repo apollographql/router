@@ -3,7 +3,6 @@ use std::fmt;
 use std::fmt::Write;
 use std::io;
 
-use chrono::SecondsFormat;
 use serde::ser::SerializeMap;
 use serde::ser::Serializer as _;
 use serde_json::Serializer;
@@ -197,7 +196,7 @@ where
     where
         S: Subscriber + for<'a> LookupSpan<'a>,
     {
-        let timestamp = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        let timestamp = time::OffsetDateTime::now_utc();
 
         let meta = event.metadata();
 

@@ -189,13 +189,16 @@ impl GetAttributes<subgraph::Request, subgraph::Response> for SubgraphAttributes
         let mut attrs = HashMap::new();
         if let Some(true) = &self.graphql_document {
             if let Some(query) = &request.supergraph_request.body().query {
-                attrs.insert(GRAPHQL_DOCUMENT, AttributeValue::String(query.clone()));
+                attrs.insert(
+                    Key::from_static_str("subgraph.graphql.document"),
+                    AttributeValue::String(query.clone()),
+                );
             }
         }
         if let Some(true) = &self.graphql_operation_name {
             if let Some(op_name) = &request.supergraph_request.body().operation_name {
                 attrs.insert(
-                    GRAPHQL_OPERATION_NAME,
+                    Key::from_static_str("subgraph.graphql.operation.name"),
                     AttributeValue::String(op_name.clone()),
                 );
             }
@@ -208,14 +211,14 @@ impl GetAttributes<subgraph::Request, subgraph::Response> for SubgraphAttributes
                 .flatten()
                 .unwrap_or_default();
             attrs.insert(
-                GRAPHQL_OPERATION_TYPE,
+                Key::from_static_str("subgraph.graphql.operation.type"),
                 AttributeValue::String(operation_kind.as_apollo_operation_type().to_string()),
             );
         }
         if let Some(true) = &self.graphql_federation_subgraph_name {
             if let Some(subgraph_name) = &request.subgraph_name {
                 attrs.insert(
-                    Key::from_static_str("graphql.federation.subgraph.name"),
+                    Key::from_static_str("subgraph.name"),
                     AttributeValue::String(subgraph_name.clone()),
                 );
             }
