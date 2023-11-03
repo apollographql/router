@@ -35,7 +35,6 @@ pub(crate) use self::rate::RateLimited;
 pub(crate) use self::retry::RetryPolicy;
 pub(crate) use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
-use crate::cache::redis::RedisCacheStorage;
 use crate::configuration::RedisCache;
 use crate::error::ConfigurationError;
 use crate::plugin::Plugin;
@@ -252,7 +251,6 @@ pub(crate) struct TrafficShaping {
     config: Config,
     rate_limit_router: Option<RateLimitLayer>,
     rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
-    storage: Option<RedisCacheStorage>,
 }
 
 #[async_trait::async_trait]
@@ -284,35 +282,30 @@ impl Plugin for TrafficShaping {
             .transpose()?;
 
         {
-            let storage = if let Some(urls) = init
-                .config
-                .experimental_cache
-                .as_ref()
-                .map(|cache| cache.urls.clone())
-            {
-                Some(
-                    RedisCacheStorage::new(
-                        urls,
-                        None,
-                        init.config
-                            .experimental_cache
-                            .as_ref()
-                            .and_then(|c| c.timeout),
-                    )
-                    .await?,
-                )
-            } else {
-                None
-            };
             Ok(Self {
                 config: init.config,
                 rate_limit_router,
                 rate_limit_subgraphs: Mutex::new(HashMap::new()),
-                storage,
             })
         }
     }
 }
+
+pub(crate) type TrafficShapingSubgraphFuture<S> = Either<
+    Either<
+        BoxFuture<'static, Result<subgraph::Response, BoxError>>,
+        timeout::future::ResponseFuture<
+            Oneshot<
+                Either<
+                    Retry<RetryPolicy, Either<rate::service::RateLimit<S>, S>>,
+                    Either<rate::service::RateLimit<S>, S>,
+                >,
+                subgraph::Request,
+            >,
+        >,
+    >,
+    <S as Service<subgraph::Request>>::Future,
+>;
 
 impl TrafficShaping {
     fn merge_config<T: Merge + Clone>(
@@ -365,21 +358,21 @@ impl TrafficShaping {
         subgraph::Request,
         Response = subgraph::Response,
         Error = BoxError,
-        Future = Either<
-            Either<
-                BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-                timeout::future::ResponseFuture<
-                    Oneshot<
-                        Either<
-                            Retry<RetryPolicy, Either<rate::service::RateLimit<S>, S>>,
-                            Either<rate::service::RateLimit<S>, S>,
-                        >,
-                        subgraph::Request,
-                    >,
-                >,
-            >,
-            <S as Service<subgraph::Request>>::Future,
-        >,
+        Future = TrafficShapingSubgraphFuture<S>, /*Either<
+                                                      Either<
+                                                          BoxFuture<'static, Result<subgraph::Response, BoxError>>,
+                                                          timeout::future::ResponseFuture<
+                                                              Oneshot<
+                                                                  Either<
+                                                                      Retry<RetryPolicy, Either<rate::service::RateLimit<S>, S>>,
+                                                                      Either<rate::service::RateLimit<S>, S>,
+                                                                  >,
+                                                                  subgraph::Request,
+                                                              >,
+                                                          >,
+                                                      >,
+                                                      <S as Service<subgraph::Request>>::Future,
+                                                  >*/
     > + Clone
            + Send
            + Sync
