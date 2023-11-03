@@ -244,6 +244,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "apollo-federation"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38d08d88375b1cb778d4b663877fa5d2ba482180283d2071f4de75e697627d60"
+dependencies = [
+ "apollo-compiler 1.0.0-beta.4",
+ "indexmap 2.0.2",
+ "lazy_static",
+ "salsa",
+ "strum",
+ "strum_macros",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "apollo-parser"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -272,6 +288,7 @@ dependencies = [
  "access-json",
  "anyhow",
  "apollo-compiler 1.0.0-beta.4",
+ "apollo-federation",
  "arc-swap",
  "askama",
  "async-compression",
