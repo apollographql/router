@@ -402,7 +402,7 @@ impl RouterService {
         if results.len() == 1 {
             Ok(results.pop().expect("we should have at least one response"))
         } else {
-            let first = results.pop().expect("we should have at least one response");
+            let first = results.remove(0);
             let (parts, body) = first.response.into_parts();
             let context = first.context;
             let mut bytes = BytesMut::new();
@@ -601,9 +601,7 @@ impl RouterService {
 
         let mut ok_results = graphql_requests?;
         let mut results = Vec::with_capacity(ok_results.len());
-        let first = ok_results
-            .pop()
-            .expect("We must have at least one response");
+        let first = ok_results.remove(0);
         let sg = http::Request::from_parts(parts, first);
 
         if !ok_results.is_empty() {
