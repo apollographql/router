@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -45,6 +44,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tokio::runtime::Handle;
+use tokio::runtime::TryCurrentError;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -167,6 +167,8 @@ pub(crate) struct Telemetry {
     public_prometheus_meter_provider: Option<FilterMeterProvider>,
     private_meter_provider: Option<FilterMeterProvider>,
     counter: Option<Arc<Mutex<CacheCounter>>>,
+    // important: last in struct, so last thing to be dropped
+    notifier: tokio::sync::mpsc::Sender<Box<dyn FnOnce() + Send + 'static>>,
 }
 
 #[derive(Debug)]
@@ -204,10 +206,41 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
 
 impl Drop for Telemetry {
     fn drop(&mut self) {
-        Self::safe_shutdown_meter_provider(&mut self.private_meter_provider);
-        Self::safe_shutdown_meter_provider(&mut self.public_meter_provider);
-        Self::safe_shutdown_meter_provider(&mut self.public_prometheus_meter_provider);
-        self.safe_shutown_tracer();
+        let metrics_providers = [
+            self.private_meter_provider.take(),
+            self.public_meter_provider.take(),
+            self.public_prometheus_meter_provider.take(),
+        ];
+        // Make sure we are in async context, error notification if not
+        match Handle::try_current() {
+            Ok(hdl) => {
+                // Runtime, so use send
+                let my_notifier = self.notifier.clone();
+                let tracer_provider_opt = self.tracer_provider.take();
+                hdl.spawn(async move {
+                    for meter_provider_opt in metrics_providers {
+                        if let Some(meter_provider) = meter_provider_opt {
+                            let _ = my_notifier.send(Box::new(move || {
+                            if let Err(e) = meter_provider.shutdown() {
+                                ::tracing::error!(error = %e, "failed to shutdown meter provider")
+                            }
+                        })).await
+                            .expect("send meter shutdown");
+                        }
+                    }
+                    if let Some(tracer_provider) = tracer_provider_opt {
+                        let _ = my_notifier
+                            .send(Box::new(|| drop(tracer_provider)))
+                            .await
+                            .expect("send trace provider drop");
+                    }
+                });
+                // Sadly, we don't join here since we can't await
+            }
+            Err(err) => {
+                ::tracing::error!("Cannot shutdown telemetry, no async runtime: {err}");
+            }
+        }
     }
 }
 
@@ -235,6 +268,15 @@ impl Plugin for Telemetry {
         };
         let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
 
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Box<dyn FnOnce() + Send + 'static>>(1);
+
+        // This task accepts blocking synchronous tasks and executes them
+        tokio::task::spawn_blocking(move || {
+            while let Some(msg) = rx.blocking_recv() {
+                msg();
+            }
+        });
+
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
@@ -250,6 +292,7 @@ impl Plugin for Telemetry {
             sampling_filter_ratio,
             config: Arc::new(config),
             counter,
+            notifier: tx,
         })
     }
 
@@ -1537,49 +1580,47 @@ impl Telemetry {
 
         metrics_layer().clear();
 
-        // Old providers MUST be shut down in a blocking thread.
-        tokio::task::spawn_blocking(move || {
+        if let Err(err) = self.notify_msg(Box::new(move || {
             for (meter_provider_type, meter_provider) in old_meter_providers {
                 if let Err(e) = meter_provider.shutdown() {
                     ::tracing::error!(error = %e, meter_provider_type = ?meter_provider_type, "failed to shutdown meter provider")
                 }
             }
-        });
-    }
-
-    fn safe_shutdown_meter_provider(meter_provider: &mut Option<FilterMeterProvider>) {
-        if Handle::try_current().is_ok() {
-            if let Some(meter_provider) = meter_provider.take() {
-                // This is a thread for a reason!
-                // Tokio doesn't finish executing tasks before termination https://github.com/tokio-rs/tokio/issues/1156.
-                // This means that if the runtime is shutdown there is potentially a race where the provider may not be flushed.
-                // By using a thread it doesn't matter if the tokio runtime is shut down.
-                // This is likely to happen in tests due to the tokio runtime being destroyed when the test method exits.
-                thread::spawn(move || {
-                    if let Err(e) = meter_provider.shutdown() {
-                        ::tracing::error!(error = %e, "failed to shutdown meter provider")
-                    }
+        })) {
+                ::tracing::error!("Cannot shutdown old meter providers, no async runtime: {err}");
+        }
+        /*
+        // Make sure we are in async context, error notification if not
+        match Handle::try_current() {
+            Ok(hdl) => {
+                let my_notifier = self.notifier.clone();
+                hdl.spawn(async move {
+                    my_notifier.send(Box::new(move || {
+                        for (meter_provider_type, meter_provider) in old_meter_providers {
+                            if let Err(e) = meter_provider.shutdown() {
+                                ::tracing::error!(error = %e, meter_provider_type = ?meter_provider_type, "failed to shutdown meter provider")
+                            }
+                        }
+                    })).await.expect("send metrics shutdown");
                 });
+                // Sadly, we don't join here since we can't await
+            }
+            Err(err) => {
+                tracing::error!("Cannot shutdown old meter providers, no async runtime: {err}");
             }
         }
+        */
     }
 
-    fn safe_shutown_tracer(&mut self) {
-        // If for some reason we didn't use the trace provider then safely discard it e.g. some other plugin failed `new`
-        // To ensure we don't hang tracing providers are dropped in a blocking task.
-        // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
-        // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
-        if let Some(tracer_provider) = self.tracer_provider.take() {
-            // If we have no runtime then we don't need to spawn a task as we are already in a blocking context.
-            if Handle::try_current().is_ok() {
-                // This is a thread for a reason!
-                // Tokio doesn't finish executing tasks before termination https://github.com/tokio-rs/tokio/issues/1156.
-                // This means that if the runtime is shutdown there is potentially a race where the provider may not be flushed.
-                // By using a thread it doesn't matter if the tokio runtime is shut down.
-                // This is likely to happen in tests due to the tokio runtime being destroyed when the test method exits.
-                thread::spawn(move || drop(tracer_provider));
-            }
-        }
+    fn notify_msg(&self, msg: Box<dyn FnOnce() + Send + 'static>) -> Result<(), TryCurrentError> {
+        // Make sure we are in async context, error notification if not
+        let hdl = Handle::try_current()?;
+        let my_notifier = self.notifier.clone();
+        hdl.spawn(async move {
+            my_notifier.send(msg).await.expect("notifying msg");
+        });
+        // Sadly, we don't join here since we can't await
+        Ok(())
     }
 }
 
