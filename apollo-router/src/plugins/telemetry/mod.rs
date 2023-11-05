@@ -211,34 +211,18 @@ impl Drop for Telemetry {
             self.public_meter_provider.take(),
             self.public_prometheus_meter_provider.take(),
         ];
-        // Make sure we are in async context, error notification if not
-        match Handle::try_current() {
-            Ok(hdl) => {
-                // Runtime, so use send
-                let my_notifier = self.notifier.clone();
-                let tracer_provider_opt = self.tracer_provider.take();
-                hdl.spawn(async move {
-                    for meter_provider_opt in metrics_providers {
-                        if let Some(meter_provider) = meter_provider_opt {
-                            let _ = my_notifier.send(Box::new(move || {
-                            if let Err(e) = meter_provider.shutdown() {
-                                ::tracing::error!(error = %e, "failed to shutdown meter provider")
-                            }
-                        })).await
-                            .expect("send meter shutdown");
-                        }
-                    }
-                    if let Some(tracer_provider) = tracer_provider_opt {
-                        let _ = my_notifier
-                            .send(Box::new(|| drop(tracer_provider)))
-                            .await
-                            .expect("send trace provider drop");
-                    }
-                });
-                // Sadly, we don't join here since we can't await
+        for meter_provider in metrics_providers.into_iter().flatten() {
+            if let Err(err) = self.notify_msg(Box::new(move || {
+                if let Err(e) = meter_provider.shutdown() {
+                    ::tracing::error!(error = %e, "failed to shutdown meter provider")
+                }
+            })) {
+                ::tracing::error!("Cannot shutdown meter provider, no async runtime: {err}");
             }
-            Err(err) => {
-                ::tracing::error!("Cannot shutdown telemetry, no async runtime: {err}");
+        }
+        if let Some(tracer_provider) = self.tracer_provider.take() {
+            if let Err(err) = self.notify_msg(Box::new(|| drop(tracer_provider))) {
+                ::tracing::error!("Cannot drop tracer provider, no async runtime: {err}");
             }
         }
     }
@@ -268,7 +252,8 @@ impl Plugin for Telemetry {
         };
         let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<Box<dyn FnOnce() + Send + 'static>>(1);
+        // We may need 4 slots during a drop, so make it at least 4
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Box<dyn FnOnce() + Send + 'static>>(5);
 
         // This task accepts blocking synchronous tasks and executes them
         tokio::task::spawn_blocking(move || {
@@ -614,10 +599,10 @@ impl Telemetry {
             hot_tracer.reload(tracer);
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
-            // To ensure we don't hang tracing providers are dropped in a blocking task.
-            // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
-            // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
-            tokio::task::spawn_blocking(move || drop(last_provider));
+
+            if let Err(err) = self.notify_msg(Box::new(move || drop(last_provider))) {
+                ::tracing::error!("Cannot drop previous tracer provider, no async runtime: {err}");
+            }
 
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
         }
@@ -1589,27 +1574,6 @@ impl Telemetry {
         })) {
                 ::tracing::error!("Cannot shutdown old meter providers, no async runtime: {err}");
         }
-        /*
-        // Make sure we are in async context, error notification if not
-        match Handle::try_current() {
-            Ok(hdl) => {
-                let my_notifier = self.notifier.clone();
-                hdl.spawn(async move {
-                    my_notifier.send(Box::new(move || {
-                        for (meter_provider_type, meter_provider) in old_meter_providers {
-                            if let Err(e) = meter_provider.shutdown() {
-                                ::tracing::error!(error = %e, meter_provider_type = ?meter_provider_type, "failed to shutdown meter provider")
-                            }
-                        }
-                    })).await.expect("send metrics shutdown");
-                });
-                // Sadly, we don't join here since we can't await
-            }
-            Err(err) => {
-                tracing::error!("Cannot shutdown old meter providers, no async runtime: {err}");
-            }
-        }
-        */
     }
 
     fn notify_msg(&self, msg: Box<dyn FnOnce() + Send + 'static>) -> Result<(), TryCurrentError> {
@@ -1619,7 +1583,7 @@ impl Telemetry {
         hdl.spawn(async move {
             my_notifier.send(msg).await.expect("notifying msg");
         });
-        // Sadly, we don't join here since we can't await
+        // We don't join here since we can't await or block_on()
         Ok(())
     }
 }
