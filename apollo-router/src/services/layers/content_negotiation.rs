@@ -13,6 +13,7 @@ use mediatype::names::_STAR;
 use mediatype::MediaTypeList;
 use mediatype::ReadParams;
 use mime::APPLICATION_JSON;
+use mime::MULTIPART_FORM_DATA;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
@@ -51,6 +52,7 @@ where
             move |req| {
                 if req.router_request.method() != Method::GET
                     && !content_type_is_json(req.router_request.headers())
+                    && !content_type_is_form_data(req.router_request.headers())
                 {
                     let response: http::Response<hyper::Body> = http::Response::builder()
                         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
@@ -60,9 +62,10 @@ where
                                 "errors": [
                                     graphql::Error::builder()
                                         .message(format!(
-                                            r#"'content-type' header must be one of: {:?} or {:?}"#,
+                                            r#"'content-type' header must be one of: {:?}, {:?} or {:?}"#,
                                             APPLICATION_JSON.essence_str(),
                                             GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                            MULTIPART_FORM_DATA.essence_str()
                                         ))
                                         .extension_code("INVALID_CONTENT_TYPE_HEADER")
                                         .build()
@@ -174,6 +177,22 @@ fn content_type_is_json(headers: &HeaderMap) -> bool {
                                     && mime.subty.as_str() == "graphql-response"
                                     && mime.suffix == Some(JSON))
                         })
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false)
+    })
+}
+fn content_type_is_form_data(headers: &HeaderMap) -> bool {
+    headers.get_all(CONTENT_TYPE).iter().any(|value| {
+        value
+            .to_str()
+            .map(|accept_str| {
+                let mut list = MediaTypeList::new(accept_str);
+
+                list.any(|mime| {
+                    mime.as_ref()
+                        .map(|mime| (mime.ty == MULTIPART && mime.subty.as_str() == "form-data"))
                         .unwrap_or(false)
                 })
             })
