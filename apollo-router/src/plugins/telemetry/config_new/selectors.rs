@@ -1853,4 +1853,91 @@ mod test {
             "No Content".into()
         );
     }
+
+    #[test]
+    fn supergraph_query_variable() {
+        let selector = SupergraphSelector::QueryVariable {
+            query_variable: "key".to_string(),
+            redact: None,
+            default: Some(AttributeValue::String("default".to_string())),
+        };
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SupergraphRequest::fake_builder()
+                    .variable("key", "value")
+                    .build()
+                    .unwrap(),
+            ),
+            Some("\"value\"".into())
+        );
+
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SupergraphRequest::fake_builder()
+                    .build()
+                    .unwrap(),
+            ),
+            Some("default".into())
+        );
+    }
+
+    #[test]
+    fn subgraph_supergraph_query_variable() {
+        let selector = SubgraphSelector::SupergraphQueryVariable {
+            supergraph_query_variable: "key".to_string(),
+            redact: None,
+            default: Some(AttributeValue::String("default".to_string())),
+        };
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .supergraph_request(Arc::new(
+                        http::Request::builder()
+                            .body(
+                                graphql::Request::fake_builder()
+                                    .variable("key", "value")
+                                    .build()
+                            )
+                            .unwrap()
+                    ))
+                    .build(),
+            ),
+            Some("\"value\"".into())
+        );
+
+        assert_eq!(
+            selector.on_request(&crate::services::SubgraphRequest::fake_builder().build(),),
+            Some("default".into())
+        );
+    }
+
+    #[test]
+    fn subgraph_subgraph_query_variable() {
+        let selector = SubgraphSelector::SubgraphQueryVariable {
+            subgraph_query_variable: "key".to_string(),
+            redact: None,
+            default: Some(AttributeValue::String("default".to_string())),
+        };
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .subgraph_request(
+                        http::Request::builder()
+                            .body(
+                                graphql::Request::fake_builder()
+                                    .variable("key", "value")
+                                    .build()
+                            )
+                            .unwrap()
+                    )
+                    .build(),
+            ),
+            Some("\"value\"".into())
+        );
+
+        assert_eq!(
+            selector.on_request(&crate::services::SubgraphRequest::fake_builder().build(),),
+            Some("default".into())
+        );
+    }
 }
