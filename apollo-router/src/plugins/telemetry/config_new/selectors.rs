@@ -129,9 +129,6 @@ pub(crate) enum SupergraphSelector {
     OperationKind {
         /// The operation kind from the query (query|mutation|subscription).
         operation_kind: OperationKind,
-        #[serde(skip)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
     },
     Query {
         /// The graphql query.
@@ -698,9 +695,7 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
 mod test {
     use crate::graphql;
     use crate::plugins::telemetry::config::AttributeValue;
-    use crate::plugins::telemetry::config_new::selectors::{
-        RouterSelector, SubgraphSelector, SupergraphSelector, TraceIdFormat,
-    };
+    use crate::plugins::telemetry::config_new::selectors::{OperationKind, OperationName, RouterSelector, SubgraphSelector, SupergraphSelector, TraceIdFormat};
     use crate::plugins::telemetry::config_new::GetAttribute;
     use opentelemetry_api::baggage::BaggageExt;
     use opentelemetry_api::trace::{
@@ -712,6 +707,7 @@ mod test {
     use tracing::{span, subscriber};
     use tracing_opentelemetry::OpenTelemetrySpanExt;
     use tracing_subscriber::layer::SubscriberExt;
+    use crate::context::{OPERATION_KIND, OPERATION_NAME};
 
     #[test]
     fn router_request_header() {
@@ -1455,5 +1451,69 @@ mod test {
             Some("env_value".into())
         );
         std::env::remove_var("SELECTOR_SUBGRAPH_ENV_VARIABLE");
+    }
+
+    #[test]
+    fn supergraph_operation_kind() {
+
+        let selector = SupergraphSelector::OperationKind {
+            operation_kind: OperationKind::String,
+        };
+        let context = crate::context::Context::new();
+        let _ = context.insert(OPERATION_KIND, "query".to_string());
+        // For now operation kind is contained in context
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SupergraphRequest::fake_builder()
+                    .context(context)
+                    .build()
+                    .unwrap(),
+            ),
+            Some("query".into())
+        );
+    }
+
+    #[test]
+    fn supergraph_operation_name_string() {
+
+        let selector = SupergraphSelector::OperationName {
+            operation_name: OperationName::String,
+            redact: None,
+            default: Some("defaulted".to_string())
+        };
+        let context = crate::context::Context::new();
+        let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
+        // For now operation kind is contained in context
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SupergraphRequest::fake_builder()
+                    .context(context)
+                    .build()
+                    .unwrap(),
+            ),
+            Some("topProducts".into())
+        );
+    }
+
+    #[test]
+    fn supergraph_operation_name_hash() {
+
+        let selector = SupergraphSelector::OperationName {
+            operation_name: OperationName::Hash,
+            redact: None,
+            default: Some("defaulted".to_string())
+        };
+        let context = crate::context::Context::new();
+        let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
+        // For now operation kind is contained in context
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SupergraphRequest::fake_builder()
+                    .context(context)
+                    .build()
+                    .unwrap(),
+            ),
+            Some("topProducts".into())
+        );
     }
 }
