@@ -184,19 +184,17 @@ async fn service_call(
     .await
     {
         Ok(resp) => resp,
-        Err(err) => {
-            match err.into_graphql_errors() {
-                Ok(gql_errors) => {
-                    return Ok(SupergraphResponse::builder()
-                        .context(context)
-                        .errors(gql_errors)
-                        .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
-                        .build()
-                        .expect("this response build must not fail"));
-                }
-                Err(err) => return Err(err.into()),
+        Err(err) => match err.into_graphql_errors() {
+            Ok(gql_errors) => {
+                return Ok(SupergraphResponse::builder()
+                    .context(context)
+                    .errors(gql_errors)
+                    .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
+                    .build()
+                    .expect("this response build must not fail"));
             }
-        }
+            Err(err) => return Err(err.into()),
+        },
     };
 
     if !errors.is_empty() {
