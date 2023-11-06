@@ -458,6 +458,13 @@ impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphSelec
             SupergraphSelector::OperationKind { .. } => {
                 request.context.get(OPERATION_KIND).ok().flatten()
             }
+            SupergraphSelector::Query { default, .. } => request
+                .supergraph_request
+                .body()
+                .query
+                .clone()
+                .or_else(|| default.clone())
+                .map(AttributeValue::String),
             SupergraphSelector::QueryVariable {
                 query_variable,
                 default,
@@ -587,6 +594,20 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
             SubgraphSelector::SupergraphOperationKind { .. } => {
                 request.context.get(OPERATION_KIND).ok().flatten()
             }
+            SubgraphSelector::SupergraphQuery { default, .. } => request
+                .supergraph_request
+                .body()
+                .query
+                .clone()
+                .or_else(|| default.clone())
+                .map(AttributeValue::String),
+            SubgraphSelector::SubgraphQuery { default, .. } => request
+                .subgraph_request
+                .body()
+                .query
+                .clone()
+                .or_else(|| default.clone())
+                .map(AttributeValue::String),
             SubgraphSelector::SubgraphQueryVariable {
                 subgraph_query_variable,
                 default,
@@ -710,7 +731,7 @@ mod test {
     use crate::graphql;
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::selectors::{
-        OperationKind, OperationName, RouterSelector, SubgraphSelector, SupergraphSelector,
+        OperationKind, OperationName, Query, RouterSelector, SubgraphSelector, SupergraphSelector,
         TraceIdFormat,
     };
     use crate::plugins::telemetry::config_new::GetAttribute;
@@ -1680,6 +1701,93 @@ mod test {
                     .build()
             ),
             Some("bd141fca26094be97c30afd42e9fc84755b252e7052d8c992358319246bd555a".into())
+        );
+    }
+
+    #[test]
+    fn supergraph_query() {
+        let selector = SupergraphSelector::Query {
+            query: Query::String,
+            redact: None,
+            default: Some("default".to_string()),
+        };
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SupergraphRequest::fake_builder()
+                    .query("topProducts{name}")
+                    .build()
+                    .unwrap(),
+            ),
+            Some("topProducts{name}".into())
+        );
+
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SupergraphRequest::fake_builder()
+                    .build()
+                    .unwrap(),
+            ),
+            Some("default".into())
+        );
+    }
+
+    #[test]
+    fn subgraph_supergraph_query() {
+        let selector = SubgraphSelector::SupergraphQuery {
+            supergraph_query: Query::String,
+            redact: None,
+            default: Some("default".to_string()),
+        };
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .supergraph_request(Arc::new(
+                        http::Request::builder()
+                            .body(
+                                graphql::Request::fake_builder()
+                                    .query("topProducts{name}")
+                                    .build()
+                            )
+                            .unwrap()
+                    ))
+                    .build(),
+            ),
+            Some("topProducts{name}".into())
+        );
+
+        assert_eq!(
+            selector.on_request(&crate::services::SubgraphRequest::fake_builder().build(),),
+            Some("default".into())
+        );
+    }
+
+    #[test]
+    fn subgraph_subgraph_query() {
+        let selector = SubgraphSelector::SubgraphQuery {
+            subgraph_query: Query::String,
+            redact: None,
+            default: Some("default".to_string()),
+        };
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .subgraph_request(
+                        http::Request::builder()
+                            .body(
+                                graphql::Request::fake_builder()
+                                    .query("topProducts{name}")
+                                    .build()
+                            )
+                            .unwrap()
+                    )
+                    .build(),
+            ),
+            Some("topProducts{name}".into())
+        );
+
+        assert_eq!(
+            selector.on_request(&crate::services::SubgraphRequest::fake_builder().build(),),
+            Some("default".into())
         );
     }
 }
