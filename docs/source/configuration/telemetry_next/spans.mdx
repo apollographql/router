@@ -60,11 +60,23 @@ Valid values are:
 ```yaml title="router.yaml"
 telemetry:
   spans:
+    # Set the default requirement level
     default_attribute_requirement_level: required
 ```
 
 Note that the Open Telemetry spec defines some attributes as `opt-in`, these attributes must be individually enabled.
 Individual attribute configuration will always override the default attribute requirement level, in this way it is possible to disable `required` attributes.
+
+```yaml title="desc.router.yaml"
+telemetry:
+  spans:
+    # Set the default requirement level
+    default_attribute_requirement_level: required
+    router:
+      attributes:
+        # Disable standard attribute
+        http.response.status_code: false
+```
 
 #### `legacy_request_span`
 

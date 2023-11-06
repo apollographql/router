@@ -96,13 +96,27 @@ Valid values are:
 * `recommended` - recommended attributes will be attached to standard instruments by default.
 * `required` - (default) required will be attached to standard instruments by default.
 
+```yaml title="router.yaml"
+telemetry:
+  instruments:
+    # Set the default requirement level
+    default_attribute_requirement_level: required
+```
+
 Note that the Open Telemetry spec defines some attributes as `opt-in`, these attributes must be individually enabled.
 Individual attribute configuration will always override the default attribute requirement level, in this way it is possible to disable `required` attributes.
 
 ```yaml title="router.yaml"
 telemetry:
   instruments:
+    # Set the default requirement level
     default_attribute_requirement_level: required
+    router:
+      http.server.active_requests:
+        attributes:
+          # Override attributes for this instrument
+          network.transport: true
+          http.response.status_code: false
 ```
 
 See the [Open Telemetry attribute requirement level documentation](https://opentelemetry.io/docs/specs/otel/common/attribute-requirement-level/) for more information.
