@@ -348,11 +348,11 @@ impl From<QueryPlannerError> for FetchError {
 #[serde(untagged)]
 #[non_exhaustive]
 pub(crate) enum RouterError {
-    /// Error types for CacheResolver
+    /// {0}
     CacheResolver(CacheResolverError),
-    /// Error types for QueryPlanner
+    /// {0}
     QueryPlanner(QueryPlannerError),
-    /// Container for planner setup errors
+    /// {0}
     Planner(PlannerErrors),
 }
 
@@ -362,11 +362,11 @@ pub(crate) enum RouterError {
 #[serde(untagged)]
 #[non_exhaustive]
 pub enum RouterError {
-    /// Error types for CacheResolver
+    /// {0}
     CacheResolver(CacheResolverError),
-    /// Error types for QueryPlanner
+    /// {0}
     QueryPlanner(QueryPlannerError),
-    /// Container for planner setup errors
+    /// {0}
     Planner(PlannerErrors),
 }
 
