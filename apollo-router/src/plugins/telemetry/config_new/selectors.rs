@@ -1345,7 +1345,7 @@ mod test {
                 ),
                 None
             );
-            // Span context set
+            // Context set
             let _context = Context::current()
                 .with_remote_span_context(span_context)
                 .attach();
@@ -1384,7 +1384,6 @@ mod test {
             redact: None,
             default: Some("defaulted".to_string()),
         };
-        // No span context
         assert_eq!(
             selector.on_request(
                 &crate::services::RouterRequest::fake_builder()
@@ -1393,7 +1392,7 @@ mod test {
             ),
             Some("defaulted".into())
         );
-
+        // Env set
         std::env::set_var("SELECTOR_ENV_VARIABLE", "env_value");
 
         assert_eq!(
@@ -1404,5 +1403,55 @@ mod test {
             ),
             Some("env_value".into())
         );
+    }
+
+    #[test]
+    fn supergraph_env() {
+        let selector = SupergraphSelector::Env {
+            env: "SELECTOR_SUPERGRAPH_ENV_VARIABLE".to_string(),
+            redact: None,
+            default: Some("defaulted".to_string()),
+        };
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SupergraphRequest::fake_builder()
+                    .build()
+                    .unwrap(),
+            ),
+            Some("defaulted".into())
+        );
+        // Env set
+        std::env::set_var("SELECTOR_SUPERGRAPH_ENV_VARIABLE", "env_value");
+
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SupergraphRequest::fake_builder()
+                    .build()
+                    .unwrap(),
+            ),
+            Some("env_value".into())
+        );
+        std::env::remove_var("SELECTOR_SUPERGRAPH_ENV_VARIABLE");
+    }
+
+    #[test]
+    fn subgraph_env() {
+        let selector = SubgraphSelector::Env {
+            env: "SELECTOR_SUBGRAPH_ENV_VARIABLE".to_string(),
+            redact: None,
+            default: Some("defaulted".to_string()),
+        };
+        assert_eq!(
+            selector.on_request(&crate::services::SubgraphRequest::fake_builder().build()),
+            Some("defaulted".into())
+        );
+        // Env set
+        std::env::set_var("SELECTOR_SUBGRAPH_ENV_VARIABLE", "env_value");
+
+        assert_eq!(
+            selector.on_request(&crate::services::SubgraphRequest::fake_builder().build()),
+            Some("env_value".into())
+        );
+        std::env::remove_var("SELECTOR_SUBGRAPH_ENV_VARIABLE");
     }
 }
