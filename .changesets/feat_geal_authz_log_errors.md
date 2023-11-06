@@ -1,13 +1,18 @@
-### add a flag to disable authorization error logs ([PR #4076](https://github.com/apollographql/router/pull/4076))
+### add a flag to disable authorization error logs ([Issue #4077](https://github.com/apollographql/router/issues/4077) & [Issue #4116](https://github.com/apollographql/router/issues/4116))
 
-Authorization errors can be seen as common usage of the service when filtering fields from queries depending on the client's rights, so they might not warrant error logs to be analyzed by the router operators
+Authorization errors need flexible reporting depending on the use case. They can now be configured as follows:
 
-Those logs can be disabled in the configuration:
-
-```yaml
+```yaml title="router.yaml"
 authorization:
   preview_directives:
-    log_errors: true
+    errors:
+      log: true # default: true
+      response: "errors" # possible values: "errors" (default), "extensions", "disabled"
 ```
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4076
+Logging can be disabled if platform operators do not want to see the logs polluted by common authorization errors.
+Errors in responses may be:
+ - moved to extensions, to avoid raising exceptions in clients
+ - or disabled entirely, in which case clients will not receive any authorization errors.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4076 & https://github.com/apollographql/router/pull/4122

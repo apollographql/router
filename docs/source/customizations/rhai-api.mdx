@@ -236,8 +236,11 @@ fn supergraph_service(service) {
     }
 }
 ```
+<Note>
 
-Note: You don't need to import the "base64" module. It is imported in the router.
+You don't need to import the "base64" module. It is imported in the router.
+
+</Note>
 
 ### Different alphabets
 
@@ -309,8 +312,12 @@ fn router_service(service) {
 }
 ```
 
-Note: You don't need to import the "env" module. It is imported in the router.
-Note: get() may fail, so it's best to handle exceptions when using it.
+<Note>
+
+* You don't need to import the "env" module. It is imported in the router.
+* `get()` may fail, so it's best to handle exceptions when using it.
+
+</Note>
 
 ## `Request` interface
 
@@ -327,7 +334,12 @@ request.body.extensions
 request.uri.host
 request.uri.path
 ```
-Note: These fields are typically modifiable, apart from `method` which is always read-only. However, when the callback service is `subgraph_service`,the only modifiable field is `request.context`.
+
+<Note>
+
+These fields are typically modifiable, apart from `method` which is always read-only. However, when the callback service is `subgraph_service`, the only modifiable field is `request.context`.
+
+</Note>
 
 **For `subgraph_service` callbacks only,** the `request` object provides _additional_ modifiable fields for interacting with the request that will be sent to the corresponding subgraph:
 
