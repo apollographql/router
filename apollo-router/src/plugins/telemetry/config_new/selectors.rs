@@ -445,19 +445,15 @@ impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphSelec
             } => {
                 let op_name = request.context.get(OPERATION_NAME).ok().flatten();
                 match operation_name {
-                    OperationName::String => op_name
-                        .or_else(|| default.clone())
-                        .map(AttributeValue::String),
-                    OperationName::Hash => op_name
-                        .or_else(|| default.clone())
-                        .map(|op_name| {
-                            let mut hasher = sha2::Sha256::new();
-                            hasher.update(op_name.as_bytes());
-                            let result = hasher.finalize();
-                            hex::encode(result)
-                        })
-                        .map(AttributeValue::String),
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
                 }
+                .map(AttributeValue::String)
             }
             SupergraphSelector::OperationKind { .. } => {
                 request.context.get(OPERATION_KIND).ok().flatten()
@@ -567,11 +563,15 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
             } => {
                 let op_name = request.context.get(OPERATION_NAME).ok().flatten();
                 match supergraph_operation_name {
-                    OperationName::String => {
-                        op_name.or_else(|| default.clone().map(AttributeValue::String))
-                    }
-                    OperationName::Hash => todo!(),
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
                 }
+                .map(AttributeValue::String)
             }
             SubgraphSelector::SubgraphOperationKind { .. } => AttributeValue::String(
                 request
@@ -1485,6 +1485,24 @@ mod test {
     }
 
     #[test]
+    fn subgraph_operation_kind() {
+        let selector = SubgraphSelector::SupergraphOperationKind {
+            supergraph_operation_kind: OperationKind::String,
+        };
+        let context = crate::context::Context::new();
+        let _ = context.insert(OPERATION_KIND, "query".to_string());
+        // For now operation kind is contained in context
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .context(context)
+                    .build(),
+            ),
+            Some("query".into())
+        );
+    }
+
+    #[test]
     fn supergraph_operation_name_string() {
         let selector = SupergraphSelector::OperationName {
             operation_name: OperationName::String,
@@ -1492,6 +1510,15 @@ mod test {
             default: Some("defaulted".to_string()),
         };
         let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SupergraphRequest::fake_builder()
+                    .context(context.clone())
+                    .build()
+                    .unwrap(),
+            ),
+            Some("defaulted".into())
+        );
         let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
         // For now operation kind is contained in context
         assert_eq!(
@@ -1500,6 +1527,34 @@ mod test {
                     .context(context)
                     .build()
                     .unwrap(),
+            ),
+            Some("topProducts".into())
+        );
+    }
+
+    #[test]
+    fn subgraph_supergraph_operation_name_string() {
+        let selector = SubgraphSelector::SupergraphOperationName {
+            supergraph_operation_name: OperationName::String,
+            redact: None,
+            default: Some("defaulted".to_string()),
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some("defaulted".into())
+        );
+        let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
+        // For now operation kind is contained in context
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .context(context)
+                    .build(),
             ),
             Some("topProducts".into())
         );
@@ -1530,6 +1585,34 @@ mod test {
                     .context(context)
                     .build()
                     .unwrap(),
+            ),
+            Some("bd141fca26094be97c30afd42e9fc84755b252e7052d8c992358319246bd555a".into())
+        );
+    }
+
+    #[test]
+    fn subgraph_supergraph_operation_name_hash() {
+        let selector = SubgraphSelector::SupergraphOperationName {
+            supergraph_operation_name: OperationName::Hash,
+            redact: None,
+            default: Some("defaulted".to_string()),
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some("96294f50edb8f006f6b0a2dadae50d3c521e9841d07d6395d91060c8ccfed7f0".into())
+        );
+
+        let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .context(context)
+                    .build(),
             ),
             Some("bd141fca26094be97c30afd42e9fc84755b252e7052d8c992358319246bd555a".into())
         );
