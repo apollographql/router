@@ -187,8 +187,9 @@ impl PluginFactory {
     pub(crate) fn is_apollo(&self) -> bool {
         self.name.starts_with("apollo.") || self.name.starts_with("experimental.")
     }
+
     /// Create a plugin factory.
-    pub fn new<P: Plugin>(group: &str, name: &str) -> PluginFactory {
+    pub fn new<P: PluginUnstable>(group: &str, name: &str) -> PluginFactory {
         let plugin_factory_name = if group.is_empty() {
             name.to_string()
         } else {
@@ -208,7 +209,34 @@ impl PluginFactory {
                     Ok(Box::new(plugin) as Box<dyn DynPlugin>)
                 })
             },
-            schema_factory: |gen| gen.subschema_for::<<P as Plugin>::Config>(),
+            schema_factory: |gen| gen.subschema_for::<<P as PluginUnstable>::Config>(),
+            type_id: TypeId::of::<P>(),
+        }
+    }
+
+    /// Create a plugin factory.
+    #[allow(dead_code)]
+    pub(crate) fn new_private<P: PluginPrivate>(group: &str, name: &str) -> PluginFactory {
+        let plugin_factory_name = if group.is_empty() {
+            name.to_string()
+        } else {
+            format!("{group}.{name}")
+        };
+        tracing::debug!(%plugin_factory_name, "creating plugin factory");
+        PluginFactory {
+            name: plugin_factory_name,
+            instance_factory: |configuration, schema, notify| {
+                Box::pin(async move {
+                    let init = PluginInit::try_builder()
+                        .config(configuration.clone())
+                        .supergraph_sdl(schema)
+                        .notify(notify)
+                        .build()?;
+                    let plugin = P::new(init).await?;
+                    Ok(Box::new(plugin) as Box<dyn DynPlugin>)
+                })
+            },
+            schema_factory: |gen| gen.subschema_for::<<P as PluginPrivate>::Config>(),
             type_id: TypeId::of::<P>(),
         }
     }
@@ -715,6 +743,42 @@ macro_rules! register_plugin {
             #[linkme(crate = $crate::_private::linkme)]
             static REGISTER_PLUGIN: Lazy<PluginFactory> =
                 Lazy::new(|| $crate::plugin::PluginFactory::new::<$plugin_type>($group, $name));
+        };
+    };
+}
+
+/// Register a private plugin with a group and a name
+/// Grouping prevent name clashes for plugins, so choose something unique, like your domain name.
+/// Plugins will appear in the configuration as a layer property called: {group}.{name}
+#[macro_export]
+macro_rules! register_private_plugin {
+    ($group: literal, $name: literal, $plugin_type: ident <  $generic: ident >) => {
+        //  Artificial scope to avoid naming collisions
+        const _: () = {
+            use $crate::_private::once_cell::sync::Lazy;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::PLUGINS;
+
+            #[$crate::_private::linkme::distributed_slice(PLUGINS)]
+            #[linkme(crate = $crate::_private::linkme)]
+            static REGISTER_PLUGIN: Lazy<PluginFactory> = Lazy::new(|| {
+                $crate::plugin::PluginFactory::new_private::<$plugin_type<$generic>>($group, $name)
+            });
+        };
+    };
+
+    ($group: literal, $name: literal, $plugin_type: ident) => {
+        //  Artificial scope to avoid naming collisions
+        const _: () = {
+            use $crate::_private::once_cell::sync::Lazy;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::PLUGINS;
+
+            #[$crate::_private::linkme::distributed_slice(PLUGINS)]
+            #[linkme(crate = $crate::_private::linkme)]
+            static REGISTER_PLUGIN: Lazy<PluginFactory> = Lazy::new(|| {
+                $crate::plugin::PluginFactory::new_private::<$plugin_type>($group, $name)
+            });
         };
     };
 }
