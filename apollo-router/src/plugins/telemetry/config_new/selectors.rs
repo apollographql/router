@@ -550,11 +550,15 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
             } => {
                 let op_name = request.subgraph_request.body().operation_name.clone();
                 match subgraph_operation_name {
-                    OperationName::String => op_name
-                        .map(AttributeValue::String)
-                        .or_else(|| default.clone().map(AttributeValue::String)),
-                    OperationName::Hash => todo!(),
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
                 }
+                .map(AttributeValue::String)
             }
             SubgraphSelector::SupergraphOperationName {
                 supergraph_operation_name,
@@ -1561,6 +1565,36 @@ mod test {
     }
 
     #[test]
+    fn subgraph_subgraph_operation_name_string() {
+        let selector = SubgraphSelector::SubgraphOperationName {
+            subgraph_operation_name: OperationName::String,
+            redact: None,
+            default: Some("defaulted".to_string()),
+        };
+        assert_eq!(
+            selector.on_request(&crate::services::SubgraphRequest::fake_builder().build(),),
+            Some("defaulted".into())
+        );
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .subgraph_request(
+                        ::http::Request::builder()
+                            .uri("http://localhost/graphql")
+                            .body(
+                                graphql::Request::fake_builder()
+                                    .operation_name("topProducts")
+                                    .build()
+                            )
+                            .unwrap()
+                    )
+                    .build(),
+            ),
+            Some("topProducts".into())
+        );
+    }
+
+    #[test]
     fn supergraph_operation_name_hash() {
         let selector = SupergraphSelector::OperationName {
             operation_name: OperationName::Hash,
@@ -1613,6 +1647,37 @@ mod test {
                 &crate::services::SubgraphRequest::fake_builder()
                     .context(context)
                     .build(),
+            ),
+            Some("bd141fca26094be97c30afd42e9fc84755b252e7052d8c992358319246bd555a".into())
+        );
+    }
+
+    #[test]
+    fn subgraph_subgraph_operation_name_hash() {
+        let selector = SubgraphSelector::SubgraphOperationName {
+            subgraph_operation_name: OperationName::Hash,
+            redact: None,
+            default: Some("defaulted".to_string()),
+        };
+        assert_eq!(
+            selector.on_request(&crate::services::SubgraphRequest::fake_builder().build()),
+            Some("96294f50edb8f006f6b0a2dadae50d3c521e9841d07d6395d91060c8ccfed7f0".into())
+        );
+
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .subgraph_request(
+                        ::http::Request::builder()
+                            .uri("http://localhost/graphql")
+                            .body(
+                                graphql::Request::fake_builder()
+                                    .operation_name("topProducts")
+                                    .build()
+                            )
+                            .unwrap()
+                    )
+                    .build()
             ),
             Some("bd141fca26094be97c30afd42e9fc84755b252e7052d8c992358319246bd555a".into())
         );
