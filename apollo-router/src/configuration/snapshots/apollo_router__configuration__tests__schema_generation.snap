@@ -18671,6 +18671,11 @@ expression: "&schema"
                 }
               ]
             },
+            "legacy_request_span": {
+              "description": "Whether to create a `request` span. This will be removed in future, and users should set this to false.",
+              "default": false,
+              "type": "boolean"
+            },
             "router": {
               "description": "Configuration of router spans. Log events inherit attributes from the containing span, so attributes configured here will be included on log events for a request. Router spans contain http request and response information and therefore contain http specific attributes.",
               "type": "object",

@@ -38,6 +38,7 @@ use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
 use opentelemetry_api::Key;
+use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
@@ -65,6 +66,7 @@ use self::apollo_exporter::Sender;
 use self::config::Conf;
 use self::config::Sampler;
 use self::config::SamplerOption;
+use self::config_new::spans::Spans;
 use self::formatters::json::Json;
 use self::formatters::json::JsonFields;
 use self::formatters::text::TextFormatter;
@@ -75,6 +77,7 @@ use self::reload::LayeredTracer;
 use self::reload::NullFieldFormatter;
 use self::reload::SamplingFilter;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
+use self::tracing::apollo_telemetry::APOLLO_PRIVATE_REQUEST;
 use super::traffic_shaping::cache::hash_request;
 use super::traffic_shaping::cache::hash_vary_headers;
 use super::traffic_shaping::cache::REPRESENTATIONS;
@@ -193,9 +196,10 @@ fn setup_tracing<T: TracingConfigurator>(
     mut builder: Builder,
     configurator: &T,
     tracing_config: &Trace,
+    spans_config: &Spans,
 ) -> Result<Builder, BoxError> {
     if configurator.enabled() {
-        builder = configurator.apply(builder, tracing_config)?;
+        builder = configurator.apply(builder, tracing_config, spans_config)?;
     }
     Ok(builder)
 }
@@ -307,35 +311,45 @@ impl Plugin for Telemetry {
             .map_future_with_request_data(
                 move |request: &router::Request| {
                     let span = Span::current();
-                    let trace_id = TraceId::maybe_new()
-                        .map(|t| t.to_string())
-                        .unwrap_or_default();
-                    span.record("trace_id", trace_id);
 
-                    let client_name: &str = request
-                        .router_request
-                        .headers()
-                        .get(&config_request.apollo.client_name_header)
-                        .and_then(|h| h.to_str().ok())
-                        .unwrap_or("");
-                    span.record("client.name", client_name);
+                    if !config_request.spans.legacy_request_span {
+                        let trace_id = TraceId::maybe_new()
+                            .map(|t| t.to_string())
+                            .unwrap_or_default();
+                        span.record("trace_id", trace_id);
 
-                    let client_version = request
-                        .router_request
-                        .headers()
-                        .get(&config_request.apollo.client_version_header)
-                        .and_then(|h| h.to_str().ok())
-                        .unwrap_or("");
-                    span.record("client.version", client_version);
-                    span.record(
-                        "apollo_private.http.request_headers",
-                        filter_headers(
-                            request.router_request.headers(),
-                            &config_request.apollo.send_headers,
-                        )
-                        .as_str(),
-                    );
-                    // TODO set dyn_attributes here
+                        let client_name: &str = dbg!(request
+                            .router_request
+                            .headers()
+                            .get(&config_request.apollo.client_name_header)
+                            .and_then(|h| h.to_str().ok())
+                            .unwrap_or(""));
+                        span.record("client.name", client_name);
+
+                        let client_version = dbg!(request
+                            .router_request
+                            .headers()
+                            .get(&config_request.apollo.client_version_header)
+                            .and_then(|h| h.to_str().ok())
+                            .unwrap_or(""));
+                        span.record("client.version", client_version);
+                        span.record(
+                            "apollo_private.http.request_headers",
+                            filter_headers(
+                                request.router_request.headers(),
+                                &config_request.apollo.send_headers,
+                            )
+                            .as_str(),
+                        );
+
+                        span.set_dyn_attributes([
+                            (
+                                HTTP_REQUEST_METHOD,
+                                AttributeValue::String(request.router_request.method().to_string()),
+                            ),
+                            (APOLLO_PRIVATE_REQUEST, AttributeValue::Bool(true)),
+                        ]);
+                    }
 
                     config_request.spans.router.attributes.on_request(request)
                 },
@@ -605,7 +619,7 @@ impl Plugin for Telemetry {
 pub(crate) fn create_router_span<B>(router_request: &http::Request<B>) -> Span {
     let span = ::tracing::info_span!(ROUTER_SPAN_NAME,
         "http.route" = %router_request.uri(),
-        "http.method" = %router_request.method(),
+        "http.request.method" = %router_request.method(),
         otel.name = ::tracing::field::Empty,
         "trace_id" = ::tracing::field::Empty,
         "client.name" = ::tracing::field::Empty,
@@ -713,6 +727,7 @@ impl Telemetry {
         config: &config::Conf,
     ) -> Result<(SamplerOption, opentelemetry::sdk::trace::TracerProvider), BoxError> {
         let tracing_config = &config.tracing;
+        let spans_config = &config.spans;
         let mut common = tracing_config.common.clone();
         let mut sampler = common.sampler.clone();
         // set it to AlwaysOn: it is now done in the SamplingFilter, so whatever is sent to an exporter
@@ -722,11 +737,11 @@ impl Telemetry {
         let mut builder =
             opentelemetry::sdk::trace::TracerProvider::builder().with_config((&common).into());
 
-        builder = setup_tracing(builder, &tracing_config.jaeger, &common)?;
-        builder = setup_tracing(builder, &tracing_config.zipkin, &common)?;
-        builder = setup_tracing(builder, &tracing_config.datadog, &common)?;
-        builder = setup_tracing(builder, &tracing_config.otlp, &common)?;
-        builder = setup_tracing(builder, &config.apollo, &common)?;
+        builder = setup_tracing(builder, &tracing_config.jaeger, &common, spans_config)?;
+        builder = setup_tracing(builder, &tracing_config.zipkin, &common, spans_config)?;
+        builder = setup_tracing(builder, &tracing_config.datadog, &common, spans_config)?;
+        builder = setup_tracing(builder, &tracing_config.otlp, &common, spans_config)?;
+        builder = setup_tracing(builder, &config.apollo, &common, spans_config)?;
 
         if !tracing_config.jaeger.enabled()
             && !tracing_config.zipkin.enabled()

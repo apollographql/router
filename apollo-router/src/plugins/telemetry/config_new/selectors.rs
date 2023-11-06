@@ -1,8 +1,3 @@
-use crate::context::{OPERATION_KIND, OPERATION_NAME};
-use crate::plugin::serde::deserialize_json_query;
-use crate::plugins::telemetry::config::AttributeValue;
-use crate::plugins::telemetry::config_new::{get_baggage, trace_id, DatadogId, GetAttribute};
-use crate::services::{router, subgraph, supergraph};
 use access_json::JSONQuery;
 use opentelemetry_api::baggage::BaggageExt;
 use opentelemetry_api::Context;
@@ -12,6 +7,18 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
 use sha2::Digest;
+
+use crate::context::OPERATION_KIND;
+use crate::context::OPERATION_NAME;
+use crate::plugin::serde::deserialize_json_query;
+use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::get_baggage;
+use crate::plugins::telemetry::config_new::trace_id;
+use crate::plugins::telemetry::config_new::DatadogId;
+use crate::plugins::telemetry::config_new::GetAttribute;
+use crate::services::router;
+use crate::services::subgraph;
+use crate::services::supergraph;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -731,25 +738,37 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
 
 #[cfg(test)]
 mod test {
-    use crate::context::{OPERATION_KIND, OPERATION_NAME};
-    use crate::graphql;
-    use crate::plugins::telemetry::config::AttributeValue;
-    use crate::plugins::telemetry::config_new::selectors::{
-        OperationKind, OperationName, Query, ResponseStatus, RouterSelector, SubgraphSelector,
-        SupergraphSelector, TraceIdFormat,
-    };
-    use crate::plugins::telemetry::config_new::GetAttribute;
+    use std::sync::Arc;
+
     use http::StatusCode;
     use opentelemetry_api::baggage::BaggageExt;
-    use opentelemetry_api::trace::{
-        SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState,
-    };
-    use opentelemetry_api::{Context, KeyValue};
+    use opentelemetry_api::trace::SpanContext;
+    use opentelemetry_api::trace::SpanId;
+    use opentelemetry_api::trace::TraceContextExt;
+    use opentelemetry_api::trace::TraceFlags;
+    use opentelemetry_api::trace::TraceId;
+    use opentelemetry_api::trace::TraceState;
+    use opentelemetry_api::Context;
+    use opentelemetry_api::KeyValue;
     use serde_json::json;
-    use std::sync::Arc;
-    use tracing::{span, subscriber};
+    use tracing::span;
+    use tracing::subscriber;
     use tracing_opentelemetry::OpenTelemetrySpanExt;
     use tracing_subscriber::layer::SubscriberExt;
+
+    use crate::context::OPERATION_KIND;
+    use crate::context::OPERATION_NAME;
+    use crate::graphql;
+    use crate::plugins::telemetry::config::AttributeValue;
+    use crate::plugins::telemetry::config_new::selectors::OperationKind;
+    use crate::plugins::telemetry::config_new::selectors::OperationName;
+    use crate::plugins::telemetry::config_new::selectors::Query;
+    use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+    use crate::plugins::telemetry::config_new::selectors::RouterSelector;
+    use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
+    use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
+    use crate::plugins::telemetry::config_new::selectors::TraceIdFormat;
+    use crate::plugins::telemetry::config_new::GetAttribute;
 
     #[test]
     fn router_request_header() {
