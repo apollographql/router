@@ -52,7 +52,7 @@ where
             move |req| {
                 if req.router_request.method() != Method::GET
                     && !content_type_is_json(req.router_request.headers())
-                    && !content_type_is_form_data(req.router_request.headers())
+                    && !content_type_is_multipart(req.router_request.headers())
                 {
                     let response: http::Response<hyper::Body> = http::Response::builder()
                         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
@@ -183,7 +183,12 @@ fn content_type_is_json(headers: &HeaderMap) -> bool {
             .unwrap_or(false)
     })
 }
-fn content_type_is_form_data(headers: &HeaderMap) -> bool {
+
+// TODO: with this enabled, if the client sends a multipart request and file_uploads are disabled,
+// the router will complain that the request body cannot be parsed to json.
+// Which is valid because a multipart body is a stream.
+// Can we conditionally enable this based on the file_uploads plugin?
+fn content_type_is_multipart(headers: &HeaderMap) -> bool {
     headers.get_all(CONTENT_TYPE).iter().any(|value| {
         value
             .to_str()
