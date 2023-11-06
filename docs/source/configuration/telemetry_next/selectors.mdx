@@ -23,14 +23,15 @@ telemetry:
 #### Router
 This Router stage is the initial entrypoint for all requests. It is HTTP centric and deals with bytes.
 
-| Selector           | Defaultable | Value                        | Description                          |
-|--------------------|-------------|------------------------------|--------------------------------------|
-| `trace_id`         | Yes         | `open_telemetry`\|`datadog`  | A header from the request            |
-| `request_header`   | Yes         |                              | A header from the request            |
-| `response_header`  | Yes         |                              | A header from the response           |
-| `response_context` | Yes         |                              | A value from context                 |
-| `baggage`          | Yes         |                              | A value from baggage                 |
-| `env`              | Yes         |                              | A value from an environment variable |
+| Selector           | Defaultable | Value                       | Description                          |
+|--------------------|-------------|-----------------------------|--------------------------------------|
+| `trace_id`         | Yes         | `open_telemetry`\|`datadog` | The trace ID                         |
+| `request_header`   | Yes         |                             | The name of the request header       |
+| `response_header`  | Yes         |                             | The name of a response header        |
+| `response_status`  | Yes         | `code`\|`reason`            | The response status                  |
+| `response_context` | Yes         |                             | The name of a response context key   |
+| `baggage`          | Yes         |                             | The name of a baggage item           |
+| `env`              | Yes         |                             | The name of an environment variable  |
 
 #### Supergraph
 The Supergraph stage is executed after query parse but before query execution. It is Graphql centric and deals with GraphQL queries and responses.
@@ -42,12 +43,12 @@ The Supergraph stage is executed after query parse but before query execution. I
 | `query`            | Yes         | `query`\|`hash`                      | The graphql query                    |
 | `query_variable`   | Yes         |                                      | The name of a graphql query variable |
 | `response_body`    | Yes         |                                      | Json Path into the response body     |
-| `request_header`   | Yes         |                                      | The name of the request header       |
-| `response_header`  | Yes         |                                      | The name of the response header      |
-| `request_context`  | Yes         |                                      | The request context key              |
-| `response_context` | Yes         |                                      | The response context key             |
-| `baggage`          | Yes         |                                      | The name of the baggage item         |
-| `env`              | Yes         |                                      | The name of the environment variable |
+| `request_header`   | Yes         |                                      | The name of a request header         |
+| `response_header`  | Yes         |                                      | The name of a response header        |
+| `request_context`  | Yes         |                                      | The name of a request context key    |
+| `response_context` | Yes         |                                      | The name of a response context key   |
+| `baggage`          | Yes         |                                      | The name of a baggage item           |
+| `env`              | Yes         |                                      | The name of an environment variable  |
 
 
 #### Subgraph
@@ -61,13 +62,14 @@ It is Graphql centric and deals with GraphQL queries and responses.
 | `subgraph_query`            | Yes         |                                      | The graphql query to the subgraph            |
 | `subgraph_query_variable`   | Yes         |                                      | The name of a subgraph query variable        |
 | `subgraph_response_body`    | Yes         |                                      | Json Path into the subgraph response body    |
-| `subgraph_request_header`   | Yes         |                                      | The name of the subgraph request header      |
-| `subgraph_response_header`  | Yes         |                                      | The name of the subgraph response header     |
+| `subgraph_request_header`   | Yes         |                                      | The name of a subgraph request header        |
+| `subgraph_response_header`  | Yes         |                                      | The name of a subgraph response header       |
+| `subgraph_response_status`  | Yes         |                                      | The name of a subgraph response header       |
 | `supergraph_operation_name` | Yes         |                                      | The operation name from the supergraph query |
 | `supergraph_operation_kind` | Yes         | `query`\|`mutation`\|`subscription`  | The operation kind from the supergraph query |
 | `supergraph_query`          | Yes         |                                      | The graphql query to the supergraph          |
 | `supergraph_query_variable` | Yes         |                                      | The name of a supergraph query variable      |
-| `request_context`           | Yes         |                                      | The request context key                      |
-| `response_context`          | Yes         |                                      | The response context key                     |
-| `baggage`                   | Yes         |                                      | The name of the baggage item                 |
-| `env`                       | Yes         |                                      | The name of the environment variable         |
+| `request_context`           | Yes         |                                      | The name of a request context key            |
+| `response_context`          | Yes         |                                      | The name of a response context key           |
+| `baggage`                   | Yes         |                                      | The name of a baggage item                   |
+| `env`                       | Yes         |                                      | The name of an environment variable          |
