@@ -67,13 +67,12 @@ pub(crate) struct Conf {
     pub(crate) tracing: Tracing,
     /// Apollo reporting configuration
     pub(crate) apollo: apollo::Config,
-
-    #[cfg(feature = "telemetry_next")]
+    #[serde(skip)]
     /// Event configuration
     pub(crate) events: config_new::events::Events,
     /// Span configuration
     pub(crate) spans: config_new::spans::Spans,
-    #[cfg(feature = "telemetry_next")]
+    #[serde(skip)]
     /// Instrument configuration
     pub(crate) instruments: config_new::instruments::Instruments,
 }

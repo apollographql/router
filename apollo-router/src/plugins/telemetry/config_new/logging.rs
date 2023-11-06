@@ -15,6 +15,7 @@ pub(crate) struct Logging {
     pub(crate) common: LoggingCommon,
     /// Settings for logging to stdout.
     pub(crate) stdout: StdOut,
+    #[serde(skip)]
     /// Settings for logging to a file.
     pub(crate) file: File,
 }
