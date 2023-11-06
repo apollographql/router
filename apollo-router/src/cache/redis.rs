@@ -236,6 +236,7 @@ impl RedisCacheStorage {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_ttl(&mut self, ttl: Option<Duration>) {
         self.ttl = ttl;
     }
