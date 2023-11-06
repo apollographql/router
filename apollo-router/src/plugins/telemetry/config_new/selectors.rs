@@ -12,6 +12,7 @@ use serde::Deserialize;
 #[cfg(test)]
 use serde::Serialize;
 use serde_json_bytes::ByteString;
+use sha2::Digest;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -444,10 +445,18 @@ impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphSelec
             } => {
                 let op_name = request.context.get(OPERATION_NAME).ok().flatten();
                 match operation_name {
-                    OperationName::String => {
-                        op_name.or_else(|| default.clone().map(AttributeValue::String))
-                    }
-                    OperationName::Hash => todo!(),
+                    OperationName::String => op_name
+                        .or_else(|| default.clone())
+                        .map(AttributeValue::String),
+                    OperationName::Hash => op_name
+                        .or_else(|| default.clone())
+                        .map(|op_name| {
+                            let mut hasher = sha2::Sha256::new();
+                            hasher.update(op_name.as_bytes());
+                            let result = hasher.finalize();
+                            hex::encode(result)
+                        })
+                        .map(AttributeValue::String),
                 }
             }
             SupergraphSelector::OperationKind { .. } => {
@@ -693,9 +702,13 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
 
 #[cfg(test)]
 mod test {
+    use crate::context::{OPERATION_KIND, OPERATION_NAME};
     use crate::graphql;
     use crate::plugins::telemetry::config::AttributeValue;
-    use crate::plugins::telemetry::config_new::selectors::{OperationKind, OperationName, RouterSelector, SubgraphSelector, SupergraphSelector, TraceIdFormat};
+    use crate::plugins::telemetry::config_new::selectors::{
+        OperationKind, OperationName, RouterSelector, SubgraphSelector, SupergraphSelector,
+        TraceIdFormat,
+    };
     use crate::plugins::telemetry::config_new::GetAttribute;
     use opentelemetry_api::baggage::BaggageExt;
     use opentelemetry_api::trace::{
@@ -707,7 +720,6 @@ mod test {
     use tracing::{span, subscriber};
     use tracing_opentelemetry::OpenTelemetrySpanExt;
     use tracing_subscriber::layer::SubscriberExt;
-    use crate::context::{OPERATION_KIND, OPERATION_NAME};
 
     #[test]
     fn router_request_header() {
@@ -1455,7 +1467,6 @@ mod test {
 
     #[test]
     fn supergraph_operation_kind() {
-
         let selector = SupergraphSelector::OperationKind {
             operation_kind: OperationKind::String,
         };
@@ -1475,11 +1486,10 @@ mod test {
 
     #[test]
     fn supergraph_operation_name_string() {
-
         let selector = SupergraphSelector::OperationName {
             operation_name: OperationName::String,
             redact: None,
-            default: Some("defaulted".to_string())
+            default: Some("defaulted".to_string()),
         };
         let context = crate::context::Context::new();
         let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
@@ -1497,15 +1507,23 @@ mod test {
 
     #[test]
     fn supergraph_operation_name_hash() {
-
         let selector = SupergraphSelector::OperationName {
             operation_name: OperationName::Hash,
             redact: None,
-            default: Some("defaulted".to_string())
+            default: Some("defaulted".to_string()),
         };
         let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SupergraphRequest::fake_builder()
+                    .context(context.clone())
+                    .build()
+                    .unwrap(),
+            ),
+            Some("96294f50edb8f006f6b0a2dadae50d3c521e9841d07d6395d91060c8ccfed7f0".into())
+        );
+
         let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
-        // For now operation kind is contained in context
         assert_eq!(
             selector.on_request(
                 &crate::services::SupergraphRequest::fake_builder()
@@ -1513,7 +1531,7 @@ mod test {
                     .build()
                     .unwrap(),
             ),
-            Some("topProducts".into())
+            Some("bd141fca26094be97c30afd42e9fc84755b252e7052d8c992358319246bd555a".into())
         );
     }
 }
