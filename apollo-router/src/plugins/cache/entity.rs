@@ -316,6 +316,12 @@ fn filter_representations(
             miss = %true,
             %subgraph_name
         );
+        tracing::event!(
+            Level::INFO,
+            entity_type = ty.as_str(),
+            cache_hit = hit,
+            cache_miss = miss
+        );
     }
 
     Ok((new_representations, result))
