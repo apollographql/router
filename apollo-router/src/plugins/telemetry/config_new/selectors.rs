@@ -266,7 +266,7 @@ pub(crate) enum SubgraphSelector {
         default: Option<AttributeValue>,
     },
     SubgraphRequestHeader {
-        /// The name of the subgraph request header.
+        /// The name of a subgraph request header.
         subgraph_request_header: String,
         #[serde(skip)]
         /// Optional redaction pattern.
@@ -275,7 +275,7 @@ pub(crate) enum SubgraphSelector {
         default: Option<AttributeValue>,
     },
     SubgraphResponseHeader {
-        /// The name of the subgraph response header.
+        /// The name of a subgraph response header.
         subgraph_response_header: String,
         #[serde(skip)]
         /// Optional redaction pattern.
@@ -283,7 +283,10 @@ pub(crate) enum SubgraphSelector {
         /// Optional default value.
         default: Option<AttributeValue>,
     },
-
+    SubgraphResponseStatus {
+        /// The subgraph http response status code.
+        subgraph_response_status: ResponseStatus,
+    },
     SupergraphOperationName {
         /// The supergraph query operation name.
         supergraph_operation_name: OperationName,
@@ -722,6 +725,18 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
                 .get(subgraph_response_header)
                 .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
                 .or_else(|| default.clone()),
+            SubgraphSelector::SubgraphResponseStatus {
+                subgraph_response_status: response_status,
+            } => match response_status {
+                ResponseStatus::Code => Some(AttributeValue::I64(
+                    response.response.status().as_u16() as i64,
+                )),
+                ResponseStatus::Reason => response
+                    .response
+                    .status()
+                    .canonical_reason()
+                    .map(|reason| AttributeValue::String(reason.to_string())),
+            },
             SubgraphSelector::SubgraphResponseBody {
                 subgraph_response_body,
                 default,
@@ -1837,6 +1852,23 @@ mod test {
     }
 
     #[test]
+    fn subgraph_subgraph_response_status_code() {
+        let selector = SubgraphSelector::SubgraphResponseStatus {
+            subgraph_response_status: ResponseStatus::Code,
+        };
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake_builder()
+                        .status_code(StatusCode::NO_CONTENT)
+                        .build()
+                )
+                .unwrap(),
+            AttributeValue::I64(204)
+        );
+    }
+
+    #[test]
     fn router_response_status_reason() {
         let selector = RouterSelector::ResponseStatus {
             response_status: ResponseStatus::Reason,
@@ -1848,6 +1880,23 @@ mod test {
                         .status_code(StatusCode::NO_CONTENT)
                         .build()
                         .unwrap()
+                )
+                .unwrap(),
+            "No Content".into()
+        );
+    }
+
+    #[test]
+    fn subgraph_subgraph_response_status_reason() {
+        let selector = SubgraphSelector::SubgraphResponseStatus {
+            subgraph_response_status: ResponseStatus::Reason,
+        };
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake_builder()
+                        .status_code(StatusCode::NO_CONTENT)
+                        .build()
                 )
                 .unwrap(),
             "No Content".into()
