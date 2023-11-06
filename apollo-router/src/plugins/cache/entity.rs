@@ -126,8 +126,10 @@ async fn cache_call(
 
         Ok(ControlFlow::Continue(request))
     } else {
+        // TODO: compute TTL with cacheControl directive on the subgraph
+        let ttl = None;
         let entities =
-            insert_entities_in_result(&mut Vec::new(), &cache, &mut cache_result).await?;
+            insert_entities_in_result(&mut Vec::new(), &cache, ttl, &mut cache_result).await?;
         let mut data = Object::default();
         data.insert(ENTITIES, entities.into());
 
@@ -158,6 +160,8 @@ async fn cache_store_from_response(
             .and_then(|v| v.as_object_mut())
             .and_then(|o| o.remove(ENTITIES))
         {
+            // TODO: compute TTL with cacheControl directive on the subgraph
+            let ttl = None;
             let new_entities = insert_entities_in_result(
                 entities
                     .as_array_mut()
@@ -165,6 +169,7 @@ async fn cache_store_from_response(
                         reason: "expected an array of entities".to_string(),
                     })?,
                 &cache,
+                ttl,
                 &mut result_from_cache,
             )
             .await?;
@@ -365,6 +370,7 @@ fn filter_representations(
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     cache: &RedisCacheStorage,
+    ttl: Option<Duration>,
     result: &mut Vec<IntermediateResult>,
 ) -> Result<Vec<Value>, BoxError> {
     let mut new_entities = Vec::new();
@@ -397,10 +403,7 @@ async fn insert_entities_in_result(
         }
     }
 
-    // TODO: compute TTL with cacheControl directive on the subgraph
     if !to_insert.is_empty() {
-        // TODO use insert_multiple_with_ttl
-        let ttl = None;
         cache.insert_multiple(&to_insert, ttl).await;
     }
 
