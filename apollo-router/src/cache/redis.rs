@@ -311,11 +311,12 @@ impl RedisCacheStorage {
         &self,
         key: RedisKey<K>,
         value: RedisValue<V>,
+        ttl: Option<Duration>,
     ) {
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
-        let expiration = self
-            .ttl
+        let expiration = ttl
             .as_ref()
+            .or(self.ttl.as_ref())
             .map(|ttl| Expiration::EX(ttl.as_secs() as i64));
 
         let r = self

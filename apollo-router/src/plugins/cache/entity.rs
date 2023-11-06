@@ -37,7 +37,6 @@ register_plugin!("apollo", "entity_cache", EntityCache);
 
 struct EntityCache {
     storage: RedisCacheStorage,
-    //service_name: String,
 }
 
 /// Configuration for exposing errors that originate from subgraphs
@@ -211,10 +210,10 @@ async fn cache_store_root_from_response(
 ) -> Result<(), BoxError> {
     if let Some(data) = response.response.body().data.as_ref() {
         // TODO: compute TTL with cacheControl directive on the subgraph
-        let _ttl: Option<Duration> = None;
+        let ttl: Option<Duration> = None;
         //FIXME: we should not need to clone here
         cache
-            .insert(RedisKey(cache_key), RedisValue(data.clone()))
+            .insert(RedisKey(cache_key), RedisValue(data.clone()), ttl)
             .await;
     }
 
