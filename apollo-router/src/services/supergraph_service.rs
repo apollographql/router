@@ -32,6 +32,7 @@ use super::layers::query_analysis::ParsedDocument;
 use super::layers::query_analysis::QueryAnalysisLayer;
 use super::new_service::ServiceFactory;
 use super::router::ClientRequestAccepts;
+use super::subgraph::BoxGqlStream;
 use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionServiceFactory;
@@ -42,7 +43,6 @@ use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
-use crate::notification::HandleStream;
 use crate::plugin::DynPlugin;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
@@ -341,7 +341,7 @@ pub struct SubscriptionTaskParams {
     pub(crate) client_sender: futures::channel::mpsc::Sender<Response>,
     pub(crate) subscription_handle: SubscriptionHandle,
     pub(crate) subscription_config: SubscriptionConfig,
-    pub(crate) stream_rx: futures::channel::mpsc::Receiver<HandleStream<String, graphql::Response>>,
+    pub(crate) stream_rx: futures::channel::mpsc::Receiver<BoxGqlStream>,
     pub(crate) service_name: String,
 }
 

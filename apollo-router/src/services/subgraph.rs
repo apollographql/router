@@ -1,5 +1,6 @@
 #![allow(missing_docs)] // FIXME
 
+use std::pin::Pin;
 use std::sync::Arc;
 
 use futures::channel::mpsc;
@@ -12,13 +13,13 @@ use sha2::Digest;
 use sha2::Sha256;
 use static_assertions::assert_impl_all;
 use tokio::sync::broadcast;
+use tokio_stream::Stream;
 use tower::BoxError;
 
 use crate::error::Error;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
-use crate::notification::HandleStream;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::query_planner::fetch::OperationKind;
 use crate::Context;
@@ -26,6 +27,7 @@ use crate::Context;
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
+pub type BoxGqlStream = Pin<Box<dyn Stream<Item = graphql::Response> + Send>>;
 
 assert_impl_all!(Request: Send);
 #[non_exhaustive]
@@ -40,7 +42,7 @@ pub struct Request {
     pub context: Context,
 
     /// Channel to send the subscription stream to listen on events coming from subgraph in a task
-    pub(crate) subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
+    pub(crate) subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
     /// Channel triggered when the client connection has been dropped
     pub(crate) connection_closed_signal: Option<broadcast::Receiver<()>>,
 }
@@ -56,7 +58,7 @@ impl Request {
         subgraph_request: http::Request<graphql::Request>,
         operation_kind: OperationKind,
         context: Context,
-        subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
+        subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
     ) -> Request {
         Self {
@@ -80,7 +82,7 @@ impl Request {
         subgraph_request: Option<http::Request<graphql::Request>>,
         operation_kind: Option<OperationKind>,
         context: Option<Context>,
-        subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
+        subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
     ) -> Request {
         Request::new(
