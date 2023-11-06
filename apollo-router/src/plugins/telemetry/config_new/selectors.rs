@@ -54,6 +54,17 @@ pub(crate) enum OperationKind {
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum ResponseStatus {
+    /// The http status code.
+    Code,
+    /// The http status reason.
+    Reason,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum RouterSelector {
     /// A header from the request
@@ -75,6 +86,11 @@ pub(crate) enum RouterSelector {
         redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
+    },
+    /// A header from the response
+    ResponseStatus {
+        /// The http response status code.
+        response_status: ResponseStatus,
     },
     /// The trace ID of the request.
     TraceId {
@@ -407,6 +423,16 @@ impl GetAttribute<router::Request, router::Response> for RouterSelector {
                 .get(response_header)
                 .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
                 .or_else(|| default.clone()),
+            RouterSelector::ResponseStatus { response_status } => match response_status {
+                ResponseStatus::Code => Some(AttributeValue::I64(
+                    response.response.status().as_u16() as i64,
+                )),
+                ResponseStatus::Reason => response
+                    .response
+                    .status()
+                    .canonical_reason()
+                    .map(|reason| AttributeValue::String(reason.to_string())),
+            },
             RouterSelector::ResponseContext {
                 response_context,
                 default,
@@ -731,10 +757,11 @@ mod test {
     use crate::graphql;
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::selectors::{
-        OperationKind, OperationName, Query, RouterSelector, SubgraphSelector, SupergraphSelector,
-        TraceIdFormat,
+        OperationKind, OperationName, Query, ResponseStatus, RouterSelector, SubgraphSelector,
+        SupergraphSelector, TraceIdFormat,
     };
     use crate::plugins::telemetry::config_new::GetAttribute;
+    use http::StatusCode;
     use opentelemetry_api::baggage::BaggageExt;
     use opentelemetry_api::trace::{
         SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState,
@@ -1788,6 +1815,42 @@ mod test {
         assert_eq!(
             selector.on_request(&crate::services::SubgraphRequest::fake_builder().build(),),
             Some("default".into())
+        );
+    }
+
+    #[test]
+    fn router_response_status_code() {
+        let selector = RouterSelector::ResponseStatus {
+            response_status: ResponseStatus::Code,
+        };
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::RouterResponse::fake_builder()
+                        .status_code(StatusCode::NO_CONTENT)
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            AttributeValue::I64(204)
+        );
+    }
+
+    #[test]
+    fn router_response_status_reason() {
+        let selector = RouterSelector::ResponseStatus {
+            response_status: ResponseStatus::Reason,
+        };
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::RouterResponse::fake_builder()
+                        .status_code(StatusCode::NO_CONTENT)
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "No Content".into()
         );
     }
 }
