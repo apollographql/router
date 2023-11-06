@@ -8,7 +8,9 @@ use opentelemetry_api::baggage::BaggageExt;
 use opentelemetry_api::trace::TraceContextExt;
 use opentelemetry_api::Context;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+#[cfg(test)]
+use serde::Serialize;
 use serde_json_bytes::ByteString;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]

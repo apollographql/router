@@ -5,7 +5,9 @@ use schemars::gen::SchemaGenerator;
 use schemars::schema::Schema;
 use schemars::JsonSchema;
 use serde::de::{Error, MapAccess, Visitor};
-use serde::{Deserialize, Deserializer, Serialize};
+#[cfg(test)]
+use serde::Serialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
 use std::any::type_name;
 use std::collections::HashMap;

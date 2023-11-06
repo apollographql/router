@@ -229,7 +229,7 @@ impl Response {
     /// This does not enforce the provision of the data that is required for a fully functional
     /// Response. It's usually enough for testing, when a fully constructed Response is
     /// difficult to construct and not required for the purposes of the test.
-    #[builder(visibility = "pub (crate)")]
+    #[builder(visibility = "pub")]
     fn fake2_new(
         label: Option<String>,
         data: Option<Value>,
