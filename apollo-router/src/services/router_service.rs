@@ -1053,13 +1053,23 @@ mod tests {
                 .build()
                 .unwrap()
                 .supergraph_request
-                .map(|req: crate::request::Request| {
-                    // Modify the request so that it is a valid array of requests.
-                    let mut json_bytes = serde_json::to_vec(&req).unwrap();
+                .map(|req_2: crate::request::Request| {
+                    // Create clones of our standard query and update it to have 3 unique queries
+                    let mut req_1 = req_2.clone();
+                    let mut req_3 = req_2.clone();
+                    req_1.query = req_2.query.clone().map(|x| x.replace("upc\n", ""));
+                    req_3.query = req_2.query.clone().map(|x| x.replace("id name", "name"));
+
+                    // Modify the request so that it is a valid array of 3 requests.
+                    let mut json_bytes_1 = serde_json::to_vec(&req_1).unwrap();
+                    let mut json_bytes_2 = serde_json::to_vec(&req_2).unwrap();
+                    let mut json_bytes_3 = serde_json::to_vec(&req_3).unwrap();
                     let mut result = vec![b'['];
-                    result.append(&mut json_bytes.clone());
+                    result.append(&mut json_bytes_1);
                     result.push(b',');
-                    result.append(&mut json_bytes);
+                    result.append(&mut json_bytes_2);
+                    result.push(b',');
+                    result.append(&mut json_bytes_3);
                     result.push(b']');
                     hyper::Body::from(result)
                 });
