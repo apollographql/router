@@ -77,7 +77,7 @@ use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::plugins::cache::entity::hash_request;
+use crate::plugins::cache::entity::hash_query;
 use crate::plugins::cache::entity::hash_vary_headers;
 use crate::plugins::cache::entity::REPRESENTATIONS;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
@@ -955,7 +955,7 @@ impl Telemetry {
         sub_request: &mut Request,
     ) -> Option<CacheAttributes> {
         let body = dbg!(sub_request.subgraph_request.body_mut());
-        let hashed_query = hash_request(body);
+        let hashed_query = hash_query(body);
         let representations = body
             .variables
             .get(REPRESENTATIONS)

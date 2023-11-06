@@ -25,8 +25,10 @@ use crate::json_ext::Object;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::subgraph;
 use crate::spec::TYPENAME;
+use crate::Context;
 
 const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
@@ -83,12 +85,9 @@ impl Plugin for EntityCache {
                     }
                 }
             })
-            .map_future(move |fut| {
+            .map_future(move |response| {
                 let cache = cache2.clone();
-                async move {
-                    let response: subgraph::Response = fut.await?;
-                    cache_store_from_response(cache, response).await
-                }
+                async move { cache_store_from_response(cache, response.await?).await }
             })
             .service(service)
             .boxed()
@@ -101,35 +100,34 @@ async fn cache_call(
     mut request: subgraph::Request,
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError> {
     let body = request.subgraph_request.body_mut();
-    let query_hash = hash_request(body);
 
-    // TODO: compute TTL with cacheControl directive on the subgraph
+    let keys = extract_cache_keys(&name, body, &request.context)?;
 
-    let representations = body
-        .variables
-        .get_mut(REPRESENTATIONS)
-        .and_then(|value| value.as_array_mut())
-        .expect("we already checked that representations exist");
-
-    let keys = extract_cache_keys(representations, &name, &query_hash)?;
     let cache_result = cache
         .get_multiple(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
         .await
         .map(|res| res.into_iter().map(|r| r.map(|v| v.0)).collect())
         .unwrap_or_else(|| std::iter::repeat(None).take(keys.len()).collect());
 
-    let (new_representations, mut result) =
+    let representations = body
+        .variables
+        .get_mut(REPRESENTATIONS)
+        .and_then(|value| value.as_array_mut())
+        .expect("we already checked that representations exist");
+    // remove from representations the entities we already obtained from the cache
+    let (new_representations, mut cache_result) =
         filter_representations(&name, representations, keys, cache_result)?;
 
     if !new_representations.is_empty() {
         body.variables
             .insert(REPRESENTATIONS, new_representations.into());
 
-        request.context.private_entries.lock().insert(result);
+        request.context.private_entries.lock().insert(cache_result);
 
         Ok(ControlFlow::Continue(request))
     } else {
-        let entities = insert_entities_in_result(&mut Vec::new(), &cache, &mut result).await?;
+        let entities =
+            insert_entities_in_result(&mut Vec::new(), &cache, &mut cache_result).await?;
         let mut data = Object::default();
         data.insert(ENTITIES, entities.into());
 
@@ -204,12 +202,19 @@ pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
     hex::encode(digest.finalize().as_slice())
 }
 
-pub(crate) fn hash_request(body: &mut graphql::Request) -> String {
+pub(crate) fn hash_query(body: &graphql::Request) -> String {
     let mut digest = Sha256::new();
     digest.update(body.query.as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);
     digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);
+
+    hex::encode(digest.finalize().as_slice())
+}
+
+pub(crate) fn hash_additional_data(body: &mut graphql::Request, context: &Context) -> String {
+    let mut digest = Sha256::new();
+
     let repr_key = ByteString::from(REPRESENTATIONS);
     // Removing the representations variable because it's already part of the cache key
     let representations = body.variables.remove(&repr_key);
@@ -217,15 +222,37 @@ pub(crate) fn hash_request(body: &mut graphql::Request) -> String {
     if let Some(representations) = representations {
         body.variables.insert(repr_key, representations);
     }
+
+    let cache_key = context
+        .private_entries
+        .lock()
+        .get::<CacheKeyMetadata>()
+        .cloned()
+        .unwrap_or_default();
+    digest.update(&serde_json::to_vec(&cache_key).unwrap());
+
     hex::encode(digest.finalize().as_slice())
 }
 
 // build a list of keys to get from the cache in one query
 fn extract_cache_keys(
-    representations: &mut Vec<Value>,
+    //representations: &mut Vec<Value>,
     subgraph_name: &str,
-    query_hash: &str,
+    body: &mut graphql::Request,
+    context: &Context,
+    //query_hash: &str,
 ) -> Result<Vec<String>, BoxError> {
+    // hash the query and operation name
+    let query_hash = hash_query(body);
+    // hash more data like variables and authorization status
+    let additional_data_hash = hash_additional_data(body, context);
+
+    let representations = body
+        .variables
+        .get_mut(REPRESENTATIONS)
+        .and_then(|value| value.as_array_mut())
+        .expect("we already checked that representations exist");
+
     let mut res = Vec::new();
     for representation in representations {
         let opt_type = representation
@@ -237,14 +264,20 @@ fn extract_cache_keys(
 
         let typename = opt_type.as_str().unwrap_or("-");
 
-        // We have to have representation because it can contains PII
+        // We have to hash the representation because it can contains PII
         let mut digest = Sha256::new();
         digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
-        let hashed_repr = hex::encode(digest.finalize().as_slice());
+        let hashed_entity_key = hex::encode(digest.finalize().as_slice());
 
+        // the cache key is written to easily find keys matching a prefix for deletion:
+        // - subgraph name: caching is done per subgraph
+        // - type: can invalidate all instances of a type
+        // - entity key: invalidate a specific entity
+        // - query hash: invalidate the entry for a specific query and operation name
+        // - additional data: separate cache entries depending on info like authorization status
         let key = format!(
-            "subgraph.{}|{}|{}|{}",
-            subgraph_name, &typename, hashed_repr, query_hash
+            "subgraph.{}|{}|{}|{}|{}",
+            subgraph_name, &typename, hashed_entity_key, query_hash, additional_data_hash
         );
 
         representation
@@ -255,6 +288,7 @@ fn extract_cache_keys(
     Ok(res)
 }
 
+/// represents the result of a cache lookup for an entity type and key
 struct IntermediateResult {
     key: String,
     typename: String,
@@ -327,6 +361,7 @@ fn filter_representations(
     Ok((new_representations, result))
 }
 
+// fill in the entities for the response
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     cache: &RedisCacheStorage,
@@ -362,9 +397,11 @@ async fn insert_entities_in_result(
         }
     }
 
+    // TODO: compute TTL with cacheControl directive on the subgraph
     if !to_insert.is_empty() {
         // TODO use insert_multiple_with_ttl
-        cache.insert_multiple(&to_insert).await;
+        let ttl = None;
+        cache.insert_multiple(&to_insert, ttl).await;
     }
 
     for (ty, nb) in inserted_types {
