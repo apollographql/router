@@ -115,7 +115,7 @@ async fn cache_call(
         .and_then(|value| value.as_array_mut())
         .expect("we already checked that representations exist");
     // remove from representations the entities we already obtained from the cache
-    let (new_representations, mut cache_result) =
+    let (new_representations, cache_result) =
         filter_representations(&name, representations, keys, cache_result)?;
 
     if !new_representations.is_empty() {
@@ -126,10 +126,10 @@ async fn cache_call(
 
         Ok(ControlFlow::Continue(request))
     } else {
-        // TODO: compute TTL with cacheControl directive on the subgraph
-        let ttl = None;
-        let entities =
-            insert_entities_in_result(&mut Vec::new(), &cache, ttl, &mut cache_result).await?;
+        let entities = cache_result
+            .into_iter()
+            .filter_map(|res| res.cache_entry)
+            .collect::<Vec<_>>();
         let mut data = Object::default();
         data.insert(ENTITIES, entities.into());
 
