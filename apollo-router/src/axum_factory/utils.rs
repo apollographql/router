@@ -145,6 +145,7 @@ impl PropagatingMakeSpan {
         ) {
             tracing::error_span!(
                 REQUEST_SPAN_NAME,
+                "http.method" = %request.method(),
                 "http.request.method" = %request.method(),
                 "http.route" = %request.uri(),
                 "http.flavor" = ?request.version(),
@@ -159,6 +160,7 @@ impl PropagatingMakeSpan {
         } else {
             tracing::info_span!(
                 REQUEST_SPAN_NAME,
+                "http.method" = %request.method(),
                 "http.request.method" = %request.method(),
                 "http.route" = %request.uri(),
                 "http.flavor" = ?request.version(),
