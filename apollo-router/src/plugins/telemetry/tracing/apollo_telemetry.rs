@@ -90,8 +90,8 @@ pub(crate) const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
 const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
 const PATH: Key = Key::from_static_str("graphql.path");
 const SUBGRAPH_NAME: Key = Key::from_static_str("apollo.subgraph.name");
-const CLIENT_NAME: Key = Key::from_static_str("client.name");
-const CLIENT_VERSION: Key = Key::from_static_str("client.version");
+pub(crate) const CLIENT_NAME_KEY: Key = Key::from_static_str("client.name");
+pub(crate) const CLIENT_VERSION_KEY: Key = Key::from_static_str("client.version");
 const DEPENDS: Key = Key::from_static_str("graphql.depends");
 const LABEL: Key = Key::from_static_str("graphql.label");
 const CONDITION: Key = Key::from_static_str("graphql.condition");
@@ -422,10 +422,13 @@ impl Exporter {
             ROUTER_SPAN_NAME => {
                 child_nodes.push(TreeData::Router {
                     http: Box::new(extract_http_data(span)),
-                    client_name: span.attributes.get(&CLIENT_NAME).and_then(extract_string),
+                    client_name: span
+                        .attributes
+                        .get(&CLIENT_NAME_KEY)
+                        .and_then(extract_string),
                     client_version: span
                         .attributes
-                        .get(&CLIENT_VERSION)
+                        .get(&CLIENT_VERSION_KEY)
                         .and_then(extract_string),
                     duration_ns: span
                         .attributes
@@ -447,10 +450,13 @@ impl Exporter {
                 if !self.use_legacy_request_span {
                     child_nodes.push(TreeData::Router {
                         http: Box::new(extract_http_data(span)),
-                        client_name: span.attributes.get(&CLIENT_NAME).and_then(extract_string),
+                        client_name: span
+                            .attributes
+                            .get(&CLIENT_NAME_KEY)
+                            .and_then(extract_string),
                         client_version: span
                             .attributes
-                            .get(&CLIENT_VERSION)
+                            .get(&CLIENT_VERSION_KEY)
                             .and_then(extract_string),
                         duration_ns: span
                             .attributes
@@ -543,10 +549,13 @@ impl Exporter {
                 // To put the duration
                 child_nodes.push(TreeData::Router {
                     http: Box::new(extract_http_data(span)),
-                    client_name: span.attributes.get(&CLIENT_NAME).and_then(extract_string),
+                    client_name: span
+                        .attributes
+                        .get(&CLIENT_NAME_KEY)
+                        .and_then(extract_string),
                     client_version: span
                         .attributes
-                        .get(&CLIENT_VERSION)
+                        .get(&CLIENT_VERSION_KEY)
                         .and_then(extract_string),
                     duration_ns: span
                         .attributes

@@ -78,6 +78,8 @@ use self::reload::NullFieldFormatter;
 use self::reload::SamplingFilter;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_REQUEST;
+use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
+use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
 use super::traffic_shaping::cache::hash_request;
 use super::traffic_shaping::cache::hash_vary_headers;
 use super::traffic_shaping::cache::REPRESENTATIONS;
@@ -310,29 +312,8 @@ impl Plugin for Telemetry {
             }))
             .map_future_with_request_data(
                 move |request: &router::Request| {
-                    let span = Span::current();
-
                     if !config_request.spans.legacy_request_span {
-                        let trace_id = TraceId::maybe_new()
-                            .map(|t| t.to_string())
-                            .unwrap_or_default();
-                        span.record("trace_id", trace_id);
-
-                        let client_name: &str = dbg!(request
-                            .router_request
-                            .headers()
-                            .get(&config_request.apollo.client_name_header)
-                            .and_then(|h| h.to_str().ok())
-                            .unwrap_or(""));
-                        span.record("client.name", client_name);
-
-                        let client_version = dbg!(request
-                            .router_request
-                            .headers()
-                            .get(&config_request.apollo.client_version_header)
-                            .and_then(|h| h.to_str().ok())
-                            .unwrap_or(""));
-                        span.record("client.version", client_version);
+                        let span = Span::current();
                         span.record(
                             "apollo_private.http.request_headers",
                             filter_headers(
@@ -351,7 +332,33 @@ impl Plugin for Telemetry {
                         ]);
                     }
 
-                    config_request.spans.router.attributes.on_request(request)
+                    let client_name: &str = request
+                        .router_request
+                        .headers()
+                        .get(&config_request.apollo.client_name_header)
+                        .and_then(|h| h.to_str().ok())
+                        .unwrap_or("");
+                    let client_version = request
+                        .router_request
+                        .headers()
+                        .get(&config_request.apollo.client_version_header)
+                        .and_then(|h| h.to_str().ok())
+                        .unwrap_or("");
+
+                    let mut custom_attributes =
+                        config_request.spans.router.attributes.on_request(request);
+                    custom_attributes.extend([
+                        (
+                            CLIENT_NAME_KEY,
+                            AttributeValue::String(client_name.to_string()),
+                        ),
+                        (
+                            CLIENT_VERSION_KEY,
+                            AttributeValue::String(client_version.to_string()),
+                        ),
+                    ]);
+
+                    custom_attributes
                 },
                 move |custom_attributes: HashMap<opentelemetry_api::Key, AttributeValue>, fut| {
                     let start = Instant::now();
@@ -362,7 +369,10 @@ impl Plugin for Telemetry {
                     async move {
                         let span = Span::current();
                         span.set_dyn_attributes(custom_attributes);
-
+                        let trace_id = TraceId::maybe_new()
+                            .map(|t| t.to_string())
+                            .unwrap_or_default();
+                        span.record("trace_id", trace_id);
                         let response: Result<router::Response, BoxError> = fut.await;
 
                         span.record(
