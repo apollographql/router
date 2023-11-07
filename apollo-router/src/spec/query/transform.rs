@@ -17,31 +17,25 @@ pub(crate) fn document(
     // walk through the fragment first: if a fragment is entirely filtered, we want to
     // remove the spread too
     for definition in &document.definitions {
-        match definition {
-            ast::Definition::FragmentDefinition(def) => {
-                if let Some(new_def) = visitor.fragment_definition(def)? {
-                    new.definitions
-                        .push(ast::Definition::FragmentDefinition(new_def.into()))
-                }
+        if let ast::Definition::FragmentDefinition(def) = definition {
+            if let Some(new_def) = visitor.fragment_definition(def)? {
+                new.definitions
+                    .push(ast::Definition::FragmentDefinition(new_def.into()))
             }
-            _ => {}
         }
     }
 
     for definition in &document.definitions {
-        match definition {
-            ast::Definition::OperationDefinition(def) => {
-                let root_type = visitor
-                    .schema()
-                    .root_operation(def.operation_type)
-                    .ok_or("missing root operation definition")?
-                    .clone();
-                if let Some(new_def) = visitor.operation(&root_type, def)? {
-                    new.definitions
-                        .push(ast::Definition::OperationDefinition(new_def.into()))
-                }
+        if let ast::Definition::OperationDefinition(def) = definition {
+            let root_type = visitor
+                .schema()
+                .root_operation(def.operation_type)
+                .ok_or("missing root operation definition")?
+                .clone();
+            if let Some(new_def) = visitor.operation(&root_type, def)? {
+                new.definitions
+                    .push(ast::Definition::OperationDefinition(new_def.into()))
             }
-            _ => {}
         }
     }
     Ok(new)
