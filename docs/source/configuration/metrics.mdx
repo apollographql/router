@@ -1,32 +1,74 @@
 ---
-title: Collecting metrics in the Apollo Router
+title: Router Metrics
+subtitle: Export Apollo Router metrics for Prometheus and OpenTelemetry
+description: Export and collect metrics from the Apollo Router with Prometheus and OpenTelemetry Collector.
 ---
 
-The Apollo Router provides built-in support for metrics collection via [Prometheus](#using-prometheus) and [OpenTelemetry Collector](#using-opentelemetry-collector).
+The Apollo Router exports metrics for collection by [Prometheus](#using-prometheus) and [OpenTelemetry Collector](#using-opentelemetry-collector), with support for [Datadog via OpenTelemetry]().
 
-## Common configuration
+In `router.yaml`, you configure router metrics within the following settings:
+
+- `telemetry.metrics.common`. Configure values for the router and common across metrics exporters.
+- `telemetry.metrics.prometheus`. Configure the Prometheus exporter.
+- `telemetry.metrics.otlp`. Configure the OpenTelemetry exporter. Supports sending traces to Datadog.
+
+## Configure common metrics settings
+
+Common settings for router metrics include:
+
+* [Service name](#service-name)
+* [Resource attributes](#resource)
+* [Custom historgram buckets](#custom-histogram-buckets)
 
 ### Service name
 
-```yaml title="router.yaml"
-telemetry:
-  metrics:
-    common:
-      # (Optional) Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
-      service_name: "router"
-```
+Set a service name for your router metrics so they can be easily searched and found in your metrics dashboards. 
 
-Service name discovery is handled in the following order:
-1. `OTEL_SERVICE_NAME` env
-2. `OTEL_RESOURCE_ATTRIBUTES` env
-3. `router.yaml` `service_name`
-4. `router.yaml` `resource`
+The service name can be set by an environment variable or in `router.yaml`, with the following order of precedence (first to last):
 
-If none of the above are found then the service name will be set to `unknown_service:apollo_router` or `unknown_service` if the executable name cannot be determined.
+1. `OTEL_SERVICE_NAME` environment variable
+2. `OTEL_RESOURCE_ATTRIBUTES` environment variable
+3. `telemetry.metrics.common.service_name` in `router.yaml`
 
-### Resource
+      <ExpansionPanel title="Example service_name">
 
-A Resource is a set of key-value pairs that provide additional information to an exporter. APMs may interpret and display resource information. 
+      Example setting service name in `telemetry.metrics.common.service_name`:
+
+      ```yaml title="router.yaml"
+      telemetry:
+        metrics:
+          common:
+            # (Optional) Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
+            service_name: "router" #highlight-line
+      ```
+
+      </ExpansionPanel>
+
+
+4. `telemetry.metrics.common.resource` in `router.yaml`
+
+      <ExpansionPanel title="Example resource">
+
+      Example setting service name in `telemetry.metrics.common.resource`:
+
+      ```yaml title="router.yaml"
+      telemetry:
+        metrics:
+          common:
+            resource:
+              # (Optional) Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
+              "service.name": "router" #highlight-line
+      ```
+
+      </ExpansionPanel>
+
+If the service name isn't explicitly set, then by default the service name will be set to `unknown_service:apollo_router` (or `unknown_service` if the executable name cannot be determined).
+
+### Resource attribute
+
+A resource attribute is a set of key-value pairs that provide additional information to an exporter. Application performance monitors (APM) may interpret and display resource information. 
+
+In `router.yaml`, resource attributes are set in `telemetry.metrics.common.resource`. For example:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -37,11 +79,119 @@ telemetry:
         "environment.namespace": "{env.MY_K8_NAMESPACE_ENV_VARIABLE}"
 ```
 
-> [See OpenTelemetry conventions for resources.](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/README.md)
+For OpenTelemetry conventions for resources, see [Resource Semantic Conventions](https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/README.md).
 
-## Using Prometheus
 
-You can use [Prometheus and Grafana](https://prometheus.io/docs/visualization/grafana/) to collect metrics and visualize the router metrics.
+### Custom histogram buckets
+
+You can customize bucket boundaries for all generated histograms by setting `telemetry.metrics.common.buckets` in `router.yaml`. For example:
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    common:
+      buckets:
+        - 0.05
+        - 0.10
+        - 0.25
+        - 0.50
+        - 1.00
+        - 2.50
+        - 5.00
+        - 10.00
+        - 20.00
+```
+
+
+### Customizing `apollo_router_http_requests` instrument
+
+<Caution>
+
+The `apollo_router_http_requests` metric is deprecated and will be removed in a future release.
+
+</Caution>
+
+You can add custom attributes (OpenTelemetry) and labels (Prometheus) to the `apollo_router_http_requests` metric. Attributes can be static or obtained from requests or responses that are:
+
+* static values (prefer using a resource)
+* headers from the request or response.
+* a value from context.
+* a value from the request or response body ([JSON path](https://goessner.net/articles/JsonPath/)).
+
+An example of configuring these attributes is shown below:
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    common:
+      attributes:
+        supergraph: # Attribute configuration for requests to/responses from the router
+          static:
+            - name: "version"
+              value: "v1.0.0"
+          request:
+            header:
+              - named: "content-type"
+                rename: "payload_type"
+                default: "application/json"
+              - named: "x-custom-header-to-add"
+          response:
+            body:
+              # Apply the value of the provided path of the router's response body as an attribute
+              - path: .errors[0].extensions.http.status
+                name: error_from_body
+              # Use the unique extension code to identify the kind of error
+              - path: .errors[0].extensions.code
+                name: error_code
+          context:
+            # Apply the indicated element from the plugin chain's context as an attribute
+            - named: my_key
+        subgraph: # Attribute configuration for requests to/responses from subgraphs
+          all:
+            static:
+              # Always apply this attribute to all metrics for all subgraphs
+              - name: kind
+                value: subgraph_request
+            errors: # Only work if it's a valid GraphQL error (for example if the subgraph returns an http error or if the router can't reach the subgraph)
+              include_messages: true # Will include the error message in a message attribute
+              extensions: # Include extensions data
+                - name: subgraph_error_extended_type # Name of the attribute
+                  path: .type # JSON query path to fetch data from extensions
+                - name: message
+                  path: .reason
+            # Will create this kind of metric for example apollo_router_http_requests_error_total{message="cannot contact the subgraph",subgraph="my_subgraph_name",subgraph_error_extended_type="SubrequestHttpError"}
+          subgraphs:
+            my_subgraph_name: # Apply these rules only for the subgraph named `my_subgraph_name`
+              request:
+                header:
+                  - named: "x-custom-header"
+                body:
+                  # Apply the value of the provided path of the router's request body as an attribute (here it's the query)
+                  - path: .query
+                    name: query
+                    default: UNKNOWN
+```
+
+<Note>
+
+OpenTelemetry includes many [standard attributes](https://opentelemetry.io/docs/specs/semconv/attributes-registry/) that you can use these via custom [instruments](../instruments.mdx). 
+
+</Note>
+
+
+## Configure metrics exporters
+
+The Apollo Router exports metrics for:
+
+* [Prometheus](#prometheus)
+* [OpenTelemetry Collector](#opentelemetry-collector)
+* [Datadog via OTLP](#datadog-otlp)
+
+### Prometheus
+
+You can use [Prometheus with Grafana](https://prometheus.io/docs/visualization/grafana/) to collect metrics and visualize the router metrics.
+
+To export metrics to Prometheus, in `router.yaml` you must enable the Prometheus endpoint and set its address and path. For example:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -54,41 +204,58 @@ telemetry:
       path: /metrics
 ```
 
-### Using in a containers environment
+### OpenTelemetry Collector
 
-The Prometheus endpoint listens to 127.0.0.1 by default, which won't allow connections issued from a network.
-While this is a safe default, _other containers won't be able to access the Prometheus endpoint_, which will disable metric scraping.
+You can send metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) for processing and reporting metrics.
 
-You can change this by setting:
+To export metrics to OpenTelemetry Collector, in `router.yaml` you must enable the OpenTelemetry exporter and optionally customize its configuration. For example: 
 
 ```yaml title="router.yaml"
 telemetry:
   metrics:
-    prometheus:
-      # By setting this endpoint you enable other containers and pods to access the Prometheus endpoint
+    otlp:
+      # Enable the OpenTelemetry exporter
       enabled: true
-      listen: 0.0.0.0:9090
-      path: /metrics
+
+      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317 for gRPC and http://127.0.0.1:4318 for HTTP)
+      endpoint: default
+
+      # Optional protocol. Only grpc is supported currently.
+      # Setting to http will result in configuration failure.
+      protocol: grpc
+
+      # Optional Grpc configuration
+      grpc:
+        domain_name: "my.domain"
+        key: ""
+        ca: ""
+        cert: ""
+        metadata:
+          foo: bar
+
+      # Optional batch_processor configuration
+      batch_processor:
+        scheduled_delay: 100ms
+        max_concurrent_exports: 1000
+        max_export_batch_size: 10000
+        max_export_timeout: 100s
+        max_queue_size: 10000
 ```
 
-Assuming you're running locally:
+<Tip>
 
-1. Run a query against the router.
-2. Navigate to [http://localhost:9090/metrics](http://localhost:9090/metrics) to see something like:
+Use the [variable expansion feature](./overview#variable-expansion) for referencing environment variables and file paths in YAML configuration files. Use `env.` and `file.` prefixes, for example `${file.ca.txt}`.
 
-```
-# HELP apollo_router_http_request_duration_seconds Total number of HTTP requests made.
-# TYPE apollo_router_http_request_duration_seconds histogram
-apollo_router_http_request_duration_seconds_bucket{le="0.5"} 1
-apollo_router_http_request_duration_seconds_bucket{le="0.9"} 1
----SNIP---
-```
+</Tip>
 
-> Note that if you haven't run a query against the router yet, you'll see a blank page because no metrics have been generated!
+### Datadog (OTLP)
 
-## Datadog via OTLP
+To export metrics to Datadog, you must both 
 
-To use Datadog, you must configure the Datadog agent to accept OTLP metrics. This can be done by adding the following to your `datadog.yaml`:
+- Configure the Datadog agent to accept OpenTelemetry (OTLP) metrics, and
+- Configure the router to send traces to the Datadog agent.
+
+To configure the Datadog agent, add OTLP configuration to your `datadog.yaml`. For example:
 
 ```yaml title="datadog.yaml"
 otlp_config:
@@ -98,7 +265,7 @@ otlp_config:
         endpoint: <dd-agent-ip>:4317
 ```
 
-The router must also be configured to send traces to the Datadog agent:
+To configure the router, enable OTLP metrics and set both `temporality: delta` and `endpoint: <datadog-agent-endpoint>`. For example: 
 
 ```yaml title="router.yaml"
 telemetry:
@@ -111,11 +278,18 @@ telemetry:
       endpoint: "${env.DATADOG_AGENT_HOST}:4317"
 ```
 
-See [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host) for more details
+<Note>
 
-## Available metrics
+**You must set `temporality: delta`**, otherwise the router generates incorrect metrics.
 
-The following metrics are available for Prometheus and OpenTelemetry. Attributes are listed where applicable.
+</Note>
+
+For more details about Datadog configuration, see [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host).
+
+
+## Metrics reference
+
+The following metrics for the Apollo Router are available for Prometheus and OpenTelemetry. Attributes are listed where applicable.
 
 ### HTTP
 
@@ -177,7 +351,11 @@ The coprocessor operations metric has the following attributes:
   - `status`: (`success`, `failure`)
   - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `License`)
 
-Note that the initial call to uplink during router startup will not be reflected in metrics.
+<Note>
+
+The initial call to uplink during router startup is not reflected in metrics.
+
+</Note>
 
 ### Subscription
 
@@ -194,150 +372,3 @@ Note that the initial call to uplink during router startup will not be reflected
 
 - `apollo.router.telemetry.studio.reports` - The number of reports submitted to Studio by the Router.
   - `type`: The type of report submitted: "traces" or "metrics"
-
-## Using OpenTelemetry Collector
-
-You can send metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) for processing and reporting metrics.
-
-```yaml title="router.yaml"
-telemetry:
-  metrics:
-    otlp:
-      # Enable the OpenTelemetry exporter
-      enabled: true
-
-      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317 for gRPC and http://127.0.0.1:4318 for HTTP)
-      endpoint: default
-
-      # Optional protocol. Only grpc is supported currently.
-      # Setting to http will result in configuration failure.
-      protocol: grpc
-
-      # Optional Grpc configuration
-      grpc:
-        domain_name: "my.domain"
-        key: ""
-        ca: ""
-        cert: ""
-        metadata:
-          foo: bar
-
-      # Optional batch_processor configuration
-      batch_processor:
-        scheduled_delay: 100ms
-        max_concurrent_exports: 1000
-        max_export_batch_size: 10000
-        max_export_timeout: 100s
-        max_queue_size: 10000
-```
-
-Remember that `file.` and `env.` prefixes can be used for expansion in config yaml. e.g. `${file.ca.txt}`.
-
-## Adding custom attributes/labels
-
-You can add custom attributes (OpenTelemetry) and labels (Prometheus) to your generated metrics. You can apply these across _all_ requests, or you can selectively apply them based on the details of a particular request. These details include:
-
-- The presence of a particular HTTP header
-- The value at a particular JSON path within a request or response body (either from a subgraph or from the router itself)
-  - [See examples of querying a JSON path.](#example-json-path-queries)
-- A custom value provided via the router plugin context
-
-Examples of all of these are shown in the file below:
-
-```yaml title="router.yaml"
-telemetry:
-  metrics:
-    common:
-      attributes:
-        supergraph: # Attribute configuration for requests to/responses from the router
-          static:
-            - name: "version"
-              value: "v1.0.0"
-          request:
-            header:
-              - named: "content-type"
-                rename: "payload_type"
-                default: "application/json"
-              - named: "x-custom-header-to-add"
-          response:
-            body:
-              # Apply the value of the provided path of the router's response body as an attribute
-              - path: .errors[0].extensions.http.status
-                name: error_from_body
-              # Use the unique extension code to identify the kind of error
-              - path: .errors[0].extensions.code
-                name: error_code
-          context:
-            # Apply the indicated element from the plugin chain's context as an attribute
-            - named: my_key
-        subgraph: # Attribute configuration for requests to/responses from subgraphs
-          all:
-            static:
-              # Always apply this attribute to all metrics for all subgraphs
-              - name: kind
-                value: subgraph_request
-            errors: # Only work if it's a valid GraphQL error (for example if the subgraph returns an http error or if the router can't reach the subgraph)
-              include_messages: true # Will include the error message in a message attribute
-              extensions: # Include extensions data
-                - name: subgraph_error_extended_type # Name of the attribute
-                  path: .type # JSON query path to fetch data from extensions
-                - name: message
-                  path: .reason
-            # Will create this kind of metric for example apollo_router_http_requests_error_total{message="cannot contact the subgraph",subgraph="my_subgraph_name",subgraph_error_extended_type="SubrequestHttpError"}
-          subgraphs:
-            my_subgraph_name: # Apply these rules only for the subgraph named `my_subgraph_name`
-              request:
-                header:
-                  - named: "x-custom-header"
-                body:
-                  # Apply the value of the provided path of the router's request body as an attribute (here it's the query)
-                  - path: .query
-                    name: query
-                    default: UNKNOWN
-```
-
-### Example JSON path queries
-
-Let's say you have a JSON request body with the following structure:
-
-```json
-{
-  "items": [
-    {
-      "unwanted": 7,
-      "wanted": { "x": 3, "y": 7 },
-      "array": [3, 2, 1]
-    },
-    {
-      "isImportant": true
-    }
-  ]
-}
-```
-
-To fetch the value of the field `isImportant`, the corresponding path is `.items[1].isImportant`.
-
-To fetch the value of the field `x`, the corresponding path is `.items[0].wanted.x`.
-
-JSON path queries always begin with a period `.`
-
-## Changing default buckets for histograms
-
-You can customize the buckets for all generated histograms:
-
-```yaml title="router.yaml"
-telemetry:
-  metrics:
-    common:
-      buckets:
-        - 0.05
-        - 0.10
-        - 0.25
-        - 0.50
-        - 1.00
-        - 2.50
-        - 5.00
-        - 10.00
-        - 20.00
-```
-

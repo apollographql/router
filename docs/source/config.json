@@ -97,10 +97,10 @@
         ]
       }
     },
-    "Metrics & Monitoring": {
+    "Metrics and Monitoring": {
+      "Metrics": "/configuration/metrics",
       "GraphOS reporting": "/configuration/apollo-telemetry",
-      "OpenTelemetry tracing": "/configuration/tracing",
-      "Configuring metrics collectors": "/configuration/metrics",
+      "Tracing": "/configuration/tracing",
       "Client awareness": "/managed-federation/client-awareness",
       "Health check": "/configuration/health-checks"
     },
