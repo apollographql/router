@@ -19,8 +19,8 @@ use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
-use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::GetAttributes;
+use crate::plugins::telemetry::config_new::{trace_id, DatadogId, DefaultForLevel};
 use crate::query_planner::OperationKind;
 use crate::services::router;
 use crate::services::subgraph;
@@ -123,10 +123,10 @@ impl GetAttributes<router::Request, router::Response> for RouterAttributes {
             }
         }
         if let Some(true) = &self.datadog_trace_id {
-            if let Some(trace_id) = TraceId::maybe_new().map(|t| t.to_u128()) {
+            if let Some(trace_id) = trace_id() {
                 attrs.insert(
                     Key::from_static_str("dd.trace_id"),
-                    AttributeValue::U128(trace_id),
+                    AttributeValue::String(trace_id.to_datadog()),
                 );
             }
         }

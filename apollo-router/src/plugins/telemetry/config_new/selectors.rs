@@ -1,11 +1,10 @@
 use crate::context::{OPERATION_KIND, OPERATION_NAME};
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugins::telemetry::config::AttributeValue;
-use crate::plugins::telemetry::config_new::GetAttribute;
+use crate::plugins::telemetry::config_new::{trace_id, DatadogId, GetAttribute};
 use crate::services::{router, subgraph, supergraph};
 use access_json::JSONQuery;
 use opentelemetry_api::baggage::BaggageExt;
-use opentelemetry_api::trace::TraceContextExt;
 use opentelemetry_api::Context;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -383,20 +382,13 @@ impl GetAttribute<router::Request, router::Response> for RouterSelector {
                 .or_else(|| default.clone().map(AttributeValue::String)),
             RouterSelector::TraceId {
                 trace_id: trace_id_format,
-            } => {
-                if Context::current().span().span_context().is_valid() {
-                    let id = Context::current().span().span_context().trace_id();
-                    match trace_id_format {
-                        TraceIdFormat::OpenTelemetry => AttributeValue::String(id.to_string()),
-                        TraceIdFormat::Datadog => {
-                            AttributeValue::U128(u128::from_be_bytes(id.to_bytes()))
-                        }
-                    }
-                    .into()
-                } else {
-                    None
+            } => trace_id().map(|id| {
+                match trace_id_format {
+                    TraceIdFormat::OpenTelemetry => AttributeValue::String(id.to_string()),
+                    TraceIdFormat::Datadog => AttributeValue::String(id.to_datadog()),
                 }
-            }
+                .into()
+            }),
             RouterSelector::Baggage {
                 baggage: baggage_name,
                 default,
@@ -775,7 +767,7 @@ mod test {
         OperationKind, OperationName, Query, ResponseStatus, RouterSelector, SubgraphSelector,
         SupergraphSelector, TraceIdFormat,
     };
-    use crate::plugins::telemetry::config_new::GetAttribute;
+    use crate::plugins::telemetry::config_new::{DatadogId, GetAttribute};
     use http::StatusCode;
     use opentelemetry_api::baggage::BaggageExt;
     use opentelemetry_api::trace::{
@@ -1399,21 +1391,10 @@ mod test {
     #[test]
     fn router_trace_id() {
         let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
-
         subscriber::with_default(subscriber, || {
-            let span_context = SpanContext::new(
-                TraceId::from_u128(42),
-                SpanId::from_u64(42),
-                TraceFlags::default(),
-                true,
-                TraceState::default(),
-            );
-            let span = span!(tracing::Level::INFO, "test");
-            let _guard = span.enter();
             let selector = RouterSelector::TraceId {
                 trace_id: TraceIdFormat::OpenTelemetry,
             };
-            // No span context
             assert_eq!(
                 selector.on_request(
                     &crate::services::RouterRequest::fake_builder()
@@ -1422,10 +1403,20 @@ mod test {
                 ),
                 None
             );
-            // Context set
+
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                TraceFlags::default(),
+                false,
+                TraceState::default(),
+            );
             let _context = Context::current()
                 .with_remote_span_context(span_context)
                 .attach();
+            let span = span!(tracing::Level::INFO, "test");
+            let _guard = span.enter();
+
             assert_eq!(
                 selector
                     .on_request(
@@ -1449,7 +1440,7 @@ mod test {
                             .unwrap(),
                     )
                     .unwrap(),
-                AttributeValue::U128(42)
+                AttributeValue::String("42".into())
             );
         });
     }
