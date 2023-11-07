@@ -1,12 +1,15 @@
-use crate::plugins::telemetry::config::AttributeValue;
-use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use std::collections::HashMap;
+
+use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::Key;
 use opentelemetry_api::trace::TraceContextExt;
-use std::collections::HashMap;
 use tower::BoxError;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 
 /// These modules contain a new config structure for telemetry that will progressively move to
 pub(crate) mod attributes;
@@ -20,14 +23,14 @@ pub(crate) mod selectors;
 pub(crate) mod spans;
 
 pub(crate) trait GetAttributes<Request, Response> {
-    fn on_request(&self, request: &Request) -> HashMap<Key, AttributeValue>;
-    fn on_response(&self, response: &Response) -> HashMap<Key, AttributeValue>;
-    fn on_error(&self, error: &BoxError) -> HashMap<Key, AttributeValue>;
+    fn on_request(&self, request: &Request) -> HashMap<Key, opentelemetry::Value>;
+    fn on_response(&self, response: &Response) -> HashMap<Key, opentelemetry::Value>;
+    fn on_error(&self, error: &BoxError) -> HashMap<Key, opentelemetry::Value>;
 }
 
 pub(crate) trait GetAttribute<Request, Response> {
-    fn on_request(&self, request: &Request) -> Option<AttributeValue>;
-    fn on_response(&self, response: &Response) -> Option<AttributeValue>;
+    fn on_request(&self, request: &Request) -> Option<opentelemetry::Value>;
+    fn on_response(&self, response: &Response) -> Option<opentelemetry::Value>;
 }
 
 pub(crate) trait DefaultForLevel {
@@ -55,24 +58,131 @@ pub(crate) fn trace_id() -> Option<TraceId> {
     }
 }
 
-use opentelemetry::baggage::BaggageExt;
-pub(crate) fn get_baggage(key: &str) -> Option<AttributeValue> {
+pub(crate) fn get_baggage(key: &str) -> Option<opentelemetry::Value> {
     let context = Span::current().context();
     let baggage = context.baggage();
-    baggage
-        .get(key.to_string())
-        .map(|v| AttributeValue::from(v.clone()))
+    baggage.get(key.to_string()).cloned()
+}
+
+pub(crate) trait ToOtelValue {
+    fn maybe_to_otel_value(&self) -> Option<opentelemetry::Value>;
+}
+impl ToOtelValue for &Option<AttributeValue> {
+    fn maybe_to_otel_value(&self) -> Option<opentelemetry::Value> {
+        self.as_ref().map(|v| v.clone().into())
+    }
+}
+
+impl ToOtelValue for &serde_json_bytes::Value {
+    fn maybe_to_otel_value(&self) -> Option<opentelemetry::Value> {
+        match self {
+            serde_json_bytes::Value::Bool(value) => Some((*value).into()),
+            serde_json_bytes::Value::Number(value) if value.is_f64() => {
+                value.as_f64().map(opentelemetry::Value::from)
+            }
+            serde_json_bytes::Value::Number(value) if value.is_i64() => {
+                value.as_i64().map(opentelemetry::Value::from)
+            }
+            serde_json_bytes::Value::String(value) => Some(value.as_str().to_string().into()),
+            serde_json_bytes::Value::Array(value) => {
+                // Arrays must be uniform in value
+                if value.iter().all(|v| v.is_i64()) {
+                    Some(opentelemetry::Value::Array(opentelemetry::Array::I64(
+                        value.iter().filter_map(|v| v.as_i64()).collect(),
+                    )))
+                } else if value.iter().all(|v| v.is_f64()) {
+                    Some(opentelemetry::Value::Array(opentelemetry::Array::F64(
+                        value.iter().filter_map(|v| v.as_f64()).collect(),
+                    )))
+                } else if value.iter().all(|v| v.is_boolean()) {
+                    Some(opentelemetry::Value::Array(opentelemetry::Array::Bool(
+                        value.iter().filter_map(|v| v.as_bool()).collect(),
+                    )))
+                } else if value.iter().all(|v| v.is_string()) {
+                    Some(opentelemetry::Value::Array(opentelemetry::Array::String(
+                        value
+                            .iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|v| v.to_string().into())
+                            .collect(),
+                    )))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+impl ToOtelValue for &serde_json::Value {
+    fn maybe_to_otel_value(&self) -> Option<opentelemetry::Value> {
+        match self {
+            serde_json::Value::Bool(value) => Some((*value).into()),
+            serde_json::Value::Number(value) if value.is_f64() => {
+                value.as_f64().map(opentelemetry::Value::from)
+            }
+            serde_json::Value::Number(value) if value.is_i64() => {
+                value.as_i64().map(opentelemetry::Value::from)
+            }
+            serde_json::Value::String(value) => Some(value.as_str().to_string().into()),
+            serde_json::Value::Array(value) => {
+                // Arrays must be uniform in value
+                if value.iter().all(|v| v.is_i64()) {
+                    Some(opentelemetry::Value::Array(opentelemetry::Array::I64(
+                        value.iter().filter_map(|v| v.as_i64()).collect(),
+                    )))
+                } else if value.iter().all(|v| v.is_f64()) {
+                    Some(opentelemetry::Value::Array(opentelemetry::Array::F64(
+                        value.iter().filter_map(|v| v.as_f64()).collect(),
+                    )))
+                } else if value.iter().all(|v| v.is_boolean()) {
+                    Some(opentelemetry::Value::Array(opentelemetry::Array::Bool(
+                        value.iter().filter_map(|v| v.as_bool()).collect(),
+                    )))
+                } else if value.iter().all(|v| v.is_string()) {
+                    Some(opentelemetry::Value::Array(opentelemetry::Array::String(
+                        value
+                            .iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|v| v.to_string().into())
+                            .collect(),
+                    )))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+impl From<opentelemetry::Value> for AttributeValue {
+    fn from(value: opentelemetry::Value) -> Self {
+        match value {
+            opentelemetry::Value::Bool(v) => AttributeValue::Bool(v),
+            opentelemetry::Value::I64(v) => AttributeValue::I64(v),
+            opentelemetry::Value::F64(v) => AttributeValue::F64(v),
+            opentelemetry::Value::String(v) => AttributeValue::String(v.into()),
+            opentelemetry::Value::Array(v) => AttributeValue::Array(v.into()),
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::plugins::telemetry::config_new::{trace_id, DatadogId};
-    use opentelemetry_api::trace::{
-        SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState,
-    };
+    use opentelemetry_api::trace::SpanContext;
+    use opentelemetry_api::trace::SpanId;
+    use opentelemetry_api::trace::TraceContextExt;
+    use opentelemetry_api::trace::TraceFlags;
+    use opentelemetry_api::trace::TraceId;
+    use opentelemetry_api::trace::TraceState;
     use opentelemetry_api::Context;
     use tracing::span;
     use tracing_subscriber::layer::SubscriberExt;
+
+    use crate::plugins::telemetry::config_new::trace_id;
+    use crate::plugins::telemetry::config_new::DatadogId;
 
     #[test]
     fn dd_convert() {

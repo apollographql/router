@@ -17,7 +17,9 @@ use tower::BoxError;
 
 use crate::error::Error;
 use crate::graphql;
-use crate::http_ext::{header_map, TryIntoHeaderName, TryIntoHeaderValue};
+use crate::http_ext::header_map;
+use crate::http_ext::TryIntoHeaderName;
+use crate::http_ext::TryIntoHeaderValue;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::notification::HandleStream;

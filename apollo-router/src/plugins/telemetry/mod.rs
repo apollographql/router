@@ -318,9 +318,9 @@ impl Plugin for Telemetry {
                         span.set_dyn_attributes([
                             (
                                 HTTP_REQUEST_METHOD,
-                                AttributeValue::String(request.router_request.method().to_string()),
+                                request.router_request.method().to_string().into(),
                             ),
-                            (APOLLO_PRIVATE_REQUEST, AttributeValue::Bool(true)),
+                            (APOLLO_PRIVATE_REQUEST, opentelemetry_api::Value::Bool(true)),
                         ]);
                     }
 
@@ -340,26 +340,25 @@ impl Plugin for Telemetry {
                     let mut custom_attributes =
                         config_request.spans.router.attributes.on_request(request);
                     custom_attributes.extend([
-                        (
-                            CLIENT_NAME_KEY,
-                            AttributeValue::String(client_name.to_string()),
-                        ),
-                        (
-                            CLIENT_VERSION_KEY,
-                            AttributeValue::String(client_version.to_string()),
-                        ),
+                        (CLIENT_NAME_KEY, client_name.to_string().into()),
+                        (CLIENT_VERSION_KEY, client_version.to_string().into()),
                         (
                             Key::from_static_str("apollo_private.http.request_headers"),
-                            AttributeValue::String(filter_headers(
+                            filter_headers(
                                 request.router_request.headers(),
                                 &config_request.apollo.send_headers,
-                            )),
+                            )
+                            .into(),
                         ),
                     ]);
 
                     custom_attributes
                 },
-                move |custom_attributes: HashMap<opentelemetry_api::Key, AttributeValue>, fut| {
+                move |custom_attributes: HashMap<
+                    opentelemetry_api::Key,
+                    opentelemetry_api::Value,
+                >,
+                      fut| {
                     let start = Instant::now();
                     let config = config_later.clone();
 
@@ -476,7 +475,7 @@ impl Plugin for Telemetry {
                     Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
                     (req.context.clone(), custom_attributes)
                 },
-                move |(ctx, custom_attributes): (Context, HashMap<Key, AttributeValue>), fut| {
+                move |(ctx, custom_attributes): (Context, HashMap<Key, opentelemetry::Value>), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -582,7 +581,7 @@ impl Plugin for Telemetry {
                 move |(context, cache_attributes, custom_attributes): (
                     Context,
                     Option<CacheAttributes>,
-                    HashMap<Key, AttributeValue>,
+                    HashMap<Key, opentelemetry::Value>,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let subgraph_attribute = subgraph_attribute.clone();
