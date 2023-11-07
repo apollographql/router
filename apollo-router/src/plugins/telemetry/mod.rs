@@ -146,6 +146,7 @@ pub(crate) mod metrics;
 mod otlp;
 pub(crate) mod reload;
 mod resource;
+mod span_factory;
 pub(crate) mod tracing;
 pub(crate) mod utils;
 
@@ -837,7 +838,7 @@ impl Telemetry {
         }
     }
 
-    fn filter_variables_values(
+    pub(crate) fn filter_variables_values(
         variables: &Map<ByteString, Value>,
         forward_rules: &ForwardValues,
     ) -> String {
