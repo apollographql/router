@@ -4,6 +4,7 @@ use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::Key;
 use opentelemetry_api::trace::TraceContextExt;
+use paste::paste;
 use tower::BoxError;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -73,89 +74,55 @@ impl ToOtelValue for &Option<AttributeValue> {
     }
 }
 
-impl ToOtelValue for &serde_json_bytes::Value {
-    fn maybe_to_otel_value(&self) -> Option<opentelemetry::Value> {
-        match self {
-            serde_json_bytes::Value::Bool(value) => Some((*value).into()),
-            serde_json_bytes::Value::Number(value) if value.is_f64() => {
-                value.as_f64().map(opentelemetry::Value::from)
-            }
-            serde_json_bytes::Value::Number(value) if value.is_i64() => {
-                value.as_i64().map(opentelemetry::Value::from)
-            }
-            serde_json_bytes::Value::String(value) => Some(value.as_str().to_string().into()),
-            serde_json_bytes::Value::Array(value) => {
-                // Arrays must be uniform in value
-                if value.iter().all(|v| v.is_i64()) {
-                    Some(opentelemetry::Value::Array(opentelemetry::Array::I64(
-                        value.iter().filter_map(|v| v.as_i64()).collect(),
-                    )))
-                } else if value.iter().all(|v| v.is_f64()) {
-                    Some(opentelemetry::Value::Array(opentelemetry::Array::F64(
-                        value.iter().filter_map(|v| v.as_f64()).collect(),
-                    )))
-                } else if value.iter().all(|v| v.is_boolean()) {
-                    Some(opentelemetry::Value::Array(opentelemetry::Array::Bool(
-                        value.iter().filter_map(|v| v.as_bool()).collect(),
-                    )))
-                } else if value.iter().all(|v| v.is_string()) {
-                    Some(opentelemetry::Value::Array(opentelemetry::Array::String(
-                        value
-                            .iter()
-                            .filter_map(|v| v.as_str())
-                            .map(|v| v.to_string().into())
-                            .collect(),
-                    )))
-                } else {
-                    None
+macro_rules! impl_to_otel_value {
+    ($type:ty) => {
+        paste! {
+            impl ToOtelValue for $type {
+                fn maybe_to_otel_value(&self) -> Option<opentelemetry::Value> {
+                    match self {
+                        $type::Bool(value) => Some((*value).into()),
+                        $type::Number(value) if value.is_f64() => {
+                            value.as_f64().map(opentelemetry::Value::from)
+                        }
+                        $type::Number(value) if value.is_i64() => {
+                            value.as_i64().map(opentelemetry::Value::from)
+                        }
+                        $type::String(value) => Some(value.as_str().to_string().into()),
+                        $type::Array(value) => {
+                            // Arrays must be uniform in value
+                            if value.iter().all(|v| v.is_i64()) {
+                                Some(opentelemetry::Value::Array(opentelemetry::Array::I64(
+                                    value.iter().filter_map(|v| v.as_i64()).collect(),
+                                )))
+                            } else if value.iter().all(|v| v.is_f64()) {
+                                Some(opentelemetry::Value::Array(opentelemetry::Array::F64(
+                                    value.iter().filter_map(|v| v.as_f64()).collect(),
+                                )))
+                            } else if value.iter().all(|v| v.is_boolean()) {
+                                Some(opentelemetry::Value::Array(opentelemetry::Array::Bool(
+                                    value.iter().filter_map(|v| v.as_bool()).collect(),
+                                )))
+                            } else if value.iter().all(|v| v.is_string()) {
+                                Some(opentelemetry::Value::Array(opentelemetry::Array::String(
+                                    value
+                                        .iter()
+                                        .filter_map(|v| v.as_str())
+                                        .map(|v| v.to_string().into())
+                                        .collect(),
+                                )))
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    }
                 }
             }
-            _ => None,
         }
-    }
+    };
 }
-
-impl ToOtelValue for &serde_json::Value {
-    fn maybe_to_otel_value(&self) -> Option<opentelemetry::Value> {
-        match self {
-            serde_json::Value::Bool(value) => Some((*value).into()),
-            serde_json::Value::Number(value) if value.is_f64() => {
-                value.as_f64().map(opentelemetry::Value::from)
-            }
-            serde_json::Value::Number(value) if value.is_i64() => {
-                value.as_i64().map(opentelemetry::Value::from)
-            }
-            serde_json::Value::String(value) => Some(value.as_str().to_string().into()),
-            serde_json::Value::Array(value) => {
-                // Arrays must be uniform in value
-                if value.iter().all(|v| v.is_i64()) {
-                    Some(opentelemetry::Value::Array(opentelemetry::Array::I64(
-                        value.iter().filter_map(|v| v.as_i64()).collect(),
-                    )))
-                } else if value.iter().all(|v| v.is_f64()) {
-                    Some(opentelemetry::Value::Array(opentelemetry::Array::F64(
-                        value.iter().filter_map(|v| v.as_f64()).collect(),
-                    )))
-                } else if value.iter().all(|v| v.is_boolean()) {
-                    Some(opentelemetry::Value::Array(opentelemetry::Array::Bool(
-                        value.iter().filter_map(|v| v.as_bool()).collect(),
-                    )))
-                } else if value.iter().all(|v| v.is_string()) {
-                    Some(opentelemetry::Value::Array(opentelemetry::Array::String(
-                        value
-                            .iter()
-                            .filter_map(|v| v.as_str())
-                            .map(|v| v.to_string().into())
-                            .collect(),
-                    )))
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    }
-}
+impl_to_otel_value!(serde_json_bytes::Value);
+impl_to_otel_value!(serde_json::Value);
 
 impl From<opentelemetry::Value> for AttributeValue {
     fn from(value: opentelemetry::Value) -> Self {
@@ -178,11 +145,14 @@ mod test {
     use opentelemetry_api::trace::TraceId;
     use opentelemetry_api::trace::TraceState;
     use opentelemetry_api::Context;
+    use opentelemetry_api::StringValue;
+    use serde_json::json;
     use tracing::span;
     use tracing_subscriber::layer::SubscriberExt;
 
     use crate::plugins::telemetry::config_new::trace_id;
     use crate::plugins::telemetry::config_new::DatadogId;
+    use crate::plugins::telemetry::config_new::ToOtelValue;
 
     #[test]
     fn dd_convert() {
@@ -233,5 +203,40 @@ mod test {
             let trace_id = trace_id();
             assert_eq!(trace_id, Some(TraceId::from_u128(42)));
         });
+    }
+
+    #[test]
+    fn maybe_to_otel_value() {
+        assert_eq!(json!("string").maybe_to_otel_value(), Some("string".into()));
+        assert_eq!(json!(1).maybe_to_otel_value(), Some(1.into()));
+        assert_eq!(json!(1.0).maybe_to_otel_value(), Some(1.0.into()));
+        assert_eq!(json!(true).maybe_to_otel_value(), Some(true.into()));
+
+        assert_eq!(
+            json!(["string1", "string2"]).maybe_to_otel_value(),
+            Some(opentelemetry::Value::Array(
+                vec![
+                    StringValue::from("string1".to_string()),
+                    StringValue::from("string2".to_string())
+                ]
+                .into()
+            ))
+        );
+        assert_eq!(
+            json!([1, 2]).maybe_to_otel_value(),
+            Some(opentelemetry::Value::Array(vec![1i64, 2i64].into()))
+        );
+        assert_eq!(
+            json!([1.0, 2.0]).maybe_to_otel_value(),
+            Some(opentelemetry::Value::Array(vec![1.0, 2.0].into()))
+        );
+        assert_eq!(
+            json!([true, false]).maybe_to_otel_value(),
+            Some(opentelemetry::Value::Array(vec![true, false].into()))
+        );
+
+        // Arrays must be uniform
+        assert!(json!(["1", 1]).maybe_to_otel_value().is_none());
+        assert!(json!([1.0, 1]).maybe_to_otel_value().is_none());
     }
 }
