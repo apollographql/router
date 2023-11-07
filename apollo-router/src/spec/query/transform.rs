@@ -13,6 +13,21 @@ pub(crate) fn document(
         sources: document.sources.clone(),
         definitions: Vec::new(),
     };
+
+    // walk through the fragment first: if a fragment is entirely filtered, we want to
+    // remove the spread too
+    for definition in &document.definitions {
+        match definition {
+            ast::Definition::FragmentDefinition(def) => {
+                if let Some(new_def) = visitor.fragment_definition(def)? {
+                    new.definitions
+                        .push(ast::Definition::FragmentDefinition(new_def.into()))
+                }
+            }
+            _ => {}
+        }
+    }
+
     for definition in &document.definitions {
         match definition {
             ast::Definition::OperationDefinition(def) => {
@@ -24,12 +39,6 @@ pub(crate) fn document(
                 if let Some(new_def) = visitor.operation(&root_type, def)? {
                     new.definitions
                         .push(ast::Definition::OperationDefinition(new_def.into()))
-                }
-            }
-            ast::Definition::FragmentDefinition(def) => {
-                if let Some(new_def) = visitor.fragment_definition(def)? {
-                    new.definitions
-                        .push(ast::Definition::FragmentDefinition(new_def.into()))
                 }
             }
             _ => {}
@@ -301,18 +310,18 @@ fn test_add_directive_to_fields() {
     let ast = apollo_compiler::ast::Document::parse(graphql, "");
     let (schema, _doc) = ast.to_mixed();
     let mut visitor = AddDirective { schema };
-    let expected = "query($id: ID = null) {
+    let expected = "fragment F on Query {
+  next @added {
+    a @added
+  }
+}
+
+query($id: ID = null) {
   a @added
   ... @defer {
     b @added
   }
   ...F
-}
-
-fragment F on Query {
-  next @added {
-    a @added
-  }
 }
 ";
     assert_eq!(document(&mut visitor, &ast).unwrap().to_string(), expected)

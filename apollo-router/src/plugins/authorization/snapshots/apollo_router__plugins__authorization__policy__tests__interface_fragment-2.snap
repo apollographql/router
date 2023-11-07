@@ -21,7 +21,11 @@ query:
 extracted_policies: {"read user", "read username"}
 successful policies: ["read user", "read username"]
 filtered:
-{
+fragment F on User {
+  name
+}
+
+query {
   topProducts {
     type
   }
@@ -29,10 +33,6 @@ filtered:
     id
     ...F
   }
-}
-
-fragment F on User {
-  name
 }
 
 paths: []
