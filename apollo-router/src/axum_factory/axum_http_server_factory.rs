@@ -383,7 +383,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
     }
 }
 
-fn use_legacy_request_span(configuration: &Configuration) -> bool {
+pub(crate) fn use_legacy_request_span(configuration: &Configuration) -> bool {
     configuration
         .apollo_plugins
         .plugins

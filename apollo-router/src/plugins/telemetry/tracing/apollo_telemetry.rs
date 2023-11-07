@@ -739,9 +739,10 @@ impl SpanExporter for Exporter {
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
         for span in batch {
-            if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
-                || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
-                || (!self.use_legacy_request_span && span.name == ROUTER_SPAN_NAME)
+            if matches!(
+                span.attributes.get(&APOLLO_PRIVATE_REQUEST),
+                Some(&Value::Bool(true))
+            ) || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
             {
                 match self.extract_traces(span.into()) {
                     Ok(extracted_traces) => {

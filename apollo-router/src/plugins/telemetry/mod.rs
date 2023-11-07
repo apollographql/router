@@ -314,14 +314,6 @@ impl Plugin for Telemetry {
                 move |request: &router::Request| {
                     if !config_request.spans.legacy_request_span {
                         let span = Span::current();
-                        span.record(
-                            "apollo_private.http.request_headers",
-                            filter_headers(
-                                request.router_request.headers(),
-                                &config_request.apollo.send_headers,
-                            )
-                            .as_str(),
-                        );
 
                         span.set_dyn_attributes([
                             (
@@ -355,6 +347,13 @@ impl Plugin for Telemetry {
                         (
                             CLIENT_VERSION_KEY,
                             AttributeValue::String(client_version.to_string()),
+                        ),
+                        (
+                            Key::from_static_str("apollo_private.http.request_headers"),
+                            AttributeValue::String(filter_headers(
+                                request.router_request.headers(),
+                                &config_request.apollo.send_headers,
+                            )),
                         ),
                     ]);
 
@@ -638,7 +637,7 @@ pub(crate) fn create_router_span<B>(router_request: &http::Request<B>) -> Span {
         "otel.status_code" = ::tracing::field::Empty,
         "apollo_private.duration_ns" = ::tracing::field::Empty,
         "apollo_private.http.request_headers" = ::tracing::field::Empty,
-        "apollo_private.http.response_headers" = field::Empty
+        "apollo_private.http.response_headers" = field::Empty,
     );
 
     span
