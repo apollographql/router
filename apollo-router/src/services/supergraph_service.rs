@@ -3546,7 +3546,7 @@ mod tests {
                 }},
                 serde_json::json!{{"data": {
                     "_entities": [{
-                        "__typename": "Contact",
+                        "__typename": "Person",
                         "country": "A"
                     }]
                 } }}
