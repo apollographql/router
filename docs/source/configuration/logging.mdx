@@ -1,8 +1,17 @@
 ---
-title: Logging in the Apollo Router
+title: Router Logging
+subtitle: Logging in the Apollo Router
+description: Configure logging in the Apollo Router. Set the log level and output format.
 ---
 
 import { Link } from "gatsby";
+
+The Apollo Router provides built-in support for logging with support for:
+
+* [Configurable log level](#log-level)
+* [stdout output](#logging-to-stdout) with [configurable output formats](#logging-output-format)
+
+## Log level
 
 The Apollo Router accepts a command-line argument to set its log level:
 
@@ -61,62 +70,440 @@ In both examples, the actual filter used by the router is as defined in the RUST
 
 For more information about specifying filters for more granular control over Apollo Router logging, see the [Env Logger documentation](https://docs.rs/env_logger/latest/env_logger/).
 
-## Output formats
 
-The Apollo Router supports two logging formats:
+## Common logging settings
 
-- [Basic logging](#basic-logging-via-shell), primarily for local development
-- [JSON-formatted logging](#json-formatted-logging), for compatibility with searchable logging tools like Google Cloud Logging
+Common settings for router logging:
 
-The router uses basic logging whenever an interactive shell session is attached, and it uses JSON-formatted logging otherwise (e.g., in CI and deployed environments). You can also enforce a specific format in configuration.
+* [Service name](#service-name)
+* [Resource attributes](#resource)
 
-### Basic logging via shell
+### Service name
 
-Basic logging is mostly used during local development:
+Set a service name for your router logging so they can be easily searched and found in your metrics dashboards. 
 
-```
-2022-03-18T10:28:11.090054Z  INFO apollo_router::executable: apollo-router@0.1.0-alpha.9
-2022-03-18T10:28:11.160650Z  INFO apollo_router: Starting Apollo Router
-2022-03-18T10:28:11.339906Z  INFO apollo_router: Listening on http://127.0.0.1:4000 🚀
-```
+The service name can be set by an environment variable or in `router.yaml`, with the following order of precedence (first to last):
 
-### JSON-formatted logging
+1. `OTEL_SERVICE_NAME` environment variable
+2. `OTEL_RESOURCE_ATTRIBUTES` environment variable
+3. `telemetry.logging.common.service_name` in `router.yaml`
 
-JSON-formatted logging provides compatibility with common searchable logging tools like Google Cloud Logging. The Apollo Router uses the popular Bunyan format:
+      <ExpansionPanel title="Example service_name">
 
-```json
-{"timestamp":"2022-03-18T11:46:41.926942Z","level":"INFO","fields":{"message":"apollo-router@0.1.0-alpha.9"},"target":"apollo_router::executable"}
-{"timestamp":"2022-03-18T11:46:41.985121Z","level":"INFO","fields":{"message":"Starting Apollo Router"},"target":"apollo_router"}
-{"timestamp":"2022-03-18T11:46:42.171173Z","level":"INFO","fields":{"message":"Listening on http://127.0.0.1:4000 🚀"},"target":"apollo_router"}
-{"timestamp":"2022-03-18T11:46:43.453993Z","level":"INFO","fields":{"message":"Stopped"},"target":"apollo_router"}
-```
+      Example setting service name in `telemetry.logging.common.service_name`:
 
-## Basic configuration
+      ```yaml title="router.yaml"
+      telemetry:
+        logging:
+          common:
+            # (Optional) Set the service name to easily find logs related to the apollo-router in your metrics dashboards
+            service_name: "router" #highlight-line
+      ```
 
-<ExperimentalFeature />
+      </ExpansionPanel>
 
-By default, the router _doesn't_ log certain values that might contain sensitive data, even if a sufficient log level is set:
 
- - Request bodies
- - Response bodies
- - Headers 
+4. `telemetry.logging.common.resource` in `router.yaml`
 
-You can enable selective logging of these values via the `when_header` option:
+      <ExpansionPanel title="Example resource">
+
+      Example setting service name in `telemetry.logging.common.resource`:
+
+      ```yaml title="router.yaml"
+      telemetry:
+        logging:
+          common:
+            resource:
+              # (Optional) Set the service name to easily find logs related to the apollo-router in your metrics dashboards
+              "service.name": "router" #highlight-line
+      ```
+
+      </ExpansionPanel>
+
+If the service name isn't explicitly set, then by default the service name will be set to `unknown_service:apollo_router` (or `unknown_service` if the executable name cannot be determined).
+
+### Resource attribute
+
+A resource attribute is a set of key-value pairs that provide additional information to an exporter. Application performance monitors (APM) may interpret and display resource information. 
+
+In `router.yaml`, resource attributes are set in `telemetry.logging.common.resource`. For example:
 
 ```yaml title="router.yaml"
 telemetry:
-  experimental_logging:
-    format: json # By default it's "pretty" if you are in an interactive shell session
-    display_filename: true # Display filename where the log is coming from. Default: true
-    display_line_number: false # Display line number in the file where the log is coming from. Default: true
-    # If one of these headers matches we will log supergraph and subgraphs requests/responses
-    when_header:
-      - name: apollo-router-log-request
-        value: my_client
-        headers: true # default: false
-        body: true # default: false
-      # log request for all requests coming from Iphones
-      - name: user-agent
-        match: ^Mozilla/5.0 (iPhone*
-        headers: true
+  logging:
+    common:
+      resource:
+        "environment.name": "production"
+        "environment.namespace": "{env.MY_K8_NAMESPACE_ENV_VARIABLE}"
 ```
+
+For OpenTelemetry conventions for resources, see [Resource Semantic Conventions](https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/README.md).
+
+## Logging to stdout
+
+Logging in the Apollo Router can be directed to stdout.
+
+### Configure stdout
+
+#### `enabled`
+
+To enable stdout logging, set the `enabled` option to `true`:
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    stdout:
+      enabled: true #highlight-line
+```
+
+#### `format`
+
+Logging to stdout can be configured to output in different formats.
+
+The default format depends on how the router is run:
+
+* `text` - interactive shell.
+* `json` - non-interactive shell.
+
+The format can be explicitly set in `router.yaml` with `telemetry.logging.stdout.format`:
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    stdout:
+      enabled: true
+      format: text #highlight-line
+```
+
+For configuration options specific to each output format, see the [`text`](#text) and [`json`](#json) format references.
+
+### `stdout` configuration reference
+
+| Option                | Values                     | Default         | Description                                          |
+|-----------------------|----------------------------|-----------------|------------------------------------------------------|
+| `enabled`             | `true`\|`false`            | `false`         | Enable or disable stdout logging.                    |
+| `format`              |                            | `text`\|`json`  | See the [format documentation](#format) for details. |
+
+
+## Logging output format
+
+You can configure logging to be output in different formats:
+
+* [`text`](#text)
+* [`json`](#json)
+
+Each format has its own specific settings.
+
+### `text`
+
+The `text` format is human-readable and ideal for development and debugging. It is the default logging output format.
+
+To use the `text` format, in `router.yaml` enable `telemetry.logging.stdout` and set the format as `text`:
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    stdout:
+      enabled: true
+      format: text # The default text format will be used
+```
+
+The `text` format can also be used as a key in YAML, `telemetry.logging.stdout.format.text`, to specify advanced configuration options:
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    stdout:
+      enabled: true
+      format:
+        text: #highlight-line
+          flavor: compact
+          ansi: false
+          display_filename: true
+          display_level: true
+          display_line_number: true
+          display_target: true
+          display_thread_id: true
+          display_thread_name: true
+          display_timestamp: true
+```
+
+Example `text` output:
+
+```json
+2023-10-30T15:49:34.174435Z  INFO main ThreadId(01) span_name{span_attr_1="span_attr_1" span_attr_2="span_attr_2"}: event_target: event_file.rs:32: event_attr_1="event_attr_1" event_attr_2="event_attr_2"
+```
+
+#### `flavor`
+
+To use different "flavors" of text formatting, in `router.yaml` you can set `telemetry.logging.stdout.format.text.flavor` and choose between `default`, `pretty` or `compact` formatting.
+
+##### `default`
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    stdout:
+      enabled: true
+      format:
+        text:
+          flavor: default
+```
+
+Example `default` flavor output:
+
+```
+2023-10-30T15:54:48.563180Z  INFO span_name{span_attr_1="span_attr_1" span_attr_2="span_attr_2"}: event_target: event_attr_1="event_attr_1" event_attr_2="event_attr_2"
+```
+
+##### `pretty`
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    stdout:
+      enabled: true
+      format:
+        text:
+          flavor: pretty
+```
+
+Example `pretty` flavor output:
+
+```
+  2023-10-30T15:56:26.478213Z  INFO event_target: event_attr_1: "event_attr_1", event_attr_2: "event_attr_2"
+    at event_file.rs:32
+    in span_target::span_name with span_attr_1: "span_attr_1", span_attr_2: "span_attr_2"
+
+```
+
+##### `compact`
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    stdout:
+      enabled: true
+      format:
+        text:
+          flavor: compact
+```
+
+Example `compact` flavor output:
+
+```
+2023-10-30T15:56:57.717627Z  INFO span_name: event_target: event_attr_1="event_attr_1" event_attr_2="event_attr_2" span_attr_1="span_attr_1" span_attr_2="span_attr_2"
+```
+
+
+#### `text` configuration reference
+
+| Option                | Values                         | Default   | Description                                                |
+|-----------------------|--------------------------------|-----------|------------------------------------------------------------|
+| `flavor`              | `default`\|`compact`\|`pretty` | `default` | The overall output formatting.                             |
+| `ansi`                | `true`\|`false`                | `false`   | Use ansi terminal escape codes.                            |
+| `display_filename`    | `true`\|`false`                | `false`   | The filename where the log event was raised.               |
+| `display_level`       | `true`\|`false`                | `true`    | The level of the log event, e.g. INFO, WARN, ERROR, TRACE. |
+| `display_line_number` | `true`\|`false`                | `false`   | The line number where the event was raised.                |
+| `display_target`      | `true`\|`false`                | `false`   | The module name where the event was raised.                |
+| `display_thread_id`   | `true`\|`false`                | `false`   | The id of the thread where the event was raised.           |
+| `display_thread_name` | `true`\|`false`                | `false`   | The name of the thread where the event was raised.         |
+| `display_timestamp`   | `true`\|`false`                | `true`    | The timestamp of when the event was raised.                |
+
+
+### `json`
+
+The `json` format is a machine-readable format ideal for consumption by application performance monitors (APMs).
+
+The router supports structured JSON output provided by [tracing-subscriber](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html).
+
+To use the `json` format, in `router.yaml` enable `telemetry.logging.stdout` and set the format as `json`:
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    stdout:
+      enabled: true
+      format: json
+```
+
+Each log entry will be a single well-formed JSON document that is ideal for processing in your APM tool of choice.
+
+Example default `json` output:
+
+```json title="stdout"
+{
+  "timestamp": "2023-10-30T14:09:34.771388Z",
+  "level": "INFO",
+  "fields": {
+    "event_attr_1": "event_attr_1",
+    "event_attr_2": "event_attr_2"
+  },
+  "target": "event_target"
+}
+```
+
+You can configure which attributes are included in the JSON output by specifying `telemetry.logging.stdout.format.json` as a key in `router.yaml`:
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    stdout:
+      enabled: true
+      format: 
+        json:
+          display_filename: false
+          display_level: true
+          display_line_number: false
+          display_target: false
+          display_thread_id: false
+          display_thread_name: false
+          display_timestamp: true
+          flatten_event: false
+          display_current_span: true
+          display_span_list: true
+```
+
+Example `json` output:
+
+```json
+{
+  "timestamp": "2023-10-30T15:47:52.570482Z",
+  "level": "INFO",
+  "fields": {
+    "event_attr_1": "event_attr_1",
+    "event_attr_2": "event_attr_2"
+  },
+  "target": "event_target",
+  "filename": "event_file.rs",
+  "line_number": 32,
+  "span": {
+    "span_attr_1": "span_attr_1",
+    "span_attr_2": "span_attr_2",
+    "name": "span_name"
+  },
+  "spans": [
+    {
+      "span_attr_1": "span_attr_1",
+      "span_attr_2": "span_attr_2",
+      "name": "span_name"
+    }
+  ],
+  "threadName": "main",
+  "threadId": "ThreadId(1)"
+}
+```
+
+#### `flatten_event`
+
+The `telemetry.logging.stdout.format.json.flatten_event` flag can be used to eliminate the `fields` attribute and output event fields directly on the root JSON object. This is useful if you want to ingest the logs into a tool that doesn't support nested JSON objects.
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    stdout:
+      enabled: true
+      format: 
+        json:
+          flatten_event: true
+```
+
+Example flattened output:
+
+```yaml
+{
+  "timestamp": "2023-10-30T14:09:34.771388Z",
+  "level": "INFO",
+  "event_attr_1": "event_attr_1",
+  "event_attr_2": "event_attr_2",
+  "target": "event_target"
+}
+```
+
+#### `display_current_span`
+
+Events may also output information about the span that they are raised in, which is useful to log attributes attached to the span for a particular request.
+
+To log span information, set the `telemetry.logging.stdout.format.json.display_current_span` option to `true`:
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    stdout:
+      enabled: true
+      format: 
+        json:
+          display_current_span: true
+```
+
+Example output with span information:
+
+```yaml
+{
+  "timestamp": "2023-10-30T14:09:34.771388Z",
+  "level": "INFO",
+  "fields": {
+    "event_attr_1": "event_attr_1",
+    "event_attr_2": "event_attr_2"
+  },
+  "target": "event_target",
+  "span": {
+    "span_attr_1": "span_attr_1",
+    "span_attr_2": "span_attr_2",
+    "name": "span_name"
+  }
+}
+```
+
+#### `display_span_list`
+
+The `telemetry.logging.stdout.format.json.display_span_list` option is like [`display_current_span`](#displaycurrentspan) but instead of outputting information for the current span, `display_span_list`  outputs information for all spans that an event was raised in. 
+
+For instance, if you have a custom `trace_id` from a request header, as long as the attribute is configured on the `router` span it will appear on all log events associated with the request.
+
+```yaml title="router.yaml"
+telemetry:
+  logging:
+    stdout:
+      enabled: true
+      format: 
+        json:
+          display_span_list: true
+```
+
+Example output with a list of spans:
+
+```yaml
+{
+  "timestamp": "2023-10-30T14:09:34.771388Z",
+  "level": "INFO",
+  "fields": {
+    "event_attr_1": "event_attr_1",
+    "event_attr_2": "event_attr_2"
+  },
+  "target": "event_target",
+  "spans": [
+    {
+      "span_attr_1": "span_attr_1",
+      "span_attr_2": "span_attr_2",
+      "name": "span_name"
+    }
+  ]
+}
+```
+
+#### `json` configuration reference
+
+| Option                 | Values            | Default | Event Field   | Description                                                                            |
+|------------------------|-------------------|---------|:--------------|----------------------------------------------------------------------------------------|
+| `current_span`         | `true`\|`false`   | `false` | `span`        | The span in which the event was raised and all of its' attributes.                     |
+| `display_filename`     | `true`\|`false`   | `false` | `filename`    | The filename where the log event was raised.                                           |
+| `display_level`        | `true`\|`false`   | `true`  | `level`       | The level of the log event, e.g. INFO, WARN, ERROR, TRACE.                             |
+| `display_line_number`  | `true`\|`false`   | `false` | `line_number` | The line number where the event was raised.                                            |
+| `display_target`       | `true`\|`false`   | `false` | `target`      | The module name where the event was raised.                                            |
+| `display_thread_id`    | `true`\|`false`   | `false` | `thread_id`   | The id of the thread where the event was raised.                                       |
+| `display_thread_name`  | `true`\|`false`   | `false` | `thread_name` | The name of the thread where the event was raised.                                     |
+| `display_timestamp`    | `true`\|`false`   | `true`  | `timestamp`   | The timestamp of when the event was raised.                                            |
+| `flatten_event`        | `true`\|`false`   | `false` |               | Instead output event fields directly on the root json object, see documentation above. |
+| `span_list`            | `true`\|`false`   | `false` | `spans`       | A list of all spans to root in which the event was raised and all of their attributes. |
+
