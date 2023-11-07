@@ -24,4 +24,4 @@ filtered:
   }
 }
 
-paths: ["/reviews/@"]
+paths: ["/topProducts/reviews/@"]

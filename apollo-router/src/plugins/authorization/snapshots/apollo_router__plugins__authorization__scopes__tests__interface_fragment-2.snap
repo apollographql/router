@@ -36,4 +36,4 @@ query {
   }
 }
 
-paths: ["/name"]
+paths: ["/itf/name"]
