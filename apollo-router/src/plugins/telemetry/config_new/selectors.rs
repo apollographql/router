@@ -1,7 +1,7 @@
 use crate::context::{OPERATION_KIND, OPERATION_NAME};
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugins::telemetry::config::AttributeValue;
-use crate::plugins::telemetry::config_new::{trace_id, DatadogId, GetAttribute};
+use crate::plugins::telemetry::config_new::{get_baggage, trace_id, DatadogId, GetAttribute};
 use crate::services::{router, subgraph, supergraph};
 use access_json::JSONQuery;
 use opentelemetry_api::baggage::BaggageExt;
@@ -390,17 +390,8 @@ impl GetAttribute<router::Request, router::Response> for RouterSelector {
                 .into()
             }),
             RouterSelector::Baggage {
-                baggage: baggage_name,
-                default,
-                ..
-            } => {
-                let context = Context::current();
-                let baggage = context.baggage();
-                match baggage.get(baggage_name.to_string()) {
-                    Some(baggage) => AttributeValue::from(baggage.clone()).into(),
-                    None => default.clone(),
-                }
-            }
+                baggage, default, ..
+            } => get_baggage(baggage).or_else(|| default.clone()),
             // Related to Response
             _ => None,
         }
@@ -439,18 +430,8 @@ impl GetAttribute<router::Request, router::Response> for RouterSelector {
                 .flatten()
                 .or_else(|| default.clone()),
             RouterSelector::Baggage {
-                baggage: baggage_name,
-                default,
-                ..
-            } => {
-                let span_context = Context::current();
-                // I must clone the key because the otel API is bad
-                let baggage = span_context.baggage().get(baggage_name.clone()).cloned();
-                match baggage {
-                    Some(baggage) => AttributeValue::from(baggage).into(),
-                    None => default.clone(),
-                }
-            }
+                baggage, default, ..
+            } => get_baggage(baggage).or_else(|| default.clone()),
             _ => None,
         }
     }
@@ -519,18 +500,8 @@ impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphSelec
                 .flatten()
                 .or_else(|| default.clone()),
             SupergraphSelector::Baggage {
-                baggage: baggage_name,
-                default,
-                ..
-            } => {
-                let span_context = Context::current();
-                // I must clone the key because the otel API is bad
-                let baggage = span_context.baggage().get(baggage_name.clone()).cloned();
-                match baggage {
-                    Some(baggage) => AttributeValue::from(baggage.clone()).into(),
-                    None => default.clone(),
-                }
-            }
+                baggage, default, ..
+            } => get_baggage(baggage).or_else(|| default.clone()),
             SupergraphSelector::Env { env, default, .. } => std::env::var(env)
                 .ok()
                 .map(AttributeValue::String)
@@ -767,7 +738,7 @@ mod test {
         OperationKind, OperationName, Query, ResponseStatus, RouterSelector, SubgraphSelector,
         SupergraphSelector, TraceIdFormat,
     };
-    use crate::plugins::telemetry::config_new::{DatadogId, GetAttribute};
+    use crate::plugins::telemetry::config_new::GetAttribute;
     use http::StatusCode;
     use opentelemetry_api::baggage::BaggageExt;
     use opentelemetry_api::trace::{
@@ -1280,13 +1251,14 @@ mod test {
     fn router_baggage() {
         let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
         subscriber::with_default(subscriber, || {
-            let span = span!(tracing::Level::INFO, "test");
-            let _guard = span.enter();
             let selector = RouterSelector::Baggage {
                 baggage: "baggage_key".to_string(),
                 redact: None,
                 default: Some("defaulted".into()),
             };
+            let _context_guard = Context::new()
+                .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
+                .attach();
             assert_eq!(
                 selector
                     .on_request(
@@ -1298,11 +1270,8 @@ mod test {
                 "defaulted".into()
             );
 
-            let _outer_guard = span
-                .context()
-                .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
-                .attach();
-
+            let span = span!(tracing::Level::INFO, "test");
+            let _guard = span.enter();
             assert_eq!(
                 selector
                     .on_request(
@@ -1320,8 +1289,6 @@ mod test {
     fn supergraph_baggage() {
         let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
         subscriber::with_default(subscriber, || {
-            let span = span!(tracing::Level::INFO, "test");
-            let _guard = span.enter();
             let selector = SupergraphSelector::Baggage {
                 baggage: "baggage_key".to_string(),
                 redact: None,
@@ -1337,11 +1304,11 @@ mod test {
                     .unwrap(),
                 "defaulted".into()
             );
-
-            let _outer_guard = span
-                .context()
+            let _outer_guard = Context::new()
                 .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
                 .attach();
+            let span = span!(tracing::Level::INFO, "test");
+            let _guard = span.enter();
 
             assert_eq!(
                 selector

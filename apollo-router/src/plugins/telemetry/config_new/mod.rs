@@ -55,16 +55,73 @@ pub(crate) fn trace_id() -> Option<TraceId> {
     }
 }
 
+use opentelemetry::baggage::BaggageExt;
+pub(crate) fn get_baggage(key: &str) -> Option<AttributeValue> {
+    let context = Span::current().context();
+    let baggage = context.baggage();
+    baggage
+        .get(key.to_string())
+        .map(|v| AttributeValue::from(v.clone()))
+}
+
 #[cfg(test)]
 mod test {
-    use crate::plugins::telemetry::config_new::DatadogId;
-    use opentelemetry_api::baggage::BaggageExt;
-    use opentelemetry_api::trace::TraceId;
+    use crate::plugins::telemetry::config_new::{trace_id, DatadogId};
+    use opentelemetry_api::trace::{
+        SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState,
+    };
+    use opentelemetry_api::Context;
+    use tracing::span;
+    use tracing_subscriber::layer::SubscriberExt;
 
     #[test]
     fn dd_convert() {
         let trace_id = TraceId::from_hex("234e10d9e749a0a19e94ac0e4a896aee").unwrap();
         let dd_id = trace_id.to_datadog();
         assert_eq!(dd_id, "11426947331925830382");
+    }
+
+    #[test]
+    fn test_trace_id() {
+        // Create a span with a trace ID
+        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        tracing::subscriber::with_default(subscriber, || {
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                TraceFlags::default(),
+                false,
+                TraceState::default(),
+            );
+            let _context = Context::current()
+                .with_remote_span_context(span_context)
+                .attach();
+            let span = span!(tracing::Level::INFO, "test");
+            let _guard = span.enter();
+            let trace_id = trace_id();
+            assert_eq!(trace_id, Some(TraceId::from_u128(42)));
+        });
+    }
+
+    #[test]
+    fn test_baggage() {
+        // Create a span with a trace ID
+        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        tracing::subscriber::with_default(subscriber, || {
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                TraceFlags::default(),
+                false,
+                TraceState::default(),
+            );
+            let _context = Context::current()
+                .with_remote_span_context(span_context)
+                .attach();
+            let span = span!(tracing::Level::INFO, "test");
+            let _guard = span.enter();
+            let trace_id = trace_id();
+            assert_eq!(trace_id, Some(TraceId::from_u128(42)));
+        });
     }
 }
