@@ -1,0 +1,24 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+expression: stream.next_response().await.unwrap()
+---
+{
+  "data": null,
+  "extensions": {
+    "valueCompletion": [
+      {
+        "message": "Cannot return null for non-nullable array element of type Contact at index 0",
+        "path": [
+          "searchContacts",
+          0
+        ]
+      },
+      {
+        "message": "Cannot return null for non-nullable field [Contact!]!.searchContacts",
+        "path": [
+          "searchContacts"
+        ]
+      }
+    ]
+  }
+}

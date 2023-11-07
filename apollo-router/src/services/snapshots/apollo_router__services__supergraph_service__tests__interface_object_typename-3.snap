@@ -1,0 +1,13 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+expression: stream.next_response().await.unwrap()
+---
+{
+  "data": {
+    "searchContacts": [
+      {
+        "displayName": "Max"
+      }
+    ]
+  }
+}
