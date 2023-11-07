@@ -12,6 +12,7 @@ use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
 use bloomfilter::Bloom;
+use config_new::GetAttributes;
 use dashmap::DashMap;
 use futures::future::ready;
 use futures::future::BoxFuture;
@@ -127,7 +128,6 @@ use crate::spec::TYPENAME;
 use crate::tracer::TraceId;
 use crate::Context;
 use crate::ListenAddr;
-use config_new::GetAttributes;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
@@ -325,7 +325,7 @@ impl Plugin for Telemetry {
             // TODO add map_future_with_request_data to log the request
             .map_future_with_request_data(move |request: &router::Request| {
                 config_request.spans.router.attributes.on_request(request)
-            }, move |custom_attributes: HashMap<opentelemetry_api::Key, AttributeValue>, fut| {
+            }, move |custom_attributes: HashMap<opentelemetry_api::Key, opentelemetry::Value>, fut| {
                 let start = Instant::now();
                 let config = config_later.clone();
 
@@ -429,7 +429,7 @@ impl Plugin for Telemetry {
                     Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
                     (req.context.clone(), custom_attributes)
                 },
-                move |(ctx, custom_attributes): (Context, HashMap<Key, AttributeValue>), fut| {
+                move |(ctx, custom_attributes): (Context, HashMap<Key, opentelemetry::Value>), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -535,7 +535,7 @@ impl Plugin for Telemetry {
                 move |(context, cache_attributes, custom_attributes): (
                     Context,
                     Option<CacheAttributes>,
-                    HashMap<Key, AttributeValue>,
+                    HashMap<Key, opentelemetry::Value>,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let subgraph_attribute = subgraph_attribute.clone();

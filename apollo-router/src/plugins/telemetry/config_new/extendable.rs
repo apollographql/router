@@ -1,18 +1,24 @@
-use crate::plugins::telemetry::config::AttributeValue;
-use crate::plugins::telemetry::config_new::{GetAttribute, GetAttributes};
+use std::any::type_name;
+use std::collections::HashMap;
+use std::fmt::Debug;
+
 use opentelemetry_api::Key;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::Schema;
 use schemars::JsonSchema;
-use serde::de::{Error, MapAccess, Visitor};
+use serde::de::Error;
+use serde::de::MapAccess;
+use serde::de::Visitor;
+use serde::Deserialize;
+use serde::Deserializer;
 #[cfg(test)]
 use serde::Serialize;
-use serde::{Deserialize, Deserializer};
-use serde_json::{Map, Value};
-use std::any::type_name;
-use std::collections::HashMap;
-use std::fmt::Debug;
+use serde_json::Map;
+use serde_json::Value;
 use tower::BoxError;
+
+use crate::plugins::telemetry::config_new::GetAttribute;
+use crate::plugins::telemetry::config_new::GetAttributes;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[allow(dead_code)]
@@ -134,7 +140,7 @@ where
     A: Default + GetAttributes<Request, Response>,
     E: GetAttribute<Request, Response>,
 {
-    fn on_request(&self, request: &Request) -> HashMap<Key, AttributeValue> {
+    fn on_request(&self, request: &Request) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = self.attributes.on_request(request);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
@@ -146,7 +152,7 @@ where
         attrs
     }
 
-    fn on_response(&self, response: &Response) -> HashMap<Key, AttributeValue> {
+    fn on_response(&self, response: &Response) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = self.attributes.on_response(response);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
@@ -158,7 +164,7 @@ where
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> HashMap<Key, AttributeValue> {
+    fn on_error(&self, error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
         self.attributes.on_error(error)
     }
 }

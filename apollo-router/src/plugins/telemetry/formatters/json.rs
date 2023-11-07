@@ -3,6 +3,8 @@ use std::fmt;
 use std::fmt::Write;
 use std::io;
 
+use opentelemetry_api::Array;
+use opentelemetry_api::Value;
 use serde::ser::SerializeMap;
 use serde::ser::Serializer as _;
 use serde_json::Serializer;
@@ -144,7 +146,19 @@ where
                 let custom_attributes = ext.get::<LogAttributes>().map(|attrs| attrs.attributes());
                 if let Some(custom_attributes) = custom_attributes {
                     for (key, value) in custom_attributes {
-                        serializer.serialize_entry(key.as_str(), value)?;
+                        match value {
+                            Value::Bool(value) => {serializer.serialize_entry(key.as_str(), value)?;}
+                            Value::I64(value) => {serializer.serialize_entry(key.as_str(), value)?;}
+                            Value::F64(value) => {serializer.serialize_entry(key.as_str(), value)?;}
+                            Value::String(value) => {serializer.serialize_entry(key.as_str(), value.as_str())?;}
+                            Value::Array(Array::Bool(array)) => {serializer.serialize_entry(key.as_str(), array)?;}
+                            Value::Array(Array::I64(array)) => {serializer.serialize_entry(key.as_str(), array)?;}
+                            Value::Array(Array::F64(array)) => {serializer.serialize_entry(key.as_str(), array)?;}
+                            Value::Array(Array::String(array)) => {
+                                let array = array.iter().map(|a| a.as_str()).collect::<Vec<_>>();
+                                serializer.serialize_entry(key.as_str(), &array)?;
+                            }
+                        }
                     }
                 }
             }

@@ -8,12 +8,11 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 
-use super::config::AttributeValue;
 use super::reload::IsSampled;
 
 #[derive(Debug)]
 pub(crate) struct LogAttributes {
-    attributes: HashMap<Key, AttributeValue>,
+    attributes: HashMap<Key, opentelemetry::Value>,
 }
 
 impl Default for LogAttributes {
@@ -25,15 +24,15 @@ impl Default for LogAttributes {
 }
 
 impl LogAttributes {
-    pub(crate) fn attributes(&self) -> &HashMap<Key, AttributeValue> {
+    pub(crate) fn attributes(&self) -> &HashMap<Key, opentelemetry::Value> {
         &self.attributes
     }
 
-    fn insert(&mut self, key: Key, value: AttributeValue) {
+    fn insert(&mut self, key: Key, value: opentelemetry::Value) {
         self.attributes.insert(key, value);
     }
 
-    fn extend(&mut self, val: impl IntoIterator<Item = (Key, AttributeValue)>) {
+    fn extend(&mut self, val: impl IntoIterator<Item = (Key, opentelemetry::Value)>) {
         self.attributes.extend(val);
     }
 }
@@ -65,12 +64,12 @@ impl DynAttributeLayer {
 }
 
 pub(crate) trait DynAttribute {
-    fn set_dyn_attribute(&self, key: Key, value: AttributeValue);
-    fn set_dyn_attributes(&self, attributes: impl IntoIterator<Item = (Key, AttributeValue)>);
+    fn set_dyn_attribute(&self, key: Key, value: opentelemetry::Value);
+    fn set_dyn_attributes(&self, attributes: impl IntoIterator<Item = (Key, opentelemetry::Value)>);
 }
 
 impl DynAttribute for ::tracing::Span {
-    fn set_dyn_attribute(&self, key: Key, value: AttributeValue) {
+    fn set_dyn_attribute(&self, key: Key, value: opentelemetry::Value) {
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
@@ -115,7 +114,10 @@ impl DynAttribute for ::tracing::Span {
         });
     }
 
-    fn set_dyn_attributes(&self, attributes: impl IntoIterator<Item = (Key, AttributeValue)>) {
+    fn set_dyn_attributes(
+        &self,
+        attributes: impl IntoIterator<Item = (Key, opentelemetry::Value)>,
+    ) {
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
@@ -126,18 +128,15 @@ impl DynAttribute for ::tracing::Span {
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => {
                                     if otel_data.builder.attributes.is_none() {
-                                        otel_data.builder.attributes = Some(
-                                            attributes
-                                                .into_iter()
-                                                .map(|(k, v)| (k, Value::from(v)))
-                                                .collect(),
-                                        );
+                                        otel_data.builder.attributes =
+                                            Some(attributes.into_iter().collect());
                                     } else {
-                                        otel_data.builder.attributes.as_mut().unwrap().extend(
-                                            attributes
-                                                .into_iter()
-                                                .map(|(k, v)| (k, Value::from(v))),
-                                        );
+                                        otel_data
+                                            .builder
+                                            .attributes
+                                            .as_mut()
+                                            .unwrap()
+                                            .extend(attributes.into_iter());
                                     }
                                 }
                                 None => {

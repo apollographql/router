@@ -23,9 +23,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
-use crate::plugins::telemetry::config::AttributeValue;
-
-use crate::plugins::telemetry::config_new::{DefaultForLevel, GetAttributes};
+use crate::plugins::telemetry::config_new::DefaultForLevel;
+use crate::plugins::telemetry::config_new::GetAttributes;
 use crate::services::router;
 
 #[allow(dead_code)]
@@ -353,21 +352,21 @@ pub(crate) struct HttpClientAttributes {
 }
 
 impl GetAttributes<router::Request, router::Response> for RouterAttributes {
-    fn on_request(&self, request: &router::Request) -> HashMap<Key, AttributeValue> {
+    fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
         self.common.on_request(request)
     }
 
-    fn on_response(&self, response: &router::Response) -> HashMap<Key, AttributeValue> {
+    fn on_response(&self, response: &router::Response) -> HashMap<Key, opentelemetry::Value> {
         self.common.on_response(response)
     }
 
-    fn on_error(&self, error: &BoxError) -> HashMap<Key, AttributeValue> {
+    fn on_error(&self, error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
         self.common.on_error(error)
     }
 }
 
 impl GetAttributes<router::Request, router::Response> for HttpCommonAttributes {
-    fn on_request(&self, request: &router::Request) -> HashMap<Key, AttributeValue> {
+    fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = HashMap::new();
         if let Some(true) = &self.http_request_body_size {
             if let Some(content_length) = request
@@ -376,26 +375,20 @@ impl GetAttributes<router::Request, router::Response> for HttpCommonAttributes {
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.insert(
-                    HTTP_REQUEST_BODY_SIZE,
-                    AttributeValue::String(content_length.to_string()),
-                );
+                attrs.insert(HTTP_REQUEST_BODY_SIZE, content_length.to_string().into());
             }
         }
         if let Some(true) = &self.network_protocol_name {
-            attrs.insert(
-                NETWORK_PROTOCOL_NAME,
-                AttributeValue::String("http".to_string()),
-            );
+            attrs.insert(NETWORK_PROTOCOL_NAME, "http".into());
         }
         if let Some(true) = &self.network_protocol_version {
             attrs.insert(
                 NETWORK_PROTOCOL_VERSION,
-                AttributeValue::String(format!("{:?}", request.router_request.version())),
+                format!("{:?}", request.router_request.version()).into(),
             );
         }
         if let Some(true) = &self.network_transport {
-            attrs.insert(NETWORK_TRANSPORT, AttributeValue::String("tcp".to_string()));
+            attrs.insert(NETWORK_TRANSPORT, "tcp".to_string().into());
         }
         if let Some(true) = &self.user_agent_original {
             if let Some(user_agent) = request
@@ -404,17 +397,14 @@ impl GetAttributes<router::Request, router::Response> for HttpCommonAttributes {
                 .get(&USER_AGENT)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.insert(
-                    USER_AGENT_ORIGINAL,
-                    AttributeValue::String(user_agent.to_string()),
-                );
+                attrs.insert(USER_AGENT_ORIGINAL, user_agent.to_string().into());
             }
         }
 
         attrs
     }
 
-    fn on_response(&self, response: &router::Response) -> HashMap<Key, AttributeValue> {
+    fn on_response(&self, response: &router::Response) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = HashMap::new();
         if let Some(true) = &self.http_response_body_size {
             if let Some(content_length) = response
@@ -423,25 +413,22 @@ impl GetAttributes<router::Request, router::Response> for HttpCommonAttributes {
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.insert(
-                    HTTP_RESPONSE_BODY_SIZE,
-                    AttributeValue::String(content_length.to_string()),
-                );
+                attrs.insert(HTTP_RESPONSE_BODY_SIZE, content_length.to_string().into());
             }
         }
         if let Some(true) = &self.http_response_status_code {
             attrs.insert(
                 HTTP_RESPONSE_STATUS_CODE,
-                AttributeValue::String(response.response.status().to_string()),
+                (response.response.status().as_u16() as i64).into(),
             );
         }
         attrs
     }
 
-    fn on_error(&self, _error: &BoxError) -> HashMap<Key, AttributeValue> {
+    fn on_error(&self, _error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = HashMap::new();
         if let Some(true) = &self.error_type {
-            attrs.insert(Key::from_static_str("error.type"), AttributeValue::I64(500));
+            attrs.insert(Key::from_static_str("error.type"), 500.into());
         }
 
         attrs
@@ -449,50 +436,44 @@ impl GetAttributes<router::Request, router::Response> for HttpCommonAttributes {
 }
 
 impl GetAttributes<router::Request, router::Response> for HttpServerAttributes {
-    fn on_request(&self, request: &router::Request) -> HashMap<Key, AttributeValue> {
+    fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = HashMap::new();
         if let Some(true) = &self.http_route {
-            attrs.insert(
-                HTTP_ROUTE,
-                AttributeValue::String(request.router_request.uri().to_string()),
-            );
+            attrs.insert(HTTP_ROUTE, request.router_request.uri().to_string().into());
         }
         let router_uri = request.router_request.uri();
         if let Some(true) = &self.server_address {
             if let Some(host) = router_uri.host() {
-                attrs.insert(SERVER_ADDRESS, AttributeValue::String(host.to_string()));
+                attrs.insert(SERVER_ADDRESS, host.to_string().into());
             }
         }
         if let Some(true) = &self.server_port {
-            if let Some(port) = router_uri.port() {
-                attrs.insert(SERVER_PORT, AttributeValue::String(port.to_string()));
+            if let Some(port) = router_uri.port_u16() {
+                attrs.insert(SERVER_PORT, (port as i64).into());
             }
         }
         if let Some(true) = &self.url_path {
-            attrs.insert(
-                URL_PATH,
-                AttributeValue::String(router_uri.path().to_string()),
-            );
+            attrs.insert(URL_PATH, router_uri.path().to_string().into());
         }
         if let Some(true) = &self.url_query {
             if let Some(query) = router_uri.query() {
-                attrs.insert(URL_QUERY, AttributeValue::String(query.to_string()));
+                attrs.insert(URL_QUERY, query.to_string().into());
             }
         }
         if let Some(true) = &self.url_scheme {
             if let Some(scheme) = router_uri.scheme_str() {
-                attrs.insert(URL_SCHEME, AttributeValue::String(scheme.to_string()));
+                attrs.insert(URL_SCHEME, scheme.to_string().into());
             }
         }
 
         attrs
     }
 
-    fn on_response(&self, _response: &router::Response) -> HashMap<Key, AttributeValue> {
+    fn on_response(&self, _response: &router::Response) -> HashMap<Key, opentelemetry::Value> {
         HashMap::with_capacity(0)
     }
 
-    fn on_error(&self, _error: &BoxError) -> HashMap<Key, AttributeValue> {
+    fn on_error(&self, _error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
         HashMap::with_capacity(0)
     }
 }

@@ -537,18 +537,6 @@ impl From<AttributeValue> for opentelemetry::Value {
     }
 }
 
-impl From<opentelemetry::Value> for AttributeValue {
-    fn from(value: opentelemetry::Value) -> Self {
-        match value {
-            opentelemetry::Value::Bool(v) => AttributeValue::Bool(v),
-            opentelemetry::Value::I64(v) => AttributeValue::I64(v),
-            opentelemetry::Value::F64(v) => AttributeValue::F64(v),
-            opentelemetry::Value::String(v) => AttributeValue::String(v.into()),
-            opentelemetry::Value::Array(v) => AttributeValue::Array(v.into()),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(untagged, deny_unknown_fields)]
 pub(crate) enum AttributeArray {

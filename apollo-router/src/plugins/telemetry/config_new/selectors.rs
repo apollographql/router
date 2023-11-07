@@ -1,17 +1,23 @@
-use crate::context::{OPERATION_KIND, OPERATION_NAME};
-use crate::plugin::serde::deserialize_json_query;
-use crate::plugins::telemetry::config::AttributeValue;
-use crate::plugins::telemetry::config_new::{get_baggage, trace_id, DatadogId, GetAttribute};
-use crate::services::{router, subgraph, supergraph};
 use access_json::JSONQuery;
-use opentelemetry_api::baggage::BaggageExt;
-use opentelemetry_api::Context;
 use schemars::JsonSchema;
 use serde::Deserialize;
 #[cfg(test)]
 use serde::Serialize;
 use serde_json_bytes::ByteString;
 use sha2::Digest;
+
+use crate::context::OPERATION_KIND;
+use crate::context::OPERATION_NAME;
+use crate::plugin::serde::deserialize_json_query;
+use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::get_baggage;
+use crate::plugins::telemetry::config_new::trace_id;
+use crate::plugins::telemetry::config_new::DatadogId;
+use crate::plugins::telemetry::config_new::GetAttribute;
+use crate::plugins::telemetry::config_new::ToOtelValue;
+use crate::services::router;
+use crate::services::subgraph;
+use crate::services::supergraph;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -170,7 +176,7 @@ pub(crate) enum SupergraphSelector {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<AttributeValue>,
+        default: Option<String>,
     },
     ResponseHeader {
         /// The name of the response header.
@@ -179,7 +185,7 @@ pub(crate) enum SupergraphSelector {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<AttributeValue>,
+        default: Option<String>,
     },
     RequestContext {
         /// The request context key.
@@ -271,7 +277,7 @@ pub(crate) enum SubgraphSelector {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<AttributeValue>,
+        default: Option<String>,
     },
     SubgraphResponseHeader {
         /// The name of a subgraph response header.
@@ -280,7 +286,7 @@ pub(crate) enum SubgraphSelector {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<AttributeValue>,
+        default: Option<String>,
     },
     SubgraphResponseStatus {
         /// The subgraph http response status code.
@@ -323,7 +329,7 @@ pub(crate) enum SubgraphSelector {
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
-        default: Option<AttributeValue>,
+        default: Option<String>,
     },
     RequestContext {
         /// The request context key.
@@ -364,7 +370,7 @@ pub(crate) enum SubgraphSelector {
 }
 
 impl GetAttribute<router::Request, router::Response> for RouterSelector {
-    fn on_request(&self, request: &router::Request) -> Option<AttributeValue> {
+    fn on_request(&self, request: &router::Request) -> Option<opentelemetry::Value> {
         match self {
             RouterSelector::RequestHeader {
                 request_header,
@@ -374,30 +380,30 @@ impl GetAttribute<router::Request, router::Response> for RouterSelector {
                 .router_request
                 .headers()
                 .get(request_header)
-                .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
-                .or_else(|| default.clone()),
+                .and_then(|h| Some(h.to_str().ok()?.to_string().into()))
+                .or_else(|| default.maybe_to_otel_value()),
             RouterSelector::Env { env, default, .. } => std::env::var(env)
                 .ok()
-                .map(AttributeValue::String)
-                .or_else(|| default.clone().map(AttributeValue::String)),
+                .or_else(|| default.clone())
+                .map(opentelemetry::Value::from),
             RouterSelector::TraceId {
                 trace_id: trace_id_format,
             } => trace_id().map(|id| {
                 match trace_id_format {
-                    TraceIdFormat::OpenTelemetry => AttributeValue::String(id.to_string()),
-                    TraceIdFormat::Datadog => AttributeValue::String(id.to_datadog()),
+                    TraceIdFormat::OpenTelemetry => id.to_string(),
+                    TraceIdFormat::Datadog => id.to_datadog(),
                 }
                 .into()
             }),
             RouterSelector::Baggage {
                 baggage, default, ..
-            } => get_baggage(baggage).or_else(|| default.clone()),
+            } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
             // Related to Response
             _ => None,
         }
     }
 
-    fn on_response(&self, response: &router::Response) -> Option<AttributeValue> {
+    fn on_response(&self, response: &router::Response) -> Option<opentelemetry::Value> {
         match self {
             RouterSelector::ResponseHeader {
                 response_header,
@@ -407,17 +413,17 @@ impl GetAttribute<router::Request, router::Response> for RouterSelector {
                 .response
                 .headers()
                 .get(response_header)
-                .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
-                .or_else(|| default.clone()),
+                .and_then(|h| Some(h.to_str().ok()?.to_string().into()))
+                .or_else(|| default.maybe_to_otel_value()),
             RouterSelector::ResponseStatus { response_status } => match response_status {
-                ResponseStatus::Code => Some(AttributeValue::I64(
+                ResponseStatus::Code => Some(opentelemetry::Value::I64(
                     response.response.status().as_u16() as i64,
                 )),
                 ResponseStatus::Reason => response
                     .response
                     .status()
                     .canonical_reason()
-                    .map(|reason| AttributeValue::String(reason.to_string())),
+                    .map(|reason| reason.to_string().into()),
             },
             RouterSelector::ResponseContext {
                 response_context,
@@ -425,20 +431,22 @@ impl GetAttribute<router::Request, router::Response> for RouterSelector {
                 ..
             } => response
                 .context
-                .get(response_context)
+                .get::<_, serde_json_bytes::Value>(response_context)
                 .ok()
                 .flatten()
-                .or_else(|| default.clone()),
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
             RouterSelector::Baggage {
                 baggage, default, ..
-            } => get_baggage(baggage).or_else(|| default.clone()),
+            } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
             _ => None,
         }
     }
 }
 
 impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphSelector {
-    fn on_request(&self, request: &supergraph::Request) -> Option<AttributeValue> {
+    fn on_request(&self, request: &supergraph::Request) -> Option<opentelemetry::Value> {
         match self {
             SupergraphSelector::OperationName {
                 operation_name,
@@ -455,18 +463,33 @@ impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphSelec
                         hex::encode(result)
                     }),
                 }
-                .map(AttributeValue::String)
+                .map(opentelemetry::Value::from)
             }
-            SupergraphSelector::OperationKind { .. } => {
-                request.context.get(OPERATION_KIND).ok().flatten()
-            }
+            SupergraphSelector::OperationKind { .. } => request
+                .context
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+
             SupergraphSelector::Query { default, .. } => request
                 .supergraph_request
                 .body()
                 .query
                 .clone()
                 .or_else(|| default.clone())
-                .map(AttributeValue::String),
+                .map(opentelemetry::Value::from),
+            SupergraphSelector::RequestHeader {
+                request_header,
+                default,
+                ..
+            } => request
+                .supergraph_request
+                .headers()
+                .get(request_header)
+                .and_then(|h| Some(h.to_str().ok()?.to_string()))
+                .or_else(|| default.clone())
+                .map(opentelemetry::Value::from),
             SupergraphSelector::QueryVariable {
                 query_variable,
                 default,
@@ -476,42 +499,33 @@ impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphSelec
                 .body()
                 .variables
                 .get(&ByteString::from(query_variable.as_str()))
-                .and_then(|v| serde_json::to_string(v).ok())
-                .map(AttributeValue::String)
-                .or_else(|| default.clone()),
-            SupergraphSelector::RequestHeader {
-                request_header,
-                default,
-                ..
-            } => request
-                .supergraph_request
-                .headers()
-                .get(request_header)
-                .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
-                .or_else(|| default.clone()),
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
             SupergraphSelector::RequestContext {
                 request_context,
                 default,
                 ..
             } => request
                 .context
-                .get(request_context)
+                .get::<_, serde_json_bytes::Value>(request_context)
                 .ok()
                 .flatten()
-                .or_else(|| default.clone()),
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
             SupergraphSelector::Baggage {
                 baggage, default, ..
-            } => get_baggage(baggage).or_else(|| default.clone()),
+            } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
             SupergraphSelector::Env { env, default, .. } => std::env::var(env)
                 .ok()
-                .map(AttributeValue::String)
-                .or_else(|| default.clone().map(AttributeValue::String)),
+                .or_else(|| default.clone())
+                .map(opentelemetry::Value::from),
             // For response
             _ => None,
         }
     }
 
-    fn on_response(&self, response: &supergraph::Response) -> Option<AttributeValue> {
+    fn on_response(&self, response: &supergraph::Response) -> Option<opentelemetry::Value> {
         match self {
             SupergraphSelector::ResponseHeader {
                 response_header,
@@ -521,18 +535,21 @@ impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphSelec
                 .response
                 .headers()
                 .get(response_header)
-                .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
-                .or_else(|| default.clone()),
+                .and_then(|h| Some(h.to_str().ok()?.to_string()))
+                .or_else(|| default.clone())
+                .map(opentelemetry::Value::from),
             SupergraphSelector::ResponseContext {
                 response_context,
                 default,
                 ..
             } => response
                 .context
-                .get(response_context)
+                .get::<_, serde_json_bytes::Value>(response_context)
                 .ok()
                 .flatten()
-                .or_else(|| default.clone()),
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
             // For request
             _ => None,
         }
@@ -540,7 +557,7 @@ impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphSelec
 }
 
 impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
-    fn on_request(&self, request: &subgraph::Request) -> Option<AttributeValue> {
+    fn on_request(&self, request: &subgraph::Request) -> Option<opentelemetry::Value> {
         match self {
             SubgraphSelector::SubgraphOperationName {
                 subgraph_operation_name,
@@ -557,7 +574,7 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
                         hex::encode(result)
                     }),
                 }
-                .map(AttributeValue::String)
+                .map(opentelemetry::Value::from)
             }
             SubgraphSelector::SupergraphOperationName {
                 supergraph_operation_name,
@@ -574,32 +591,35 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
                         hex::encode(result)
                     }),
                 }
-                .map(AttributeValue::String)
+                .map(opentelemetry::Value::from)
             }
-            SubgraphSelector::SubgraphOperationKind { .. } => AttributeValue::String(
-                request
-                    .operation_kind
-                    .as_apollo_operation_type()
-                    .to_string(),
-            )
-            .into(),
-            SubgraphSelector::SupergraphOperationKind { .. } => {
-                request.context.get(OPERATION_KIND).ok().flatten()
-            }
+            SubgraphSelector::SubgraphOperationKind { .. } => request
+                .context
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+            SubgraphSelector::SupergraphOperationKind { .. } => request
+                .context
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+
             SubgraphSelector::SupergraphQuery { default, .. } => request
                 .supergraph_request
                 .body()
                 .query
                 .clone()
                 .or_else(|| default.clone())
-                .map(AttributeValue::String),
+                .map(opentelemetry::Value::from),
             SubgraphSelector::SubgraphQuery { default, .. } => request
                 .subgraph_request
                 .body()
                 .query
                 .clone()
                 .or_else(|| default.clone())
-                .map(AttributeValue::String),
+                .map(opentelemetry::Value::from),
             SubgraphSelector::SubgraphQueryVariable {
                 subgraph_query_variable,
                 default,
@@ -609,9 +629,9 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
                 .body()
                 .variables
                 .get(&ByteString::from(subgraph_query_variable.as_str()))
-                .and_then(|v| serde_json::to_string(v).ok())
-                .map(AttributeValue::String)
-                .or_else(|| default.clone()),
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
+
             SubgraphSelector::SupergraphQueryVariable {
                 supergraph_query_variable,
                 default,
@@ -621,9 +641,8 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
                 .body()
                 .variables
                 .get(&ByteString::from(supergraph_query_variable.as_str()))
-                .and_then(|v| serde_json::to_string(v).ok())
-                .map(AttributeValue::String)
-                .or_else(|| default.clone()),
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
             SubgraphSelector::SubgraphRequestHeader {
                 subgraph_request_header,
                 default,
@@ -632,8 +651,9 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
                 .subgraph_request
                 .headers()
                 .get(subgraph_request_header)
-                .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
-                .or_else(|| default.clone()),
+                .and_then(|h| Some(h.to_str().ok()?.to_string().into()))
+                .or_else(|| default.clone())
+                .map(opentelemetry::Value::from),
             SubgraphSelector::SupergraphRequestHeader {
                 supergraph_request_header,
                 default,
@@ -642,41 +662,37 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
                 .supergraph_request
                 .headers()
                 .get(supergraph_request_header)
-                .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
-                .or_else(|| default.clone()),
+                .and_then(|h| Some(h.to_str().ok()?.to_string()))
+                .or_else(|| default.clone())
+                .map(opentelemetry::Value::from),
             SubgraphSelector::RequestContext {
                 request_context,
                 default,
                 ..
             } => request
                 .context
-                .get(request_context)
+                .get::<_, serde_json_bytes::Value>(request_context)
                 .ok()
                 .flatten()
-                .or_else(|| default.clone()),
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
             SubgraphSelector::Baggage {
                 baggage: baggage_name,
                 default,
                 ..
-            } => {
-                let span_context = Context::current();
-                // I must clone the key because the otel API is bad
-                let baggage = span_context.baggage().get(baggage_name.clone()).cloned();
-                match baggage {
-                    Some(baggage) => AttributeValue::from(baggage).into(),
-                    None => default.clone(),
-                }
-            }
+            } => get_baggage(baggage_name).or_else(|| default.maybe_to_otel_value()),
             SubgraphSelector::Env { env, default, .. } => std::env::var(env)
                 .ok()
-                .map(AttributeValue::String)
-                .or_else(|| default.clone().map(AttributeValue::String)),
+                .or_else(|| default.clone())
+                .map(opentelemetry::Value::from),
+
             // For response
             _ => None,
         }
     }
 
-    fn on_response(&self, response: &subgraph::Response) -> Option<AttributeValue> {
+    fn on_response(&self, response: &subgraph::Response) -> Option<opentelemetry::Value> {
         match self {
             SubgraphSelector::SubgraphResponseHeader {
                 subgraph_response_header,
@@ -686,43 +702,44 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
                 .response
                 .headers()
                 .get(subgraph_response_header)
-                .and_then(|h| Some(AttributeValue::String(h.to_str().ok()?.to_string())))
-                .or_else(|| default.clone()),
+                .and_then(|h| Some(h.to_str().ok()?.to_string()))
+                .or_else(|| default.clone())
+                .map(opentelemetry::Value::from),
             SubgraphSelector::SubgraphResponseStatus {
                 subgraph_response_status: response_status,
             } => match response_status {
-                ResponseStatus::Code => Some(AttributeValue::I64(
+                ResponseStatus::Code => Some(opentelemetry::Value::I64(
                     response.response.status().as_u16() as i64,
                 )),
                 ResponseStatus::Reason => response
                     .response
                     .status()
                     .canonical_reason()
-                    .map(|reason| AttributeValue::String(reason.to_string())),
+                    .map(|reason| reason.into()),
             },
             SubgraphSelector::SubgraphResponseBody {
                 subgraph_response_body,
                 default,
                 ..
-            } => {
-                let output = subgraph_response_body
-                    .execute(response.response.body())
-                    .ok()
-                    .flatten()?;
-                AttributeValue::try_from(output)
-                    .ok()
-                    .or_else(|| default.clone())
-            }
+            } => subgraph_response_body
+                .execute(response.response.body())
+                .ok()
+                .flatten()
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
             SubgraphSelector::ResponseContext {
                 response_context,
                 default,
                 ..
             } => response
                 .context
-                .get(response_context)
+                .get::<_, serde_json_bytes::Value>(response_context)
                 .ok()
                 .flatten()
-                .or_else(|| default.clone()),
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
             // For request
             _ => None,
         }
@@ -731,25 +748,36 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
 
 #[cfg(test)]
 mod test {
-    use crate::context::{OPERATION_KIND, OPERATION_NAME};
-    use crate::graphql;
-    use crate::plugins::telemetry::config::AttributeValue;
-    use crate::plugins::telemetry::config_new::selectors::{
-        OperationKind, OperationName, Query, ResponseStatus, RouterSelector, SubgraphSelector,
-        SupergraphSelector, TraceIdFormat,
-    };
-    use crate::plugins::telemetry::config_new::GetAttribute;
+    use std::sync::Arc;
+
     use http::StatusCode;
     use opentelemetry_api::baggage::BaggageExt;
-    use opentelemetry_api::trace::{
-        SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState,
-    };
-    use opentelemetry_api::{Context, KeyValue};
+    use opentelemetry_api::trace::SpanContext;
+    use opentelemetry_api::trace::SpanId;
+    use opentelemetry_api::trace::TraceContextExt;
+    use opentelemetry_api::trace::TraceFlags;
+    use opentelemetry_api::trace::TraceId;
+    use opentelemetry_api::trace::TraceState;
+    use opentelemetry_api::Context;
+    use opentelemetry_api::KeyValue;
     use serde_json::json;
-    use std::sync::Arc;
-    use tracing::{span, subscriber};
-    use tracing_opentelemetry::OpenTelemetrySpanExt;
+    use tracing::span;
+    use tracing::subscriber;
     use tracing_subscriber::layer::SubscriberExt;
+
+    use crate::context::OPERATION_KIND;
+    use crate::context::OPERATION_NAME;
+    use crate::graphql;
+    use crate::plugins::telemetry::config::AttributeValue;
+    use crate::plugins::telemetry::config_new::selectors::OperationKind;
+    use crate::plugins::telemetry::config_new::selectors::OperationName;
+    use crate::plugins::telemetry::config_new::selectors::Query;
+    use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+    use crate::plugins::telemetry::config_new::selectors::RouterSelector;
+    use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
+    use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
+    use crate::plugins::telemetry::config_new::selectors::TraceIdFormat;
+    use crate::plugins::telemetry::config_new::GetAttribute;
 
     #[test]
     fn router_request_header() {
@@ -1327,8 +1355,6 @@ mod test {
     fn subgraph_baggage() {
         let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
         subscriber::with_default(subscriber, || {
-            let span = span!(tracing::Level::INFO, "test");
-            let _guard = span.enter();
             let selector = SubgraphSelector::Baggage {
                 baggage: "baggage_key".to_string(),
                 redact: None,
@@ -1340,11 +1366,12 @@ mod test {
                     .unwrap(),
                 "defaulted".into()
             );
-
-            let _outer_guard = span
-                .context()
+            let _outer_guard = Context::new()
                 .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
                 .attach();
+
+            let span = span!(tracing::Level::INFO, "test");
+            let _guard = span.enter();
 
             assert_eq!(
                 selector
@@ -1407,7 +1434,7 @@ mod test {
                             .unwrap(),
                     )
                     .unwrap(),
-                AttributeValue::String("42".into())
+                opentelemetry::Value::String("42".into())
             );
         });
     }
@@ -1805,7 +1832,7 @@ mod test {
                         .unwrap()
                 )
                 .unwrap(),
-            AttributeValue::I64(204)
+            opentelemetry::Value::I64(204)
         );
     }
 
@@ -1822,7 +1849,7 @@ mod test {
                         .build()
                 )
                 .unwrap(),
-            AttributeValue::I64(204)
+            opentelemetry::Value::I64(204)
         );
     }
 
@@ -1875,7 +1902,7 @@ mod test {
                     .build()
                     .unwrap(),
             ),
-            Some("\"value\"".into())
+            Some("value".into())
         );
 
         assert_eq!(
@@ -1909,7 +1936,7 @@ mod test {
                     ))
                     .build(),
             ),
-            Some("\"value\"".into())
+            Some("value".into())
         );
 
         assert_eq!(
@@ -1923,7 +1950,7 @@ mod test {
         let selector = SubgraphSelector::SubgraphQueryVariable {
             subgraph_query_variable: "key".to_string(),
             redact: None,
-            default: Some(AttributeValue::String("default".to_string())),
+            default: Some("default".into()),
         };
         assert_eq!(
             selector.on_request(
@@ -1939,7 +1966,7 @@ mod test {
                     )
                     .build(),
             ),
-            Some("\"value\"".into())
+            Some("value".into())
         );
 
         assert_eq!(
