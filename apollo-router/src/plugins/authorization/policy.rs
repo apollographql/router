@@ -982,6 +982,35 @@ mod tests {
     }
 
     #[test]
+    fn fragment_fields() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+                ...F
+            }
+        }
+
+        fragment F on Product {
+            reviews {
+                body
+            }
+        }
+        "#;
+
+        let extracted_policies = extract(BASIC_SCHEMA, QUERY);
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
     fn or_and() {
         static QUERY: &str = r#"
         {

@@ -1054,6 +1054,35 @@ mod tests {
         });
     }
 
+    #[test]
+    fn fragment_fields() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+                ...F
+            }
+        }
+
+        fragment F on Product {
+            reviews {
+                body
+            }
+        }
+        "#;
+
+        let extracted_scopes = extract(BASIC_SCHEMA, QUERY);
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_scopes: &extracted_scopes,
+            scopes: Vec::new(),
+            result: doc,
+            paths
+        });
+    }
+
     static INTERFACE_SCHEMA: &str = r#"
     schema
     @link(url: "https://specs.apollo.dev/link/v1.0")
