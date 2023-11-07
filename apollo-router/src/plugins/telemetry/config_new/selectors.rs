@@ -651,7 +651,7 @@ impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
                 .subgraph_request
                 .headers()
                 .get(subgraph_request_header)
-                .and_then(|h| Some(h.to_str().ok()?.to_string().into()))
+                .and_then(|h| Some(h.to_str().ok()?.to_string()))
                 .or_else(|| default.clone())
                 .map(opentelemetry::Value::from),
             SubgraphSelector::SupergraphRequestHeader {

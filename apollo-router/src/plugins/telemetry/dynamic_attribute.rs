@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use opentelemetry_api::Key;
-use opentelemetry_api::Value;
 use tracing_opentelemetry::OtelData;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
@@ -81,14 +80,14 @@ impl DynAttribute for ::tracing::Span {
                                 Some(otel_data) => {
                                     if otel_data.builder.attributes.is_none() {
                                         otel_data.builder.attributes =
-                                            Some([(key, Value::from(value))].into_iter().collect());
+                                            Some([(key, value)].into_iter().collect());
                                     } else {
                                         otel_data
                                             .builder
                                             .attributes
                                             .as_mut()
                                             .unwrap()
-                                            .insert(key, Value::from(value));
+                                            .insert(key, value);
                                     }
                                 }
                                 None => {
@@ -136,7 +135,7 @@ impl DynAttribute for ::tracing::Span {
                                             .attributes
                                             .as_mut()
                                             .unwrap()
-                                            .extend(attributes.into_iter());
+                                            .extend(attributes);
                                     }
                                 }
                                 None => {
