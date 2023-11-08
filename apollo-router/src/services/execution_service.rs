@@ -181,51 +181,56 @@ impl ExecutionService {
 
         let execution_span = Span::current();
 
-        let stream = stream
-            .map(move |mut response: Response| {
-                if is_deferred || is_subscription {
-                    // Enforce JWT expiry
-                    let ts_opt = expiry.map(|seconds_since_epoch| {
-                        chrono::DateTime::from_timestamp(seconds_since_epoch, 0)
-                            .expect("should be able to create a DateTime here")
-                    });
-                    if let Some(ts) = ts_opt {
-                        let now = chrono::Utc::now();
-                        if ts < now {
-                            tracing::debug!("token has expired, shut down the subscription");
-                            response = Response::builder()
-                                .errors(vec![Error::builder()
-                                    .message(
-                                        "subscription has been closed because the JWT has expired",
-                                    )
-                                    .extension_code("REQUEST_JWT_EXPIRED")
-                                    .build()])
-                                .build();
-                            if is_deferred {
-                                response.has_next = Some(false);
-                            }
-                            if is_subscription {
-                                response.subscribed = Some(false);
+        let stream =
+            stream
+                .map(move |mut response: Response| {
+                    // Enforce JWT expiry for deferred and subscription responses
+                    if is_deferred || is_subscription {
+                        let ts_opt = expiry.map(|seconds_since_epoch| {
+                            chrono::DateTime::from_timestamp(seconds_since_epoch, 0)
+                                .expect("should be able to create a DateTime here")
+                        });
+                        if let Some(ts) = ts_opt {
+                            let now = chrono::Utc::now();
+                            if ts < now {
+                                tracing::debug!("token has expired, shut down the subscription");
+                                if is_deferred {
+                                    response = Response::builder()
+                                        .has_next(false)
+                                        .error(Error::builder()
+                                            .message("deferred response closed because the JWT has expired",)
+                                            .extension_code("DEFERRED_RESPONSE_JWT_EXPIRED")
+                                            .build())
+                                        .build()
+                                }
+                                if is_subscription {
+                                    response = Response::builder()
+                                        .subscribed(false)
+                                        .error(Error::builder()
+                                            .message("subscription closed because the JWT has expired",)
+                                            .extension_code("SUBSCRIPTION_JWT_EXPIRED")
+                                            .build())
+                                        .build()
+                                }
                             }
                         }
                     }
-                }
-                response
-            })
-            .filter_map(move |response: Response| {
-                ready(execution_span.in_scope(|| {
-                    Self::process_graphql_response(
-                        &query,
-                        operation_name.as_deref(),
-                        &variables,
-                        is_deferred,
-                        &schema,
-                        &mut nullified_paths,
-                        response,
-                    )
-                }))
-            })
-            .boxed();
+                    response
+                })
+                .filter_map(move |response: Response| {
+                    ready(execution_span.in_scope(|| {
+                        Self::process_graphql_response(
+                            &query,
+                            operation_name.as_deref(),
+                            &variables,
+                            is_deferred,
+                            &schema,
+                            &mut nullified_paths,
+                            response,
+                        )
+                    }))
+                })
+                .boxed();
 
         Ok(ExecutionResponse::new_from_response(
             http::Response::new(stream as _),
