@@ -81,7 +81,7 @@ impl Plugin for EntityCache {
                     .lock()
                     .get::<CacheControl>()
                 {
-                    cache_control.to_headers(response.response.headers_mut());
+                    let _ = cache_control.to_headers(response.response.headers_mut());
                 }
 
                 response
@@ -246,9 +246,10 @@ async fn cache_store_from_response(
     }
 
     if let Some(cache_key) = opt_root_cache_key {
-        cache_store_root_from_response(cache, &response, cache_key).await?;
+        cache_store_root_from_response(cache, &response, cache_control, cache_key).await?;
     } else if let Some(result_from_cache) = opt_entities_results {
-        cache_store_entities_from_response(cache, &mut response, result_from_cache).await?;
+        cache_store_entities_from_response(cache, &mut response, cache_control, result_from_cache)
+            .await?;
     }
 
     Ok(response)
@@ -256,11 +257,13 @@ async fn cache_store_from_response(
 async fn cache_store_root_from_response(
     cache: RedisCacheStorage,
     response: &subgraph::Response,
+    cache_control: CacheControl,
     cache_key: String,
 ) -> Result<(), BoxError> {
     if let Some(data) = response.response.body().data.as_ref() {
-        // TODO: compute TTL with cacheControl directive on the subgraph
-        let ttl: Option<Duration> = None;
+        let ttl: Option<Duration> = cache_control
+            .ttl()
+            .map(|secs| Duration::from_secs(secs as u64));
         //FIXME: we should not need to clone here
         cache
             .insert(RedisKey(cache_key), RedisValue(data.clone()), ttl)
@@ -273,6 +276,8 @@ async fn cache_store_root_from_response(
 async fn cache_store_entities_from_response(
     cache: RedisCacheStorage,
     response: &mut subgraph::Response,
+    cache_control: CacheControl,
+
     mut result_from_cache: Vec<IntermediateResult>,
 ) -> Result<(), BoxError> {
     let mut data = response.response.body_mut().data.take();
@@ -282,8 +287,9 @@ async fn cache_store_entities_from_response(
         .and_then(|v| v.as_object_mut())
         .and_then(|o| o.remove(ENTITIES))
     {
-        // TODO: compute TTL with cacheControl directive on the subgraph
-        let ttl = None;
+        let ttl: Option<Duration> = cache_control
+            .ttl()
+            .map(|secs| Duration::from_secs(secs as u64));
         let new_entities = insert_entities_in_result(
             entities
                 .as_array_mut()
