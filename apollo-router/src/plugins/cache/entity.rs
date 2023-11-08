@@ -14,11 +14,11 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing::Level;
-use url::Url;
 
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
+use crate::configuration::RedisCache;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
@@ -39,13 +39,16 @@ struct EntityCache {
     storage: RedisCacheStorage,
 }
 
-/// Configuration for exposing errors that originate from subgraphs
-#[derive(Clone, Debug, JsonSchema, Default, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+/// Configuration for entity caching
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Config {
-    urls: Vec<Url>,
+    redis: RedisCache,
+
+    /// Default time to live for cache entries
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
     ttl: Option<Duration>,
-    timeout: Option<Duration>,
 }
 
 #[async_trait::async_trait]
@@ -56,8 +59,12 @@ impl Plugin for EntityCache {
     where
         Self: Sized,
     {
-        let storage =
-            RedisCacheStorage::new(init.config.urls, init.config.ttl, init.config.timeout).await?;
+        let storage = RedisCacheStorage::new(
+            init.config.redis.urls,
+            init.config.ttl,
+            init.config.redis.timeout,
+        )
+        .await?;
 
         Ok(Self { storage })
     }

@@ -1061,6 +1061,46 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "entity_cache": {
+      "description": "Configuration for entity caching",
+      "type": "object",
+      "required": [
+        "redis"
+      ],
+      "properties": {
+        "redis": {
+          "description": "Redis cache configuration",
+          "type": "object",
+          "required": [
+            "urls"
+          ],
+          "properties": {
+            "timeout": {
+              "description": "Redis request timeout (default: 2ms)",
+              "default": null,
+              "type": "string",
+              "nullable": true
+            },
+            "urls": {
+              "description": "List of URLs to the Redis cluster",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uri"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "ttl": {
+          "description": "Default time to live for cache entries",
+          "default": null,
+          "type": "string",
+          "nullable": true
+        }
+      },
+      "additionalProperties": false
+    },
     "experimental_api_schema_generation_mode": {
       "description": "Set the API schema generation implementation to use.",
       "default": "legacy",
