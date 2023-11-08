@@ -1,6 +1,8 @@
 include_subgraph_errors:
   all: true
 telemetry:
+  spans:
+    mode: deprecated
   tracing:
     experimental_response_trace_id:
       enabled: true

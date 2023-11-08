@@ -4798,6 +4798,25 @@ expression: "&schema"
                 }
               ]
             },
+            "mode": {
+              "description": "Whether to create a `request` span if you set `legacy` mode. This will be removed in future, and users should set this to `new`.",
+              "oneOf": [
+                {
+                  "description": "Keep the request span as root span and deprecated attributes",
+                  "type": "string",
+                  "enum": [
+                    "deprecated"
+                  ]
+                },
+                {
+                  "description": "router span will be the new root span",
+                  "type": "string",
+                  "enum": [
+                    "new"
+                  ]
+                }
+              ]
+            },
             "router": {
               "description": "Configuration of router spans. Log events inherit attributes from the containing span, so attributes configured here will be included on log events for a request. Router spans contain http request and response information and therefore contain http specific attributes.",
               "type": "object",

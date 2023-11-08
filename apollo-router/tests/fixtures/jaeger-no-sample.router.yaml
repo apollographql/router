@@ -28,6 +28,7 @@ telemetry:
         match: ^foo.*
         headers: true
   spans:
+    mode: deprecated
     supergraph:
       attributes:
         graphql.operation.name: true

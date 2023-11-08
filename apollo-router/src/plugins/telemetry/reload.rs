@@ -31,6 +31,7 @@ use super::dynamic_attribute::DynAttributeLayer;
 use super::formatters::json::Json;
 use super::formatters::json::JsonFields;
 use super::metrics::span_metrics_exporter::SpanMetricsLayer;
+use super::ROUTER_SPAN_NAME;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::metrics::layer::MetricsLayer;
 use crate::metrics::meter_provider;
@@ -143,7 +144,7 @@ pub(super) fn reload_fmt(layer: Box<dyn Layer<LayeredTracer> + Send + Sync>) {
     }
 }
 
-pub(crate) struct SamplingFilter {}
+pub(crate) struct SamplingFilter;
 
 #[allow(dead_code)]
 impl SamplingFilter {
@@ -209,7 +210,8 @@ where
 
         // we only make the sampling decision on the root span. If we reach here for any other span,
         // it means that the parent span was not enabled, so we should not enable this span either
-        if meta.name() != REQUEST_SPAN_NAME {
+        // TODO take the conf option to check the root span name
+        if meta.name() != REQUEST_SPAN_NAME && meta.name() != ROUTER_SPAN_NAME {
             return false;
         }
 

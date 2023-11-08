@@ -17,6 +17,7 @@ use tower::BoxError;
 
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::config_new::spans::Spans;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
@@ -59,7 +60,12 @@ impl TracingConfigurator for Config {
         self.enabled
     }
 
-    fn apply(&self, builder: Builder, trace: &Trace) -> Result<Builder, BoxError> {
+    fn apply(
+        &self,
+        builder: Builder,
+        trace: &Trace,
+        _spans_config: &Spans,
+    ) -> Result<Builder, BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
         let enable_span_mapping = self.enable_span_mapping.then_some(true);
         let common: sdk::trace::Config = trace.into();
