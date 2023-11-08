@@ -132,16 +132,24 @@ async fn cache_lookup_root(
 
     let key = extract_cache_key_root(&name, body, &request.context);
 
-    let cache_result: Option<RedisValue<Value>> = cache.get(RedisKey(key.clone())).await;
+    let cache_result: Option<RedisValue<CacheEntry>> = cache.get(RedisKey(key.clone())).await;
 
     match cache_result {
-        Some(value) => Ok(ControlFlow::Break(
-            subgraph::Response::builder()
-                .data(value.0)
-                .extensions(Object::new())
-                .context(request.context)
-                .build(),
-        )),
+        Some(value) => {
+            request
+                .context
+                .private_entries
+                .lock()
+                .insert(value.0.control);
+
+            Ok(ControlFlow::Break(
+                subgraph::Response::builder()
+                    .data(value.0.data)
+                    .extensions(Object::new())
+                    .context(request.context)
+                    .build(),
+            ))
+        }
         None => {
             request
                 .context
@@ -165,7 +173,7 @@ async fn cache_lookup_entities(
 
     let keys = extract_cache_keys(&name, body, &request.context)?;
 
-    let cache_result = cache
+    let cache_result: Vec<Option<CacheEntry>> = cache
         .get_multiple(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
         .await
         .map(|res| res.into_iter().map(|r| r.map(|v| v.0)).collect())
@@ -177,8 +185,12 @@ async fn cache_lookup_entities(
         .and_then(|value| value.as_array_mut())
         .expect("we already checked that representations exist");
     // remove from representations the entities we already obtained from the cache
-    let (new_representations, cache_result) =
+    let (new_representations, cache_result, cache_control) =
         filter_representations(&name, representations, keys, cache_result)?;
+
+    if let Some(control) = cache_control {
+        update_cache_control(&request.context, &control);
+    }
 
     if !new_representations.is_empty() {
         body.variables
@@ -195,6 +207,7 @@ async fn cache_lookup_entities(
         let entities = cache_result
             .into_iter()
             .filter_map(|res| res.cache_entry)
+            .map(|entry| entry.data)
             .collect::<Vec<_>>();
         let mut data = Object::default();
         data.insert(ENTITIES, entities.into());
@@ -206,6 +219,18 @@ async fn cache_lookup_entities(
                 .context(request.context)
                 .build(),
         ))
+    }
+}
+
+fn update_cache_control(context: &Context, cache_control: &CacheControl) {
+    match context.private_entries.lock().get_mut::<CacheControl>() {
+        Some(c) => {
+            *c = c.merge(&cache_control);
+        }
+        //FIXME: race condition. We need an Entry API for private entries
+        None => {
+            context.private_entries.lock().insert(cache_control.clone());
+        }
     }
 }
 
@@ -224,26 +249,7 @@ async fn cache_store_from_response(
     };
 
     let cache_control = CacheControl::new(response.response.headers())?;
-    {
-        match response
-            .context
-            .private_entries
-            .lock()
-            .get_mut::<CacheControl>()
-        {
-            Some(c) => {
-                *c = c.merge(&cache_control);
-            }
-            //FIXME: race condition. We need an Entry API for private entries
-            None => {
-                response
-                    .context
-                    .private_entries
-                    .lock()
-                    .insert(cache_control.clone());
-            }
-        }
-    }
+    update_cache_control(&response.context, &cache_control);
 
     if let Some(cache_key) = opt_root_cache_key {
         cache_store_root_from_response(cache, &response, cache_control, cache_key).await?;
@@ -254,6 +260,13 @@ async fn cache_store_from_response(
 
     Ok(response)
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct CacheEntry {
+    control: CacheControl,
+    data: Value,
+}
+
 async fn cache_store_root_from_response(
     cache: RedisCacheStorage,
     response: &subgraph::Response,
@@ -264,9 +277,16 @@ async fn cache_store_root_from_response(
         let ttl: Option<Duration> = cache_control
             .ttl()
             .map(|secs| Duration::from_secs(secs as u64));
-        //FIXME: we should not need to clone here
+
         cache
-            .insert(RedisKey(cache_key), RedisValue(data.clone()), ttl)
+            .insert(
+                RedisKey(cache_key),
+                RedisValue(CacheEntry {
+                    control: cache_control,
+                    data: data.clone(),
+                }),
+                ttl,
+            )
             .await;
     }
 
@@ -277,9 +297,10 @@ async fn cache_store_entities_from_response(
     cache: RedisCacheStorage,
     response: &mut subgraph::Response,
     cache_control: CacheControl,
-
     mut result_from_cache: Vec<IntermediateResult>,
 ) -> Result<(), BoxError> {
+    update_cache_control(&response.context, &cache_control);
+
     let mut data = response.response.body_mut().data.take();
 
     if let Some(mut entities) = data
@@ -287,9 +308,6 @@ async fn cache_store_entities_from_response(
         .and_then(|v| v.as_object_mut())
         .and_then(|o| o.remove(ENTITIES))
     {
-        let ttl: Option<Duration> = cache_control
-            .ttl()
-            .map(|secs| Duration::from_secs(secs as u64));
         let new_entities = insert_entities_in_result(
             entities
                 .as_array_mut()
@@ -297,7 +315,7 @@ async fn cache_store_entities_from_response(
                     reason: "expected an array of entities".to_string(),
                 })?,
             &cache,
-            ttl,
+            cache_control,
             &mut result_from_cache,
         )
         .await?;
@@ -445,7 +463,7 @@ fn extract_cache_keys(
 struct IntermediateResult {
     key: String,
     typename: String,
-    cache_entry: Option<Value>,
+    cache_entry: Option<CacheEntry>,
 }
 
 // build a new list of representations without the ones we got from the cache
@@ -453,11 +471,12 @@ fn filter_representations(
     subgraph_name: &str,
     representations: &mut Vec<Value>,
     keys: Vec<String>,
-    mut cache_result: Vec<Option<Value>>,
-) -> Result<(Vec<Value>, Vec<IntermediateResult>), BoxError> {
+    mut cache_result: Vec<Option<CacheEntry>>,
+) -> Result<(Vec<Value>, Vec<IntermediateResult>, Option<CacheControl>), BoxError> {
     let mut new_representations: Vec<Value> = Vec::new();
     let mut result = Vec::new();
     let mut cache_hit: HashMap<String, (usize, usize)> = HashMap::new();
+    let mut cache_control = None;
 
     for ((mut representation, key), cache_entry) in representations
         .drain(..)
@@ -473,15 +492,22 @@ fn filter_representations(
 
         let typename = opt_type.as_str().unwrap_or("-").to_string();
 
-        if cache_entry.is_none() {
-            cache_hit.entry(typename.clone()).or_default().1 += 1;
+        match cache_entry.as_ref() {
+            None => {
+                cache_hit.entry(typename.clone()).or_default().1 += 1;
 
-            representation
-                .as_object_mut()
-                .map(|o| o.insert(TYPENAME, opt_type));
-            new_representations.push(representation);
-        } else {
-            cache_hit.entry(typename.clone()).or_default().0 += 1;
+                representation
+                    .as_object_mut()
+                    .map(|o| o.insert(TYPENAME, opt_type));
+                new_representations.push(representation);
+            }
+            Some(entry) => {
+                cache_hit.entry(typename.clone()).or_default().0 += 1;
+                match cache_control.as_mut() {
+                    None => cache_control = Some(entry.control.clone()),
+                    Some(c) => *c = c.merge(&entry.control),
+                }
+            }
         }
         result.push(IntermediateResult {
             key,
@@ -511,16 +537,20 @@ fn filter_representations(
         );
     }
 
-    Ok((new_representations, result))
+    Ok((new_representations, result, cache_control))
 }
 
 // fill in the entities for the response
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     cache: &RedisCacheStorage,
-    ttl: Option<Duration>,
+    cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
 ) -> Result<Vec<Value>, BoxError> {
+    let ttl: Option<Duration> = cache_control
+        .ttl()
+        .map(|secs| Duration::from_secs(secs as u64));
+
     let mut new_entities = Vec::new();
 
     let mut inserted_types: HashMap<String, usize> = HashMap::new();
@@ -536,7 +566,7 @@ async fn insert_entities_in_result(
     } in result.drain(..)
     {
         match cache_entry {
-            Some(v) => new_entities.push(v),
+            Some(v) => new_entities.push(v.data),
             None => {
                 let value = entities_it
                     .next()
@@ -544,7 +574,13 @@ async fn insert_entities_in_result(
                         reason: "invalid number of entities".to_string(),
                     })?;
                 *inserted_types.entry(typename).or_default() += 1;
-                to_insert.push((RedisKey(key), RedisValue(value.clone())));
+                to_insert.push((
+                    RedisKey(key),
+                    RedisValue(CacheEntry {
+                        control: cache_control.clone(),
+                        data: value.clone(),
+                    }),
+                ));
 
                 new_entities.push(value);
             }
