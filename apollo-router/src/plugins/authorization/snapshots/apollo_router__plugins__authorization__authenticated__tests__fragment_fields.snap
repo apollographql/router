@@ -7,15 +7,14 @@ query:
         query {
             topProducts {
                 type
-            }
-            itf {
-                id
                 ...F
             }
         }
 
-        fragment F on User {
-            name
+        fragment F on Product {
+            reviews {
+                body
+            }
         }
         
 filtered:
@@ -23,9 +22,6 @@ filtered:
   topProducts {
     type
   }
-  itf {
-    id
-  }
 }
 
-paths: ["/itf"]
+paths: ["/topProducts/reviews/@"]
