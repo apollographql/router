@@ -7,28 +7,23 @@ query:
         query {
             topProducts {
                 type
-            }
-            itf {
-                id
                 ...F
             }
         }
 
-        fragment F on User {
-            id2: id
-            name
+        fragment F on Product {
+            reviews {
+                body
+            }
         }
         
-extracted_scopes: {"read:user", "read:username"}
+extracted_scopes: {"review"}
 request scopes: []
 filtered:
 {
   topProducts {
     type
   }
-  itf {
-    id
-  }
 }
 
-paths: ["/itf"]
+paths: ["/topProducts/reviews/@"]
