@@ -110,12 +110,6 @@ impl ExecutionService {
     async fn call_inner(&mut self, req: ExecutionRequest) -> Result<ExecutionResponse, BoxError> {
         let context = req.context;
         let ctx = context.clone();
-        let expiry = context
-            .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)?
-            .and_then(|x: Value| {
-                let claims = x.as_object().expect("claims should be an object");
-                claims.get("exp").expect("FIX ME LATER").as_i64()
-            });
         let variables = req.supergraph_request.body().variables.clone();
         let operation_name = req.supergraph_request.body().operation_name.clone();
 
@@ -124,6 +118,10 @@ impl ExecutionService {
             .query_plan
             .is_deferred(operation_name.as_deref(), &variables);
         let is_subscription = req.query_plan.is_subscription(operation_name.as_deref());
+        let mut claims = None;
+        if is_subscription || is_deferred {
+            claims = context.get(APOLLO_AUTHENTICATION_JWT_CLAIMS)?
+        }
         let (tx_close_signal, subscription_handle) = if is_subscription {
             let (tx_close_signal, rx_close_signal) = broadcast::channel(1);
             (
@@ -186,10 +184,24 @@ impl ExecutionService {
                 .map(move |mut response: Response| {
                     // Enforce JWT expiry for deferred and subscription responses
                     if is_deferred || is_subscription {
-                        let ts_opt = expiry.map(|seconds_since_epoch| {
-                            chrono::DateTime::from_timestamp(seconds_since_epoch, 0)
-                                .expect("should be able to create a DateTime here")
-                        });
+                        let ts_opt = claims
+                            .as_ref()
+                            .and_then(|x: &Value| {
+                                if !x.is_object() {
+                                    tracing::error!("JWT claims should be an object");
+                                    return None;
+                                }
+                                let claims = x.as_object().expect("claims should be an object");
+                                let exp = claims.get("exp")?;
+                                if !exp.is_number() {
+                                    tracing::error!("JWT 'exp' (expiry) claim should be a number");
+                                    return None;
+                                }
+                                exp.as_i64()
+                            })
+                            .map(|seconds_since_epoch| {
+                                chrono::DateTime::from_timestamp(seconds_since_epoch, 0).expect("should be able to create a DateTime here")
+                            });
                         if let Some(ts) = ts_opt {
                             let now = chrono::Utc::now();
                             if ts < now {
