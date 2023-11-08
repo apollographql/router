@@ -19,4 +19,16 @@ telemetry:
       enabled: true
       agent:
         endpoint: default
-
+  spans:
+    mode: legacy
+    default_attribute_requirement_level: recommended
+    router:
+      attributes:
+        "custom_one":
+          request_header: host
+    supergraph:
+      attributes:
+        graphql.document: true
+    subgraph:
+      attributes:
+        graphql.document: true

@@ -311,8 +311,19 @@ impl Metrics {
             opt.tracing.jaeger,
             "$.tracing.jaeger[?(@.enabled==true)]",
             opt.tracing.zipkin,
-            "$.tracing.zipkin[?(@.enabled==true)]"
+            "$.tracing.zipkin[?(@.enabled==true)]",
+            opt.spans.mode,
+            "$.spans.mode",
+            opt.spans.default_attribute_requirement_level,
+            "$.spans.default_attribute_requirement_level",
+            opt.spans.router,
+            "$[?(@.spans.router)]",
+            opt.spans.subgraph,
+            "$[?(@.spans.subgraph)]",
+            opt.spans.supergraph,
+            "$[?(@.spans.supergraph)]"
         );
+
         log_usage_metrics!(
             value.apollo.router.config.batching,
             "$.experimental_batching[?(@.enabled == true)]",
