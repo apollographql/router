@@ -209,9 +209,9 @@ impl Text {
             .and_then(|id| ctx.span(id))
             .or_else(|| ctx.lookup_current());
         if let Some(mut span) = span {
-            Self::write_span(writer, &span)?;
+            Self::write_span(ctx, writer, &span)?;
             while let Some(parent) = span.parent() {
-                Self::write_span(writer, &parent)?;
+                Self::write_span(ctx, writer, &parent)?;
                 span = parent;
             }
         }
@@ -219,13 +219,18 @@ impl Text {
         Ok(())
     }
 
-    fn write_span<S>(writer: &mut Writer, span: &SpanRef<S>) -> fmt::Result
+    fn write_span<S, N>(
+        _ctx: &FmtContext<'_, S, N>,
+        writer: &mut Writer,
+        span: &SpanRef<S>,
+    ) -> fmt::Result
     where
         S: Subscriber + for<'a> LookupSpan<'a>,
+        N: for<'a> FormatFields<'a> + 'static,
     {
         let ext = span.extensions();
         let mut attributes = BTreeMap::new();
-        if let Some(data) = ext.get::<FormattedFields<S>>() {
+        if let Some(data) = ext.get::<FormattedFields<N>>() {
             if let Ok(serde_json::Value::Object(fields)) =
                 serde_json::from_str::<serde_json::Value>(data)
             {
