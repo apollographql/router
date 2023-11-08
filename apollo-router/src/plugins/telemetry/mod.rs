@@ -7,7 +7,6 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
-use ::tracing::field;
 use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
@@ -76,8 +75,8 @@ use self::reload::reload_fmt;
 use self::reload::LayeredTracer;
 use self::reload::NullFieldFormatter;
 use self::reload::SamplingFilter;
+pub(crate) use self::span_factory::SpanMode;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
-use self::tracing::apollo_telemetry::APOLLO_PRIVATE_REQUEST;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
 use super::traffic_shaping::cache::hash_request;
@@ -161,6 +160,7 @@ const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
+pub(crate) const OTEL_STATUS_CODE: &str = "otel.status_code";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 static DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
@@ -274,7 +274,8 @@ impl Plugin for Telemetry {
         let config = self.config.clone();
         let config_later = self.config.clone();
         let config_request = self.config.clone();
-        let use_legacy_request_span = config.spans.legacy_request_span;
+        let span_mode = config.spans.mode;
+        let use_legacy_request_span = matches!(config.spans.mode, SpanMode::Legacy);
 
         ServiceBuilder::new()
             .map_response(move |response: router::Response| {
@@ -306,23 +307,20 @@ impl Plugin for Telemetry {
 
                 response
             })
-            .option_layer(self.config.spans.legacy_request_span.then(move || {
-                InstrumentLayer::new(|request: &router::Request| {
-                    create_router_span(&request.router_request)
+            .option_layer(use_legacy_request_span.then(move || {
+                InstrumentLayer::new(move |request: &router::Request| {
+                    span_mode.create_router(&request.router_request)
                 })
             }))
             .map_future_with_request_data(
                 move |request: &router::Request| {
-                    if !config_request.spans.legacy_request_span {
+                    if !use_legacy_request_span {
                         let span = Span::current();
 
-                        span.set_dyn_attributes([
-                            (
-                                HTTP_REQUEST_METHOD,
-                                request.router_request.method().to_string().into(),
-                            ),
-                            (APOLLO_PRIVATE_REQUEST, opentelemetry_api::Value::Bool(true)),
-                        ]);
+                        span.set_dyn_attribute(
+                            HTTP_REQUEST_METHOD,
+                            request.router_request.method().to_string().into(),
+                        );
                     }
 
                     let client_name: &str = request
@@ -406,9 +404,9 @@ impl Plugin for Telemetry {
                             }
 
                             if response.response.status() >= StatusCode::BAD_REQUEST {
-                                span.record("otel.status_code", "Error");
+                                span.record(OTEL_STATUS_CODE, "Error");
                             } else {
-                                span.record("otel.status_code", "Ok");
+                                span.record(OTEL_STATUS_CODE, "Ok");
                             }
                         } else if let Err(err) = &response {
                             span.set_dyn_attributes(config.spans.router.attributes.on_error(err));
@@ -424,14 +422,17 @@ impl Plugin for Telemetry {
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let metrics_sender = self.apollo_metrics_sender.clone();
+        let span_mode = self.config.spans.mode;
         let config = self.config.clone();
+        let config_instrument = self.config.clone();
         let config_map_res_first = config.clone();
         let config_map_res = config.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
         ServiceBuilder::new()
-            .instrument(Self::supergraph_service_span(
-                self.field_level_instrumentation_ratio,
-                &config.apollo,
+            .instrument(move |supergraph_req: &SupergraphRequest| span_mode.create_supergraph(
+                &config_instrument.apollo,
+                supergraph_req,
+                field_level_instrumentation_ratio,
             ))
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
@@ -534,6 +535,7 @@ impl Plugin for Telemetry {
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let config = self.config.clone();
+        let span_mode = self.config.spans.mode;
         let conf = self.config.clone();
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
@@ -544,14 +546,7 @@ impl Plugin for Telemetry {
         let name = name.to_owned();
         let subgraph_name_arc = Arc::new(name.to_owned());
         ServiceBuilder::new()
-            .instrument(move |_req: &SubgraphRequest| {
-                info_span!(
-                    SUBGRAPH_SPAN_NAME,
-                    "apollo.subgraph.name" = name.as_str(),
-                    "otel.kind" = "INTERNAL",
-                    "apollo_private.ftv1" = field::Empty
-                )
-            })
+            .instrument(move |req: &SubgraphRequest| span_mode.create_subgraph(name.as_str(), req))
             .map_request(move |mut req: SubgraphRequest| {
                 let cache_attributes = cache_metrics_enabled
                     .then(|| Self::get_cache_attributes(subgraph_name_arc.clone(), &mut req))
@@ -595,12 +590,25 @@ impl Plugin for Telemetry {
                         let span = Span::current();
                         span.set_dyn_attributes(custom_attributes);
                         let result: Result<SubgraphResponse, BoxError> = f.await;
+
                         match &result {
-                            Ok(resp) => span.set_dyn_attributes(
-                                conf.spans.subgraph.attributes.on_response(resp),
-                            ),
-                            Err(err) => span
-                                .set_dyn_attributes(conf.spans.subgraph.attributes.on_error(err)),
+                            Ok(resp) => {
+                                if resp.response.status() >= StatusCode::BAD_REQUEST {
+                                    span.record(OTEL_STATUS_CODE, "Error");
+                                } else {
+                                    span.record(OTEL_STATUS_CODE, "Ok");
+                                }
+                                span.set_dyn_attributes(
+                                    conf.spans.subgraph.attributes.on_response(resp),
+                                );
+                            }
+                            Err(err) => {
+                                span.record(OTEL_STATUS_CODE, "Error");
+
+                                span.set_dyn_attributes(
+                                    conf.spans.subgraph.attributes.on_error(err),
+                                );
+                            }
                         }
 
                         Self::store_subgraph_response_attributes(
@@ -623,24 +631,6 @@ impl Plugin for Telemetry {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         self.custom_endpoints.clone()
     }
-}
-
-pub(crate) fn create_router_span<B>(router_request: &http::Request<B>) -> Span {
-    let span = ::tracing::info_span!(ROUTER_SPAN_NAME,
-        "http.route" = %router_request.uri(),
-        "http.request.method" = %router_request.method(),
-        otel.name = ::tracing::field::Empty,
-        "trace_id" = ::tracing::field::Empty,
-        "client.name" = ::tracing::field::Empty,
-        "client.version" = ::tracing::field::Empty,
-        "otel.kind" = "SERVER",
-        "otel.status_code" = ::tracing::field::Empty,
-        "apollo_private.duration_ns" = ::tracing::field::Empty,
-        "apollo_private.http.request_headers" = ::tracing::field::Empty,
-        "apollo_private.http.response_headers" = field::Empty,
-    );
-
-    span
 }
 
 struct LateCallsite {
@@ -805,37 +795,6 @@ impl Telemetry {
                 .boxed(),
         };
         fmt
-    }
-
-    fn supergraph_service_span(
-        field_level_instrumentation_ratio: f64,
-        config: &apollo::Config,
-    ) -> impl Fn(&SupergraphRequest) -> Span + Clone {
-        let send_variable_values = config.send_variable_values.clone();
-        move |request: &SupergraphRequest| {
-            let span = info_span!(
-                SUPERGRAPH_SPAN_NAME,
-                otel.kind = "INTERNAL",
-                graphql.operation.name = field::Empty,
-                apollo_private.field_level_instrumentation_ratio =
-                    field_level_instrumentation_ratio,
-                apollo_private.operation_signature = field::Empty,
-                apollo_private.graphql.variables = Self::filter_variables_values(
-                    &request.supergraph_request.body().variables,
-                    &send_variable_values,
-                ),
-            );
-
-            if let Some(operation_name) = request
-                .context
-                .get::<_, String>(OPERATION_NAME)
-                .unwrap_or_default()
-            {
-                span.record("graphql.operation.name", operation_name);
-            }
-
-            span
-        }
     }
 
     pub(crate) fn filter_variables_values(

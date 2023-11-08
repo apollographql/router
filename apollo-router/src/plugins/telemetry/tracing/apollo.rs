@@ -8,6 +8,7 @@ use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::spans::Spans;
+use crate::plugins::telemetry::span_factory::SpanMode;
 use crate::plugins::telemetry::tracing::apollo_telemetry;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
@@ -40,7 +41,7 @@ impl TracingConfigurator for Config {
             .field_execution_sampler(&self.field_level_instrumentation_sampler)
             .batch_config(&self.batch_processor)
             .errors_configuration(&self.errors)
-            .use_legacy_request_span(spans_config.legacy_request_span)
+            .use_legacy_request_span(matches!(spans_config.mode, SpanMode::Legacy))
             .build()?;
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)

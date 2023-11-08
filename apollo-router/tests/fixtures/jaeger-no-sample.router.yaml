@@ -28,7 +28,7 @@ telemetry:
         match: ^foo.*
         headers: true
   spans:
-    legacy_request_span: true
+    mode: legacy
     supergraph:
       attributes:
         graphql.operation.name: true

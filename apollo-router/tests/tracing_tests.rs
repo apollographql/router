@@ -22,7 +22,7 @@ async fn make_request(request: supergraph::Request) {
                 "field_level_instrumentation_sampler": "always_off"
             },
             "spans": {
-                "legacy_request_span": true
+                "mode": "legacy"
             }
         }
         }))

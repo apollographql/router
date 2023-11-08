@@ -50,6 +50,7 @@ use crate::configuration::ListenAddr;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
+use crate::plugins::telemetry::SpanMode;
 use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
@@ -383,7 +384,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
     }
 }
 
-pub(crate) fn use_legacy_request_span(configuration: &Configuration) -> bool {
+pub(crate) fn span_mode(configuration: &Configuration) -> SpanMode {
     configuration
         .apollo_plugins
         .plugins
@@ -391,7 +392,7 @@ pub(crate) fn use_legacy_request_span(configuration: &Configuration) -> bool {
         .find(|(s, _)| s.as_str() == "telemetry")
         .and_then(|(_, v)| v.get("spans").and_then(|v| v.as_object()))
         .and_then(|v| {
-            v.get("legacy_request_span")
+            v.get("mode")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
         })
         .unwrap_or_default()
@@ -409,7 +410,7 @@ where
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
-    let use_legacy_request_span = use_legacy_request_span(configuration);
+    let span_mode = span_mode(configuration);
 
     let main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
@@ -422,10 +423,7 @@ where
         // Telemetry layers MUST be last. This means that they will be hit first during execution of the pipeline
         // Adding layers after telemetry will cause us to lose metrics and spans.
         .layer(
-            TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan {
-                license,
-                use_legacy_request_span,
-            }),
+            TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license, span_mode }),
         )
         .layer(middleware::from_fn(metrics_handler));
 

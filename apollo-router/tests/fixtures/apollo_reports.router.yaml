@@ -2,7 +2,7 @@ include_subgraph_errors:
   all: true
 telemetry:
   spans:
-    legacy_request_span: true
+    mode: legacy
   tracing:
     experimental_response_trace_id:
       enabled: true

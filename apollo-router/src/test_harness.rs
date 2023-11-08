@@ -10,7 +10,7 @@ use tower::ServiceExt;
 use tower_http::trace::MakeSpan;
 use tracing_futures::Instrument;
 
-use crate::axum_factory::use_legacy_request_span;
+use crate::axum_factory::span_mode;
 use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::plugin::test::canned;
@@ -286,7 +286,7 @@ impl<'a> TestHarness<'a> {
             let router = ServiceBuilder::new().service(router_creator.make()).boxed();
             let span = PropagatingMakeSpan {
                 license: LicenseState::default(),
-                use_legacy_request_span: use_legacy_request_span(&config),
+                span_mode: span_mode(&config),
             }
             .make_span(&request.router_request);
             async move { router.oneshot(request).await }.instrument(span)
