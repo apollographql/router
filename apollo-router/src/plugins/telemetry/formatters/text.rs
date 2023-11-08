@@ -3,7 +3,6 @@ use std::fmt;
 
 use nu_ansi_term::Color;
 use nu_ansi_term::Style;
-use opentelemetry::trace::TraceContextExt;
 use tracing_core::Event;
 use tracing_core::Level;
 use tracing_core::Subscriber;
