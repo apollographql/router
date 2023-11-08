@@ -36,6 +36,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
@@ -109,6 +110,12 @@ impl ExecutionService {
     async fn call_inner(&mut self, req: ExecutionRequest) -> Result<ExecutionResponse, BoxError> {
         let context = req.context;
         let ctx = context.clone();
+        let expiry = context
+            .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)?
+            .and_then(|x: Value| {
+                let claims = x.as_object().expect("claims should be an object");
+                claims.get("exp").expect("FIX ME LATER").as_i64()
+            });
         let variables = req.supergraph_request.body().variables.clone();
         let operation_name = req.supergraph_request.body().operation_name.clone();
 
@@ -153,7 +160,7 @@ impl ExecutionService {
                 first.subscribed = Some(first.errors.is_empty());
                 StreamMode::Subscription
             };
-            let stream = filter_stream(first, receiver, stream_mode);
+            let stream = filter_stream(first, receiver, stream_mode, expiry);
             StreamWrapper(stream, tx_close_signal).boxed()
         } else if has_initial_data {
             // If it's a subscription event
@@ -478,16 +485,23 @@ fn filter_stream(
     first: Response,
     mut stream: Receiver<Response>,
     stream_mode: StreamMode,
+    expiry: Option<i64>,
 ) -> Receiver<Response> {
     let (mut sender, receiver) = mpsc::channel(10);
 
     tokio::task::spawn(async move {
         let mut seen_last_message =
-            consume_responses(first, &mut stream, &mut sender, stream_mode).await?;
+            consume_responses(first, &mut stream, &mut sender, stream_mode, expiry).await?;
 
         while let Some(current_response) = stream.next().await {
-            seen_last_message =
-                consume_responses(current_response, &mut stream, &mut sender, stream_mode).await?;
+            seen_last_message = consume_responses(
+                current_response,
+                &mut stream,
+                &mut sender,
+                stream_mode,
+                expiry,
+            )
+            .await?;
         }
 
         // the response stream disconnected early so we could not add `has_next = false` to the
@@ -512,8 +526,26 @@ async fn consume_responses(
     stream: &mut Receiver<Response>,
     sender: &mut Sender<Response>,
     stream_mode: StreamMode,
+    expiry: Option<i64>,
 ) -> Result<bool, SendError> {
+    let ts_opt = expiry.map(|seconds_since_epoch| {
+        chrono::DateTime::from_timestamp(seconds_since_epoch, 0)
+            .expect("should be able to create a DateTime here")
+    });
     loop {
+        if let Some(ts) = ts_opt {
+            let now = chrono::Utc::now();
+            if ts < now {
+                tracing::debug!("token has expired, shut down the subscription");
+                match stream_mode {
+                    StreamMode::Defer => current_response.has_next = Some(false),
+                    StreamMode::Subscription => current_response.subscribed = Some(false),
+                }
+
+                sender.send(current_response).await?;
+                return Ok(true);
+            }
+        }
         match stream.try_next() {
             // no messages available, but the channel is not closed
             // this means more deferred responses can come
