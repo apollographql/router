@@ -54,7 +54,6 @@ use tracing_core::Callsite;
 use tracing_core::Interest;
 use tracing_core::Metadata;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use tracing_subscriber::Layer;
 
 use self::apollo::ForwardValues;
 use self::apollo::LicensedOperationCountByType;
@@ -65,14 +64,9 @@ use self::apollo_exporter::Sender;
 use self::config::Conf;
 use self::config::Sampler;
 use self::config::SamplerOption;
-use self::formatters::json::Json;
-use self::formatters::json::JsonFields;
-use self::formatters::text::TextFormatter;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
 use self::reload::reload_fmt;
-use self::reload::LayeredTracer;
-use self::reload::NullFieldFormatter;
 use self::reload::SamplingFilter;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use super::traffic_shaping::cache::hash_request;
@@ -94,8 +88,7 @@ use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::dynamic_attribute::DynAttribute;
-use crate::plugins::telemetry::formatters::filter_metric_events;
-use crate::plugins::telemetry::formatters::FilteringFormatter;
+use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SinglePathErrorStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
@@ -135,6 +128,7 @@ pub(crate) mod config;
 mod config_new;
 pub(crate) mod dynamic_attribute;
 mod endpoint;
+mod fmt_layer;
 pub(crate) mod formatters;
 pub(crate) mod metrics;
 mod otlp;
@@ -652,7 +646,7 @@ impl Telemetry {
 
         self.reload_metrics();
 
-        reload_fmt(Self::create_fmt_layer(&self.config));
+        reload_fmt(create_fmt_layer(&self.config));
     }
 
     fn create_propagator(config: &config::Conf) -> TextMapCompositePropagator {
@@ -733,37 +727,6 @@ impl Telemetry {
             setup_metrics_exporter(builder, &metrics_config.prometheus, metrics_common_config)?;
         builder = setup_metrics_exporter(builder, &metrics_config.otlp, metrics_common_config)?;
         Ok(builder)
-    }
-
-    fn create_fmt_layer(config: &config::Conf) -> Box<dyn Layer<LayeredTracer> + Send + Sync> {
-        let logging = &config.logging;
-        let fmt = match logging.format {
-            config::LoggingFormat::Pretty => tracing_subscriber::fmt::layer()
-                .event_format(FilteringFormatter::new(
-                    TextFormatter::new()
-                        .with_filename(logging.display_filename)
-                        .with_line(logging.display_line_number)
-                        .with_target(logging.display_target),
-                    filter_metric_events,
-                ))
-                .fmt_fields(NullFieldFormatter)
-                .boxed(),
-            config::LoggingFormat::Json => tracing_subscriber::fmt::layer()
-                .event_format(FilteringFormatter::new(
-                    Json::default()
-                        .with_file(logging.display_filename)
-                        .with_line_number(logging.display_line_number)
-                        .with_target(logging.display_target)
-                        .with_current_span(true)
-                        .with_span_list(true)
-                        .flatten_event(true),
-                    filter_metric_events,
-                ))
-                .fmt_fields(NullFieldFormatter)
-                .map_fmt_fields(|_f| JsonFields {})
-                .boxed(),
-        };
-        fmt
     }
 
     fn supergraph_service_span(
