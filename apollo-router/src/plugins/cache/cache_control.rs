@@ -7,23 +7,41 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use tower::BoxError;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct CacheControl {
     created: u64,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     max_age: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     age: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     s_max_age: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     stale_while_revalidate: Option<u32>,
+    #[serde(skip_serializing_if = "is_false", default)]
     no_cache: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
     must_revalidate: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
     proxy_revalidate: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
     no_store: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
     private: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
     public: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
     must_understand: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
     no_transform: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
     immutable: bool,
+    #[serde(skip_serializing_if = "is_false", default)]
     stale_if_error: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !b
 }
 
 fn now_epoch_seconds() -> u64 {
@@ -186,7 +204,6 @@ impl CacheControl {
         }
         if self.stale_if_error {
             write!(&mut s, "{}stale-if-error", if prev { "," } else { "" },)?;
-            prev = true;
         }
         headers.insert(CACHE_CONTROL, HeaderValue::from_str(&s)?);
         //TODO: Age header
