@@ -267,6 +267,8 @@ impl CacheControl {
         }
     }
 
+    // We don't support revalidation yet
+    #[allow(dead_code)]
     pub(crate) fn should_revalidate(&self) -> bool {
         if self.no_cache {
             return true;

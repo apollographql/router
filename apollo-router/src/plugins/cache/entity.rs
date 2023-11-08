@@ -278,16 +278,18 @@ async fn cache_store_root_from_response(
             .ttl()
             .map(|secs| Duration::from_secs(secs as u64));
 
-        cache
-            .insert(
-                RedisKey(cache_key),
-                RedisValue(CacheEntry {
-                    control: cache_control,
-                    data: data.clone(),
-                }),
-                ttl,
-            )
-            .await;
+        if cache_control.should_store() {
+            cache
+                .insert(
+                    RedisKey(cache_key),
+                    RedisValue(CacheEntry {
+                        control: cache_control,
+                        data: data.clone(),
+                    }),
+                    ttl,
+                )
+                .await;
+        }
     }
 
     Ok(())
@@ -580,14 +582,17 @@ async fn insert_entities_in_result(
                         reason: "invalid number of entities".to_string(),
                     })?;
 
-                *inserted_types.entry(typename).or_default() += 1;
-                to_insert.push((
-                    RedisKey(key),
-                    RedisValue(CacheEntry {
-                        control: cache_control.clone(),
-                        data: value.clone(),
-                    }),
-                ));
+                if cache_control.should_store() {
+                    *inserted_types.entry(typename).or_default() += 1;
+
+                    to_insert.push((
+                        RedisKey(key),
+                        RedisValue(CacheEntry {
+                            control: cache_control.clone(),
+                            data: value.clone(),
+                        }),
+                    ));
+                }
 
                 new_entities.push(value);
             }
