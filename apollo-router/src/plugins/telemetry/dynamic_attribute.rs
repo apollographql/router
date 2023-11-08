@@ -8,6 +8,7 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 
 use super::reload::IsSampled;
+use super::tracing::APOLLO_PRIVATE_PREFIX;
 
 #[derive(Debug)]
 pub(crate) struct LogAttributes {
@@ -96,6 +97,9 @@ impl DynAttribute for ::tracing::Span {
                                 }
                             }
                         } else {
+                            if key.as_str().starts_with(APOLLO_PRIVATE_PREFIX) {
+                                return;
+                            }
                             let mut extensions = s.extensions_mut();
                             match extensions.get_mut::<LogAttributes>() {
                                 Some(attributes) => {
@@ -149,7 +153,11 @@ impl DynAttribute for ::tracing::Span {
                             let mut extensions = s.extensions_mut();
                             match extensions.get_mut::<LogAttributes>() {
                                 Some(registered_attributes) => {
-                                    registered_attributes.extend(attributes);
+                                    registered_attributes.extend(attributes.into_iter().filter(
+                                        |(name, _)| {
+                                            !name.as_str().starts_with(APOLLO_PRIVATE_PREFIX)
+                                        },
+                                    ));
                                 }
                                 None => {
                                     // Can't use ::tracing::error! because it could create deadlock on extensions
