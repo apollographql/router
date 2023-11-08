@@ -16,6 +16,8 @@ use tokio::io::AsyncWriteExt;
 use tower_http::trace::MakeSpan;
 use tracing::Span;
 
+use crate::plugins::telemetry::SpanMode;
+use crate::plugins::telemetry::OTEL_STATUS_CODE;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
@@ -101,6 +103,7 @@ pub(super) async fn decompress_request_body(
 #[derive(Clone, Default)]
 pub(crate) struct PropagatingMakeSpan {
     pub(crate) license: LicenseState,
+    pub(crate) span_mode: SpanMode,
 }
 
 impl<B> MakeSpan<B> for PropagatingMakeSpan {
@@ -111,53 +114,36 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         let context = global::get_text_map_propagator(|propagator| {
             propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
         });
+        let use_legacy_request_span = matches!(self.span_mode, SpanMode::Deprecated);
 
         // If there was no span from the request then it will default to the NOOP span.
         // Attaching the NOOP span has the effect of preventing further tracing.
-        if context.span().span_context().is_valid()
+        let span = if context.span().span_context().is_valid()
             || context.span().span_context().trace_id() != opentelemetry::trace::TraceId::INVALID
         {
             // We have a valid remote span, attach it to the current thread before creating the root span.
             let _context_guard = context.attach();
-            self.create_span(request)
+            if use_legacy_request_span {
+                self.span_mode.create_request(request, self.license)
+            } else {
+                self.span_mode.create_router(request)
+            }
         } else {
             // No remote span, we can go ahead and create the span without context.
-            self.create_span(request)
-        }
-    }
-}
-
-impl PropagatingMakeSpan {
-    fn create_span<B>(&mut self, request: &Request<B>) -> Span {
+            if use_legacy_request_span {
+                self.span_mode.create_request(request, self.license)
+            } else {
+                self.span_mode.create_router(request)
+            }
+        };
         if matches!(
             self.license,
             LicenseState::LicensedWarn | LicenseState::LicensedHalt
         ) {
-            tracing::error_span!(
-                REQUEST_SPAN_NAME,
-                "http.method" = %request.method(),
-                "http.route" = %request.uri(),
-                "http.flavor" = ?request.version(),
-                "http.status" = 500, // This prevents setting later
-                "otel.name" = ::tracing::field::Empty,
-                "otel.kind" = "SERVER",
-                "graphql.operation.name" = ::tracing::field::Empty,
-                "graphql.operation.type" = ::tracing::field::Empty,
-                "apollo_router.license" = LICENSE_EXPIRED_SHORT_MESSAGE,
-                "apollo_private.request" = true,
-            )
-        } else {
-            tracing::info_span!(
-                REQUEST_SPAN_NAME,
-                "http.method" = %request.method(),
-                "http.route" = %request.uri(),
-                "http.flavor" = ?request.version(),
-                "otel.name" = ::tracing::field::Empty,
-                "otel.kind" = "SERVER",
-                "graphql.operation.name" = ::tracing::field::Empty,
-                "graphql.operation.type" = ::tracing::field::Empty,
-                "apollo_private.request" = true,
-            )
+            span.record(OTEL_STATUS_CODE, "Error");
+            span.record("apollo_router.license", LICENSE_EXPIRED_SHORT_MESSAGE);
         }
+
+        span
     }
 }

@@ -8,7 +8,6 @@ use crate::plugins::telemetry::formatters::json::JsonFields;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::reload::LayeredTracer;
-use crate::plugins::telemetry::reload::NullFieldFormatter;
 
 pub(crate) fn create_fmt_layer(
     config: &config::Conf,
