@@ -160,7 +160,7 @@ impl ExecutionService {
                 first.subscribed = Some(first.errors.is_empty());
                 StreamMode::Subscription
             };
-            let stream = filter_stream(first, receiver, stream_mode, expiry);
+            let stream = filter_stream(first, receiver, stream_mode);
             StreamWrapper(stream, tx_close_signal).boxed()
         } else if has_initial_data {
             // If it's a subscription event
@@ -182,6 +182,36 @@ impl ExecutionService {
         let execution_span = Span::current();
 
         let stream = stream
+            .map(move |mut response: Response| {
+                if is_deferred || is_subscription {
+                    // Enforce JWT expiry
+                    let ts_opt = expiry.map(|seconds_since_epoch| {
+                        chrono::DateTime::from_timestamp(seconds_since_epoch, 0)
+                            .expect("should be able to create a DateTime here")
+                    });
+                    if let Some(ts) = ts_opt {
+                        let now = chrono::Utc::now();
+                        if ts < now {
+                            tracing::debug!("token has expired, shut down the subscription");
+                            response = Response::builder()
+                                .errors(vec![Error::builder()
+                                    .message(
+                                        "subscription has been closed because the JWT has expired",
+                                    )
+                                    .extension_code("REQUEST_JWT_EXPIRED")
+                                    .build()])
+                                .build();
+                            if is_deferred {
+                                response.has_next = Some(false);
+                            }
+                            if is_subscription {
+                                response.subscribed = Some(false);
+                            }
+                        }
+                    }
+                }
+                response
+            })
             .filter_map(move |response: Response| {
                 ready(execution_span.in_scope(|| {
                     Self::process_graphql_response(
@@ -485,23 +515,16 @@ fn filter_stream(
     first: Response,
     mut stream: Receiver<Response>,
     stream_mode: StreamMode,
-    expiry: Option<i64>,
 ) -> Receiver<Response> {
     let (mut sender, receiver) = mpsc::channel(10);
 
     tokio::task::spawn(async move {
         let mut seen_last_message =
-            consume_responses(first, &mut stream, &mut sender, stream_mode, expiry).await?;
+            consume_responses(first, &mut stream, &mut sender, stream_mode).await?;
 
         while let Some(current_response) = stream.next().await {
-            seen_last_message = consume_responses(
-                current_response,
-                &mut stream,
-                &mut sender,
-                stream_mode,
-                expiry,
-            )
-            .await?;
+            seen_last_message =
+                consume_responses(current_response, &mut stream, &mut sender, stream_mode).await?;
         }
 
         // the response stream disconnected early so we could not add `has_next = false` to the
@@ -526,26 +549,8 @@ async fn consume_responses(
     stream: &mut Receiver<Response>,
     sender: &mut Sender<Response>,
     stream_mode: StreamMode,
-    expiry: Option<i64>,
 ) -> Result<bool, SendError> {
-    let ts_opt = expiry.map(|seconds_since_epoch| {
-        chrono::DateTime::from_timestamp(seconds_since_epoch, 0)
-            .expect("should be able to create a DateTime here")
-    });
     loop {
-        if let Some(ts) = ts_opt {
-            let now = chrono::Utc::now();
-            if ts < now {
-                tracing::debug!("token has expired, shut down the subscription");
-                match stream_mode {
-                    StreamMode::Defer => current_response.has_next = Some(false),
-                    StreamMode::Subscription => current_response.subscribed = Some(false),
-                }
-
-                sender.send(current_response).await?;
-                return Ok(true);
-            }
-        }
         match stream.try_next() {
             // no messages available, but the channel is not closed
             // this means more deferred responses can come
