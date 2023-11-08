@@ -6,11 +6,10 @@ use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 
-use crate::configuration::RedisCache;
-
 use self::storage::CacheStorage;
 use self::storage::KeyType;
 use self::storage::ValueType;
+use crate::configuration::RedisCache;
 
 pub(crate) mod redis;
 pub(crate) mod storage;

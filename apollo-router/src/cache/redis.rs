@@ -15,10 +15,9 @@ use fred::types::ReconnectPolicy;
 use fred::types::RedisConfig;
 use url::Url;
 
-use crate::configuration::RedisCache;
-
 use super::KeyType;
 use super::ValueType;
+use crate::configuration::RedisCache;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct RedisKey<K>(pub(crate) K)

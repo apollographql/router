@@ -10,9 +10,8 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
-use crate::configuration::RedisCache;
-
 use super::redis::*;
+use crate::configuration::RedisCache;
 
 pub(crate) trait KeyType:
     Clone + fmt::Debug + fmt::Display + Hash + Eq + Send + Sync
