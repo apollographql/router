@@ -295,7 +295,7 @@ impl Plugin for TrafficShaping {
                 Some(
                     RedisCacheStorage::new(
                         urls,
-                        None,
+                        init.config.experimental_cache.as_ref().and_then(|c| c.ttl),
                         init.config
                             .experimental_cache
                             .as_ref()

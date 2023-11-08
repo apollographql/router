@@ -60,13 +60,14 @@ where
         max_capacity: NonZeroUsize,
         redis_urls: Option<Vec<url::Url>>,
         timeout: Option<Duration>,
+        ttl: Option<Duration>,
         caller: &str,
     ) -> Self {
         Self {
             caller: caller.to_string(),
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             redis: if let Some(urls) = redis_urls {
-                match RedisCacheStorage::new(urls, None, timeout).await {
+                match RedisCacheStorage::new(urls, ttl, timeout).await {
                     Err(e) => {
                         tracing::error!(
                             "could not open connection to Redis for {} caching: {:?}",
