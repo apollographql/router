@@ -275,7 +275,7 @@ impl Plugin for Telemetry {
         let config_later = self.config.clone();
         let config_request = self.config.clone();
         let span_mode = config.spans.mode;
-        let use_legacy_request_span = matches!(config.spans.mode, SpanMode::Legacy);
+        let use_legacy_request_span = matches!(config.spans.mode, SpanMode::Deprecated);
 
         ServiceBuilder::new()
             .map_response(move |response: router::Response| {

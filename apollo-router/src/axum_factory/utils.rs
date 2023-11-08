@@ -114,7 +114,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         let context = global::get_text_map_propagator(|propagator| {
             propagator.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
         });
-        let use_legacy_request_span = matches!(self.span_mode, SpanMode::Legacy);
+        let use_legacy_request_span = matches!(self.span_mode, SpanMode::Deprecated);
 
         // If there was no span from the request then it will default to the NOOP span.
         // Attaching the NOOP span has the effect of preventing further tracing.

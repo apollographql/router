@@ -4805,7 +4805,7 @@ expression: "&schema"
                   "description": "Keep the request span as root span and deprecated attributes",
                   "type": "string",
                   "enum": [
-                    "legacy"
+                    "deprecated"
                   ]
                 },
                 {

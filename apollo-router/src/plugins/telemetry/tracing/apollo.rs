@@ -41,7 +41,7 @@ impl TracingConfigurator for Config {
             .field_execution_sampler(&self.field_level_instrumentation_sampler)
             .batch_config(&self.batch_processor)
             .errors_configuration(&self.errors)
-            .use_legacy_request_span(matches!(spans_config.mode, SpanMode::Legacy))
+            .use_legacy_request_span(matches!(spans_config.mode, SpanMode::Deprecated))
             .build()?;
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)

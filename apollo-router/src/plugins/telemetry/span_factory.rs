@@ -16,11 +16,11 @@ use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
 #[derive(Debug, Copy, Clone, Deserialize, JsonSchema, Default)]
-/// Span mode to create new or legacy spans
+/// Span mode to create new or deprecated spans
 #[serde(rename_all = "camelCase")]
 pub(crate) enum SpanMode {
     /// Keep the request span as root span and deprecated attributes
-    Legacy,
+    Deprecated,
     #[default]
     /// router span will be the new root span
     New,
@@ -33,7 +33,7 @@ impl SpanMode {
         license_state: LicenseState,
     ) -> ::tracing::span::Span {
         match self {
-            SpanMode::Legacy => {
+            SpanMode::Deprecated => {
                 if matches!(
                     license_state,
                     LicenseState::LicensedWarn | LicenseState::LicensedHalt
@@ -78,7 +78,7 @@ impl SpanMode {
             .map(|t| t.to_string())
             .unwrap_or_default();
         match self {
-            SpanMode::Legacy => {
+            SpanMode::Deprecated => {
                 let span = info_span!(ROUTER_SPAN_NAME,
                     "http.method" = %request.method(),
                     "http.request.method" = %request.method(),
@@ -122,7 +122,7 @@ impl SpanMode {
         field_level_instrumentation_ratio: f64,
     ) -> ::tracing::span::Span {
         match self {
-            SpanMode::Legacy => {
+            SpanMode::Deprecated => {
                 let send_variable_values = config.send_variable_values.clone();
                 let span = info_span!(
                     SUPERGRAPH_SPAN_NAME,
@@ -175,7 +175,7 @@ impl SpanMode {
         req: &SubgraphRequest,
     ) -> ::tracing::span::Span {
         match self {
-            SpanMode::Legacy => {
+            SpanMode::Deprecated => {
                 let query = req
                     .subgraph_request
                     .body()
