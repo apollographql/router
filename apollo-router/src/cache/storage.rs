@@ -3,13 +3,14 @@ use std::fmt::{self};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::time::Duration;
 
 use lru::LruCache;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
+
+use crate::configuration::RedisCache;
 
 use super::redis::*;
 
@@ -58,16 +59,14 @@ where
 {
     pub(crate) async fn new(
         max_capacity: NonZeroUsize,
-        redis_urls: Option<Vec<url::Url>>,
-        timeout: Option<Duration>,
-        ttl: Option<Duration>,
+        config: Option<RedisCache>,
         caller: &str,
     ) -> Self {
         Self {
             caller: caller.to_string(),
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            redis: if let Some(urls) = redis_urls {
-                match RedisCacheStorage::new(urls, ttl, timeout).await {
+            redis: if let Some(config) = config {
+                match RedisCacheStorage::new(config).await {
                     Err(e) => {
                         tracing::error!(
                             "could not open connection to Redis for {} caching: {:?}",
