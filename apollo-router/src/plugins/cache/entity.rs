@@ -27,8 +27,11 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::subgraph;
+use crate::services::supergraph;
 use crate::spec::TYPENAME;
 use crate::Context;
+
+use super::cache_control::CacheControl;
 
 const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
@@ -67,6 +70,24 @@ impl Plugin for EntityCache {
         .await?;
 
         Ok(Self { storage })
+    }
+
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+        ServiceBuilder::new()
+            .map_response(|mut response: supergraph::Response| {
+                if let Some(cache_control) = response
+                    .context
+                    .private_entries
+                    .lock()
+                    .get::<CacheControl>()
+                {
+                    cache_control.to_headers(response.response.headers_mut());
+                }
+
+                response
+            })
+            .service(service)
+            .boxed()
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
@@ -201,6 +222,28 @@ async fn cache_store_from_response(
 
         (opt_root_cache_key, opt_entities_results)
     };
+
+    let cache_control = CacheControl::new(response.response.headers())?;
+    {
+        match response
+            .context
+            .private_entries
+            .lock()
+            .get_mut::<CacheControl>()
+        {
+            Some(c) => {
+                *c = c.merge(&cache_control);
+            }
+            //FIXME: race condition. We need an Entry API for private entries
+            None => {
+                response
+                    .context
+                    .private_entries
+                    .lock()
+                    .insert(cache_control.clone());
+            }
+        }
+    }
 
     if let Some(cache_key) = opt_root_cache_key {
         cache_store_root_from_response(cache, &response, cache_key).await?;
