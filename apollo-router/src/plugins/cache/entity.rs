@@ -15,6 +15,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing::Level;
 
+use super::cache_control::CacheControl;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
@@ -30,8 +31,6 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::TYPENAME;
 use crate::Context;
-
-use super::cache_control::CacheControl;
 
 const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
@@ -225,7 +224,7 @@ async fn cache_lookup_entities(
 fn update_cache_control(context: &Context, cache_control: &CacheControl) {
     match context.private_entries.lock().get_mut::<CacheControl>() {
         Some(c) => {
-            *c = c.merge(&cache_control);
+            *c = c.merge(cache_control);
         }
         //FIXME: race condition. We need an Entry API for private entries
         None => {
@@ -469,6 +468,7 @@ struct IntermediateResult {
 }
 
 // build a new list of representations without the ones we got from the cache
+#[allow(clippy::type_complexity)]
 fn filter_representations(
     subgraph_name: &str,
     representations: &mut Vec<Value>,

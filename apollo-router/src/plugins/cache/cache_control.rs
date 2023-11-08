@@ -1,10 +1,12 @@
-use http::header::CACHE_CONTROL;
-use http::HeaderMap;
-use http::HeaderValue;
-use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
+
+use http::header::CACHE_CONTROL;
+use http::HeaderMap;
+use http::HeaderValue;
+use serde::Deserialize;
+use serde::Serialize;
 use tower::BoxError;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -257,14 +259,9 @@ impl CacheControl {
     }
 
     pub(crate) fn should_store(&self) -> bool {
-        //FIXME: should we add support for must-understand?
-        if self.no_store || self.private {
-            false
-        } else if self.public {
-            true
-        } else {
-            true
-        }
+        // FIXME: should we add support for must-understand?
+        // public will be the default case
+        !(self.no_store || self.private)
     }
 
     // We don't support revalidation yet
