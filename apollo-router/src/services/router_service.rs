@@ -402,13 +402,16 @@ impl RouterService {
         if results.len() == 1 {
             Ok(results.pop().expect("we should have at least one response"))
         } else {
-            let first = results.remove(0);
+            let mut results_it = results.into_iter();
+            let first = results_it
+                .next()
+                .expect("we should have at least one response");
             let (parts, body) = first.response.into_parts();
             let context = first.context;
             let mut bytes = BytesMut::new();
             bytes.put_u8(b'[');
             bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
-            for result in results {
+            for result in results_it {
                 bytes.put(&b", "[..]);
                 bytes.extend_from_slice(&hyper::body::to_bytes(result.response.into_body()).await?);
             }
@@ -599,17 +602,22 @@ impl RouterService {
             }
         };
 
-        let mut ok_results = graphql_requests?;
+        let ok_results = graphql_requests?;
         let mut results = Vec::with_capacity(ok_results.len());
-        let first = ok_results.remove(0);
-        let sg = http::Request::from_parts(parts, first);
 
-        if !ok_results.is_empty() {
+        if ok_results.len() > 1 {
             context
                 .private_entries
                 .lock()
                 .insert(self.experimental_batching.clone());
         }
+
+        let mut ok_results_it = ok_results.into_iter();
+        let first = ok_results_it
+            .next()
+            .expect("we should have at least one request");
+        let sg = http::Request::from_parts(parts, first);
+
         // Building up the batch of supergraph requests is tricky.
         // Firstly note that any http extensions are only propagated for the first request sent
         // through the pipeline. This is because there is simply no way to clone http
@@ -624,7 +632,7 @@ impl RouterService {
         // would mean all the requests in a batch shared the same set of private entries and review
         // comments expressed the sentiment that this may be a bad thing...)
         //
-        for graphql_request in ok_results {
+        for graphql_request in ok_results_it {
             // XXX Lose http extensions, is that ok?
             let mut new = http_ext::clone_http_request(&sg);
             *new.body_mut() = graphql_request;
