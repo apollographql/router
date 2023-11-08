@@ -478,7 +478,7 @@ fn filter_representations(
     let mut cache_hit: HashMap<String, (usize, usize)> = HashMap::new();
     let mut cache_control = None;
 
-    for ((mut representation, key), cache_entry) in representations
+    for ((mut representation, key), mut cache_entry) in representations
         .drain(..)
         .zip(keys)
         .zip(cache_result.drain(..))
@@ -491,6 +491,11 @@ fn filter_representations(
             })?;
 
         let typename = opt_type.as_str().unwrap_or("-").to_string();
+
+        // do not use that cache entry if it is stale
+        if let Some(false) = cache_entry.as_ref().map(|c| !c.control.can_use()) {
+            cache_entry = None;
+        }
 
         match cache_entry.as_ref() {
             None => {
@@ -509,6 +514,7 @@ fn filter_representations(
                 }
             }
         }
+
         result.push(IntermediateResult {
             key,
             typename,
@@ -573,6 +579,7 @@ async fn insert_entities_in_result(
                     .ok_or_else(|| FetchError::MalformedResponse {
                         reason: "invalid number of entities".to_string(),
                     })?;
+
                 *inserted_types.entry(typename).or_default() += 1;
                 to_insert.push((
                     RedisKey(key),
