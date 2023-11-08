@@ -199,14 +199,13 @@ impl ExecutionService {
                                 }
                                 exp.as_i64()
                             })
-                            .map(|seconds_since_epoch| {
+                            .and_then(|seconds_since_epoch| {
                                 let dt = chrono::DateTime::from_timestamp(seconds_since_epoch, 0);
                                 if dt.is_none() {
                                     tracing::error!("JWT 'exp' (expiry) claim could not be converted to a DateTime");
                                 }
                                 dt
-                            })
-                            .flatten();
+                            });
                         if let Some(ts) = ts_opt {
                             let now = chrono::Utc::now();
                             if ts < now {
