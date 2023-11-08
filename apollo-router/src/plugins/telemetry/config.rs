@@ -57,7 +57,6 @@ pub(crate) struct Conf {
     #[serde(rename = "experimental_logging", default)]
     pub(crate) logging: Logging,
 
-    #[cfg(feature = "telemetry_next")]
     #[serde(rename = "logging", default)]
     #[allow(dead_code)]
     pub(crate) new_logging: config_new::logging::Logging,
@@ -167,14 +166,6 @@ pub(crate) struct Tracing {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Logging {
-    /// Log format
-    pub(crate) format: LoggingFormat,
-    /// Display the target in the logs
-    pub(crate) display_target: bool,
-    /// Display the filename in the logs
-    pub(crate) display_filename: bool,
-    /// Display the line number in the logs
-    pub(crate) display_line_number: bool,
     /// Log configuration to log request and response for subgraphs and supergraph
     pub(crate) when_header: Vec<HeaderLoggingCondition>,
 }
@@ -711,10 +702,6 @@ mod tests {
     #[test]
     fn test_logging_conf_validation() {
         let logging_conf = Logging {
-            format: LoggingFormat::default(),
-            display_target: false,
-            display_filename: false,
-            display_line_number: false,
             when_header: vec![HeaderLoggingCondition::Value {
                 name: "test".to_string(),
                 value: String::new(),
@@ -726,10 +713,6 @@ mod tests {
         logging_conf.validate().unwrap();
 
         let logging_conf = Logging {
-            format: LoggingFormat::default(),
-            display_target: false,
-            display_filename: false,
-            display_line_number: false,
             when_header: vec![HeaderLoggingCondition::Value {
                 name: "test".to_string(),
                 value: String::new(),
@@ -746,10 +729,6 @@ mod tests {
     #[test]
     fn test_logging_conf_should_log() {
         let logging_conf = Logging {
-            format: LoggingFormat::default(),
-            display_target: false,
-            display_filename: false,
-            display_line_number: false,
             when_header: vec![HeaderLoggingCondition::Matching {
                 name: "test".to_string(),
                 matching: Regex::new("^foo*").unwrap(),
@@ -764,10 +743,6 @@ mod tests {
         assert_eq!(logging_conf.should_log(&req), (true, false));
 
         let logging_conf = Logging {
-            format: LoggingFormat::default(),
-            display_target: false,
-            display_filename: false,
-            display_line_number: false,
             when_header: vec![HeaderLoggingCondition::Value {
                 name: "test".to_string(),
                 value: String::from("foobar"),
@@ -778,10 +753,6 @@ mod tests {
         assert_eq!(logging_conf.should_log(&req), (true, false));
 
         let logging_conf = Logging {
-            format: LoggingFormat::default(),
-            display_target: false,
-            display_filename: false,
-            display_line_number: false,
             when_header: vec![
                 HeaderLoggingCondition::Matching {
                     name: "test".to_string(),
@@ -800,10 +771,6 @@ mod tests {
         assert_eq!(logging_conf.should_log(&req), (true, true));
 
         let logging_conf = Logging {
-            format: LoggingFormat::default(),
-            display_target: false,
-            display_filename: false,
-            display_line_number: false,
             when_header: vec![HeaderLoggingCondition::Matching {
                 name: "testtest".to_string(),
                 matching: Regex::new("^foo*").unwrap(),

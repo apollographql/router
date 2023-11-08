@@ -32,13 +32,21 @@ pub(crate) struct LoggingCommon {
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct StdOut {
     /// Set to true to log to stdout.
     pub(crate) enabled: bool,
     /// The format to log to stdout.
     pub(crate) format: Format,
+}
+impl Default for StdOut {
+    fn default() -> Self {
+        StdOut {
+            enabled: true,
+            format: Format::default(),
+        }
+    }
 }
 
 /// Log to a file
@@ -61,27 +69,20 @@ pub(crate) struct File {
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Format {
-    /// https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_AnalyzeLogData-discoverable-fields.html
-    Aws,
-    /// https://github.com/trentm/node-bunyan
-    Bunyan,
-    /// https://go2docs.graylog.org/5-0/getting_in_log_data/ingest_gelf.html#:~:text=The%20Graylog%20Extended%20Log%20Format,UDP%2C%20TCP%2C%20or%20HTTP.
-    Gelf,
-
-    /// https://cloud.google.com/logging/docs/structured-logging
-    Google,
-    /// https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-appender-log
-    OpenTelemetry,
-
-    /// https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html
-    #[serde(rename = "json")]
-    JsonDefault,
+    // /// https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_AnalyzeLogData-discoverable-fields.html
+    // Aws,
+    // /// https://github.com/trentm/node-bunyan
+    // Bunyan,
+    // /// https://go2docs.graylog.org/5-0/getting_in_log_data/ingest_gelf.html#:~:text=The%20Graylog%20Extended%20Log%20Format,UDP%2C%20TCP%2C%20or%20HTTP.
+    // Gelf,
+    //
+    // /// https://cloud.google.com/logging/docs/structured-logging
+    // Google,
+    // /// https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-appender-log
+    // OpenTelemetry,
     /// https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html
     Json(JsonFormat),
 
-    /// https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html
-    #[serde(rename = "text")]
-    TextDefault,
     /// https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html
     Text(TextFormat),
 }
@@ -89,9 +90,9 @@ pub(crate) enum Format {
 impl Default for Format {
     fn default() -> Self {
         if std::io::stdout().is_terminal() {
-            Format::TextDefault
+            Format::Text(TextFormat::default())
         } else {
-            Format::JsonDefault
+            Format::Json(JsonFormat::default())
         }
     }
 }
@@ -101,34 +102,31 @@ impl Default for Format {
 #[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct JsonFormat {
     /// Move all span attributes to the top level json object.
-    flatten_event: bool,
-    /// Use ansi escape codes.
-    ansi: bool,
+    pub(crate) flatten_event: bool,
     /// Include the timestamp with the log event.
-    display_timestamp: bool,
+    pub(crate) display_timestamp: bool,
     /// Include the target with the log event.
-    display_target: bool,
+    pub(crate) display_target: bool,
     /// Include the level with the log event.
-    display_level: bool,
+    pub(crate) display_level: bool,
     /// Include the thread_id with the log event.
-    display_thread_id: bool,
+    pub(crate) display_thread_id: bool,
     /// Include the thread_name with the log event.
-    display_thread_name: bool,
+    pub(crate) display_thread_name: bool,
     /// Include the filename with the log event.
-    display_filename: bool,
+    pub(crate) display_filename: bool,
     /// Include the line number with the log event.
-    display_line_number: bool,
+    pub(crate) display_line_number: bool,
     /// Include the current span in this log event.
-    display_current_span: bool,
+    pub(crate) display_current_span: bool,
     /// Include all of the containing span information with the log event.
-    display_span_list: bool,
+    pub(crate) display_span_list: bool,
 }
 
 impl Default for JsonFormat {
     fn default() -> Self {
         JsonFormat {
             flatten_event: false,
-            ansi: false,
             display_timestamp: true,
             display_target: true,
             display_level: true,
@@ -146,32 +144,29 @@ impl Default for JsonFormat {
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct TextFormat {
-    /// The type of text output, one of `default`, `compact`, or `full`.
-    flavor: TextFlavor,
     /// Use ansi escape codes.
-    ansi: bool,
+    pub(crate) ansi: bool,
     /// Include the timestamp with the log event.
-    display_timestamp: bool,
+    pub(crate) display_timestamp: bool,
     /// Include the target with the log event.
-    display_target: bool,
+    pub(crate) display_target: bool,
     /// Include the level with the log event.
-    display_level: bool,
+    pub(crate) display_level: bool,
     /// Include the thread_id with the log event.
-    display_thread_id: bool,
+    pub(crate) display_thread_id: bool,
     /// Include the thread_name with the log event.
-    display_thread_name: bool,
+    pub(crate) display_thread_name: bool,
     /// Include the filename with the log event.
-    display_filename: bool,
+    pub(crate) display_filename: bool,
     /// Include the line number with the log event.
-    display_line_number: bool,
+    pub(crate) display_line_number: bool,
     /// Include the location with the log event.
-    display_location: bool,
+    pub(crate) display_location: bool,
 }
 
 impl Default for TextFormat {
     fn default() -> Self {
         TextFormat {
-            flavor: TextFlavor::Default,
             ansi: false,
             display_timestamp: true,
             display_target: false,
@@ -183,16 +178,6 @@ impl Default for TextFormat {
             display_location: false,
         }
     }
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum TextFlavor {
-    #[default]
-    Default,
-    Compact,
-    Full,
 }
 
 /// The period to rollover the log file.

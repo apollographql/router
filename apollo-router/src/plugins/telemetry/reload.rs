@@ -36,7 +36,7 @@ use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::metrics::layer::MetricsLayer;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::formatters::filter_metric_events;
-use crate::plugins::telemetry::formatters::text::TextFormatter;
+use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 
@@ -85,9 +85,9 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let fmt = if std::io::stdout().is_terminal() {
         tracing_subscriber::fmt::Layer::new()
             .event_format(FilteringFormatter::new(
-                TextFormatter::new()
-                    .with_filename(false)
-                    .with_line(false)
+                Text::new()
+                    .with_file(false)
+                    .with_line_number(false)
                     .with_target(false),
                 filter_metric_events,
             ))

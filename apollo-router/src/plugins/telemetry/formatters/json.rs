@@ -35,6 +35,10 @@ pub(crate) struct Json {
     pub(crate) display_target: bool,
     pub(crate) display_line_number: bool,
     pub(crate) display_span_list: bool,
+    pub(crate) display_level: bool,
+    pub(crate) display_thread_id: bool,
+    pub(crate) display_thread_name: bool,
+    pub(crate) display_timestamp: bool,
 }
 
 impl Json {
@@ -68,6 +72,24 @@ impl Json {
     /// entered spans. Spans are logged in a list from root to leaf.
     pub(crate) fn with_span_list(mut self, display_span_list: bool) -> Self {
         self.display_span_list = display_span_list;
+        self
+    }
+    pub(crate) fn with_level(mut self, display_level: bool) -> Self {
+        self.display_level = display_level;
+        self
+    }
+    pub(crate) fn with_thread_ids(mut self, display_thread_id: bool) -> Self {
+        self.display_thread_id = display_thread_id;
+        self
+    }
+
+    pub(crate) fn with_thread_names(mut self, display_thread_name: bool) -> Self {
+        self.display_thread_name = display_thread_name;
+        self
+    }
+
+    pub(crate) fn with_timestamp(mut self, display_timestamp: bool) -> Self {
+        self.display_timestamp = display_timestamp;
         self
     }
 }
@@ -210,8 +232,6 @@ where
     where
         S: Subscriber + for<'a> LookupSpan<'a>,
     {
-        let timestamp = time::OffsetDateTime::now_utc();
-
         let meta = event.metadata();
 
         let mut visit = || {
@@ -219,9 +239,16 @@ where
 
             let mut serializer = serializer.serialize_map(None)?;
 
-            serializer.serialize_entry("timestamp", &timestamp)?;
+            if self.display_timestamp {
+                let timestamp = time::OffsetDateTime::now_utc()
+                    .format(&time::format_description::well_known::Iso8601::DEFAULT)
+                    .map_err(|e| serde::ser::Error::custom(e.to_string()))?;
+                serializer.serialize_entry("timestamp", &timestamp)?;
+            }
 
-            serializer.serialize_entry("level", &meta.level().as_serde())?;
+            if self.display_level {
+                serializer.serialize_entry("level", &meta.level().as_serde())?;
+            }
 
             let format_field_marker: std::marker::PhantomData<N> = std::marker::PhantomData;
 
@@ -279,9 +306,13 @@ impl Default for Json {
             flatten_event: false,
             display_current_span: true,
             display_span_list: true,
-            display_filename: true,
-            display_line_number: true,
+            display_level: false,
+            display_thread_id: false,
+            display_thread_name: false,
+            display_filename: false,
+            display_line_number: false,
             display_target: true,
+            display_timestamp: true,
         }
     }
 }
