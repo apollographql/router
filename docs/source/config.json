@@ -99,6 +99,12 @@
     },
     "Metrics and Monitoring": {
       "Metrics": "/configuration/metrics",
+      "Spans" : "/configuration/spans",
+      "Events" : "/configuration/events",
+      "Instruments" : "/configuration/instruments",
+      "Conditions" : "/configuration/conditions",
+      "Selectors" : "/configuration/selectors",
+      "Standard attributes": "/configuration/standard-attributes",
       "GraphOS reporting": "/configuration/apollo-telemetry",
       "Tracing": "/configuration/tracing",
       "Client awareness": "/managed-federation/client-awareness",

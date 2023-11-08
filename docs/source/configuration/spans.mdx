@@ -1,0 +1,157 @@
+---
+title: Spans
+subtitle: Add router lifecycle context to logs and traces
+description: Use spans to add contextual information from the Apollo Router to traces displayed by your application performance monitors (APM).
+---
+
+Spans in the Apollo Router capture contextual information about requests and responses as they're processed through the [router's request lifecycle (pipeline)](../customizations/overview/#the-request-lifecycle). The information from spans can be used when displaying traces in your application performance monitors (APM).
+
+The router's pipeline has three major services:
+
+* **Router service** - Handles an incoming request before it is parsed. Works within a context of opaque bytes.
+* **Supergraph service** - Handles a request after it has been parsed and before it is sent to the subgraph. Works within a GraphQL context.
+* **Subgraph service** - Handles a request after it has been sent to the subgraph. Works within a  GraphQL context.
+
+Each service has a corresponding span, and each span is configurable in `router.yaml` with `telemetry.spans`.
+
+### Span customization example
+
+An example configuration of `telemetry.spans` in `router.yaml` sets both standard and custom attributes for the router service:
+
+```yaml title="router.yaml"
+telemetry:
+  spans:
+    default_attribute_requirement_level: required
+    legacy_request_span: true
+    router:
+      attributes:
+        # Standard attributes (http)
+        dd.trace_id: false
+        http.request.body.size: false
+        http.response.body.size: false
+        http.request.method: false
+        # ...
+
+        # Custom attributes
+        "acme.custom_1":
+          trace_id: datadog
+        "acme.custom_2":
+          response_header: "X-CUSTOM2"
+          default: "unknown"
+        "acme.custom_3":
+          env: "ENV_VAR"
+          # ...
+        
+    supergraph:
+      attributes:
+        # ...
+    subgraph:
+      attributes:
+        # ...
+        
+```
+
+### Spans configuration
+
+#### `default_attribute_requirement_level`
+
+The `default_attribute_requirement_level` option sets the default attributes to attach to spans, as defined by [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/otel/common/attribute-requirement-level/).
+
+Valid values:
+
+* `required` (default)
+* `recommended`
+
+```yaml title="router.yaml"
+telemetry:
+  spans:
+    # Set the default requirement level
+    default_attribute_requirement_level: required #highlight-line
+```
+
+Attributes can be configured individually, so that `required` attributes can be overridden or disabled. For example, `http.response.status_code` is set individually to override the standard value:
+
+```yaml title="desc.router.yaml"
+telemetry:
+  spans:
+    # Set the default requirement level
+    default_attribute_requirement_level: required
+    router:
+      attributes:
+        # Disable standard attribute
+        http.response.status_code: false
+```
+
+<Note>
+
+The attributes that the OpenTelemetry spec defines as `opt-in` must be configured individually.
+
+</Note>
+
+#### `legacy_request_span`
+
+The `legacy_request_span` option enables previously supported, now deprecated behavior.
+
+The router previously emitted a span called `request` that was a parent of the `router` span. 
+This is now deprecated and removed. If you wish to restore the previous behavior, set `legacy_request_span` to `true`. 
+
+```yaml title="router.yaml"
+telemetry:
+  spans:
+    legacy_request_span: true
+```
+
+<Note>
+
+The `legacy_request_span` option is not configurable and will be removed in a future release.
+
+</Note>
+
+#### `router`|`supergraph`|`subgraph`
+
+The `router`, `supergraph` and `subgraph` sections are used to define custom span configuration for the `router`, `supergraph` and `subgraph` services in the router, respectively.
+
+```yaml title="router.yaml"
+telemetry:
+  spans:
+    router:
+      attributes:
+        # ...     
+    supergraph:
+      attributes:
+        # ...
+    subgraph:
+      attributes:
+        # ...
+        
+```
+
+#### `attributes`
+
+Spans may have attributes attached to them from the Apollo Router pipeline. These attributes are used to filter and group spans in your APM.
+
+Attributes may be drawn from [standard attributes](standard-attributes.mdx) or [selectors](selectors.mdx). 
+
+The attributes that are available depend on the service of the pipeline.
+
+```yaml title="desc.router.yaml"
+telemetry:
+  spans:
+    router:
+      attributes:
+        # Standard attributes
+        http.response.status_code: true
+        # Custom attributes
+        "my_attribute":
+          response_header: "x-my-header"
+```
+
+### Spans configuration reference
+
+| Option                                 | Values                                                                        | Default    | Description                                 |
+|----------------------------------------|-------------------------------------------------------------------------------|------------|---------------------------------------------|
+| `<attribute-name>`                     |                                                                               |            | The name of the custom attribute.           |
+| `attributes`                           | [standard attributes](standard-attributes.mdx) or [selectors](selectors.mdx)  |            | The attributes of the stan.                 |
+| `default_attribute_requirement_level`  | `required`\|`recommended`                                                     | `required` | The default attribute requirement level.    |
+| `legacy_request_span`                  | `true`\|`false`                                                               |            | Include the `request` span in traces.       |
+
