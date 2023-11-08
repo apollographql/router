@@ -793,11 +793,14 @@ impl RouterCreator {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use http::Uri;
     use mime::APPLICATION_JSON;
     use serde_json_bytes::json;
 
     use super::*;
+    use crate::services::subgraph;
     use crate::services::supergraph;
     use crate::Context;
 
@@ -1306,5 +1309,71 @@ mod tests {
         let bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let data = String::from_utf8_lossy(&bytes);
         assert_eq!(expected_response, data);
+    }
+
+    /// <https://github.com/apollographql/router/issues/3541>
+    #[tokio::test]
+    async fn escaped_quotes_in_string_literal() {
+        let query = r#"
+            query TopProducts($first: Int) {
+                topProducts(first: $first) {
+                    name
+                    reviewsForAuthor(authorID: "\"1\"") {
+                        body
+                    }
+                }
+            }
+        "#;
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .variable("first", 2)
+            .build()
+            .unwrap();
+        let config = serde_json::json!({
+            "include_subgraph_errors": {"all": true},
+        });
+        let subgraph_query_log = Arc::new(Mutex::new(Vec::new()));
+        let subgraph_query_log_2 = subgraph_query_log.clone();
+        let mut response = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .subgraph_hook(move |subgraph_name, service| {
+                let is_reviews = subgraph_name == "reviews";
+                let subgraph_name = subgraph_name.to_owned();
+                let subgraph_query_log_3 = subgraph_query_log_2.clone();
+                service
+                    .map_request(move |request: subgraph::Request| {
+                        subgraph_query_log_3.lock().unwrap().push((
+                            subgraph_name.clone(),
+                            request.subgraph_request.body().query.clone(),
+                        ));
+                        request
+                    })
+                    .map_response(move |mut response| {
+                        if is_reviews {
+                            // Replace "couldn't find mock for query" error with empty data
+                            let graphql_response = response.response.body_mut();
+                            graphql_response.errors.clear();
+                            graphql_response.data = Some(serde_json_bytes::json!({
+                                "_entities": {"reviews": []},
+                            }));
+                        }
+                        response
+                    })
+                    .boxed()
+            })
+            .build_supergraph()
+            .await
+            .unwrap()
+            .oneshot(request)
+            .await
+            .unwrap();
+        let graphql_response = response.next_response().await.unwrap();
+        let subgraph_query_log = subgraph_query_log.lock().unwrap();
+        insta::assert_debug_snapshot!((graphql_response, &subgraph_query_log));
+        let subgraph_query = subgraph_query_log[1].1.as_ref().unwrap();
+
+        // The string literal made it through unchanged:
+        assert!(subgraph_query.contains(r#"reviewsForAuthor(authorID:"\"1\"")"#));
     }
 }
