@@ -35,7 +35,7 @@ use crate::Context;
 const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 
-register_plugin!("apollo", "entity_cache", EntityCache);
+register_plugin!("apollo", "experimental_entity_cache", EntityCache);
 
 struct EntityCache {
     storage: RedisCacheStorage,
