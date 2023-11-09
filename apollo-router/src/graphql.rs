@@ -215,7 +215,7 @@ impl Error {
         }
     }
 
-    pub(crate) fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
+    pub fn from_value(service_name: &str, value: Value) -> Result<Error, FetchError> {
         let mut object =
             ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
                 service: service_name.to_string(),
