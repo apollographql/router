@@ -221,15 +221,17 @@ impl RedisCacheStorage {
                         ));
                     }
 
-                    let _host = url.host_str().ok_or_else(|| {
+                    let host = url.host_str().ok_or_else(|| {
                         RedisError::new(RedisErrorKind::Config, "missing host in Redis URL")
                     })?;
 
-                    let _port = url.port().ok_or_else(|| {
+                    let port = url.port().ok_or_else(|| {
                         RedisError::new(RedisErrorKind::Config, "missing port in Redis URL")
                     })?;
 
-                    // We don't perform further preprocessing on Cluster/Sentinel urls
+                    result
+                        .query_pairs_mut()
+                        .append_pair("node", &format!("{host}:{port}"));
                 }
 
                 Ok(result)
