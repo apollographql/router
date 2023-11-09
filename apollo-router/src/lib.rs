@@ -1,3 +1,4 @@
+#![deny(unused_crate_dependencies)]
 //! Components of a federated GraphQL Server.
 //!
 //! Most of these modules are of varying interest to different audiences.
@@ -109,3 +110,11 @@ pub mod _private {
     // For tests
     pub use crate::router_factory::create_test_service_factory_from_yaml;
 }
+
+// Prevent false positives from unused crate dependencies. If any more
+// arise, add them here
+
+#[cfg(test)]
+use ecdsa as _;
+#[cfg(test)]
+use test_span as _;
