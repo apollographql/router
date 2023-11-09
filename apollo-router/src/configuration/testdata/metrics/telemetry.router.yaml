@@ -20,7 +20,7 @@ telemetry:
       agent:
         endpoint: default
   spans:
-    mode: deprecated
+    mode: new
     default_attribute_requirement_level: recommended
     router:
       attributes:

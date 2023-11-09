@@ -1,8 +1,19 @@
 use std::collections::BTreeMap;
 use std::io::IsTerminal;
 
+use schemars::gen::SchemaGenerator;
+use schemars::schema::InstanceType;
+use schemars::schema::Metadata;
+use schemars::schema::ObjectValidation;
+use schemars::schema::Schema;
+use schemars::schema::SchemaObject;
+use schemars::schema::SingleOrVec;
+use schemars::schema::SubschemaValidation;
 use schemars::JsonSchema;
+use serde::de::MapAccess;
+use serde::de::Visitor;
 use serde::Deserialize;
+use serde::Deserializer;
 
 use crate::plugins::telemetry::config::AttributeValue;
 
@@ -66,9 +77,11 @@ pub(crate) struct File {
 
 /// The format for logging.
 #[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Format {
+    // !!!!WARNING!!!!, if you change this enum then be sure to add the changes to the JsonSchema AND the custom deserializer.
+
+    // Want to see support for these formats? Please open an issue!
     // /// https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_AnalyzeLogData-discoverable-fields.html
     // Aws,
     // /// https://github.com/trentm/node-bunyan
@@ -87,6 +100,122 @@ pub(crate) enum Format {
     Text(TextFormat),
 }
 
+// This custom implementation JsonSchema allows the user to supply an enum or a struct in the same way that the custom deserializer does.
+impl JsonSchema for Format {
+    fn schema_name() -> String {
+        "logging_format".to_string()
+    }
+
+    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+        // Does nothing, but will compile error if the
+        let types = vec![
+            ("json", JsonFormat::json_schema(gen), "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html"),
+            ("text", TextFormat::json_schema(gen), "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html"),
+        ];
+
+        Schema::Object(SchemaObject {
+            subschemas: Some(Box::new(SubschemaValidation {
+                one_of: Some(
+                    types
+                        .into_iter()
+                        .map(|(name, schema, description)| {
+                            (
+                                name,
+                                ObjectValidation {
+                                    required: [name.to_string()].into(),
+                                    properties: [(name.to_string(), schema)].into(),
+                                    additional_properties: Some(Box::new(Schema::Bool(false))),
+                                    ..Default::default()
+                                },
+                                description,
+                            )
+                        })
+                        .map(|(name, o, dec)| {
+                            vec![
+                                SchemaObject {
+                                    metadata: Some(Box::new(Metadata {
+                                        description: Some(dec.to_string()),
+                                        ..Default::default()
+                                    })),
+                                    instance_type: Some(SingleOrVec::Single(Box::new(
+                                        InstanceType::Object,
+                                    ))),
+                                    object: Some(Box::new(o)),
+                                    ..Default::default()
+                                },
+                                SchemaObject {
+                                    metadata: Some(Box::new(Metadata {
+                                        description: Some(dec.to_string()),
+                                        ..Default::default()
+                                    })),
+                                    instance_type: Some(SingleOrVec::Single(Box::new(
+                                        InstanceType::String,
+                                    ))),
+                                    enum_values: Some(vec![serde_json::Value::String(
+                                        name.to_string(),
+                                    )]),
+                                    ..Default::default()
+                                },
+                            ]
+                        })
+                        .flatten()
+                        .map(Schema::Object)
+                        .collect::<Vec<_>>(),
+                ),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for Format {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct StringOrStruct;
+
+        impl<'de> Visitor<'de> for StringOrStruct {
+            type Value = Format;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("string or enum")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Format, E>
+            where
+                E: serde::de::Error,
+            {
+                match value {
+                    "json" => Ok(Format::Json(JsonFormat::default())),
+                    "text" => Ok(Format::Text(TextFormat::default())),
+                    _ => Err(E::custom(format!("unknown log format: {}", value))),
+                }
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let key = map.next_key::<String>()?;
+
+                match key.as_ref().map(|a| a.as_str()) {
+                    Some("json") => Ok(Format::Json(map.next_value::<JsonFormat>()?)),
+                    Some("text") => Ok(Format::Text(map.next_value::<TextFormat>()?)),
+                    Some(value) => Err(serde::de::Error::custom(format!(
+                        "unknown log format: {}",
+                        value
+                    ))),
+                    _ => Err(serde::de::Error::custom(format!("unknown log format"))),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(StringOrStruct)
+    }
+}
+
 impl Default for Format {
     fn default() -> Self {
         if std::io::stdout().is_terminal() {
@@ -98,7 +227,7 @@ impl Default for Format {
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Debug, Eq, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct JsonFormat {
     /// Move all span attributes to the top level json object.
@@ -141,7 +270,7 @@ impl Default for JsonFormat {
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[derive(Deserialize, JsonSchema, Clone, Debug, Eq, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct TextFormat {
     /// Use ansi escape codes.
@@ -192,4 +321,23 @@ pub(crate) enum Rollover {
     #[default]
     /// Never roll over.
     Never,
+}
+
+#[cfg(test)]
+mod test {
+    use serde_json::json;
+
+    use crate::plugins::telemetry::config_new::logging::Format;
+
+    #[test]
+    fn format_de() {
+        let format = serde_json::from_value::<Format>(json!("text")).unwrap();
+        assert_eq!(format, Format::Text(Default::default()));
+        let format = serde_json::from_value::<Format>(json!("json")).unwrap();
+        assert_eq!(format, Format::Json(Default::default()));
+        let format = serde_json::from_value::<Format>(json!({"text":{}})).unwrap();
+        assert_eq!(format, Format::Text(Default::default()));
+        let format = serde_json::from_value::<Format>(json!({"json":{}})).unwrap();
+        assert_eq!(format, Format::Json(Default::default()));
+    }
 }
