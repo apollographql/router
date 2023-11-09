@@ -97,16 +97,26 @@
         ]
       }
     },
-    "Metrics and Monitoring": {
-      "Metrics": "/configuration/metrics",
-      "Spans" : "/configuration/spans",
-      "Events" : "/configuration/events",
-      "Instruments" : "/configuration/instruments",
-      "Conditions" : "/configuration/conditions",
-      "Selectors" : "/configuration/selectors",
-      "Standard attributes": "/configuration/standard-attributes",
+    "Telemetry and Monitoring": {
+      "Signals": {
+        "Metrics": {
+          "Configuration": "/configuration/metrics",
+          "Prometheus": "/configuration/exporters/prometheus",
+          "OpenTelemetry": "/configuration/exporters/opentelemetry",
+          "Datadog (OTLP)": "/configuration/exporters/datadog-otlp"
+        },
+        "Tracing": "/configuration/tracing",
+        "Logging": "/configuration/logging"
+      },
+      "Instrumentation": {
+        "Instruments" : "/configuration/instruments",
+        "Events" : "/configuration/events",
+        "Conditions" : "/configuration/conditions",
+        "Spans" : "/configuration/spans",
+        "Selectors" : "/configuration/selectors",
+        "Standard attributes": "/configuration/standard-attributes"
+      },
       "GraphOS reporting": "/configuration/apollo-telemetry",
-      "Tracing": "/configuration/tracing",
       "Client awareness": "/managed-federation/client-awareness",
       "Health check": "/configuration/health-checks"
     },

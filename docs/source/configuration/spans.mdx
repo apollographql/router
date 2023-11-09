@@ -1,6 +1,6 @@
 ---
 title: Spans
-subtitle: Add router lifecycle context to logs and traces
+subtitle: Add router lifecycle context to traces
 description: Use spans to add contextual information from the Apollo Router to traces displayed by your application performance monitors (APM).
 ---
 
@@ -130,7 +130,7 @@ telemetry:
 
 Spans may have attributes attached to them from the Apollo Router pipeline. These attributes are used to filter and group spans in your APM.
 
-Attributes may be drawn from [standard attributes](standard-attributes.mdx) or [selectors](selectors.mdx). 
+Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors). 
 
 The attributes that are available depend on the service of the pipeline.
 
@@ -151,7 +151,7 @@ telemetry:
 | Option                                 | Values                                                                        | Default    | Description                                 |
 |----------------------------------------|-------------------------------------------------------------------------------|------------|---------------------------------------------|
 | `<attribute-name>`                     |                                                                               |            | The name of the custom attribute.           |
-| `attributes`                           | [standard attributes](standard-attributes.mdx) or [selectors](selectors.mdx)  |            | The attributes of the stan.                 |
+| `attributes`                           | [standard attributes](./standard-attributes) or [selectors](./selectors)  |            | The attributes of the stan.                 |
 | `default_attribute_requirement_level`  | `required`\|`recommended`                                                     | `required` | The default attribute requirement level.    |
 | `legacy_request_span`                  | `true`\|`false`                                                               |            | Include the `request` span in traces.       |
 

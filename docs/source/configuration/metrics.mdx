@@ -4,9 +4,9 @@ subtitle: Export Apollo Router metrics for Prometheus and OpenTelemetry
 description: Export and collect metrics from the Apollo Router with Prometheus and OpenTelemetry Collector.
 ---
 
-The Apollo Router exports metrics for collection by [Prometheus](#using-prometheus) and [OpenTelemetry Collector](#using-opentelemetry-collector), with support for [Datadog via OpenTelemetry]().
+The Apollo Router exports metrics for collection by [Prometheus](./exporters/prometheus) and [OpenTelemetry Protocol (OTLP)](./exporters/opentelemetry), with support for [Datadog via OTLP](./exporters/datadog-otlp).
 
-In `router.yaml`, you configure router metrics within the following settings:
+In `router.yaml`, you configure router metrics with the following settings:
 
 - `telemetry.metrics.common`. Configure values for the router and common across metrics exporters.
 - `telemetry.metrics.prometheus`. Configure the Prometheus exporter.
@@ -102,8 +102,22 @@ telemetry:
         - 20.00
 ```
 
+## Metrics reference
 
-### Customizing `apollo_router_http_requests` instrument
+The following metrics for the Apollo Router are available for Prometheus and OpenTelemetry. Attributes are listed where applicable.
+
+### HTTP
+
+- `apollo_router_http_request_duration_seconds_bucket` - HTTP router request duration
+- `apollo_router_http_request_duration_seconds_bucket` - HTTP subgraph request duration, attributes:
+  - `subgraph`: (Optional) The subgraph being queried
+- `apollo_router_http_requests_total` [**deprecated**] - Total number of HTTP requests by HTTP status
+- `apollo_router_timeout` - Number of triggered timeouts
+- `apollo_router_http_request_retry_total` - Number of subgraph requests retried, attributes:
+  - `subgraph`: The subgraph being queried
+  - `status` : If the retry was aborted (`aborted`)
+
+#### Customizing `apollo_router_http_requests`
 
 <Caution>
 
@@ -174,170 +188,9 @@ telemetry:
 
 <Note>
 
-OpenTelemetry includes many [standard attributes](https://opentelemetry.io/docs/specs/semconv/attributes-registry/) that you can use these via custom [instruments](../instruments.mdx). 
+OpenTelemetry includes many [standard attributes](https://opentelemetry.io/docs/specs/semconv/attributes-registry/) that you can use these via custom [instruments](./instruments). 
 
 </Note>
-
-
-## Configure metrics exporters
-
-The Apollo Router exports metrics for:
-
-* [Prometheus](#prometheus)
-* [OpenTelemetry Collector](#opentelemetry-collector)
-* [Datadog via OTLP](#datadog-otlp)
-
-### Prometheus
-
-You can use [Prometheus with Grafana](https://prometheus.io/docs/visualization/grafana/) to collect metrics and visualize the router metrics.
-
-To export metrics to Prometheus, in `router.yaml` you must enable the Prometheus endpoint and set its address and path. For example:
-
-```yaml title="router.yaml"
-telemetry:
-  metrics:
-    prometheus:
-      # By setting this endpoint you enable the Prometheus exporter
-      # All our endpoints exposed by plugins are namespaced by the name of the plugin
-      enabled: true
-      listen: 127.0.0.1:9090
-      path: /metrics
-```
-
-#### Using Prometheus with containers
-
-The Prometheus endpoint listens to `127.0.0.1` by default, which won't allow connections issued from a network.
-
-While this is a safe default, _other containers won't be able to access the Prometheus endpoint_, which will disable metric scraping.
-
-You can enable other containers to access it by setting the endpoint to listen to `0.0.0.0`:
-
-```yaml title="router.yaml"
-telemetry:
-  metrics:
-    prometheus:
-      # By setting this endpoint you enable other containers and pods to access the Prometheus endpoint
-      enabled: true
-      listen: 0.0.0.0:9090 #highlight-line
-      path: /metrics
-```
-
-You can validate your setting locally:
-
-1. Run a query against the router.
-2. Navigate to [http://localhost:9090/metrics](http://localhost:9090/metrics), and check that the endpoint returns metrics similar to the following:
-
-    ```
-    # HELP apollo_router_http_request_duration_seconds Total number of HTTP requests made.
-    # TYPE apollo_router_http_request_duration_seconds histogram
-    apollo_router_http_request_duration_seconds_bucket{le="0.5"} 1
-    apollo_router_http_request_duration_seconds_bucket{le="0.9"} 1
-    ---SNIP---
-    ```
-
-<Note>
-
-If you haven't run a query against the router yet, you'll see a blank page because no metrics have been generated.
-
-</Note>
-
-### OpenTelemetry Collector
-
-You can send metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) for processing and reporting metrics.
-
-To export metrics to OpenTelemetry Collector, in `router.yaml` you must enable the OpenTelemetry exporter and optionally customize its configuration. For example: 
-
-```yaml title="router.yaml"
-telemetry:
-  metrics:
-    otlp:
-      # Enable the OpenTelemetry exporter
-      enabled: true
-
-      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317 for gRPC and http://127.0.0.1:4318 for HTTP)
-      endpoint: default
-
-      # Optional protocol. Only grpc is supported currently.
-      # Setting to http will result in configuration failure.
-      protocol: grpc
-
-      # Optional Grpc configuration
-      grpc:
-        domain_name: "my.domain"
-        key: ""
-        ca: ""
-        cert: ""
-        metadata:
-          foo: bar
-
-      # Optional batch_processor configuration
-      batch_processor:
-        scheduled_delay: 100ms
-        max_concurrent_exports: 1000
-        max_export_batch_size: 10000
-        max_export_timeout: 100s
-        max_queue_size: 10000
-```
-
-<Tip>
-
-Use the [variable expansion feature](./overview#variable-expansion) for referencing environment variables and file paths in YAML configuration files. Use `env.` and `file.` prefixes, for example `${file.ca.txt}`.
-
-</Tip>
-
-### Datadog (OTLP)
-
-To export metrics to Datadog, you must both 
-
-- Configure the Datadog agent to accept OpenTelemetry (OTLP) metrics, and
-- Configure the router to send traces to the Datadog agent.
-
-To configure the Datadog agent, add OTLP configuration to your `datadog.yaml`. For example:
-
-```yaml title="datadog.yaml"
-otlp_config:
-  receiver:
-    protocols:
-      grpc:
-        endpoint: <dd-agent-ip>:4317
-```
-
-To configure the router, enable OTLP metrics and set both `temporality: delta` and `endpoint: <datadog-agent-endpoint>`. For example: 
-
-```yaml title="router.yaml"
-telemetry:
-  metrics:
-    otlp:
-      enabled: true
-      # Temporality MUST be set to delta. Failure to do this will result in incorrect metrics.
-      temporality: delta
-      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
-      endpoint: "${env.DATADOG_AGENT_HOST}:4317"
-```
-
-<Note>
-
-**You must set `temporality: delta`**, otherwise the router generates incorrect metrics.
-
-</Note>
-
-For more details about Datadog configuration, see [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host).
-
-
-## Metrics reference
-
-The following metrics for the Apollo Router are available for Prometheus and OpenTelemetry. Attributes are listed where applicable.
-
-### HTTP
-
-- `apollo_router_http_request_duration_seconds_bucket` - HTTP router request duration
-- `apollo_router_http_request_duration_seconds_bucket` - HTTP subgraph request duration, attributes:
-  - `subgraph`: (Optional) The subgraph being queried
-- `apollo_router_http_requests_total` - Total number of HTTP requests by HTTP status
-- `apollo_router_timeout` - Number of triggered timeouts
-- `apollo_router_http_request_retry_total` - Number of subgraph requests retried, attributes:
-  - `subgraph`: The subgraph being queried
-  - `status` : If the retry was aborted (`aborted`)
 
 ### Session
 
@@ -405,7 +258,7 @@ The initial call to uplink during router startup is not reflected in metrics.
 - `apollo_router.operations.batching` - A counter of the number of query batches received by the router.
 - `apollo_router.operations.batching.size` - A histogram tracking the number of queries contained within a query batch.
 
-#### Studio
+### Studio
 
 - `apollo.router.telemetry.studio.reports` - The number of reports submitted to Studio by the Router.
   - `type`: The type of report submitted: "traces" or "metrics"

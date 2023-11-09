@@ -171,7 +171,7 @@ The `value` of an instrument is the value which will be drawn from. This can be 
 * `duration` - the duration of the pipeline service.
 * `unit` - the number of times the pipeline service has been executed.
 * `active` - the number of in-progress requests in the pipeline service.
-* `custom` - a custom value extracted from the pipeline service. See [selectors](selectors.mdx) for more information.
+* `custom` - a custom value extracted from the pipeline service. See [selectors](./selectors) for more information.
 
 ```yaml title="router.yaml"
 telemetry:
@@ -182,7 +182,7 @@ telemetry:
         value: duration
 ```
 
-Values of custom metrics can be extracted from the pipeline using [custom attributes](custom-attributes.mdx). For example, to sum the contents of a request header, create a counter with value set as the request header:
+Values of custom metrics can be extracted from the pipeline using [custom attributes](./custom-attributes). For example, to sum the contents of a request header, create a counter with value set as the request header:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -269,7 +269,7 @@ telemetry:
 
 Instruments may have attributes attached to them from the router pipeline. These attributes are used to filter and group metrics in your APM. 
 
-Attributes may be drawn from [standard attributes](../standard-attributes.mdx) or [selectors](selectors.mdx).
+Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors).
 
 The attributes available depend on the service of the pipeline.
 
@@ -300,8 +300,8 @@ telemetry:
 |---------------------------------------|------------------------------------------------------------------------------|------------|----------------------------------------------|
 | `<attribute-name>`                    |                                                                              |            | The name of the custom attribute.            |
 | `<instrument-name>`                   |                                                                              |            | The name of the custom instrument.           |
-| `attributes`                          | [standard attributes](standard-attributes.mdx) or [selectors](selectors.mdx) |            | The attributes of the custom instrument.     |
-| `condition`                           | [conditions](conditions.mdx)                                                 |            | The a condition for mutating the instrument. |
+| `attributes`                          | [standard attributes](./standard-attributes) or [selectors](./selectors) |            | The attributes of the custom instrument.     |
+| `condition`                           | [conditions](./conditions)                                                 |            | The a condition for mutating the instrument. |
 | `default_attribute_requirement_level` | `required`\|`recommended`                                                    | `required` | The default attribute requirement level.     |
 | `type`                                | `counter`\|`up_down_counter`\|`gauge`\|`histogram`                           |            | The name of the custom instrument.           |
 | `unit`                                |                                                                              |            | A unit name, for example `By` or `{request}`.        |

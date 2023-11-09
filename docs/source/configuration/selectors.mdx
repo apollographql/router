@@ -4,7 +4,7 @@ subtitle: Select data from the router pipeline to extract
 description: Extract and select data from the Apollo Router's pipeline services to attach to telemetry.
 ---
 
-Selectors are used to extract data from the Apollo Router's request lifecycle (pipeline) services and attach them to telemetry, specifically [spans](spans.mdx), [instruments](instruments.mdx), [events](events.mdx), and [conditions](conditions.mdx).
+Selectors are used to extract data from the Apollo Router's request lifecycle (pipeline) services and attach them to telemetry, specifically [spans](./spans), [instruments](./instruments), [events](./events), and [conditions](./conditions).
 
 Each service of the router pipeline (`router`, `supergraph`, `subgraph`) has its own available selectors.
 
@@ -40,7 +40,7 @@ The router service is the initial entrypoint for all requests. It is HTTP centri
 
 #### Supergraph
 
-The Supergraph service is executed after query parsing but before query execution. It is GraphQL centric and deals with GraphQL queries and responses.
+The supergraph service is executed after query parsing but before query execution. It is GraphQL centric and deals with GraphQL queries and responses.
 
 | Selector           | Defaultable | Value                                | Description                          |
 |--------------------|-------------|--------------------------------------|--------------------------------------|

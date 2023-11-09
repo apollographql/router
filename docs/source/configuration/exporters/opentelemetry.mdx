@@ -1,0 +1,50 @@
+---
+title: OpenTelemetry exporter
+description: Enable and configure the OpenTelemetry Protocol (OTLP) exporter in the Apollo Router.
+---
+
+Enable and configure the OpenTelemetry Protocol (OTLP) exporter in the Apollo Router.
+
+## Enable OpenTelemetry exporter
+
+You can export metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) for processing and reporting metrics.
+
+To export metrics to OpenTelemetry Collector, in `router.yaml` you must enable the OTLP exporter and optionally customize its configuration. For example: 
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    otlp:
+      # Enable the OpenTelemetry exporter
+      enabled: true
+
+      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317 for gRPC and http://127.0.0.1:4318 for HTTP)
+      endpoint: default
+
+      # Optional protocol. Only grpc is supported currently.
+      # Setting to http will result in configuration failure.
+      protocol: grpc
+
+      # Optional Grpc configuration
+      grpc:
+        domain_name: "my.domain"
+        key: ""
+        ca: ""
+        cert: ""
+        metadata:
+          foo: bar
+
+      # Optional batch_processor configuration
+      batch_processor:
+        scheduled_delay: 100ms
+        max_concurrent_exports: 1000
+        max_export_batch_size: 10000
+        max_export_timeout: 100s
+        max_queue_size: 10000
+```
+
+<Tip>
+
+Use the [variable expansion feature](./overview#variable-expansion) for referencing environment variables and file paths in YAML configuration files. Use `env.` and `file.` prefixes, for example `${file.ca.txt}`.
+
+</Tip>
