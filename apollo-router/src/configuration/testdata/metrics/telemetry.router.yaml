@@ -20,7 +20,7 @@ telemetry:
       agent:
         endpoint: default
   spans:
-    mode: legacy
+    mode: deprecated
     default_attribute_requirement_level: recommended
     router:
       attributes:
@@ -31,4 +31,4 @@ telemetry:
         graphql.document: true
     subgraph:
       attributes:
-        graphql.document: true
+        subgraph.graphql.document: true
