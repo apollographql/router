@@ -234,28 +234,33 @@ impl Text {
             if let Ok(serde_json::Value::Object(fields)) =
                 serde_json::from_str::<serde_json::Value>(data)
             {
-                for field in fields
-                    .into_iter()
-                    .filter(|(key, _)| !key.starts_with(APOLLO_PRIVATE_PREFIX))
-                {
-                    attributes.insert(field.0, field.1.to_string());
-                }
+                let attrs = fields.into_iter().filter_map(|(key, v)| {
+                    if !key.starts_with(APOLLO_PRIVATE_PREFIX) {
+                        Some((key, v.to_string()))
+                    } else {
+                        None
+                    }
+                });
+                attributes.extend(attrs);
             };
         }
 
         if let Some(dyn_attributes) = ext.get::<LogAttributes>() {
-            for (key, val) in dyn_attributes.attributes() {
-                attributes.insert(key.to_string(), val.to_string());
-            }
+            attributes.extend(
+                dyn_attributes
+                    .attributes()
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string())),
+            );
         }
 
         if let Some(otel_attributes) = ext
             .get::<OtelData>()
             .and_then(|otel_data| otel_data.builder.attributes.as_ref())
         {
-            for (key, val) in otel_attributes.iter().filter(|(k, _)| {
+            let attrs = otel_attributes.iter().filter_map(|(k, v)| {
                 let key_name = k.as_str();
-                !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                if !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
                     && ![
                         "code.filepath",
                         "code.namespace",
@@ -264,9 +269,14 @@ impl Text {
                         "thread.name",
                     ]
                     .contains(&key_name)
-            }) {
-                attributes.insert(key.to_string(), val.to_string());
-            }
+                {
+                    Some((key_name.to_string(), v.to_string()))
+                } else {
+                    None
+                }
+            });
+
+            attributes.extend(attrs);
         }
         if !attributes.is_empty() {
             if writer.has_ansi_escapes() {

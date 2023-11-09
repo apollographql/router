@@ -74,11 +74,11 @@ impl SpanMode {
     }
 
     pub(crate) fn create_router<B>(&self, request: &http::Request<B>) -> ::tracing::span::Span {
-        let trace_id = TraceId::maybe_new()
-            .map(|t| t.to_string())
-            .unwrap_or_default();
         match self {
             SpanMode::Deprecated => {
+                let trace_id = TraceId::maybe_new()
+                    .map(|t| t.to_string())
+                    .unwrap_or_default();
                 let span = info_span!(ROUTER_SPAN_NAME,
                     "http.method" = %request.method(),
                     "http.request.method" = %request.method(),
@@ -102,8 +102,6 @@ impl SpanMode {
                     "http.request.method" = %request.method(),
                     "otel.name" = ::tracing::field::Empty,
                     "otel.kind" = "SERVER",
-                    // Needed for formatter
-                    "trace_id" = %trace_id,
                     "otel.status_code" = ::tracing::field::Empty,
                     "apollo_router.license" = ::tracing::field::Empty,
                     "apollo_private.duration_ns" = ::tracing::field::Empty,

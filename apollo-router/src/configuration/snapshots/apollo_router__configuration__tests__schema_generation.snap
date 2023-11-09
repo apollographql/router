@@ -5065,6 +5065,12 @@ expression: "&schema"
                       "type": "boolean",
                       "nullable": true
                     },
+                    "http.route": {
+                      "description": "The matched route (path template in the format used by the respective server framework). Examples: * 65123 Requirement level: Conditionally Required: If and only if it’s available",
+                      "default": null,
+                      "type": "boolean",
+                      "nullable": true
+                    },
                     "network.protocol.name": {
                       "description": "OSI application layer or non-OSI equivalent. Examples: * http * spdy Requirement level: Recommended: if not default (http).",
                       "default": null,
@@ -5089,8 +5095,38 @@ expression: "&schema"
                       "type": "boolean",
                       "nullable": true
                     },
+                    "server.address": {
+                      "description": "Name of the local HTTP server that received the request. Examples: * example.com * 10.1.2.80 * /tmp/my.sock Requirement level: Recommended",
+                      "default": null,
+                      "type": "boolean",
+                      "nullable": true
+                    },
+                    "server.port": {
+                      "description": "Port of the local HTTP server that received the request. Examples: * 80 * 8080 * 443 Requirement level: Recommended",
+                      "default": null,
+                      "type": "boolean",
+                      "nullable": true
+                    },
                     "trace_id": {
                       "description": "Attach the opentelemetry trace ID to the router span as trace_id. This can be output in logs.",
+                      "default": null,
+                      "type": "boolean",
+                      "nullable": true
+                    },
+                    "url.path": {
+                      "description": "The URI path component Examples: * /search Requirement level: Required",
+                      "default": null,
+                      "type": "boolean",
+                      "nullable": true
+                    },
+                    "url.query": {
+                      "description": "The URI query component Examples: * q=OpenTelemetry Requirement level: Conditionally Required: If and only if one was received/sent.",
+                      "default": null,
+                      "type": "boolean",
+                      "nullable": true
+                    },
+                    "url.scheme": {
+                      "description": "The URI scheme component identifying the used protocol. Examples: * http * https Requirement level: Required",
                       "default": null,
                       "type": "boolean",
                       "nullable": true

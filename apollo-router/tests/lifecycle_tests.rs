@@ -236,7 +236,11 @@ async fn test_experimental_notice() {
             "
             telemetry:
                 experimental_logging:
-                    format: json
+                    when_header:
+                    - name: apollo-router-log-request
+                      value: test
+                      headers: true
+                      body: true
             ",
         )
         .build()

@@ -92,7 +92,7 @@ pub(crate) struct RouterAttributes {
     common: HttpCommonAttributes,
     /// Span http server attributes from Open Telemetry semantic conventions.
     // TODO unskip it
-    #[serde(flatten, skip)]
+    #[serde(flatten)]
     server: HttpServerAttributes,
 }
 
