@@ -213,7 +213,6 @@ impl CacheControl {
         Ok(())
     }
 
-    //TODO
     pub(crate) fn merge(&self, other: &CacheControl) -> CacheControl {
         CacheControl {
             created: std::cmp::min(self.created, other.created),
