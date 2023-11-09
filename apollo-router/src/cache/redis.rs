@@ -214,6 +214,15 @@ impl RedisCacheStorage {
                             "incompatible passwords between Redis URLs",
                         ));
                     }
+
+                    // Backwords compatibility with old redis client
+                    if url.scheme() == "redis" {
+                        let _ = result.set_scheme("redis-cluster");
+                    }
+                    if url.scheme() == "rediss" {
+                        let _ = result.set_scheme("rediss-cluster");
+                    }
+
                     if url.scheme() != scheme {
                         return Err(RedisError::new(
                             RedisErrorKind::Config,
