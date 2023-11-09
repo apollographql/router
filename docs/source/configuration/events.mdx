@@ -14,6 +14,149 @@ The router's pipeline has three major services:
 
 You can configure in `router.yaml` events for each service. Events can be standard or custom, and they can be triggered by configurable conditions.
 
+## Event configuration
+
+### `router`|`supergraph`|`subgraph`
+
+The `router`, `supergraph` and `subgraph` sections are used to define custom event configuration for the `router`, `supergraph` and `subgraph` services of the router, respectively.
+
+```yaml title="router.yaml"
+telemetry:
+  events:
+    router:
+      # ...     
+    supergraph:
+      # ...
+    subgraph:
+      # ...
+```
+
+### Standard events
+
+Each service has a set of standard events that can be configured:
+
+* `request` - The request has been received.
+* `response` - The response has been sent.
+* `error` - An error in the router pipeline has occurred.
+
+<Note>
+
+The `error` level applies only to router pipeline errors, not GraphQL errors.
+
+</Note>
+
+To configure these events, set the level to `trace`, `info`, `warn`, `error` or `off` (default).
+
+For example:
+
+```yaml title="router.yaml"
+telemetry:
+  events:
+    router:
+      request: off
+      response: off
+      error: error
+      # ...
+```
+
+### Custom events
+
+<EnterpriseFeature />
+
+For each service you can also configure custom events.
+
+```yaml title="router.yaml"
+telemetry:
+  events:
+    router:
+      # Custom events
+      my.event: # This key will automatically be added as a 'type' attribute of the event
+        # Custom event configuration
+```
+
+### `message`
+
+Each custom event must have a message. This is a fixed value, and custom attributes should be used to add additional information.
+
+```yaml title="router.yaml"
+telemetry:
+  events:
+    router:
+      acme.event:
+        message: "my event message"
+        # ...
+```
+
+### `on`
+
+Each custom event event must indicate when it should be triggered. This can be `request`, `response` or `error`.
+
+```yaml title="router.yaml"
+telemetry:
+  events:
+    router:
+      acme.event:
+        on: request # request, response, error
+        # ...
+```
+
+### `level`
+
+Custom events have a level, `trace`, `info`, `warn` or `error`. The level determines the severity of the event.
+
+To set the level:
+```yaml title="router.yaml"
+telemetry:
+  events:
+    router:
+      acme.event:
+        level: info # trace, info, warn, error
+        # ...
+```
+
+### `condition`
+
+Custom events can be configured to emit under specific conditions, for example if the response status code is 200.
+
+In `router.yaml`, set a `condition` with an equality (`eq`) check:
+
+```yaml title="router.yaml"
+telemetry:
+  events:
+    router:
+      acme.event:
+        # ...
+        condition:
+          eq:
+            - 200
+            - response_status: Code
+```
+
+For more details, see [Conditions](./conditions).
+
+### `attributes`
+
+Custom events may have attributes attached to them from the Router pipeline. These attributes are used to filter and group spans in your APM.
+
+Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors).
+The attributes available depend on the service of the pipeline.
+
+```yaml title="router.yaml"
+telemetry:
+  events:
+    router:
+      my.event:
+        # ...
+        attributes:
+          # Standard attributes
+          http.response.status_code: true
+          # Custom attributes
+          "my_attribute":
+            response_header: "x-my-header"
+```
+
+## Event configuration example
+
 For example, the router service can be configured with standard events (`request`, `response`, `error`), and a custom event (`my.event`) with a condition:
 
 ```yaml title="router.yaml"
@@ -44,142 +187,7 @@ telemetry:
         # ...
 ```
 
-### Event configuration
-
-#### `router`|`supergraph`|`subgraph`
-
-The `router`, `supergraph` and `subgraph` sections are used to define custom event configuration for the `router`, `supergraph` and `subgraph` services of the router, respectively.
-
-```yaml title="router.yaml"
-telemetry:
-  events:
-    router:
-      # ...     
-    supergraph:
-      # ...
-    subgraph:
-      # ...
-```
-
-Each service has a set of standard events that can be configured:
-
-* `request` - The request has been received.
-* `response` - The response has been sent.
-* `error` - An error in the router pipeline has occurred.
-
-<Note>
-
-The `error` level applies only to router pipeline errors, not GraphQL errors.
-
-</Note>
-
-To configure these events, set the level to `trace`, `info`, `warn`, `error` or `off` (default).
-
-For example:
-
-```yaml title="router.yaml"
-telemetry:
-  events:
-    router:
-      request: off
-      response: off
-      error: error
-      # ...
-```
-
-For each service you can also configure custom events.
-
-```yaml title="router.yaml"
-telemetry:
-  events:
-    router:
-      # Custom events
-      my.event: # This key will automatically be added as a 'type' attribute of the event
-        # Custom event configuration
-```
-
-#### `message`
-
-Each custom event must have a message. This is a fixed value, and custom attributes should be used to add additional information.
-
-```yaml title="router.yaml"
-telemetry:
-  events:
-    router:
-      acme.event:
-        message: "my event message"
-        # ...
-```
-
-#### `on`
-
-Each custom event event must indicate when it should be triggered. This can be `request`, `response` or `error`.
-
-```yaml title="router.yaml"
-telemetry:
-  events:
-    router:
-      acme.event:
-        on: request # request, response, error
-        # ...
-```
-
-#### `level`
-
-Custom events have a level, `trace`, `info`, `warn` or `error`. The level determines the severity of the event.
-
-To set the level:
-```yaml title="router.yaml"
-telemetry:
-  events:
-    router:
-      acme.event:
-        level: info # trace, info, warn, error
-        # ...
-```
-
-#### `condition`
-
-Custom events can be configured to emit under specific conditions, for example if the response status code is 200.
-
-In `router.yaml`, set a `condition` with an equality (`eq`) check:
-
-```yaml title="router.yaml"
-telemetry:
-  events:
-    router:
-      acme.event:
-        # ...
-        condition:
-          eq:
-            - 200
-            - response_status: Code
-```
-
-For more details, see [Conditions](./conditions).
-
-#### `attributes`
-
-Custom events may have attributes attached to them from the Router pipeline. These attributes are used to filter and group spans in your APM.
-
-Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors).
-The attributes available depend on the service of the pipeline.
-
-```yaml title="router.yaml"
-telemetry:
-  events:
-    router:
-      my.event:
-        # ...
-        attributes:
-          # Standard attributes
-          http.response.status_code: true
-          # Custom attributes
-          "my_attribute":
-            response_header: "x-my-header"
-```
-
-### Event configuration reference
+## Event configuration reference
 
 | Option             | Values                                                                       | Default | Description                                                 |
 |--------------------|------------------------------------------------------------------------------|---------|-------------------------------------------------------------|
