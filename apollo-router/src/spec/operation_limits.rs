@@ -8,12 +8,22 @@ use serde::Serialize;
 
 use crate::Configuration;
 
+#[cfg(not(feature = "apollo_unsupported"))]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub(crate) struct OperationLimits<T> {
     pub(crate) depth: T,
     pub(crate) height: T,
     pub(crate) root_fields: T,
     pub(crate) aliases: T,
+}
+
+#[cfg(feature = "apollo_unsupported")]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct OperationLimits<T> {
+    pub depth: T,
+    pub height: T,
+    pub root_fields: T,
+    pub aliases: T,
 }
 
 /// If it swims like a burrito and quacks like a burrito…
