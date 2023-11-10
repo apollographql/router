@@ -3,31 +3,27 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::ControlFlow;
-use std::sync::Arc;
 
-use apollo_compiler::ApolloCompiler;
-use apollo_compiler::InputDatabase;
+use apollo_compiler::ast;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::Value;
-use tokio::sync::Mutex;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use self::authenticated::AuthenticatedCheckVisitor;
 use self::authenticated::AuthenticatedVisitor;
-use self::authenticated::AUTHENTICATED_DIRECTIVE_NAME;
+use self::authenticated::AUTHENTICATED_SPEC_URL;
 use self::policy::PolicyExtractionVisitor;
 use self::policy::PolicyFilteringVisitor;
-use self::policy::POLICY_DIRECTIVE_NAME;
+use self::policy::POLICY_SPEC_URL;
 use self::scopes::ScopeExtractionVisitor;
 use self::scopes::ScopeFilteringVisitor;
-use self::scopes::REQUIRES_SCOPES_DIRECTIVE_NAME;
+use self::scopes::REQUIRES_SCOPES_SPEC_URL;
 use crate::error::QueryPlannerError;
-use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::json_ext::Path;
@@ -42,7 +38,6 @@ use crate::services::execution;
 use crate::services::supergraph;
 use crate::spec::query::transform;
 use crate::spec::query::traverse;
-use crate::spec::query::QUERY_EXECUTABLE;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
@@ -65,7 +60,7 @@ pub(crate) struct CacheKeyMetadata {
 }
 
 /// Authorization plugin
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[allow(dead_code)]
 pub(crate) struct Conf {
     /// Reject unauthenticated requests
@@ -76,12 +71,60 @@ pub(crate) struct Conf {
     preview_directives: Directives,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
 #[allow(dead_code)]
 pub(crate) struct Directives {
     /// enables the `@authenticated` and `@requiresScopes` directives
-    #[serde(default)]
+    #[serde(default = "default_enable_directives")]
     enabled: bool,
+    /// generates the authorization error messages without modying the query
+    #[serde(default)]
+    dry_run: bool,
+    /// refuse a query entirely if any part would be filtered
+    #[serde(default)]
+    reject_unauthorized: bool,
+    /// authorization errors behaviour
+    #[serde(default)]
+    errors: ErrorConfig,
+}
+
+#[derive(
+    Clone, Debug, serde_derive_default::Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
+#[allow(dead_code)]
+pub(crate) struct ErrorConfig {
+    /// log authorization errors
+    #[serde(default = "enable_log_errors")]
+    pub(crate) log: bool,
+    /// location of authorization errors in the GraphQL response
+    #[serde(default)]
+    pub(crate) response: ErrorLocation,
+}
+
+fn enable_log_errors() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ErrorLocation {
+    /// store authorization errors in the response errors
+    #[default]
+    Errors,
+    /// store authorization errors in the response extensions
+    Extensions,
+    /// do not add the authorization errors to the GraphQL response
+    Disabled,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct UnauthorizedPaths {
+    pub(crate) paths: Vec<Path>,
+    pub(crate) errors: ErrorConfig,
+}
+
+fn default_enable_directives() -> bool {
+    true
 }
 
 pub(crate) struct AuthorizationPlugin {
@@ -100,32 +143,26 @@ impl AuthorizationPlugin {
             .find(|(s, _)| s.as_str() == "authorization")
             .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
             .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()));
-        let has_authorization_directives = schema
-            .type_system
-            .definitions
-            .directives
-            .contains_key(AUTHENTICATED_DIRECTIVE_NAME)
-            || schema
-                .type_system
-                .definitions
-                .directives
-                .contains_key(REQUIRES_SCOPES_DIRECTIVE_NAME)
-            || schema
-                .type_system
-                .definitions
-                .directives
-                .contains_key(POLICY_DIRECTIVE_NAME);
 
-        match has_config {
-            Some(b) => Ok(b),
-            None => {
-                if has_authorization_directives {
-                    Err(ServiceBuildError::Schema(SchemaError::Api("cannot start the router on a schema with authorization directives without configuring the authorization plugin".to_string())))
-                } else {
-                    Ok(false)
-                }
-            }
-        }
+        let has_authorization_directives = schema.has_spec(AUTHENTICATED_SPEC_URL)
+            || schema.has_spec(REQUIRES_SCOPES_SPEC_URL)
+            || schema.has_spec(POLICY_SPEC_URL);
+
+        Ok(has_config.unwrap_or(true) && has_authorization_directives)
+    }
+
+    pub(crate) fn log_errors(configuration: &Configuration) -> ErrorConfig {
+        configuration
+            .apollo_plugins
+            .plugins
+            .iter()
+            .find(|(s, _)| s.as_str() == "authorization")
+            .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
+            .and_then(|v| {
+                v.get("errors")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+            })
+            .unwrap_or_default()
     }
 
     pub(crate) async fn query_analysis(
@@ -134,38 +171,36 @@ impl AuthorizationPlugin {
         configuration: &Configuration,
         context: &Context,
     ) {
-        let (compiler, file_id) = Query::make_compiler(query, schema, configuration);
+        let doc = Query::parse_document(query, schema, configuration);
+        let ast = &doc.ast;
 
-        let mut visitor = AuthenticatedCheckVisitor::new(&compiler, file_id);
-
-        // if this fails, the query is invalid and will fail at the query planning phase.
-        // We do not return validation errors here for now because that would imply a huge
-        // refactoring of telemetry and tests
-        if traverse::document(&mut visitor, file_id).is_ok() && visitor.found {
-            context.insert(AUTHENTICATED_KEY, true).unwrap();
-        }
-
-        let mut visitor = ScopeExtractionVisitor::new(&compiler, file_id);
-
-        // if this fails, the query is invalid and will fail at the query planning phase.
-        // We do not return validation errors here for now because that would imply a huge
-        // refactoring of telemetry and tests
-        if traverse::document(&mut visitor, file_id).is_ok() {
-            let scopes: Vec<String> = visitor.extracted_scopes.into_iter().collect();
-
-            if !scopes.is_empty() {
-                context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
-            }
-        }
-
-        // TODO: @policy is out of scope for preview, this will be reactivated later
-        if false {
-            let mut visitor = PolicyExtractionVisitor::new(&compiler, file_id);
-
+        if let Some(mut visitor) = AuthenticatedCheckVisitor::new(&schema.definitions, ast) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
-            if traverse::document(&mut visitor, file_id).is_ok() {
+            if traverse::document(&mut visitor, ast).is_ok() && visitor.found {
+                context.insert(AUTHENTICATED_KEY, true).unwrap();
+            }
+        }
+
+        if let Some(mut visitor) = ScopeExtractionVisitor::new(&schema.definitions, ast) {
+            // if this fails, the query is invalid and will fail at the query planning phase.
+            // We do not return validation errors here for now because that would imply a huge
+            // refactoring of telemetry and tests
+            if traverse::document(&mut visitor, ast).is_ok() {
+                let scopes: Vec<String> = visitor.extracted_scopes.into_iter().collect();
+
+                if !scopes.is_empty() {
+                    context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
+                }
+            }
+        }
+
+        if let Some(mut visitor) = PolicyExtractionVisitor::new(&schema.definitions, ast) {
+            // if this fails, the query is invalid and will fail at the query planning phase.
+            // We do not return validation errors here for now because that would imply a huge
+            // refactoring of telemetry and tests
+            if traverse::document(&mut visitor, ast).is_ok() {
                 let policies: HashMap<String, Option<bool>> = visitor
                     .extracted_policies
                     .into_iter()
@@ -230,15 +265,36 @@ impl AuthorizationPlugin {
     }
 
     pub(crate) fn filter_query(
+        configuration: &Configuration,
         key: &QueryKey,
         schema: &Schema,
     ) -> Result<Option<FilteredQuery>, QueryPlannerError> {
-        // we create a compiler to filter the query. The filtered query will then be used
+        let (reject_unauthorized, dry_run) = configuration
+            .apollo_plugins
+            .plugins
+            .iter()
+            .find(|(s, _)| s.as_str() == "authorization")
+            .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
+            .map(|config| {
+                (
+                    config
+                        .get("reject_unauthorized")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                    config
+                        .get("dry_run")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                )
+            })
+            .unwrap_or((false, false));
+
+        // The filtered query will then be used
         // to generate selections for response formatting, to execute introspection and
         // generating a query plan
-        let mut compiler = ApolloCompiler::new();
-        compiler.set_type_system_hir(schema.type_system.clone());
-        let _id = compiler.add_executable(&key.filtered_query, "query");
+
+        // TODO: do we need to (re)parse here?
+        let doc = ast::Document::parse(&key.filtered_query, "filtered_query");
 
         let is_authenticated = key.metadata.is_authenticated;
         let scopes = &key.metadata.scopes;
@@ -247,181 +303,172 @@ impl AuthorizationPlugin {
         let mut is_filtered = false;
         let mut unauthorized_paths: Vec<Path> = vec![];
 
-        let filter_res = Self::authenticated_filter_query(&compiler, is_authenticated)?;
+        let filter_res = Self::authenticated_filter_query(schema, dry_run, &doc, is_authenticated)?;
 
-        let compiler = match filter_res {
-            None => compiler,
-            Some((query, paths)) => {
+        let doc = match filter_res {
+            None => doc,
+            Some((filtered_doc, paths)) => {
                 unauthorized_paths.extend(paths);
 
-                if query.is_empty() {
+                // FIXME: consider only `filtered_doc.get_operation(key.operation_name)`?
+                if filtered_doc.definitions.is_empty() {
                     return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
                 }
 
                 is_filtered = true;
 
-                let mut compiler = ApolloCompiler::new();
-                compiler.set_type_system_hir(schema.type_system.clone());
-                let _id = compiler.add_executable(&query, "query");
-                compiler
+                filtered_doc
             }
         };
 
-        let filter_res = Self::scopes_filter_query(&compiler, scopes)?;
+        let filter_res = Self::scopes_filter_query(schema, dry_run, &doc, scopes)?;
 
-        let compiler = match filter_res {
-            None => compiler,
-            Some((query, paths)) => {
+        let doc = match filter_res {
+            None => doc,
+            Some((filtered_doc, paths)) => {
                 unauthorized_paths.extend(paths);
 
-                if query.is_empty() {
+                // FIXME: consider only `filtered_doc.get_operation(key.operation_name)`?
+                if filtered_doc.definitions.is_empty() {
                     return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
                 }
 
                 is_filtered = true;
 
-                let mut compiler = ApolloCompiler::new();
-                compiler.set_type_system_hir(schema.type_system.clone());
-                let _id = compiler.add_executable(&query, "query");
-                compiler
+                filtered_doc
             }
         };
 
-        let filter_res = Self::policies_filter_query(&compiler, policies)?;
+        let filter_res = Self::policies_filter_query(schema, dry_run, &doc, policies)?;
 
-        let compiler = match filter_res {
-            None => compiler,
-            Some((query, paths)) => {
+        let doc = match filter_res {
+            None => doc,
+            Some((filtered_doc, paths)) => {
                 unauthorized_paths.extend(paths);
 
-                if query.is_empty() {
+                // FIXME: consider only `filtered_doc.get_operation(key.operation_name)`?
+                if filtered_doc.definitions.is_empty() {
                     return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
                 }
 
                 is_filtered = true;
 
-                let mut compiler = ApolloCompiler::new();
-                compiler.set_type_system_hir(schema.type_system.clone());
-                let _id = compiler.add_executable(&query, "query");
-                compiler
+                filtered_doc
             }
         };
+
+        if reject_unauthorized && !unauthorized_paths.is_empty() {
+            return Err(QueryPlannerError::Unauthorized(unauthorized_paths));
+        }
 
         if is_filtered {
-            let file_id = compiler
-                .db
-                .source_file(QUERY_EXECUTABLE.into())
-                .ok_or_else(|| {
-                    QueryPlannerError::SpecError(SpecError::ValidationError(
-                        "missing input file for query".to_string(),
-                    ))
-                })?;
-            let filtered_query = compiler.db.source_code(file_id).to_string();
-
-            Ok(Some((
-                filtered_query,
-                unauthorized_paths,
-                Arc::new(Mutex::new(compiler)),
-            )))
+            Ok(Some((unauthorized_paths, doc)))
         } else {
             Ok(None)
         }
     }
 
     fn authenticated_filter_query(
-        compiler: &ApolloCompiler,
+        schema: &Schema,
+        dry_run: bool,
+        doc: &ast::Document,
         is_authenticated: bool,
-    ) -> Result<Option<(String, Vec<Path>)>, QueryPlannerError> {
-        let id = compiler
-            .db
-            .executable_definition_files()
-            .pop()
-            .expect("the query was added to the compiler earlier");
+    ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
+        if let Some(mut visitor) =
+            AuthenticatedVisitor::new(&schema.definitions, doc, &schema.implementers_map, dry_run)
+        {
+            let modified_query = transform::document(&mut visitor, doc)
+                .map_err(|e| SpecError::ParsingError(e.to_string()))?;
 
-        let mut visitor = AuthenticatedVisitor::new(compiler, id);
-        let modified_query = transform::document(&mut visitor, id)
-            .map_err(|e| SpecError::ParsingError(e.to_string()))?
-            .to_string();
-
-        if visitor.query_requires_authentication {
-            if is_authenticated {
-                tracing::debug!("the query contains @authenticated, the request is authenticated, keeping the query");
-                Ok(None)
-            } else {
-                tracing::debug!("the query contains @authenticated, modified query:\n{modified_query}\nunauthorized paths: {:?}", visitor
+            if visitor.query_requires_authentication {
+                if is_authenticated {
+                    tracing::debug!("the query contains @authenticated, the request is authenticated, keeping the query");
+                    Ok(None)
+                } else {
+                    tracing::debug!("the query contains @authenticated, modified query:\n{modified_query}\nunauthorized paths: {:?}", visitor
                 .unauthorized_paths
                 .iter()
                 .map(|path| path.to_string())
                 .collect::<Vec<_>>());
 
-                Ok(Some((modified_query, visitor.unauthorized_paths)))
+                    Ok(Some((modified_query, visitor.unauthorized_paths)))
+                }
+            } else {
+                tracing::debug!("the query does not contain @authenticated");
+                Ok(None)
             }
         } else {
-            tracing::debug!("the query does not contain @authenticated");
+            tracing::debug!("the schema does not contain @authenticated");
             Ok(None)
         }
     }
 
     fn scopes_filter_query(
-        compiler: &ApolloCompiler,
+        schema: &Schema,
+        dry_run: bool,
+        doc: &ast::Document,
         scopes: &[String],
-    ) -> Result<Option<(String, Vec<Path>)>, QueryPlannerError> {
-        let id = compiler
-            .db
-            .executable_definition_files()
-            .pop()
-            .expect("the query was added to the compiler earlier");
-
-        let mut visitor =
-            ScopeFilteringVisitor::new(compiler, id, scopes.iter().cloned().collect());
-
-        let modified_query = transform::document(&mut visitor, id)
-            .map_err(|e| SpecError::ParsingError(e.to_string()))?
-            .to_string();
-
-        if visitor.query_requires_scopes {
-            tracing::debug!("the query required scopes, the requests present scopes: {scopes:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
+    ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
+        if let Some(mut visitor) = ScopeFilteringVisitor::new(
+            &schema.definitions,
+            doc,
+            &schema.implementers_map,
+            scopes.iter().cloned().collect(),
+            dry_run,
+        ) {
+            let modified_query = transform::document(&mut visitor, doc)
+                .map_err(|e| SpecError::ParsingError(e.to_string()))?;
+            if visitor.query_requires_scopes {
+                tracing::debug!("the query required scopes, the requests present scopes: {scopes:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
                 visitor
                     .unauthorized_paths
                     .iter()
                     .map(|path| path.to_string())
                     .collect::<Vec<_>>()
             );
-            Ok(Some((modified_query, visitor.unauthorized_paths)))
+                Ok(Some((modified_query, visitor.unauthorized_paths)))
+            } else {
+                tracing::debug!("the query does not require scopes");
+                Ok(None)
+            }
         } else {
-            tracing::debug!("the query does not require scopes");
+            tracing::debug!("the schema does not contain @requiresScopes");
             Ok(None)
         }
     }
 
     fn policies_filter_query(
-        compiler: &ApolloCompiler,
+        schema: &Schema,
+        dry_run: bool,
+
+        doc: &ast::Document,
         policies: &[String],
-    ) -> Result<Option<(String, Vec<Path>)>, QueryPlannerError> {
-        let id = compiler
-            .db
-            .executable_definition_files()
-            .pop()
-            .expect("the query was added to the compiler earlier");
+    ) -> Result<Option<(ast::Document, Vec<Path>)>, QueryPlannerError> {
+        if let Some(mut visitor) = PolicyFilteringVisitor::new(
+            &schema.definitions,
+            doc,
+            &schema.implementers_map,
+            policies.iter().cloned().collect(),
+            dry_run,
+        ) {
+            let modified_query = transform::document(&mut visitor, doc)
+                .map_err(|e| SpecError::ParsingError(e.to_string()))?;
 
-        let mut visitor =
-            PolicyFilteringVisitor::new(compiler, id, policies.iter().cloned().collect());
-
-        let modified_query = transform::document(&mut visitor, id)
-            .map_err(|e| SpecError::ParsingError(e.to_string()))?
-            .to_string();
-
-        if visitor.query_requires_policies {
-            tracing::debug!("the query required policies, the requests present policies: {policies:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
+            if visitor.query_requires_policies {
+                tracing::debug!("the query required policies, the requests present policies: {policies:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
                 visitor
                     .unauthorized_paths
                     .iter()
                     .map(|path| path.to_string())
                     .collect::<Vec<_>>()
             );
-            Ok(Some((modified_query, visitor.unauthorized_paths)))
+                Ok(Some((modified_query, visitor.unauthorized_paths)))
+            } else {
+                tracing::debug!("the query does not require policies");
+                Ok(None)
+            }
         } else {
-            tracing::debug!("the query does not require policies");
+            tracing::debug!("the schema does not contain @policy");
             Ok(None)
         }
     }
@@ -475,16 +522,16 @@ impl Plugin for AuthorizationPlugin {
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
             .map_request(|request: execution::Request| {
-                let filtered = !request.query_plan.query.unauthorized_paths.is_empty();
+                let filtered = !request.query_plan.query.unauthorized.paths.is_empty();
                 let needs_authenticated = request.context.contains_key(AUTHENTICATED_KEY);
                 let needs_requires_scopes = request.context.contains_key(REQUIRED_SCOPES_KEY);
 
                 if needs_authenticated || needs_requires_scopes {
                     tracing::info!(
                         monotonic_counter.apollo.router.operations.authorization = 1u64,
-                        filtered = filtered,
-                        authenticated = needs_authenticated,
-                        requires_scopes = needs_requires_scopes,
+                        authorization.filtered = filtered,
+                        authorization.needs_authenticated = needs_authenticated,
+                        authorization.needs_requires_scopes = needs_requires_scopes,
                     );
                 }
 

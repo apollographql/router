@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 
@@ -62,6 +61,26 @@ impl OperationKind {
     }
 }
 
+impl From<OperationKind> for apollo_compiler::ast::OperationType {
+    fn from(value: OperationKind) -> Self {
+        match value {
+            OperationKind::Query => apollo_compiler::ast::OperationType::Query,
+            OperationKind::Mutation => apollo_compiler::ast::OperationType::Mutation,
+            OperationKind::Subscription => apollo_compiler::ast::OperationType::Subscription,
+        }
+    }
+}
+
+impl From<apollo_compiler::ast::OperationType> for OperationKind {
+    fn from(value: apollo_compiler::ast::OperationType) -> Self {
+        match value {
+            apollo_compiler::ast::OperationType::Query => OperationKind::Query,
+            apollo_compiler::ast::OperationType::Mutation => OperationKind::Mutation,
+            apollo_compiler::ast::OperationType::Subscription => OperationKind::Subscription,
+        }
+    }
+}
+
 /// A fetch node.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -98,13 +117,13 @@ pub(crate) struct FetchNode {
 
 pub(crate) struct Variables {
     pub(crate) variables: Object,
-    pub(crate) paths: HashMap<Path, usize>,
+    pub(crate) inverted_paths: Vec<Vec<Path>>,
 }
 
 impl Variables {
     #[instrument(skip_all, level = "debug", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn new(
+    pub(super) fn new(
         requires: &[Selection],
         variable_usages: &[String],
         data: &Value,
@@ -123,7 +142,7 @@ impl Variables {
                     .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
             }));
 
-            let mut paths: HashMap<Path, usize> = HashMap::new();
+            let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
             let mut values: IndexSet<Value> = IndexSet::new();
 
             data.select_values_and_paths(schema, current_dir, |path, value| {
@@ -132,11 +151,12 @@ impl Variables {
                         rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                         match values.get_index_of(&value) {
                             Some(index) => {
-                                paths.insert(path.clone(), index);
+                                inverted_paths[index].push(path.clone());
                             }
                             None => {
-                                paths.insert(path.clone(), values.len());
+                                inverted_paths.push(vec![path.clone()]);
                                 values.insert(value);
+                                debug_assert!(inverted_paths.len() == values.len());
                             }
                         }
                     }
@@ -151,7 +171,10 @@ impl Variables {
 
             variables.insert("representations", representations);
 
-            Some(Variables { variables, paths })
+            Some(Variables {
+                variables,
+                inverted_paths,
+            })
         } else {
             // with nested operations (Query or Mutation has an operation returning a Query or Mutation),
             // when the first fetch fails, the query plan will still execute up until the second fetch,
@@ -176,7 +199,7 @@ impl Variables {
                             .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                     })
                     .collect::<Object>(),
-                paths: HashMap::new(),
+                inverted_paths: Vec::new(),
             })
         }
     }
@@ -198,7 +221,10 @@ impl FetchNode {
             ..
         } = self;
 
-        let Variables { variables, paths } = match Variables::new(
+        let Variables {
+            variables,
+            inverted_paths: paths,
+        } = match Variables::new(
             &self.requires,
             self.variable_usages.as_ref(),
             data,
@@ -207,9 +233,7 @@ impl FetchNode {
             parameters.supergraph_request,
             parameters.schema,
             &self.input_rewrites,
-        )
-        .await
-        {
+        ) {
             Some(variables) => variables,
             None => {
                 return Ok((Value::Object(Object::default()), Vec::new()));
@@ -304,15 +328,9 @@ impl FetchNode {
         &'a self,
         schema: &Schema,
         current_dir: &'a Path,
-        paths: HashMap<Path, usize>,
+        inverted_paths: Vec<Vec<Path>>,
         response: graphql::Response,
     ) -> (Value, Vec<Error>) {
-        // for each entity in the response, find out the path where it must be inserted
-        let mut inverted_paths: HashMap<usize, Vec<&Path>> = HashMap::new();
-        for (path, index) in paths.iter() {
-            (*inverted_paths.entry(*index).or_default()).push(path);
-        }
-
         if !self.requires.is_empty() {
             let entities_path = Path(vec![json_ext::PathElement::Key("_entities".to_string())]);
 
@@ -330,7 +348,7 @@ impl FetchNode {
                         match path.0.get(1) {
                             Some(json_ext::PathElement::Index(i)) => {
                                 for values_path in
-                                    inverted_paths.get(i).iter().flat_map(|v| v.iter())
+                                    inverted_paths.get(*i).iter().flat_map(|v| v.iter())
                                 {
                                     errors.push(Error {
                                         locations: error.locations.clone(),
@@ -370,7 +388,7 @@ impl FetchNode {
                         for (index, mut entity) in array.into_iter().enumerate() {
                             rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
 
-                            if let Some(paths) = inverted_paths.get(&index) {
+                            if let Some(paths) = inverted_paths.get(index) {
                                 if paths.len() > 1 {
                                     for path in &paths[1..] {
                                         let _ = value.insert(path, entity.clone());

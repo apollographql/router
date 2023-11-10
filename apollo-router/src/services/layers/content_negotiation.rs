@@ -3,7 +3,6 @@ use std::ops::ControlFlow;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::HeaderMap;
-use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use mediatype::names::APPLICATION;
@@ -24,7 +23,10 @@ use crate::layers::sync_checkpoint::CheckpointService;
 use crate::layers::ServiceExt as _;
 use crate::services::router;
 use crate::services::router::ClientRequestAccepts;
+use crate::services::router_service::MULTIPART_DEFER_HEADER_VALUE;
+use crate::services::router_service::MULTIPART_SUBSCRIPTION_HEADER_VALUE;
 use crate::services::supergraph;
+use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
 use crate::services::MULTIPART_DEFER_SPEC_VALUE;
@@ -138,20 +140,17 @@ where
                     .unwrap_or_default();
 
                 if !res.has_next.unwrap_or_default() && (accepts_json || accepts_wildcard) {
-                    parts.headers.insert(
-                        CONTENT_TYPE,
-                        HeaderValue::from_static(APPLICATION_JSON.essence_str()),
-                    );
+                    parts
+                        .headers
+                        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
                 } else if accepts_multipart_defer {
-                    parts.headers.insert(
-                        CONTENT_TYPE,
-                        HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
-                    );
+                    parts
+                        .headers
+                        .insert(CONTENT_TYPE, MULTIPART_DEFER_HEADER_VALUE.clone());
                 } else if accepts_multipart_subscription {
-                    parts.headers.insert(
-                        CONTENT_TYPE,
-                        HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE),
-                    );
+                    parts
+                        .headers
+                        .insert(CONTENT_TYPE, MULTIPART_SUBSCRIPTION_HEADER_VALUE.clone());
                 }
                 (parts, res)
             })
@@ -236,6 +235,8 @@ fn parse_accept(headers: &HeaderMap) -> ClientRequestAccepts {
 
 #[cfg(test)]
 mod tests {
+    use http::HeaderValue;
+
     use super::*;
 
     #[test]

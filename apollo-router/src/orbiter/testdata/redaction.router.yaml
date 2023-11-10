@@ -25,6 +25,7 @@ telemetry:
         - "bar"
   tracing:
     otlp:
+      enabled: true
       protocol: grpc
       endpoint: default
       grpc:

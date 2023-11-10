@@ -4,9 +4,6 @@ mod manifest_poller;
 #[cfg(test)]
 use std::sync::Arc;
 
-use apollo_compiler::AstDatabase;
-use apollo_compiler::HirDatabase;
-use apollo_compiler::InputDatabase;
 use http::header::CACHE_CONTROL;
 use http::HeaderValue;
 use id_extractor::PersistedQueryIdExtractor;
@@ -14,11 +11,10 @@ pub(crate) use manifest_poller::PersistedQueryManifestPoller;
 use tower::BoxError;
 
 use self::manifest_poller::FreeformGraphQLAction;
-use super::query_analysis::Compiler;
+use super::query_analysis::ParsedDocument;
 use crate::graphql::Error as GraphQLError;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::spec::query::QUERY_EXECUTABLE;
 use crate::Configuration;
 
 const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
@@ -37,7 +33,7 @@ impl PersistedQueryLayer {
     /// Create a new [`PersistedQueryLayer`] from CLI options, YAML configuration,
     /// and optionally, an existing persisted query manifest poller.
     pub(crate) async fn new(configuration: &Configuration) -> Result<Self, BoxError> {
-        if configuration.preview_persisted_queries.enabled {
+        if configuration.persisted_queries.enabled {
             Ok(Self {
                 manifest_poller: Some(
                     PersistedQueryManifestPoller::new(configuration.clone()).await?,
@@ -165,7 +161,7 @@ impl PersistedQueryLayer {
             Some(ob) => ob,
         };
 
-        let compiler = {
+        let doc = {
             let context_guard = request.context.private_entries.lock();
 
             if context_guard.get::<UsedQueryIdFromManifest>().is_some() {
@@ -175,33 +171,20 @@ impl PersistedQueryLayer {
                 return Ok(request);
             }
 
-            match context_guard.get::<Compiler>() {
+            match context_guard.get::<ParsedDocument>() {
                 None => {
                     drop(context_guard);
-                    // For some reason, QueryAnalysisLayer didn't give us a Compiler?
+                    // For some reason, QueryAnalysisLayer didn't give us a document?
                     return Err(supergraph_err(
                         graphql_err(
                             "MISSING_PARSED_OPERATION",
-                            "internal error: compiler missing",
+                            "internal error: executable document missing",
                         ),
                         request,
                         ErrorCacheStrategy::DontCache,
                     ));
                 }
-                Some(c) => c.0.clone(),
-            }
-        };
-
-        let compiler_guard = compiler.lock().await;
-        let db = &compiler_guard.db;
-        let file_id = match db.source_file(QUERY_EXECUTABLE.into()) {
-            Some(file_id) => file_id,
-            None => {
-                return Err(supergraph_err(
-                    graphql_err("MISSING_PARSED_OPERATION", "missing input file for query"),
-                    request,
-                    ErrorCacheStrategy::DontCache,
-                ))
+                Some(d) => d.clone(),
             }
         };
 
@@ -211,16 +194,16 @@ impl PersistedQueryLayer {
         // __type/__schema/__typename.) We do want to make sure the document
         // parsed properly before poking around at it, though.
         if self.introspection_enabled
-            && db.ast(file_id).errors().peekable().peek().is_none()
-            && db
-                .operations(file_id)
-                .iter()
-                .all(|op| op.is_introspection(db))
+            && doc.ast.check_parse_errors().is_ok()
+            && doc
+                .executable
+                .all_operations()
+                .all(|op| op.is_introspection(&doc.executable))
         {
             return Ok(request);
         }
 
-        match manifest_poller.action_for_freeform_graphql(operation_body, db.ast(file_id)) {
+        match manifest_poller.action_for_freeform_graphql(operation_body, &doc.ast) {
             FreeformGraphQLAction::Allow => {
                 tracing::info!(monotonic_counter.apollo.router.operations.persisted_queries = 1u64,);
                 Ok(request)
@@ -251,6 +234,12 @@ impl PersistedQueryLayer {
                 Err(supergraph_err_operation_not_in_safelist(request))
             }
         }
+    }
+
+    pub(crate) fn all_operations(&self) -> Option<Vec<String>> {
+        self.manifest_poller
+            .as_ref()
+            .map(|poller| poller.get_all_operations())
     }
 }
 
@@ -671,7 +660,7 @@ mod tests {
     async fn pq_layer_freeform_graphql_with_safelist() {
         let manifest = HashMap::from([(
             "valid-syntax".to_string(),
-            "fragment A on T { a }    query SomeOp { ...A ...B }    fragment,,, B on U{b c  } # yeah"
+            "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{name,username}  } # yeah"
                 .to_string(),
         ), (
             "invalid-syntax".to_string(),
@@ -709,7 +698,7 @@ mod tests {
         denied_by_safelist(
             &pq_layer,
             &query_analysis_layer,
-            "query SomeQuery { hooray }",
+            "query SomeQuery { me { id } }",
         )
         .await;
 
@@ -717,7 +706,7 @@ mod tests {
         allowed_by_safelist(
             &pq_layer,
             &query_analysis_layer,
-            "fragment A on T { a }    query SomeOp { ...A ...B }    fragment,,, B on U{b c  } # yeah",
+            "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{name,username}  } # yeah",
         )
         .await;
 
@@ -725,14 +714,14 @@ mod tests {
         allowed_by_safelist(
                 &pq_layer,
                 &query_analysis_layer,
-                    "#comment\n  fragment, B on U  , { b    c }    query SomeOp {  ...A ...B }  fragment    \nA on T { a }"
+                    "#comment\n  fragment, B on Query  , { me{name    username} }    query SomeOp {  ...A ...B }  fragment    \nA on Query { me{ id} }"
             ).await;
 
         // Reordering fields does not match!
         denied_by_safelist(
                 &pq_layer,
                 &query_analysis_layer,
-                    "fragment A on T { a }    query SomeOp { ...A ...B }    fragment,,, B on U{c b  } # yeah"
+                "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{username,name}  } # yeah"
             ).await;
 
         // Documents with invalid syntax don't match...
@@ -761,7 +750,7 @@ mod tests {
         denied_by_safelist(
             &pq_layer,
             &query_analysis_layer,
-            r#"fragment F on Query { __typename foo: __schema { __typename } bla } query Q { __type(name: "foo") { name } ...F }"#,
+            r#"fragment F on Query { __typename foo: __schema { __typename } me { id } } query Q { __type(name: "foo") { name } ...F }"#,
         ).await;
     }
 

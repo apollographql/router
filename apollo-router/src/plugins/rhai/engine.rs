@@ -5,6 +5,9 @@ use std::sync::Mutex;
 use std::time::SystemTime;
 
 use base64::prelude::BASE64_STANDARD;
+use base64::prelude::BASE64_STANDARD_NO_PAD;
+use base64::prelude::BASE64_URL_SAFE;
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use bytes::Bytes;
 use http::header::InvalidHeaderName;
@@ -82,10 +85,35 @@ impl<T> OptionDance<T> for SharedMut<T> {
     }
 }
 
+#[derive(Clone)]
+#[allow(unreachable_pub)]
+pub enum Base64Alphabet {
+    Standard,
+    StandardNoPad,
+    UrlSafe,
+    UrlSafeNoPad,
+}
+
+fn get_engine(alphabet: &Base64Alphabet) -> base64::engine::GeneralPurpose {
+    match alphabet {
+        Base64Alphabet::Standard => BASE64_STANDARD,
+        Base64Alphabet::StandardNoPad => BASE64_STANDARD_NO_PAD,
+        Base64Alphabet::UrlSafe => BASE64_URL_SAFE,
+        Base64Alphabet::UrlSafeNoPad => BASE64_URL_SAFE_NO_PAD,
+    }
+}
+
 // We have to keep the modules that we export using `export_module` inline because
 // error[E0658]: non-inline modules in proc macro input are unstable
 #[export_module]
+#[allow(unreachable_pub)]
 mod router_base64 {
+    pub type Alphabet = Base64Alphabet;
+    pub const STANDARD: Alphabet = Alphabet::Standard;
+    pub const STANDARD_NO_PAD: Alphabet = Alphabet::StandardNoPad;
+    pub const URL_SAFE: Alphabet = Alphabet::UrlSafe;
+    pub const URL_SAFE_NO_PAD: Alphabet = Alphabet::UrlSafeNoPad;
+
     #[rhai_fn(pure, return_raw)]
     pub(crate) fn decode(input: &mut ImmutableString) -> Result<String, Box<EvalAltResult>> {
         String::from_utf8(
@@ -96,9 +124,51 @@ mod router_base64 {
         .map_err(|e| e.to_string().into())
     }
 
+    #[rhai_fn(pure, name = "decode", return_raw)]
+    pub(crate) fn decode_alphabet(
+        input: &mut ImmutableString,
+        alphabet: Alphabet,
+    ) -> Result<String, Box<EvalAltResult>> {
+        let engine = get_engine(&alphabet);
+        String::from_utf8(engine.decode(input.as_bytes()).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string().into())
+    }
+
     #[rhai_fn(pure)]
     pub(crate) fn encode(input: &mut ImmutableString) -> String {
         BASE64_STANDARD.encode(input.as_bytes())
+    }
+
+    #[rhai_fn(pure, name = "encode")]
+    pub(crate) fn encode_alphabet(input: &mut ImmutableString, alphabet: Alphabet) -> String {
+        let engine = get_engine(&alphabet);
+        engine.encode(input.as_bytes())
+    }
+}
+
+#[export_module]
+mod router_json {
+    pub(crate) type Object = crate::json_ext::Object;
+    pub(crate) type Value = crate::json_ext::Value;
+
+    #[rhai_fn(name = "to_string", pure)]
+    pub(crate) fn object_to_string(x: &mut Object) -> String {
+        format!("{x:?}")
+    }
+
+    #[rhai_fn(name = "to_string", pure)]
+    pub(crate) fn value_to_string(x: &mut Value) -> String {
+        format!("{x:?}")
+    }
+
+    #[rhai_fn(pure, return_raw)]
+    pub(crate) fn encode(input: &mut Dynamic) -> Result<String, Box<EvalAltResult>> {
+        serde_json::to_string(input).map_err(|e| e.to_string().into())
+    }
+
+    #[rhai_fn(pure, return_raw)]
+    pub(crate) fn decode(input: &mut ImmutableString) -> Result<Dynamic, Box<EvalAltResult>> {
+        serde_json::from_str(input).map_err(|e| e.to_string().into())
     }
 }
 
@@ -278,32 +348,6 @@ mod router_header_map {
             },
             x.1.to_str().map_or("".to_string(), |v| v.to_string())
         )
-    }
-}
-
-#[export_module]
-mod router_json {
-    pub(crate) type Object = crate::json_ext::Object;
-    pub(crate) type Value = crate::json_ext::Value;
-
-    #[rhai_fn(name = "to_string", pure)]
-    pub(crate) fn object_to_string(x: &mut Object) -> String {
-        format!("{x:?}")
-    }
-
-    #[rhai_fn(name = "to_string", pure)]
-    pub(crate) fn value_to_string(x: &mut Value) -> String {
-        format!("{x:?}")
-    }
-
-    #[rhai_fn(pure, return_raw)]
-    pub(crate) fn json_encode(input: &mut Dynamic) -> Result<String, Box<EvalAltResult>> {
-        serde_json::to_string(input).map_err(|e| e.to_string().into())
-    }
-
-    #[rhai_fn(pure, return_raw)]
-    pub(crate) fn json_decode(input: &mut ImmutableString) -> Result<Dynamic, Box<EvalAltResult>> {
-        serde_json::from_str(input).map_err(|e| e.to_string().into())
     }
 }
 
@@ -1487,10 +1531,11 @@ impl Rhai {
         let mut module = exported_module!(router_plugin);
         combine_with_exported_module!(&mut module, "header", router_header_map);
         combine_with_exported_module!(&mut module, "method", router_method);
-        combine_with_exported_module!(&mut module, "json", router_json);
         combine_with_exported_module!(&mut module, "context", router_context);
 
         let base64_module = exported_module!(router_base64);
+        let json_module = exported_module!(router_json);
+
         let expansion_module = exported_module!(router_expansion);
 
         // Share main so we can move copies into each closure as required for logging
@@ -1514,6 +1559,8 @@ impl Rhai {
             .register_global_module(module.into())
             // Register our base64 module (not global)
             .register_static_module("base64", base64_module.into())
+            // Register our json module (not global)
+            .register_static_module("json", json_module.into())
             // Register our expansion module (not global)
             // Hide the fact that it is an expansion module by calling it "env"
             .register_static_module("env", expansion_module.into())

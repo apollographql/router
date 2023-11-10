@@ -5,7 +5,7 @@ telemetry:
     experimental_response_trace_id:
       enabled: true
       header_name: "my_trace_id"
-    trace_config:
+    common:
       sampler: always_on
 
   apollo:

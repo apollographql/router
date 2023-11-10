@@ -5,10 +5,11 @@ telemetry:
       header_name: apollo-custom-trace-id
     propagation:
       jaeger: true
-    trace_config:
+    common:
       service_name: router
       sampler: always_on
     jaeger:
+      enabled: true
       batch_processor:
         scheduled_delay: 100ms
       agent:
