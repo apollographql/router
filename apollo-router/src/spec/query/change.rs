@@ -246,29 +246,11 @@ mod tests {
     use super::QueryHashVisitor;
 
     static BASIC_SCHEMA1: &str = r#"
-    schema
-      @link(url: "https://specs.apollo.dev/link/v1.0")
-      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-      @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
-    {
+    schema {
       query: Query
       mutation: Mutation
     }
-    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
-    directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
-    scalar link__Import
-      enum link__Purpose {
-    """
-    `SECURITY` features provide metadata necessary to securely resolve fields.
-    """
-    SECURITY
-  
-    """
-    `EXECUTION` features provide metadata necessary for operation execution.
-    """
-    EXECUTION
-  }
 
     type Query {
       topProducts: Product
@@ -311,29 +293,12 @@ mod tests {
     "#;
 
     static BASIC_SCHEMA2: &str = r#"
-    schema
-      @link(url: "https://specs.apollo.dev/link/v1.0")
-      @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-      @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
-    {
-      query: Query
-      mutation: Mutation
-    }
-    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-    directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
-    directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
-    scalar link__Import
-      enum link__Purpose {
-    """
-    `SECURITY` features provide metadata necessary to securely resolve fields.
-    """
-    SECURITY
-  
-    """
-    `EXECUTION` features provide metadata necessary for operation execution.
-    """
-    EXECUTION
-  }
+    schema {
+        query: Query
+        mutation: Mutation
+      }
+      directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+
 
     type Query {
       topProducts(nb: Int): Product
@@ -395,7 +360,7 @@ mod tests {
 
         // id is nullable in 1, non nullable in 2
         let query2 = "query { me { id name } }";
-        assert_eq!(hash(BASIC_SCHEMA1, query2), hash(BASIC_SCHEMA2, query2));
+        assert_ne!(hash(BASIC_SCHEMA1, query2), hash(BASIC_SCHEMA2, query2));
         panic!()
     }
 }
