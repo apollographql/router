@@ -229,8 +229,6 @@ impl Default for Format {
 #[derive(Deserialize, JsonSchema, Clone, Debug, Eq, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct JsonFormat {
-    /// Move all span attributes to the top level json object.
-    pub(crate) flatten_event: bool,
     /// Include the timestamp with the log event.
     pub(crate) display_timestamp: bool,
     /// Include the target with the log event.
@@ -254,7 +252,6 @@ pub(crate) struct JsonFormat {
 impl Default for JsonFormat {
     fn default() -> Self {
         JsonFormat {
-            flatten_event: false,
             display_timestamp: true,
             display_target: true,
             display_level: true,
@@ -272,8 +269,6 @@ impl Default for JsonFormat {
 #[derive(Deserialize, JsonSchema, Clone, Debug, Eq, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct TextFormat {
-    /// Use ansi escape codes.
-    pub(crate) ansi: bool,
     /// Include the timestamp with the log event.
     pub(crate) display_timestamp: bool,
     /// Include the target with the log event.
@@ -288,14 +283,11 @@ pub(crate) struct TextFormat {
     pub(crate) display_filename: bool,
     /// Include the line number with the log event.
     pub(crate) display_line_number: bool,
-    /// Include the location with the log event.
-    pub(crate) display_location: bool,
 }
 
 impl Default for TextFormat {
     fn default() -> Self {
         TextFormat {
-            ansi: false,
             display_timestamp: true,
             display_target: false,
             display_level: true,
@@ -303,7 +295,6 @@ impl Default for TextFormat {
             display_thread_name: false,
             display_filename: false,
             display_line_number: false,
-            display_location: false,
         }
     }
 }

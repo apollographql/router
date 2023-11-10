@@ -2634,11 +2634,6 @@ expression: "&schema"
                               "description": "Include the timestamp with the log event.",
                               "default": true,
                               "type": "boolean"
-                            },
-                            "flatten_event": {
-                              "description": "Move all span attributes to the top level json object.",
-                              "default": false,
-                              "type": "boolean"
                             }
                           },
                           "additionalProperties": false
@@ -2663,11 +2658,6 @@ expression: "&schema"
                         "text": {
                           "type": "object",
                           "properties": {
-                            "ansi": {
-                              "description": "Use ansi escape codes.",
-                              "default": false,
-                              "type": "boolean"
-                            },
                             "display_filename": {
                               "description": "Include the filename with the log event.",
                               "default": false,
@@ -2680,11 +2670,6 @@ expression: "&schema"
                             },
                             "display_line_number": {
                               "description": "Include the line number with the log event.",
-                              "default": false,
-                              "type": "boolean"
-                            },
-                            "display_location": {
-                              "description": "Include the location with the log event.",
                               "default": false,
                               "type": "boolean"
                             },

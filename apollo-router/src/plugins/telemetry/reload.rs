@@ -96,10 +96,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     } else {
         tracing_subscriber::fmt::Layer::new()
             .event_format(FilteringFormatter::new(
-                Json::default()
-                    .with_current_span(true)
-                    .with_span_list(true)
-                    .flatten_event(true),
+                Json::default().with_current_span(true).with_span_list(true),
                 filter_metric_events,
             ))
             .map_fmt_fields(|_f| JsonFields {})

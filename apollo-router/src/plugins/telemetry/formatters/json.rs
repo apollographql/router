@@ -29,7 +29,6 @@ const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub(crate) struct Json {
-    pub(crate) flatten_event: bool,
     pub(crate) display_current_span: bool,
     pub(crate) display_filename: bool,
     pub(crate) display_target: bool,
@@ -42,12 +41,6 @@ pub(crate) struct Json {
 }
 
 impl Json {
-    /// If set to `true` event metadata will be flattened into the root object.
-    pub(crate) fn flatten_event(mut self, flatten_event: bool) -> Self {
-        self.flatten_event = flatten_event;
-        self
-    }
-
     pub(crate) fn with_target(mut self, display_target: bool) -> Self {
         self.display_target = display_target;
         self
@@ -303,7 +296,6 @@ where
 impl Default for Json {
     fn default() -> Json {
         Json {
-            flatten_event: false,
             display_current_span: true,
             display_span_list: true,
             display_level: false,
