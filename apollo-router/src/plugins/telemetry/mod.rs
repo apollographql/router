@@ -242,6 +242,10 @@ impl Plugin for Telemetry {
         };
         let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
 
+        if config.spans.mode == SpanMode::Deprecated {
+            ::tracing::warn!("telemetry.span.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
+        }
+
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,

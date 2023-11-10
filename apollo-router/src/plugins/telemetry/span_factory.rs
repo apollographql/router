@@ -15,15 +15,15 @@ use crate::tracer::TraceId;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
-#[derive(Debug, Copy, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Copy, Clone, Deserialize, JsonSchema, Default, Eq, PartialEq)]
 /// Span mode to create new or deprecated spans
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum SpanMode {
-    /// Keep the request span as root span and deprecated attributes
-    Deprecated,
+    /// Keep the request span as root span and deprecated attributes. This option will eventually removed.
     #[default]
-    /// router span will be the new root span
-    New,
+    Deprecated,
+    /// Use new OpenTelemetry spec compliant span attributes or preserve existing. This will be the default in future.
+    SpecCompliant,
 }
 
 impl SpanMode {
@@ -67,7 +67,7 @@ impl SpanMode {
                     )
                 }
             }
-            SpanMode::New => {
+            SpanMode::SpecCompliant => {
                 unreachable!("this code path should not be reachable, this is a bug!")
             }
         }
@@ -95,7 +95,7 @@ impl SpanMode {
                 );
                 span
             }
-            SpanMode::New => {
+            SpanMode::SpecCompliant => {
                 info_span!(ROUTER_SPAN_NAME,
                     // Needed for apollo_telemetry
                     "http.route" = %request.uri(),
@@ -150,7 +150,7 @@ impl SpanMode {
                 }
                 span
             }
-            SpanMode::New => {
+            SpanMode::SpecCompliant => {
                 let send_variable_values = config.send_variable_values.clone();
                 info_span!(
                     SUPERGRAPH_SPAN_NAME,
@@ -197,7 +197,7 @@ impl SpanMode {
                     "otel.status_code" = ::tracing::field::Empty,
                 )
             }
-            SpanMode::New => {
+            SpanMode::SpecCompliant => {
                 info_span!(
                     SUBGRAPH_SPAN_NAME,
                     "otel.kind" = "INTERNAL",

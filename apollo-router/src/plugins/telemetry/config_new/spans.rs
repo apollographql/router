@@ -33,7 +33,7 @@ use crate::tracer::TraceId;
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Spans {
-    /// Whether to create a `request` span if you set `legacy` mode. This will be removed in future, and users should set this to `new`.
+    /// Use new OpenTelemetry spec compliant span attributes or preserve existing. This will be defaulted in future to `spec_compliant`, eventually removed in future.
     pub(crate) mode: SpanMode,
 
     /// The attributes to include by default in spans based on their level as specified in the otel semantic conventions and Apollo documentation.

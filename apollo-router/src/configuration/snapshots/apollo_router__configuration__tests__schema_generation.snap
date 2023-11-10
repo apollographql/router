@@ -5019,20 +5019,20 @@ expression: "&schema"
               ]
             },
             "mode": {
-              "description": "Whether to create a `request` span if you set `legacy` mode. This will be removed in future, and users should set this to `new`.",
+              "description": "Use new OpenTelemetry spec compliant span attributes or preserve existing. This will be defaulted in future to `spec_compliant`, eventually removed in future.",
               "oneOf": [
                 {
-                  "description": "Keep the request span as root span and deprecated attributes",
+                  "description": "Keep the request span as root span and deprecated attributes. This option will eventually removed.",
                   "type": "string",
                   "enum": [
                     "deprecated"
                   ]
                 },
                 {
-                  "description": "router span will be the new root span",
+                  "description": "Use new OpenTelemetry spec compliant span attributes or preserve existing. This will be the default in future.",
                   "type": "string",
                   "enum": [
-                    "new"
+                    "spec_compliant"
                   ]
                 }
               ]

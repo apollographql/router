@@ -30,7 +30,7 @@ telemetry:
         match: ^foo.*
         headers: true
   spans:
-    mode: new
+    mode: spec_compliant
     default_attribute_requirement_level: recommended
     router:
       attributes:
