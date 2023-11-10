@@ -50,8 +50,7 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Conf {
     /// Logging configuration
-    #[serde(rename = "logging", default)]
-    pub(crate) new_logging: config_new::logging::Logging,
+    pub(crate) logging: config_new::logging::Logging,
     /// Metrics configuration
     pub(crate) metrics: Metrics,
     /// Tracing configuration

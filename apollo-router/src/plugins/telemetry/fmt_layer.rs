@@ -12,7 +12,7 @@ use crate::plugins::telemetry::reload::LayeredTracer;
 pub(crate) fn create_fmt_layer(
     config: &config::Conf,
 ) -> Box<dyn Layer<LayeredTracer> + Send + Sync> {
-    let config = &config.new_logging.stdout;
+    let config = &config.logging.stdout;
     match &config.format {
         Format::Json(config) => {
             let format = Json::default()
