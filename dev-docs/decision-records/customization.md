@@ -4,7 +4,7 @@ Router customization mechanisms and hierarchy
 
 ## Status
 
-Proposed
+Approved
 
 ## Context
 
