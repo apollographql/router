@@ -130,7 +130,7 @@ impl JsonSchema for Format {
                                 description,
                             )
                         })
-                        .map(|(name, o, dec)| {
+                        .flat_map(|(name, o, dec)| {
                             vec![
                                 SchemaObject {
                                     metadata: Some(Box::new(Metadata {
@@ -158,7 +158,6 @@ impl JsonSchema for Format {
                                 },
                             ]
                         })
-                        .flatten()
                         .map(Schema::Object)
                         .collect::<Vec<_>>(),
                 ),
@@ -200,14 +199,14 @@ impl<'de> Deserialize<'de> for Format {
             {
                 let key = map.next_key::<String>()?;
 
-                match key.as_ref().map(|a| a.as_str()) {
+                match key.as_deref() {
                     Some("json") => Ok(Format::Json(map.next_value::<JsonFormat>()?)),
                     Some("text") => Ok(Format::Text(map.next_value::<TextFormat>()?)),
                     Some(value) => Err(serde::de::Error::custom(format!(
                         "unknown log format: {}",
                         value
                     ))),
-                    _ => Err(serde::de::Error::custom(format!("unknown log format"))),
+                    _ => Err(serde::de::Error::custom("unknown log format")),
                 }
             }
         }
