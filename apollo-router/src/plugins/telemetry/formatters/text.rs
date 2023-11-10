@@ -20,25 +20,14 @@ use tracing_subscriber::fmt::FormattedFields;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 
+use crate::plugins::telemetry::config_new::logging::TextFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::tracing::APOLLO_PRIVATE_PREFIX;
 
-#[derive(Debug, Clone)]
+#[derive(Default)]
 pub(crate) struct Text {
-    pub(crate) timer: SystemTime,
-    display_timestamp: bool,
-    display_target: bool,
-    display_filename: bool,
-    display_line_number: bool,
-    display_level: bool,
-    display_thread_id: bool,
-    display_thread_name: bool,
-}
-
-impl Default for Text {
-    fn default() -> Self {
-        Self::new()
-    }
+    timer: SystemTime,
+    config: TextFormat,
 }
 
 impl Text {
@@ -48,65 +37,10 @@ impl Text {
     const WARN_STR: &'static str = "WARN";
     const ERROR_STR: &'static str = "ERROR";
 
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(config: TextFormat) -> Self {
         Self {
             timer: Default::default(),
-            display_target: false,
-            display_filename: false,
-            display_level: false,
-            display_line_number: false,
-            display_thread_id: false,
-            display_thread_name: false,
-            display_timestamp: false,
-        }
-    }
-
-    pub(crate) fn with_target(self, display_target: bool) -> Self {
-        Self {
-            display_target,
-            ..self
-        }
-    }
-
-    pub(crate) fn with_file(self, display_filename: bool) -> Self {
-        Self {
-            display_filename,
-            ..self
-        }
-    }
-
-    pub(crate) fn with_level(self, display_level: bool) -> Self {
-        Self {
-            display_level,
-            ..self
-        }
-    }
-
-    pub(crate) fn with_line_number(self, display_line_number: bool) -> Self {
-        Self {
-            display_line_number,
-            ..self
-        }
-    }
-
-    pub(crate) fn with_thread_ids(self, display_thread_id: bool) -> Self {
-        Self {
-            display_thread_id,
-            ..self
-        }
-    }
-
-    pub(crate) fn with_thread_names(self, display_thread_name: bool) -> Self {
-        Self {
-            display_thread_name,
-            ..self
-        }
-    }
-
-    pub(crate) fn with_timestamp(self, display_timestamp: bool) -> Self {
-        Self {
-            display_timestamp,
-            ..self
+            config,
         }
     }
 
@@ -161,13 +95,13 @@ impl Text {
             if writer.has_ansi_escapes() {
                 let style = Style::new().dimmed();
                 write!(writer, "{}", style.prefix())?;
-                if self.display_filename {
+                if self.config.display_filename {
                     write!(writer, "{filename}")?;
                 }
-                if self.display_filename && self.display_line_number {
+                if self.config.display_filename && self.config.display_line_number {
                     write!(writer, ":")?;
                 }
-                if self.display_line_number {
+                if self.config.display_line_number {
                     write!(writer, "{line}")?;
                 }
                 write!(writer, "{}", style.suffix())?;
@@ -324,33 +258,33 @@ where
     ) -> fmt::Result {
         let meta = event.metadata();
 
-        if self.display_timestamp {
+        if self.config.display_timestamp {
             self.format_timestamp(&mut writer)?;
         }
-        if self.display_level {
+        if self.config.display_level {
             self.format_level(meta.level(), &mut writer)?;
         }
 
-        if self.display_thread_name {
+        if self.config.display_thread_name {
             let current_thread = std::thread::current();
             match current_thread.name() {
                 Some(name) => {
                     write!(writer, "{} ", FmtThreadName::new(name))?;
                 }
                 // fall-back to thread id when name is absent and ids are not enabled
-                None if !self.display_thread_id => {
+                None if !self.config.display_thread_id => {
                     write!(writer, "{:0>2?} ", current_thread.id())?;
                 }
                 _ => {}
             }
         }
 
-        if self.display_thread_id {
+        if self.config.display_thread_id {
             write!(writer, "{:0>2?} ", std::thread::current().id())?;
         }
 
         self.format_attributes(ctx, &mut writer, event)?;
-        if self.display_target {
+        if self.config.display_target {
             self.format_target(meta.target(), &mut writer)?;
         }
         self.format_location(event, &mut writer)?;

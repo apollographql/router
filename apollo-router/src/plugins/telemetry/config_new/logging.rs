@@ -18,6 +18,7 @@ use serde::Deserializer;
 use crate::configuration::ConfigurationError;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::experimental_when_header::HeaderLoggingCondition;
+use crate::plugins::telemetry::resource::ConfigResource;
 use crate::services::SupergraphRequest;
 
 /// Logging configuration.
@@ -81,6 +82,20 @@ pub(crate) struct LoggingCommon {
     pub(crate) service_namespace: Option<String>,
     /// The Open Telemetry resource
     pub(crate) resource: BTreeMap<String, AttributeValue>,
+}
+
+impl ConfigResource for LoggingCommon {
+    fn service_name(&self) -> &Option<String> {
+        &self.service_name
+    }
+
+    fn service_namespace(&self) -> &Option<String> {
+        &self.service_namespace
+    }
+
+    fn resource(&self) -> &BTreeMap<String, AttributeValue> {
+        &self.resource
+    }
 }
 
 #[allow(dead_code)]
@@ -288,6 +303,12 @@ pub(crate) struct JsonFormat {
     pub(crate) display_current_span: bool,
     /// Include all of the containing span information with the log event.
     pub(crate) display_span_list: bool,
+    /// Include the service namespace with the log event.
+    pub(crate) display_service_namespace: bool,
+    /// Include the service name with the log event.
+    pub(crate) display_service_name: bool,
+    /// Include the resource with the log event.
+    pub(crate) display_resource: bool,
 }
 
 impl Default for JsonFormat {
@@ -302,6 +323,9 @@ impl Default for JsonFormat {
             display_line_number: false,
             display_current_span: false,
             display_span_list: true,
+            display_service_namespace: true,
+            display_service_name: true,
+            display_resource: true,
         }
     }
 }
@@ -324,6 +348,12 @@ pub(crate) struct TextFormat {
     pub(crate) display_filename: bool,
     /// Include the line number with the log event.
     pub(crate) display_line_number: bool,
+    /// Include the service namespace with the log event.
+    pub(crate) display_service_namespace: bool,
+    /// Include the service name with the log event.
+    pub(crate) display_service_name: bool,
+    /// Include the resource with the log event.
+    pub(crate) display_resource: bool,
 }
 
 impl Default for TextFormat {
@@ -336,6 +366,9 @@ impl Default for TextFormat {
             display_thread_name: false,
             display_filename: false,
             display_line_number: false,
+            display_service_namespace: false,
+            display_service_name: false,
+            display_resource: false,
         }
     }
 }

@@ -85,10 +85,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let fmt = if std::io::stdout().is_terminal() {
         tracing_subscriber::fmt::Layer::new()
             .event_format(FilteringFormatter::new(
-                Text::new()
-                    .with_file(false)
-                    .with_line_number(false)
-                    .with_target(false),
+                Text::default(),
                 filter_metric_events,
             ))
             .fmt_fields(NullFieldFormatter)
@@ -96,7 +93,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     } else {
         tracing_subscriber::fmt::Layer::new()
             .event_format(FilteringFormatter::new(
-                Json::default().with_current_span(true).with_span_list(true),
+                Json::default(),
                 filter_metric_events,
             ))
             .map_fmt_fields(|_f| JsonFields {})

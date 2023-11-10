@@ -15,17 +15,7 @@ pub(crate) fn create_fmt_layer(
     let config = &config.logging.stdout;
     match &config.format {
         Format::Json(config) => {
-            let format = Json::default()
-                .with_level(config.display_level)
-                .with_target(config.display_target)
-                .with_span_list(config.display_span_list)
-                .with_current_span(config.display_current_span)
-                .with_file(config.display_filename)
-                .with_line_number(config.display_line_number)
-                .with_thread_ids(config.display_thread_id)
-                .with_thread_names(config.display_thread_name)
-                .with_timestamp(config.display_timestamp);
-
+            let format = Json::new(config.clone());
             tracing_subscriber::fmt::layer()
                 .event_format(FilteringFormatter::new(format, filter_metric_events))
                 .fmt_fields(JsonFields {})
@@ -33,14 +23,7 @@ pub(crate) fn create_fmt_layer(
         }
 
         Format::Text(config) => {
-            let format = Text::default()
-                .with_level(config.display_level)
-                .with_target(config.display_target)
-                .with_file(config.display_filename)
-                .with_line_number(config.display_line_number)
-                .with_thread_ids(config.display_thread_id)
-                .with_thread_names(config.display_thread_name)
-                .with_timestamp(config.display_timestamp);
+            let format = Text::new(config.clone());
             tracing_subscriber::fmt::layer()
                 .event_format(FilteringFormatter::new(format, filter_metric_events))
                 // This is JSON for a reason!

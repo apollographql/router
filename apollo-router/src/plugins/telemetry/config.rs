@@ -222,11 +222,11 @@ pub(crate) struct Trace {
 }
 
 impl ConfigResource for Trace {
-    fn service_name(&self) -> Option<String> {
-        self.service_name.clone()
+    fn service_name(&self) -> &Option<String> {
+        &self.service_name
     }
-    fn service_namespace(&self) -> Option<String> {
-        self.service_namespace.clone()
+    fn service_namespace(&self) -> &Option<String> {
+        &self.service_namespace
     }
     fn resource(&self) -> &BTreeMap<String, AttributeValue> {
         &self.resource
@@ -234,11 +234,11 @@ impl ConfigResource for Trace {
 }
 
 impl ConfigResource for MetricsCommon {
-    fn service_name(&self) -> Option<String> {
-        self.service_name.clone()
+    fn service_name(&self) -> &Option<String> {
+        &self.service_name
     }
-    fn service_namespace(&self) -> Option<String> {
-        self.service_namespace.clone()
+    fn service_namespace(&self) -> &Option<String> {
+        &self.service_namespace
     }
     fn resource(&self) -> &BTreeMap<String, AttributeValue> {
         &self.resource
