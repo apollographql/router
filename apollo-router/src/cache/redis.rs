@@ -204,7 +204,7 @@ impl RedisCacheStorage {
                     ));
                 }
 
-                while let Some(mut url) = urls_iter.next() {
+                for mut url in urls_iter {
                     if url.username() != username {
                         return Err(RedisError::new(
                             RedisErrorKind::Config,
