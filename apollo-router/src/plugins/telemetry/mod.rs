@@ -87,7 +87,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id:
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::dynamic_attribute::DynAttribute;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
@@ -188,7 +188,7 @@ impl std::error::Error for ReportingError {}
 fn setup_tracing<T: TracingConfigurator>(
     mut builder: Builder,
     configurator: &T,
-    tracing_config: &Trace,
+    tracing_config: &TracingCommon,
     spans_config: &Spans,
 ) -> Result<Builder, BoxError> {
     if configurator.enabled() {

@@ -20,7 +20,7 @@ impl TracingConfigurator for Config {
     fn apply(
         &self,
         builder: Builder,
-        _common: &config::Trace,
+        _common: &config::TracingCommon,
         spans_config: &Spans,
     ) -> Result<Builder, BoxError> {
         tracing::debug!("configuring Apollo tracing");
