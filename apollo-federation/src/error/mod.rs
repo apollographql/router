@@ -1,3 +1,4 @@
+use apollo_compiler::schema::Name;
 use lazy_static::lazy_static;
 use std::fmt::{Display, Formatter, Write};
 
@@ -349,6 +350,15 @@ impl SingleFederationError {
             }
         }
     }
+}
+
+pub(crate) fn graphql_name(name: &str) -> Result<Name, FederationError> {
+    Name::new(name).map_err(|_| {
+        SingleFederationError::InvalidGraphQL {
+            message: format!("Invalid GraphQL name \"{}\"", name,),
+        }
+        .into()
+    })
 }
 
 #[derive(Debug, Clone, thiserror::Error)]

@@ -47,7 +47,7 @@ lazy_static! {
         Ok(definitions)
     };
     pub(crate) static ref LINK_VERSIONS: Result<SpecDefinitions<LinkSpecDefinition>, FederationError> = {
-        let mut definitions = SpecDefinitions::new(Identity::core_identity());
+        let mut definitions = SpecDefinitions::new(Identity::link_identity());
         definitions.add(LinkSpecDefinition::new(
             Version { major: 1, minor: 0 },
             Some(Version { major: 2, minor: 0 }),

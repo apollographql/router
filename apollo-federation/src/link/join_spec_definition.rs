@@ -7,33 +7,33 @@ use crate::link::argument::{
 use crate::link::spec::{Identity, Url, Version};
 use crate::link::spec_definition::{SpecDefinition, SpecDefinitions};
 use crate::schema::FederationSchema;
-use apollo_compiler::schema::{Directive, DirectiveDefinition, EnumType, ExtendedType};
-use apollo_compiler::{Node, NodeStr};
+use apollo_compiler::schema::{Directive, DirectiveDefinition, EnumType, ExtendedType, Name};
+use apollo_compiler::{name, Node, NodeStr};
 use lazy_static::lazy_static;
 
-pub(crate) const JOIN_GRAPH_ENUM_NAME_IN_SPEC: &str = "Graph";
-pub(crate) const JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC: &str = "graph";
-pub(crate) const JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC: &str = "type";
-pub(crate) const JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC: &str = "field";
-pub(crate) const JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC: &str = "implements";
-pub(crate) const JOIN_UNIONMEMBER_DIRECTIVE_NAME_IN_SPEC: &str = "unionMember";
-pub(crate) const JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC: &str = "enumValue";
+pub(crate) const JOIN_GRAPH_ENUM_NAME_IN_SPEC: Name = name!("Graph");
+pub(crate) const JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC: Name = name!("graph");
+pub(crate) const JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC: Name = name!("type");
+pub(crate) const JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC: Name = name!("field");
+pub(crate) const JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC: Name = name!("implements");
+pub(crate) const JOIN_UNIONMEMBER_DIRECTIVE_NAME_IN_SPEC: Name = name!("unionMember");
+pub(crate) const JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC: Name = name!("enumValue");
 
-pub(crate) const JOIN_NAME_ARGUMENT_NAME: &str = "name";
-pub(crate) const JOIN_URL_ARGUMENT_NAME: &str = "url";
-pub(crate) const JOIN_GRAPH_ARGUMENT_NAME: &str = "graph";
-pub(crate) const JOIN_KEY_ARGUMENT_NAME: &str = "key";
-pub(crate) const JOIN_EXTENSION_ARGUMENT_NAME: &str = "extension";
-pub(crate) const JOIN_RESOLVABLE_ARGUMENT_NAME: &str = "resolvable";
-pub(crate) const JOIN_ISINTERFACEOBJECT_ARGUMENT_NAME: &str = "isInterfaceObject";
-pub(crate) const JOIN_REQUIRES_ARGUMENT_NAME: &str = "requires";
-pub(crate) const JOIN_PROVIDES_ARGUMENT_NAME: &str = "provides";
-pub(crate) const JOIN_TYPE_ARGUMENT_NAME: &str = "type";
-pub(crate) const JOIN_EXTERNAL_ARGUMENT_NAME: &str = "external";
-pub(crate) const JOIN_OVERRIDE_ARGUMENT_NAME: &str = "override";
-pub(crate) const JOIN_USEROVERRIDDEN_ARGUMENT_NAME: &str = "usedOverridden";
-pub(crate) const JOIN_INTERFACE_ARGUMENT_NAME: &str = "interface";
-pub(crate) const JOIN_MEMBER_ARGUMENT_NAME: &str = "interface";
+pub(crate) const JOIN_NAME_ARGUMENT_NAME: Name = name!("name");
+pub(crate) const JOIN_URL_ARGUMENT_NAME: Name = name!("url");
+pub(crate) const JOIN_GRAPH_ARGUMENT_NAME: Name = name!("graph");
+pub(crate) const JOIN_KEY_ARGUMENT_NAME: Name = name!("key");
+pub(crate) const JOIN_EXTENSION_ARGUMENT_NAME: Name = name!("extension");
+pub(crate) const JOIN_RESOLVABLE_ARGUMENT_NAME: Name = name!("resolvable");
+pub(crate) const JOIN_ISINTERFACEOBJECT_ARGUMENT_NAME: Name = name!("isInterfaceObject");
+pub(crate) const JOIN_REQUIRES_ARGUMENT_NAME: Name = name!("requires");
+pub(crate) const JOIN_PROVIDES_ARGUMENT_NAME: Name = name!("provides");
+pub(crate) const JOIN_TYPE_ARGUMENT_NAME: Name = name!("type");
+pub(crate) const JOIN_EXTERNAL_ARGUMENT_NAME: Name = name!("external");
+pub(crate) const JOIN_OVERRIDE_ARGUMENT_NAME: Name = name!("override");
+pub(crate) const JOIN_USEROVERRIDDEN_ARGUMENT_NAME: Name = name!("usedOverridden");
+pub(crate) const JOIN_INTERFACE_ARGUMENT_NAME: Name = name!("interface");
+pub(crate) const JOIN_MEMBER_ARGUMENT_NAME: Name = name!("member");
 
 pub(crate) struct GraphDirectiveArguments {
     pub(crate) name: NodeStr,
@@ -41,7 +41,7 @@ pub(crate) struct GraphDirectiveArguments {
 }
 
 pub(crate) struct TypeDirectiveArguments {
-    pub(crate) graph: NodeStr,
+    pub(crate) graph: Name,
     pub(crate) key: Option<NodeStr>,
     pub(crate) extension: bool,
     pub(crate) resolvable: bool,
@@ -49,7 +49,7 @@ pub(crate) struct TypeDirectiveArguments {
 }
 
 pub(crate) struct FieldDirectiveArguments {
-    pub(crate) graph: Option<NodeStr>,
+    pub(crate) graph: Option<Name>,
     pub(crate) requires: Option<NodeStr>,
     pub(crate) provides: Option<NodeStr>,
     pub(crate) type_: Option<NodeStr>,
@@ -59,17 +59,17 @@ pub(crate) struct FieldDirectiveArguments {
 }
 
 pub(crate) struct ImplementsDirectiveArguments {
-    pub(crate) graph: NodeStr,
+    pub(crate) graph: Name,
     pub(crate) interface: NodeStr,
 }
 
 pub(crate) struct UnionMemberDirectiveArguments {
-    pub(crate) graph: NodeStr,
+    pub(crate) graph: Name,
     pub(crate) member: NodeStr,
 }
 
 pub(crate) struct EnumValueDirectiveArguments {
-    pub(crate) graph: NodeStr,
+    pub(crate) graph: Name,
 }
 
 pub(crate) struct JoinSpecDefinition {
@@ -93,7 +93,7 @@ impl JoinSpecDefinition {
         schema: &'schema FederationSchema,
     ) -> Result<&'schema Node<EnumType>, FederationError> {
         let type_ = self
-            .type_definition(schema, JOIN_GRAPH_ENUM_NAME_IN_SPEC)?
+            .type_definition(schema, &JOIN_GRAPH_ENUM_NAME_IN_SPEC)?
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find join spec in schema".to_owned(),
             })?;
@@ -114,7 +114,7 @@ impl JoinSpecDefinition {
         &self,
         schema: &'schema FederationSchema,
     ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
-        self.directive_definition(schema, JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC)?
+        self.directive_definition(schema, &JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: "Unexpectedly could not find join spec in schema".to_owned(),
@@ -128,8 +128,8 @@ impl JoinSpecDefinition {
         application: &Node<Directive>,
     ) -> Result<GraphDirectiveArguments, FederationError> {
         Ok(GraphDirectiveArguments {
-            name: directive_required_string_argument(application, JOIN_NAME_ARGUMENT_NAME)?,
-            url: directive_required_string_argument(application, JOIN_URL_ARGUMENT_NAME)?,
+            name: directive_required_string_argument(application, &JOIN_NAME_ARGUMENT_NAME)?,
+            url: directive_required_string_argument(application, &JOIN_URL_ARGUMENT_NAME)?,
         })
     }
 
@@ -137,7 +137,7 @@ impl JoinSpecDefinition {
         &self,
         schema: &'schema FederationSchema,
     ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
-        self.directive_definition(schema, JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC)?
+        self.directive_definition(schema, &JOIN_TYPE_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: "Unexpectedly could not find join spec in schema".to_owned(),
@@ -151,21 +151,21 @@ impl JoinSpecDefinition {
         application: &Node<Directive>,
     ) -> Result<TypeDirectiveArguments, FederationError> {
         Ok(TypeDirectiveArguments {
-            graph: directive_required_enum_argument(application, JOIN_GRAPH_ARGUMENT_NAME)?,
-            key: directive_optional_fieldset_argument(application, JOIN_KEY_ARGUMENT_NAME)?,
+            graph: directive_required_enum_argument(application, &JOIN_GRAPH_ARGUMENT_NAME)?,
+            key: directive_optional_fieldset_argument(application, &JOIN_KEY_ARGUMENT_NAME)?,
             extension: directive_optional_boolean_argument(
                 application,
-                JOIN_EXTENSION_ARGUMENT_NAME,
+                &JOIN_EXTENSION_ARGUMENT_NAME,
             )?
             .unwrap_or(false),
             resolvable: directive_optional_boolean_argument(
                 application,
-                JOIN_RESOLVABLE_ARGUMENT_NAME,
+                &JOIN_RESOLVABLE_ARGUMENT_NAME,
             )?
             .unwrap_or(true),
             is_interface_object: directive_optional_boolean_argument(
                 application,
-                JOIN_ISINTERFACEOBJECT_ARGUMENT_NAME,
+                &JOIN_ISINTERFACEOBJECT_ARGUMENT_NAME,
             )?
             .unwrap_or(false),
         })
@@ -175,7 +175,7 @@ impl JoinSpecDefinition {
         &self,
         schema: &'schema FederationSchema,
     ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
-        self.directive_definition(schema, JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC)?
+        self.directive_definition(schema, &JOIN_FIELD_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: "Unexpectedly could not find join spec in schema".to_owned(),
@@ -189,27 +189,27 @@ impl JoinSpecDefinition {
         application: &Node<Directive>,
     ) -> Result<FieldDirectiveArguments, FederationError> {
         Ok(FieldDirectiveArguments {
-            graph: directive_optional_enum_argument(application, JOIN_GRAPH_ARGUMENT_NAME)?,
+            graph: directive_optional_enum_argument(application, &JOIN_GRAPH_ARGUMENT_NAME)?,
             requires: directive_optional_fieldset_argument(
                 application,
-                JOIN_REQUIRES_ARGUMENT_NAME,
+                &JOIN_REQUIRES_ARGUMENT_NAME,
             )?,
             provides: directive_optional_fieldset_argument(
                 application,
-                JOIN_PROVIDES_ARGUMENT_NAME,
+                &JOIN_PROVIDES_ARGUMENT_NAME,
             )?,
-            type_: directive_optional_string_argument(application, JOIN_TYPE_ARGUMENT_NAME)?,
+            type_: directive_optional_string_argument(application, &JOIN_TYPE_ARGUMENT_NAME)?,
             external: directive_optional_boolean_argument(
                 application,
-                JOIN_EXTERNAL_ARGUMENT_NAME,
+                &JOIN_EXTERNAL_ARGUMENT_NAME,
             )?,
             override_: directive_optional_string_argument(
                 application,
-                JOIN_OVERRIDE_ARGUMENT_NAME,
+                &JOIN_OVERRIDE_ARGUMENT_NAME,
             )?,
             user_overridden: directive_optional_boolean_argument(
                 application,
-                JOIN_USEROVERRIDDEN_ARGUMENT_NAME,
+                &JOIN_USEROVERRIDDEN_ARGUMENT_NAME,
             )?,
         })
     }
@@ -221,7 +221,7 @@ impl JoinSpecDefinition {
         if *self.version() < (Version { major: 0, minor: 2 }) {
             return Ok(None);
         }
-        self.directive_definition(schema, JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC)?
+        self.directive_definition(schema, &JOIN_IMPLEMENTS_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: "Unexpectedly could not find join spec in schema".to_owned(),
@@ -236,10 +236,10 @@ impl JoinSpecDefinition {
         application: &Node<Directive>,
     ) -> Result<ImplementsDirectiveArguments, FederationError> {
         Ok(ImplementsDirectiveArguments {
-            graph: directive_required_enum_argument(application, JOIN_GRAPH_ARGUMENT_NAME)?,
+            graph: directive_required_enum_argument(application, &JOIN_GRAPH_ARGUMENT_NAME)?,
             interface: directive_required_string_argument(
                 application,
-                JOIN_INTERFACE_ARGUMENT_NAME,
+                &JOIN_INTERFACE_ARGUMENT_NAME,
             )?,
         })
     }
@@ -251,7 +251,7 @@ impl JoinSpecDefinition {
         if *self.version() < (Version { major: 0, minor: 3 }) {
             return Ok(None);
         }
-        self.directive_definition(schema, JOIN_UNIONMEMBER_DIRECTIVE_NAME_IN_SPEC)?
+        self.directive_definition(schema, &JOIN_UNIONMEMBER_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: "Unexpectedly could not find join spec in schema".to_owned(),
@@ -266,8 +266,8 @@ impl JoinSpecDefinition {
         application: &Node<Directive>,
     ) -> Result<UnionMemberDirectiveArguments, FederationError> {
         Ok(UnionMemberDirectiveArguments {
-            graph: directive_required_enum_argument(application, JOIN_GRAPH_ARGUMENT_NAME)?,
-            member: directive_required_string_argument(application, JOIN_MEMBER_ARGUMENT_NAME)?,
+            graph: directive_required_enum_argument(application, &JOIN_GRAPH_ARGUMENT_NAME)?,
+            member: directive_required_string_argument(application, &JOIN_MEMBER_ARGUMENT_NAME)?,
         })
     }
 
@@ -278,7 +278,7 @@ impl JoinSpecDefinition {
         if *self.version() < (Version { major: 0, minor: 3 }) {
             return Ok(None);
         }
-        self.directive_definition(schema, JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC)?
+        self.directive_definition(schema, &JOIN_ENUMVALUE_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| {
                 SingleFederationError::Internal {
                     message: "Unexpectedly could not find join spec in schema".to_owned(),
@@ -293,7 +293,7 @@ impl JoinSpecDefinition {
         application: &Node<Directive>,
     ) -> Result<EnumValueDirectiveArguments, FederationError> {
         Ok(EnumValueDirectiveArguments {
-            graph: directive_required_enum_argument(application, JOIN_GRAPH_ARGUMENT_NAME)?,
+            graph: directive_required_enum_argument(application, &JOIN_GRAPH_ARGUMENT_NAME)?,
         })
     }
 }

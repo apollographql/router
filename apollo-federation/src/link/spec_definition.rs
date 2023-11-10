@@ -1,9 +1,9 @@
-use crate::error::{FederationError, SingleFederationError};
+use crate::error::{graphql_name, FederationError, SingleFederationError};
 use crate::link::spec::{Identity, Url, Version};
 use crate::link::Link;
 use crate::schema::FederationSchema;
-use apollo_compiler::schema::{DirectiveDefinition, ExtendedType};
-use apollo_compiler::{Node, NodeStr};
+use apollo_compiler::schema::{DirectiveDefinition, ExtendedType, Name};
+use apollo_compiler::Node;
 use std::collections::btree_map::Keys;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -57,33 +57,35 @@ pub(crate) trait SpecDefinition {
     fn directive_name_in_schema(
         &self,
         schema: &FederationSchema,
-        name_in_spec: &str,
-    ) -> Result<Option<String>, FederationError> {
-        Ok(self
-            .link_in_schema(schema)?
-            .map(|link| link.directive_name_in_schema(name_in_spec)))
+        name_in_spec: &Name,
+    ) -> Result<Option<Name>, FederationError> {
+        let Some(link) = self.link_in_schema(schema)? else {
+            return Ok(None);
+        };
+        graphql_name(&link.directive_name_in_schema(name_in_spec)).map(Some)
     }
 
     fn type_name_in_schema(
         &self,
         schema: &FederationSchema,
         name_in_spec: &str,
-    ) -> Result<Option<String>, FederationError> {
-        Ok(self
-            .link_in_schema(schema)?
-            .map(|link| link.type_name_in_schema(name_in_spec)))
+    ) -> Result<Option<Name>, FederationError> {
+        let Some(link) = self.link_in_schema(schema)? else {
+            return Ok(None);
+        };
+        graphql_name(&link.type_name_in_schema(name_in_spec)).map(Some)
     }
 
     fn directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
-        name_in_spec: &str,
+        name_in_spec: &Name,
     ) -> Result<Option<&'schema Node<DirectiveDefinition>>, FederationError> {
         match self.directive_name_in_schema(schema, name_in_spec)? {
             Some(name) => schema
                 .schema()
                 .directive_definitions
-                .get(&NodeStr::new(&name))
+                .get(&name)
                 .ok_or_else(|| {
                     SingleFederationError::Internal {
                         message: format!(
@@ -101,13 +103,13 @@ pub(crate) trait SpecDefinition {
     fn type_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
-        name_in_spec: &str,
+        name_in_spec: &Name,
     ) -> Result<Option<&'schema ExtendedType>, FederationError> {
         match self.type_name_in_schema(schema, name_in_spec)? {
             Some(name) => schema
                 .schema()
                 .types
-                .get(&NodeStr::new(&name))
+                .get(&name)
                 .ok_or_else(|| {
                     SingleFederationError::Internal {
                         message: format!(

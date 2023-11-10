@@ -1,4 +1,4 @@
-use crate::error::{FederationError, SingleFederationError};
+use crate::error::{graphql_name, FederationError, SingleFederationError};
 use crate::link::federation_spec_definition::{FederationSpecDefinition, FEDERATION_VERSIONS};
 use crate::link::join_spec_definition::{
     FieldDirectiveArguments, JoinSpecDefinition, TypeDirectiveArguments, JOIN_VERSIONS,
@@ -17,11 +17,11 @@ use crate::schema::position::{
 use crate::schema::FederationSchema;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::schema::{
-    Component, ComponentOrigin, ComponentStr, DirectiveDefinition, DirectiveLocation, Directives,
-    EnumType, EnumValueDefinition, ExtendedType, ExtensionId, InputObjectType,
+    Component, ComponentName, ComponentOrigin, DirectiveDefinition, DirectiveList,
+    DirectiveLocation, EnumType, EnumValueDefinition, ExtendedType, ExtensionId, InputObjectType,
     InputValueDefinition, InterfaceType, Name, NamedType, ObjectType, ScalarType, Type, UnionType,
 };
-use apollo_compiler::{Node, NodeStr, Schema};
+use apollo_compiler::{name, Node, NodeStr, Schema};
 use indexmap::{IndexMap, IndexSet};
 use lazy_static::lazy_static;
 use std::collections::BTreeMap;
@@ -439,6 +439,7 @@ fn add_all_empty_subgraph_types<'schema>(
                         &mut subgraph.schema,
                         Node::new(ScalarType {
                             description: None,
+                            name: pos.type_name.clone(),
                             directives: Default::default(),
                         }),
                     )?;
@@ -622,6 +623,7 @@ fn add_empty_type<'schema>(
                         &mut subgraph.schema,
                         Node::new(ObjectType {
                             description: None,
+                            name: pos.type_name.clone(),
                             implements_interfaces: Default::default(),
                             directives: Default::default(),
                             fields: Default::default(),
@@ -632,21 +634,21 @@ fn add_empty_type<'schema>(
                             root_kind: SchemaRootDefinitionKind::Query,
                         };
                         if pos.try_get(subgraph.schema.schema()).is_none() {
-                            pos.insert(&mut subgraph.schema, ComponentStr::new(type_name))?;
+                            pos.insert(&mut subgraph.schema, ComponentName::from(type_name))?;
                         }
                     } else if type_name == "Mutation" {
                         let pos = SchemaRootDefinitionPosition {
                             root_kind: SchemaRootDefinitionKind::Mutation,
                         };
                         if pos.try_get(subgraph.schema.schema()).is_none() {
-                            pos.insert(&mut subgraph.schema, ComponentStr::new(type_name))?;
+                            pos.insert(&mut subgraph.schema, ComponentName::from(type_name))?;
                         }
                     } else if type_name == "Subscription" {
                         let pos = SchemaRootDefinitionPosition {
                             root_kind: SchemaRootDefinitionKind::Subscription,
                         };
                         if pos.try_get(subgraph.schema.schema()).is_none() {
-                            pos.insert(&mut subgraph.schema, ComponentStr::new(type_name))?;
+                            pos.insert(&mut subgraph.schema, ComponentName::from(type_name))?;
                         }
                     }
                 }
@@ -663,8 +665,9 @@ fn add_empty_type<'schema>(
                             &mut subgraph.schema,
                             Node::new(ObjectType {
                                 description: None,
+                                name: pos.type_name.clone(),
                                 implements_interfaces: Default::default(),
-                                directives: Directives(vec![Component::new(
+                                directives: DirectiveList(vec![Component::new(
                                     interface_object_directive,
                                 )]),
                                 fields: Default::default(),
@@ -679,6 +682,7 @@ fn add_empty_type<'schema>(
                             &mut subgraph.schema,
                             Node::new(InterfaceType {
                                 description: None,
+                                name: pos.type_name.clone(),
                                 implements_interfaces: Default::default(),
                                 directives: Default::default(),
                                 fields: Default::default(),
@@ -695,6 +699,7 @@ fn add_empty_type<'schema>(
                         &mut subgraph.schema,
                         Node::new(UnionType {
                             description: None,
+                            name: pos.type_name.clone(),
                             directives: Default::default(),
                             members: Default::default(),
                         }),
@@ -709,6 +714,7 @@ fn add_empty_type<'schema>(
                         &mut subgraph.schema,
                         Node::new(EnumType {
                             description: None,
+                            name: pos.type_name.clone(),
                             directives: Default::default(),
                             values: Default::default(),
                         }),
@@ -723,6 +729,7 @@ fn add_empty_type<'schema>(
                         &mut subgraph.schema,
                         Node::new(InputObjectType {
                             description: None,
+                            name: pos.type_name.clone(),
                             directives: Default::default(),
                             fields: Default::default(),
                         }),
@@ -791,7 +798,7 @@ fn extract_object_type_content<'schema>(
             )?;
             pos.insert_implements_interface(
                 &mut subgraph.schema,
-                implements_directive_application.interface.clone(),
+                ComponentName::from(graphql_name(&implements_directive_application.interface)?),
             )?;
         }
 
@@ -959,7 +966,9 @@ fn extract_interface_type_content<'schema>(
                     };
                     pos.insert_implements_interface(
                         &mut subgraph.schema,
-                        implements_directive_application.interface.clone(),
+                        ComponentName::from(graphql_name(
+                            &implements_directive_application.interface,
+                        )?),
                     )?;
                 }
                 ExtendedType::Interface(_) => {
@@ -972,7 +981,9 @@ fn extract_interface_type_content<'schema>(
                     }
                     pos.insert_implements_interface(
                         &mut subgraph.schema,
-                        implements_directive_application.interface.clone(),
+                        ComponentName::from(graphql_name(
+                            &implements_directive_application.interface,
+                        )?),
                     )?;
                 }
                 _ => {
@@ -1122,10 +1133,9 @@ fn extract_union_type_content<'schema>(
                             .types
                             .contains_key((*member).deref())
                     })
-                    .cloned()
                     .collect::<Vec<_>>();
                 for member in subgraph_members {
-                    pos.insert_member(&mut subgraph.schema, member.node)?;
+                    pos.insert_member(&mut subgraph.schema, ComponentName::from(&member.name))?;
                 }
             }
         } else {
@@ -1151,7 +1161,7 @@ fn extract_union_type_content<'schema>(
                 // broken @join__unionMember).
                 pos.insert_member(
                     &mut subgraph.schema,
-                    union_member_directive_application.member.clone(),
+                    ComponentName::from(graphql_name(&union_member_directive_application.member)?),
                 )?;
             }
         }
@@ -1515,7 +1525,7 @@ fn decode_type(type_: &str) -> Result<Type, FederationError> {
 fn get_subgraph<'subgraph, 'schema>(
     subgraphs: &'subgraph mut FederationSubgraphs,
     graph_enum_value_name_to_subgraph_name: &IndexMap<&'schema Name, NodeStr>,
-    graph_enum_value: &'schema NodeStr,
+    graph_enum_value: &'schema Name,
 ) -> Result<&'subgraph mut FederationSubgraph, FederationError> {
     let subgraph_name = graph_enum_value_name_to_subgraph_name
         .get(graph_enum_value)
@@ -1672,13 +1682,13 @@ fn remove_unused_types_from_subgraph(
     Ok(())
 }
 
-const FEDERATION_ANY_TYPE_NAME: &str = "_Any";
-const FEDERATION_SERVICE_TYPE_NAME: &str = "_Service";
-const FEDERATION_SDL_FIELD_NAME: &str = "sdl";
-const FEDERATION_ENTITY_TYPE_NAME: &str = "_Entity";
-const FEDERATION_SERVICE_FIELD_NAME: &str = "_service";
-const FEDERATION_ENTITIES_FIELD_NAME: &str = "_entities";
-const FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME: &str = "representations";
+const FEDERATION_ANY_TYPE_NAME: Name = name!("_Any");
+const FEDERATION_SERVICE_TYPE_NAME: Name = name!("_Service");
+const FEDERATION_SDL_FIELD_NAME: Name = name!("sdl");
+const FEDERATION_ENTITY_TYPE_NAME: Name = name!("_Entity");
+const FEDERATION_SERVICE_FIELD_NAME: Name = name!("_service");
+const FEDERATION_ENTITIES_FIELD_NAME: Name = name!("_entities");
+const FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME: Name = name!("representations");
 
 fn add_federation_operations(
     subgraph: &mut FederationSubgraph,
@@ -1686,35 +1696,37 @@ fn add_federation_operations(
 ) -> Result<(), FederationError> {
     // TODO: Use the JS/programmatic approach of checkOrAdd() instead of hard-coding the adds.
     let any_type_pos = ScalarTypeDefinitionPosition {
-        type_name: NodeStr::new(FEDERATION_ANY_TYPE_NAME),
+        type_name: FEDERATION_ANY_TYPE_NAME.clone(),
     };
     any_type_pos.pre_insert(&mut subgraph.schema)?;
     any_type_pos.insert(
         &mut subgraph.schema,
         Node::new(ScalarType {
             description: None,
+            name: any_type_pos.type_name.clone(),
             directives: Default::default(),
         }),
     )?;
     let mut service_fields = IndexMap::new();
     service_fields.insert(
-        NodeStr::new(FEDERATION_SDL_FIELD_NAME),
+        FEDERATION_SDL_FIELD_NAME.clone(),
         Component::new(FieldDefinition {
             description: None,
-            name: NodeStr::new(FEDERATION_SDL_FIELD_NAME),
+            name: FEDERATION_SDL_FIELD_NAME.clone(),
             arguments: Vec::new(),
-            ty: Type::Named(NodeStr::new("String")),
+            ty: Type::Named(name!("String")),
             directives: Default::default(),
         }),
     );
     let service_type_pos = ObjectTypeDefinitionPosition {
-        type_name: NodeStr::new(FEDERATION_SERVICE_TYPE_NAME),
+        type_name: FEDERATION_SERVICE_TYPE_NAME.clone(),
     };
     service_type_pos.pre_insert(&mut subgraph.schema)?;
     service_type_pos.insert(
         &mut subgraph.schema,
         Node::new(ObjectType {
             description: None,
+            name: service_type_pos.type_name.clone(),
             implements_interfaces: Default::default(),
             directives: Default::default(),
             fields: service_fields,
@@ -1737,19 +1749,20 @@ fn add_federation_operations(
             {
                 return None;
             }
-            Some(ComponentStr::new(type_name))
+            Some(ComponentName::from(type_name))
         })
         .collect::<IndexSet<_>>();
     let is_entity_type = !entity_members.is_empty();
     if is_entity_type {
         let entity_type_pos = UnionTypeDefinitionPosition {
-            type_name: NodeStr::new(FEDERATION_ENTITY_TYPE_NAME),
+            type_name: FEDERATION_ENTITY_TYPE_NAME.clone(),
         };
         entity_type_pos.pre_insert(&mut subgraph.schema)?;
         entity_type_pos.insert(
             &mut subgraph.schema,
             Node::new(UnionType {
                 description: None,
+                name: entity_type_pos.type_name.clone(),
                 directives: Default::default(),
                 members: entity_members,
             }),
@@ -1761,44 +1774,46 @@ fn add_federation_operations(
     };
     if query_root_pos.try_get(subgraph.schema.schema()).is_none() {
         let default_query_type_pos = ObjectTypeDefinitionPosition {
-            type_name: NodeStr::new("Query"),
+            type_name: name!("Query"),
         };
         default_query_type_pos.pre_insert(&mut subgraph.schema)?;
         default_query_type_pos.insert(
             &mut subgraph.schema,
             Node::new(ObjectType {
                 description: None,
+                name: default_query_type_pos.type_name.clone(),
                 implements_interfaces: Default::default(),
                 directives: Default::default(),
                 fields: Default::default(),
             }),
         )?;
-        query_root_pos.insert(&mut subgraph.schema, ComponentStr::new("Query"))?;
+        query_root_pos.insert(
+            &mut subgraph.schema,
+            ComponentName::from(default_query_type_pos.type_name),
+        )?;
     }
 
-    let query_root_type_name = query_root_pos.get(subgraph.schema.schema())?.node.clone();
+    let query_root_type_name = query_root_pos.get(subgraph.schema.schema())?.name.clone();
     let entity_field_pos = ObjectFieldDefinitionPosition {
         type_name: query_root_type_name.clone(),
-        field_name: NodeStr::new(FEDERATION_ENTITIES_FIELD_NAME),
+        field_name: FEDERATION_ENTITIES_FIELD_NAME.clone(),
     };
     if is_entity_type {
         entity_field_pos.insert(
             &mut subgraph.schema,
             Component::new(FieldDefinition {
                 description: None,
-                name: NodeStr::new(FEDERATION_ENTITIES_FIELD_NAME),
+                name: FEDERATION_ENTITIES_FIELD_NAME.clone(),
                 arguments: vec![Node::new(InputValueDefinition {
                     description: None,
-                    name: NodeStr::new(FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME),
+                    name: FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME.clone(),
                     ty: Node::new(Type::NonNullList(Box::new(Type::NonNullNamed(
-                        NodeStr::new(FEDERATION_ANY_TYPE_NAME),
+                        FEDERATION_ANY_TYPE_NAME.clone(),
                     )))),
                     default_value: None,
                     directives: Default::default(),
                 })],
-                ty: Type::NonNullList(Box::new(Type::Named(NodeStr::new(
-                    FEDERATION_ENTITY_TYPE_NAME,
-                )))),
+                ty: Type::NonNullList(Box::new(Type::Named(FEDERATION_ENTITY_TYPE_NAME.clone()))),
                 directives: Default::default(),
             }),
         )?;
@@ -1808,15 +1823,15 @@ fn add_federation_operations(
 
     ObjectFieldDefinitionPosition {
         type_name: query_root_type_name.clone(),
-        field_name: NodeStr::new(FEDERATION_SERVICE_FIELD_NAME),
+        field_name: FEDERATION_SERVICE_FIELD_NAME.clone(),
     }
     .insert(
         &mut subgraph.schema,
         Component::new(FieldDefinition {
             description: None,
-            name: NodeStr::new(FEDERATION_SERVICE_FIELD_NAME),
+            name: FEDERATION_SERVICE_FIELD_NAME.clone(),
             arguments: Vec::new(),
-            ty: Type::NonNullNamed(NodeStr::new(FEDERATION_SERVICE_TYPE_NAME)),
+            ty: Type::NonNullNamed(FEDERATION_SERVICE_TYPE_NAME.clone()),
             directives: Default::default(),
         }),
     )?;

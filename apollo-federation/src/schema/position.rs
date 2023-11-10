@@ -1,4 +1,4 @@
-use crate::error::{FederationError, SingleFederationError};
+use crate::error::{graphql_name, FederationError, SingleFederationError};
 use crate::link::database::links_metadata;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::referencer::{
@@ -8,11 +8,11 @@ use crate::schema::referencer::{
 };
 use crate::schema::FederationSchema;
 use apollo_compiler::schema::{
-    Component, ComponentStr, Directive, DirectiveDefinition, EnumType, EnumValueDefinition,
+    Component, ComponentName, Directive, DirectiveDefinition, EnumType, EnumValueDefinition,
     ExtendedType, FieldDefinition, InputObjectType, InputValueDefinition, InterfaceType, Name,
     ObjectType, ScalarType, SchemaDefinition, UnionType,
 };
-use apollo_compiler::{Node, Schema};
+use apollo_compiler::{name, Node, Schema};
 use indexmap::{Equivalent, IndexSet};
 use lazy_static::lazy_static;
 use std::fmt::{Display, Formatter};
@@ -214,11 +214,14 @@ impl SchemaDefinitionPosition {
             Some(metadata) => {
                 let link_spec_definition = metadata.link_spec_definition()?;
                 let link_name_in_schema = link_spec_definition
-                    .directive_name_in_schema(schema, &link_spec_definition.identity().name)?
+                    .directive_name_in_schema(
+                        schema,
+                        &graphql_name(&link_spec_definition.identity().name)?,
+                    )?
                     .ok_or_else(|| SingleFederationError::Internal {
                         message: "Unexpectedly could not find core/link spec usage".to_owned(),
                     })?;
-                name.equivalent(&Name::new(&link_name_in_schema))
+                name.equivalent(&link_name_in_schema)
             }
             None => false,
         })
@@ -248,7 +251,7 @@ impl SchemaRootDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema ComponentStr, FederationError> {
+    ) -> Result<&'schema ComponentName, FederationError> {
         let schema_definition = self.parent().get(schema);
 
         match self.root_kind {
@@ -280,14 +283,14 @@ impl SchemaRootDefinitionPosition {
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Option<&'schema ComponentStr> {
+    ) -> Option<&'schema ComponentName> {
         self.get(schema).ok()
     }
 
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut ComponentStr, FederationError> {
+    ) -> Result<&'schema mut ComponentName, FederationError> {
         let schema_definition = self.parent().make_mut(schema).make_mut();
 
         match self.root_kind {
@@ -319,7 +322,7 @@ impl SchemaRootDefinitionPosition {
     fn try_make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Option<&'schema mut ComponentStr> {
+    ) -> Option<&'schema mut ComponentName> {
         if self.try_get(schema).is_some() {
             self.make_mut(schema).ok()
         } else {
@@ -330,7 +333,7 @@ impl SchemaRootDefinitionPosition {
     pub(crate) fn insert(
         &self,
         schema: &mut FederationSchema,
-        root_type: ComponentStr,
+        root_type: ComponentName,
     ) -> Result<(), FederationError> {
         if self.try_get(&schema.schema).is_some() {
             return Err(SingleFederationError::Internal {
@@ -375,7 +378,7 @@ impl SchemaRootDefinitionPosition {
 
     fn insert_references(
         &self,
-        root_type: &ComponentStr,
+        root_type: &ComponentName,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         let object_type_referencers = referencers
@@ -392,7 +395,7 @@ impl SchemaRootDefinitionPosition {
         Ok(())
     }
 
-    fn remove_references(&self, root_type: &ComponentStr, referencers: &mut Referencers) {
+    fn remove_references(&self, root_type: &ComponentName, referencers: &mut Referencers) {
         let Some(object_type_referencers) = referencers.object_types.get_mut(root_type.deref())
         else {
             return;
@@ -485,7 +488,7 @@ impl ScalarTypeDefinitionPosition {
         if schema.referencers.contains_type_name(&self.type_name) {
             // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name)
-                || GRAPHQL_BUILTIN_SCALAR_NAMES.contains(self.type_name.deref())
+                || GRAPHQL_BUILTIN_SCALAR_NAMES.contains(&self.type_name)
             {
                 return Ok(());
             }
@@ -506,6 +509,15 @@ impl ScalarTypeDefinitionPosition {
         schema: &mut FederationSchema,
         type_: Node<ScalarType>,
     ) -> Result<(), FederationError> {
+        if self.type_name != type_.name {
+            return Err(SingleFederationError::Internal {
+                message: format!(
+                    "Scalar type \"{}\" given type named \"{}\"",
+                    self, type_.name,
+                ),
+            }
+            .into());
+        }
         if !schema
             .referencers
             .scalar_types
@@ -519,7 +531,7 @@ impl ScalarTypeDefinitionPosition {
         if schema.schema.types.contains_key(&self.type_name) {
             // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.type_name)
-                || GRAPHQL_BUILTIN_SCALAR_NAMES.contains(self.type_name.deref())
+                || GRAPHQL_BUILTIN_SCALAR_NAMES.contains(&self.type_name)
             {
                 return Ok(());
             }
@@ -821,6 +833,15 @@ impl ObjectTypeDefinitionPosition {
         schema: &mut FederationSchema,
         type_: Node<ObjectType>,
     ) -> Result<(), FederationError> {
+        if self.type_name != type_.name {
+            return Err(SingleFederationError::Internal {
+                message: format!(
+                    "Object type \"{}\" given type named \"{}\"",
+                    self, type_.name,
+                ),
+            }
+            .into());
+        }
         if !schema
             .referencers
             .object_types
@@ -974,14 +995,11 @@ impl ObjectTypeDefinitionPosition {
     pub(crate) fn insert_implements_interface(
         &self,
         schema: &mut FederationSchema,
-        name: Name,
+        name: ComponentName,
     ) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?;
         self.insert_implements_interface_references(&mut schema.referencers, &name)?;
-        type_
-            .make_mut()
-            .implements_interfaces
-            .insert(ComponentStr::new(&name));
+        type_.make_mut().implements_interfaces.insert(name);
         Ok(())
     }
 
@@ -1986,6 +2004,15 @@ impl InterfaceTypeDefinitionPosition {
         schema: &mut FederationSchema,
         type_: Node<InterfaceType>,
     ) -> Result<(), FederationError> {
+        if self.type_name != type_.name {
+            return Err(SingleFederationError::Internal {
+                message: format!(
+                    "Interface type \"{}\" given type named \"{}\"",
+                    self, type_.name,
+                ),
+            }
+            .into());
+        }
         if !schema
             .referencers
             .interface_types
@@ -2139,14 +2166,11 @@ impl InterfaceTypeDefinitionPosition {
     pub(crate) fn insert_implements_interface(
         &self,
         schema: &mut FederationSchema,
-        name: Name,
+        name: ComponentName,
     ) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?;
         self.insert_implements_interface_references(&mut schema.referencers, &name)?;
-        type_
-            .make_mut()
-            .implements_interfaces
-            .insert(ComponentStr::new(&name));
+        type_.make_mut().implements_interfaces.insert(name);
         Ok(())
     }
 
@@ -3160,6 +3184,15 @@ impl UnionTypeDefinitionPosition {
         schema: &mut FederationSchema,
         type_: Node<UnionType>,
     ) -> Result<(), FederationError> {
+        if self.type_name != type_.name {
+            return Err(SingleFederationError::Internal {
+                message: format!(
+                    "Union type \"{}\" given type named \"{}\"",
+                    self, type_.name,
+                ),
+            }
+            .into());
+        }
         if !schema.referencers.union_types.contains_key(&self.type_name) {
             return Err(SingleFederationError::Internal {
                 message: format!("Type \"{}\" has not been pre-inserted", self),
@@ -3297,11 +3330,11 @@ impl UnionTypeDefinitionPosition {
     pub(crate) fn insert_member(
         &self,
         schema: &mut FederationSchema,
-        name: Name,
+        name: ComponentName,
     ) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?;
         self.insert_member_references(&mut schema.referencers, &name)?;
-        type_.make_mut().members.insert(ComponentStr::new(&name));
+        type_.make_mut().members.insert(name);
         Ok(())
     }
 
@@ -3520,6 +3553,12 @@ impl EnumTypeDefinitionPosition {
         schema: &mut FederationSchema,
         type_: Node<EnumType>,
     ) -> Result<(), FederationError> {
+        if self.type_name != type_.name {
+            return Err(SingleFederationError::Internal {
+                message: format!("Enum type \"{}\" given type named \"{}\"", self, type_.name,),
+            }
+            .into());
+        }
         if !schema.referencers.enum_types.contains_key(&self.type_name) {
             return Err(SingleFederationError::Internal {
                 message: format!("Type \"{}\" has not been pre-inserted", self),
@@ -4083,6 +4122,15 @@ impl InputObjectTypeDefinitionPosition {
         schema: &mut FederationSchema,
         type_: Node<InputObjectType>,
     ) -> Result<(), FederationError> {
+        if self.type_name != type_.name {
+            return Err(SingleFederationError::Internal {
+                message: format!(
+                    "Input object type \"{}\" given type named \"{}\"",
+                    self, type_.name,
+                ),
+            }
+            .into());
+        }
         if !schema
             .referencers
             .input_object_types
@@ -4731,7 +4779,7 @@ impl DirectiveDefinitionPosition {
         {
             // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.directive_name)
-                || GRAPHQL_BUILTIN_DIRECTIVE_NAMES.contains(self.directive_name.deref())
+                || GRAPHQL_BUILTIN_DIRECTIVE_NAMES.contains(&self.directive_name)
             {
                 return Ok(());
             }
@@ -4769,7 +4817,7 @@ impl DirectiveDefinitionPosition {
         {
             // TODO: Allow built-in shadowing instead of ignoring them
             if is_graphql_reserved_name(&self.directive_name)
-                || GRAPHQL_BUILTIN_DIRECTIVE_NAMES.contains(self.directive_name.deref())
+                || GRAPHQL_BUILTIN_DIRECTIVE_NAMES.contains(&self.directive_name)
             {
                 return Ok(());
             }
@@ -5258,22 +5306,22 @@ fn is_graphql_reserved_name(name: &str) -> bool {
 }
 
 lazy_static! {
-    static ref GRAPHQL_BUILTIN_SCALAR_NAMES: IndexSet<String> = {
+    static ref GRAPHQL_BUILTIN_SCALAR_NAMES: IndexSet<Name> = {
         IndexSet::from([
-            "Int".to_owned(),
-            "Float".to_owned(),
-            "String".to_owned(),
-            "Boolean".to_owned(),
-            "ID".to_owned(),
+            name!("Int"),
+            name!("Float"),
+            name!("String"),
+            name!("Boolean"),
+            name!("ID"),
         ])
     };
-    static ref GRAPHQL_BUILTIN_DIRECTIVE_NAMES: IndexSet<String> = {
+    static ref GRAPHQL_BUILTIN_DIRECTIVE_NAMES: IndexSet<Name> = {
         IndexSet::from([
-            "include".to_owned(),
-            "skip".to_owned(),
-            "deprecated".to_owned(),
-            "specifiedBy".to_owned(),
-            "defer".to_owned(),
+            name!("include"),
+            name!("skip"),
+            name!("deprecated"),
+            name!("specifiedBy"),
+            name!("defer"),
         ])
     };
 }
