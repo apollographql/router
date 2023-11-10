@@ -312,16 +312,24 @@ impl Metrics {
             "$.tracing.jaeger[?(@.enabled==true)]",
             opt.tracing.zipkin,
             "$.tracing.zipkin[?(@.enabled==true)]",
+            opt.events,
+            "$..events",
+            opt.instruments,
+            "$..instruments",
+            opt.spans,
+            "$..spans",
             opt.spans.mode,
-            "$.spans.mode",
+            "$..spans.mode",
             opt.spans.default_attribute_requirement_level,
-            "$.spans.default_attribute_requirement_level",
+            "$..spans.default_attribute_requirement_level",
             opt.spans.router,
-            "$[?(@.spans.router)]",
+            "$..spans.router",
             opt.spans.subgraph,
-            "$[?(@.spans.subgraph)]",
+            "$..spans.subgraph",
             opt.spans.supergraph,
-            "$[?(@.spans.supergraph)]"
+            "$..spans.supergraph",
+            opt.logging.experimental_when_header,
+            "$..logging.experimental_when_header"
         );
 
         log_usage_metrics!(
