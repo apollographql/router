@@ -53,15 +53,17 @@ telemetry:
 
 See the [attributes](#attributes) configuration for more information.
 
-### Custom instruments❖
+### Custom instruments 
 
 <EnterpriseFeature />
 
 You can define custom instruments on the router, supergraph and subgraph services in the router pipeline.
 
-When defining a custom instrument, make sure to reference the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/), as it will help guide you to:
+<Note>
 
+When defining a custom instrument, make sure to reference the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/).
 
+</Note>
 
 In the example configuration below, three custom instruments are defined (`acme.request.duration`, `acme.graphql.requests`, `acme.graphql.subgraph.errors`), one for each service of the router pipeline (`router`, `supergraph`, `subgraph`):
 
