@@ -357,6 +357,13 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub fn execute_huge_query(
+        &self,
+    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+        self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None)
+    }
+
+    #[allow(dead_code)]
     pub fn execute_bad_content_encoding(
         &self,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {

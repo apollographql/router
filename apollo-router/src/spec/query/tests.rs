@@ -5660,7 +5660,7 @@ fn filtered_defer_fragment() {
         subselections,
         defer_stats,
         is_original: true,
-        unauthorized_paths: vec![],
+        unauthorized: UnauthorizedPaths::default(),
         validation_error: None,
     };
 
@@ -5688,7 +5688,7 @@ fn filtered_defer_fragment() {
         subselections,
         defer_stats,
         is_original: false,
-        unauthorized_paths: vec![],
+        unauthorized: UnauthorizedPaths::default(),
         validation_error: None,
     };
 

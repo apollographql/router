@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -8,6 +10,7 @@ use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphCustomAttribute;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphCustomAttribute;
+use crate::plugins::telemetry::config_new::conditions::Condition;
 
 /// Events are
 #[allow(dead_code)]
@@ -28,11 +31,11 @@ pub(crate) struct Events {
 #[serde(deny_unknown_fields, default)]
 struct RouterEvents {
     /// Log the router request
-    request: bool,
+    request: EventLevel,
     /// Log the router response
-    response: bool,
+    response: EventLevel,
     /// Log the router error
-    error: bool,
+    error: EventLevel,
 }
 
 #[allow(dead_code)]
@@ -77,13 +80,36 @@ pub(crate) enum EventLevel {
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 pub(crate) struct Event<A, E>
 where
-    A: Default,
+    A: Default + Debug,
+    E: Debug,
 {
     /// The log level of the event.
     level: EventLevel,
+
     /// The event message.
     message: String,
+
+    /// When to trigger the event.
+    on: EventOn,
+
     /// The event attributes.
     #[serde(default = "Extendable::empty::<A, E>")]
     attributes: Extendable<A, E>,
+
+    /// The event conditions.
+    #[serde(default = "Condition::empty::<E>")]
+    condition: Condition<E>,
+}
+
+/// When to trigger the event.
+#[allow(dead_code)]
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum EventOn {
+    /// Log the event on request
+    Request,
+    /// Log the event on response
+    Response,
+    /// Log the event on error
+    Error,
 }
