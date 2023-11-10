@@ -825,11 +825,11 @@ This option will entirely reject queries that would have some parts filtered by 
 
 ### errors
 
-By default, when part of a query is filtered by authorization, the list of filtered paths is added to the response and logged by the router. This is behavior can be customized for your needs.
+By default, when part of a query is filtered by authorization, the list of filtered paths is added to the response and logged by the router. This behavior can be customized for your needs.
 
 #### log
 
-By enabling the option, you can choose if query filtering will result in a log event being output.
+By enabling the `log` option, you can choose if query filtering will result in a log event being output.
 
 ```yaml title="router.yaml"
 authorization:
@@ -838,14 +838,17 @@ authorization:
       log: false # default: true
 ```
 
-If filtering parts of a query according to the client's rights may be seen as normal operation, and not warrant investigation by platform operators, logging should be disabled.
+<Note>
+
+The `log` option should be disabled if filtering parts of queries according to the client's rights is approved as normal operation by platform operators.
+
+</Note>
 
 #### response
 
-By default, filtered paths are placed in the errors part of the graphql response.
+You can configure `response` to set where to place filtered paths in a GraphQL response:
 
-You can configure response to carry them in:
-- `errors` (default) : place filtered paths in graphql errors
+- `errors` (default) : place filtered paths in GraphQL errors
 - `extensions`: place filtered paths in extensions. Useful to suppress exceptions on the client side while still giving information that parts of the query were filtered
 - `disabled`: suppress all information that the query was filtered.
 
