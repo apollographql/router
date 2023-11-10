@@ -2410,81 +2410,8 @@ expression: "&schema"
           },
           "additionalProperties": false
         },
-        "experimental_logging": {
-          "description": "Logging configuration",
-          "type": "object",
-          "properties": {
-            "when_header": {
-              "description": "Log configuration to log request and response for subgraphs and supergraph",
-              "type": "array",
-              "items": {
-                "anyOf": [
-                  {
-                    "description": "Match header value given a regex to display logs",
-                    "type": "object",
-                    "required": [
-                      "match",
-                      "name"
-                    ],
-                    "properties": {
-                      "body": {
-                        "description": "Display request/response body (default: false)",
-                        "default": false,
-                        "type": "boolean"
-                      },
-                      "headers": {
-                        "description": "Display request/response headers (default: false)",
-                        "default": false,
-                        "type": "boolean"
-                      },
-                      "match": {
-                        "description": "Regex to match the header value",
-                        "type": "string"
-                      },
-                      "name": {
-                        "description": "Header name",
-                        "type": "string"
-                      }
-                    },
-                    "additionalProperties": false
-                  },
-                  {
-                    "description": "Match header value given a value to display logs",
-                    "type": "object",
-                    "required": [
-                      "name",
-                      "value"
-                    ],
-                    "properties": {
-                      "body": {
-                        "description": "Display request/response body (default: false)",
-                        "default": false,
-                        "type": "boolean"
-                      },
-                      "headers": {
-                        "description": "Display request/response headers (default: false)",
-                        "default": false,
-                        "type": "boolean"
-                      },
-                      "name": {
-                        "description": "Header name",
-                        "type": "string"
-                      },
-                      "value": {
-                        "description": "Header value",
-                        "type": "string"
-                      }
-                    },
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            }
-          },
-          "additionalProperties": false
-        },
         "logging": {
-          "description": "Logging configuration.",
+          "description": "Logging configuration",
           "type": "object",
           "properties": {
             "common": {
@@ -2567,6 +2494,72 @@ expression: "&schema"
                 }
               },
               "additionalProperties": false
+            },
+            "experimental_when_header": {
+              "description": "Log configuration to log request and response for subgraphs and supergraph Note that this will be removed when events are implemented.",
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "description": "Match header value given a regex to display logs",
+                    "type": "object",
+                    "required": [
+                      "match",
+                      "name"
+                    ],
+                    "properties": {
+                      "body": {
+                        "description": "Display request/response body (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "headers": {
+                        "description": "Display request/response headers (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "match": {
+                        "description": "Regex to match the header value",
+                        "type": "string"
+                      },
+                      "name": {
+                        "description": "Header name",
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "description": "Match header value given a value to display logs",
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "value"
+                    ],
+                    "properties": {
+                      "body": {
+                        "description": "Display request/response body (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "headers": {
+                        "description": "Display request/response headers (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "name": {
+                        "description": "Header name",
+                        "type": "string"
+                      },
+                      "value": {
+                        "description": "Header value",
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              }
             },
             "stdout": {
               "description": "Settings for logging to stdout.",

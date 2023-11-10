@@ -105,9 +105,9 @@ You can enable selective logging of these values via the `when_header` option:
 
 ```yaml title="router.yaml"
 telemetry:
-  experimental_logging:
+  logging:
     # If one of these headers matches we will log supergraph and subgraphs requests/responses
-    when_header:
+    experimental_when_header:
       - name: apollo-router-log-request
         value: my_client
         headers: true # default: false
