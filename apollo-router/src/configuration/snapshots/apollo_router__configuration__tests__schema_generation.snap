@@ -2581,7 +2581,7 @@ expression: "&schema"
                   "description": "The format to log to stdout.",
                   "oneOf": [
                     {
-                      "description": "https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html",
+                      "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html",
                       "type": "object",
                       "required": [
                         "json"
@@ -2647,7 +2647,14 @@ expression: "&schema"
                       "additionalProperties": false
                     },
                     {
-                      "description": "https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html",
+                      "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html",
+                      "type": "string",
+                      "enum": [
+                        "json"
+                      ]
+                    },
+                    {
+                      "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html",
                       "type": "object",
                       "required": [
                         "text"
@@ -2706,6 +2713,13 @@ expression: "&schema"
                         }
                       },
                       "additionalProperties": false
+                    },
+                    {
+                      "description": "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html",
+                      "type": "string",
+                      "enum": [
+                        "text"
+                      ]
                     }
                   ]
                 }
