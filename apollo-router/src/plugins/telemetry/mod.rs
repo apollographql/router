@@ -227,7 +227,7 @@ impl Plugin for Telemetry {
 
         let mut config = init.config;
         config.spans.update_defaults();
-        config.logging.validate()?;
+        config.new_logging.validate()?;
 
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
@@ -880,7 +880,7 @@ impl Telemetry {
             let _ = context.insert(CLIENT_VERSION, version);
         }
 
-        let (should_log_headers, should_log_body) = config.logging.should_log(req);
+        let (should_log_headers, should_log_body) = config.new_logging.should_log(req);
         if should_log_headers {
             ::tracing::info!(http.request.headers = ?req.supergraph_request.headers(), "Supergraph request headers");
 

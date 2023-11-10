@@ -17,6 +17,7 @@ pub(crate) mod attributes;
 pub(crate) mod conditions;
 
 pub(crate) mod events;
+mod experimental_when_header;
 pub(crate) mod extendable;
 pub(crate) mod instruments;
 pub(crate) mod logging;
