@@ -861,11 +861,11 @@ authorization:
 
 ### dry_run
 
+The `dry_run` option allows you to execute authorization directives without modifying a query, and evaluate the impact of authorization policies without interfering with existing traffic. It generates and returns the list of unauthorized paths as part of the response.
+
 ```yaml title="router.yaml"
 authorization:
   preview_directives:
     enabled: true
     dry_run: true # default: false
 ```
-
-This option executes the authorization directives without modifying the query: it only generates the list of unauthorized paths and returns it as part of the response. This is a way to evaluate the impact of authorization policies without breaking existing traffic.
