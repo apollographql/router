@@ -235,8 +235,8 @@ async fn test_experimental_notice() {
         .config(
             "
             telemetry:
-                experimental_logging:
-                    when_header:
+                logging:
+                    experimental_when_header:
                     - name: apollo-router-log-request
                       value: test
                       headers: true
