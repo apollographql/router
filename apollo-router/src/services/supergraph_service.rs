@@ -453,29 +453,15 @@ async fn subscription_task(
                 .expect("we should not run before EPOCH")
                 .as_secs() as i64;
             if now <= ts {
-                Instant::now()
+                Duration::from_secs(0)
             } else {
-                Instant::now() + Duration::from_secs((ts - now) as u64)
+                Duration::from_secs((ts - now) as u64)
             }
         }
-        None => Instant::now() + Duration::MAX,
+        None => Duration::MAX,
     };
 
-    let mut my_sender = sender.clone();
-    let fut = async move {
-        let response = Response::builder()
-            .subscribed(false)
-            .error(
-                crate::error::Error::builder()
-                    .message("subscription closed because the JWT has expired")
-                    .extension_code("SUBSCRIPTION_JWT_EXPIRED")
-                    .build(),
-            )
-            .build();
-        let _ = my_sender.send(response).await;
-    };
-
-    let mut timeout = Box::pin(tokio::time::timeout_at(expires_at.into(), fut));
+    let mut timeout = Box::pin(tokio::time::sleep(expires_at));
 
     loop {
         tokio::select! {
@@ -485,6 +471,16 @@ async fn subscription_task(
                 break;
             }
             _ = &mut timeout => {
+                let response = Response::builder()
+                    .subscribed(false)
+                    .error(
+                        crate::error::Error::builder()
+                            .message("subscription closed because the JWT has expired")
+                            .extension_code("SUBSCRIPTION_JWT_EXPIRED")
+                            .build(),
+                    )
+                    .build();
+                let _ = sender.send(response).await;
                 break;
             },
             message = receiver.next() => {
