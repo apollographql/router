@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "router.labels" . | nindent 4 }}
     {{- if .Values.extraLabels }}
-    {{- include "common.templatizeExtraLabels" . | trim | nindent 4 }}
+    {{- include "apollographql.templatizeExtraLabels" . | trim | nindent 4 }}
     {{- end }}
   annotations:
     "helm.sh/hook": test
