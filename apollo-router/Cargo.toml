@@ -72,7 +72,6 @@ base64 = "0.21.4"
 bloomfilter = "1.0.12"
 buildstructor = "0.5.4"
 bytes = "1.5.0"
-chrono = "0.4.31"
 clap = { version = "4.4.6", default-features = false, features = [
     "env",
     "derive",

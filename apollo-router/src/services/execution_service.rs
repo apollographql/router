@@ -5,6 +5,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use futures::channel::mpsc;
 use futures::channel::mpsc::Receiver;
@@ -198,16 +200,12 @@ impl ExecutionService {
                                     return None;
                                 }
                                 exp.as_i64()
-                            })
-                            .and_then(|seconds_since_epoch| {
-                                let dt = chrono::DateTime::from_timestamp(seconds_since_epoch, 0);
-                                if dt.is_none() {
-                                    tracing::error!("JWT 'exp' (expiry) claim could not be converted to a DateTime");
-                                }
-                                dt
                             });
                         if let Some(ts) = ts_opt {
-                            let now = chrono::Utc::now();
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .expect("we should not run before EPOCH")
+                                .as_secs() as i64;
                             if ts < now {
                                 tracing::debug!("token has expired, shut down the subscription");
                                 if is_deferred {
