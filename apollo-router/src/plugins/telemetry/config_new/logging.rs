@@ -303,6 +303,12 @@ pub(crate) struct JsonFormat {
     pub(crate) display_current_span: bool,
     /// Include all of the containing span information with the log event.
     pub(crate) display_span_list: bool,
+    /// Include the service namespace with the log event.
+    pub(crate) display_service_namespace: bool,
+    /// Include the service name with the log event.
+    pub(crate) display_service_name: bool,
+    /// Include the resource with the log event.
+    pub(crate) display_resource: bool,
 }
 
 impl Default for JsonFormat {
@@ -317,6 +323,9 @@ impl Default for JsonFormat {
             display_line_number: false,
             display_current_span: false,
             display_span_list: true,
+            display_service_namespace: true,
+            display_service_name: true,
+            display_resource: true,
         }
     }
 }
@@ -339,6 +348,12 @@ pub(crate) struct TextFormat {
     pub(crate) display_filename: bool,
     /// Include the line number with the log event.
     pub(crate) display_line_number: bool,
+    /// Include the service namespace with the log event.
+    pub(crate) display_service_namespace: bool,
+    /// Include the service name with the log event.
+    pub(crate) display_service_name: bool,
+    /// Include the resource with the log event.
+    pub(crate) display_resource: bool,
 }
 
 impl Default for TextFormat {
@@ -351,6 +366,9 @@ impl Default for TextFormat {
             display_thread_name: false,
             display_filename: false,
             display_line_number: false,
+            display_service_namespace: false,
+            display_service_name: false,
+            display_resource: false,
         }
     }
 }

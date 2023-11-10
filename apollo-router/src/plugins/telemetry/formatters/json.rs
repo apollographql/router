@@ -24,66 +24,18 @@ use tracing_subscriber::fmt::FormattedFields;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 
+use crate::plugins::telemetry::config_new::logging::JsonFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default)]
 pub(crate) struct Json {
-    pub(crate) display_current_span: bool,
-    pub(crate) display_filename: bool,
-    pub(crate) display_target: bool,
-    pub(crate) display_line_number: bool,
-    pub(crate) display_span_list: bool,
-    pub(crate) display_level: bool,
-    pub(crate) display_thread_id: bool,
-    pub(crate) display_thread_name: bool,
-    pub(crate) display_timestamp: bool,
+    config: JsonFormat,
 }
 
 impl Json {
-    pub(crate) fn with_target(mut self, display_target: bool) -> Self {
-        self.display_target = display_target;
-        self
-    }
-
-    pub(crate) fn with_file(mut self, display_filename: bool) -> Self {
-        self.display_filename = display_filename;
-        self
-    }
-
-    pub(crate) fn with_line_number(mut self, display_line_number: bool) -> Self {
-        self.display_line_number = display_line_number;
-        self
-    }
-    /// If set to `false`, formatted events won't contain a field for the current span.
-    pub(crate) fn with_current_span(mut self, display_current_span: bool) -> Self {
-        self.display_current_span = display_current_span;
-        self
-    }
-
-    /// If set to `false`, formatted events won't contain a list of all currently
-    /// entered spans. Spans are logged in a list from root to leaf.
-    pub(crate) fn with_span_list(mut self, display_span_list: bool) -> Self {
-        self.display_span_list = display_span_list;
-        self
-    }
-    pub(crate) fn with_level(mut self, display_level: bool) -> Self {
-        self.display_level = display_level;
-        self
-    }
-    pub(crate) fn with_thread_ids(mut self, display_thread_id: bool) -> Self {
-        self.display_thread_id = display_thread_id;
-        self
-    }
-
-    pub(crate) fn with_thread_names(mut self, display_thread_name: bool) -> Self {
-        self.display_thread_name = display_thread_name;
-        self
-    }
-
-    pub(crate) fn with_timestamp(mut self, display_timestamp: bool) -> Self {
-        self.display_timestamp = display_timestamp;
-        self
+    pub(crate) fn new(config: JsonFormat) -> Self {
+        Self { config }
     }
 }
 
@@ -232,14 +184,14 @@ where
 
             let mut serializer = serializer.serialize_map(None)?;
 
-            if self.display_timestamp {
+            if self.config.display_timestamp {
                 let timestamp = time::OffsetDateTime::now_utc()
                     .format(&time::format_description::well_known::Iso8601::DEFAULT)
                     .map_err(|e| serde::ser::Error::custom(e.to_string()))?;
                 serializer.serialize_entry("timestamp", &timestamp)?;
             }
 
-            if self.display_level {
+            if self.config.display_level {
                 serializer.serialize_entry("level", &meta.level().as_serde())?;
             }
 
@@ -254,23 +206,23 @@ where
 
             serializer = visitor.take_serializer()?;
 
-            if self.display_target {
+            if self.config.display_target {
                 serializer.serialize_entry("target", meta.target())?;
             }
 
-            if self.display_filename {
+            if self.config.display_filename {
                 if let Some(filename) = meta.file() {
                     serializer.serialize_entry("filename", filename)?;
                 }
             }
 
-            if self.display_line_number {
+            if self.config.display_line_number {
                 if let Some(line_number) = meta.line() {
                     serializer.serialize_entry("line_number", &line_number)?;
                 }
             }
 
-            if self.display_current_span {
+            if self.config.display_current_span {
                 if let Some(ref span) = current_span {
                     serializer
                         .serialize_entry("span", &SerializableSpan(span, format_field_marker))
@@ -278,7 +230,7 @@ where
                 }
             }
 
-            if self.display_span_list && current_span.is_some() {
+            if self.config.display_span_list && current_span.is_some() {
                 serializer.serialize_entry(
                     "spans",
                     &SerializableContext(ctx.lookup_current(), format_field_marker),
@@ -290,22 +242,6 @@ where
 
         visit().map_err(|_| fmt::Error)?;
         writeln!(writer)
-    }
-}
-
-impl Default for Json {
-    fn default() -> Json {
-        Json {
-            display_current_span: true,
-            display_span_list: true,
-            display_level: false,
-            display_thread_id: false,
-            display_thread_name: false,
-            display_filename: false,
-            display_line_number: false,
-            display_target: true,
-            display_timestamp: true,
-        }
     }
 }
 
