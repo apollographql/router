@@ -144,7 +144,7 @@ impl LoggingCount {
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_query_should_display_logs_for_subgraph_and_supergraph() {
     let logging_config = serde_json::json!({
-        "when_header": [{
+        "experimental_when_header": [{
             "name": "custom-header",
             "match": "^foo.*",
             "headers": true
@@ -166,7 +166,7 @@ async fn simple_query_should_display_logs_for_subgraph_and_supergraph() {
     .expect("subscriber must be set");
 
     let router = setup_router(serde_json::json!({"telemetry": {"tracing": {},
-    "experimental_logging": logging_config,
+    "logging": logging_config,
     "apollo": {
         "schema_id": ""
     }}}))
