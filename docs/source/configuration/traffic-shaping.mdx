@@ -76,7 +76,11 @@ traffic_shaping:
     timeout: 50s # If subgraph requests take more than 50 seconds, cancel the request (30 seconds by default)
 ```
 
-> **Note:** Since [deferred](/executing-operations/defer-support/#what-is-defer) fragments are separate requests, each fragment's request is individually subject to timeouts.
+<Note>
+
+Since [deferred](/executing-operations/defer-support/#what-is-defer) fragments are separate requests, each fragment's request is individually subject to timeouts.
+
+</Note>
 
 ### Compression
 

@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.33.1"
+version = "1.33.2"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -58,6 +58,7 @@ askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.75"
 apollo-compiler = "=1.0.0-beta.4"
+apollo-federation = "0.0.1"
 arc-swap = "1.6.0"
 async-compression = { version = "0.4.4", features = [
     "tokio",
@@ -171,7 +172,6 @@ prost = "0.11.9"
 prost-types = "0.11.9"
 proteus = "0.5.0"
 rand = "0.8.5"
-rand_core = "0.6.4"
 rhai = { version = "1.16.2", features = ["sync", "serde", "internals"] }
 regex = "1.10.2"
 reqwest = { version = "0.11.22", default-features = false, features = [
@@ -229,6 +229,7 @@ tracing-core = "0.1.31"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
 tracing-opentelemetry = "0.21.0"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter", "json"] }
+trust-dns-resolver = "0.23.2"
 url = { version = "2.4.1", features = ["serde"] }
 urlencoding = "2.1.3"
 uuid = { version = "1.4.1", features = ["serde", "v4"] }
@@ -281,7 +282,6 @@ once_cell = "1.18.0"
 opentelemetry-stdout = { version = "0.1.0", features = ["trace"] }
 p256 = "0.12.0"
 rand_core = "0.6.4"
-redis = { version = "0.21.7", features = ["tokio-comp"] }
 reqwest = { version = "0.11.22", default-features = false, features = [
     "json",
     "stream",
@@ -292,7 +292,6 @@ rhai = { version = "1.16.2", features = [
     "internals",
     "testing-environ",
 ] }
-similar-asserts = "1.5.0"
 tempfile = "3.8.0"
 test-log = { version = "0.2.13", default-features = false, features = [
     "trace",

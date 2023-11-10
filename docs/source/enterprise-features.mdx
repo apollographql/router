@@ -5,7 +5,11 @@ description: Available with GraphOS Enterprise
 
 The Apollo Router provides expanded performance, security, and customization features for organizations with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
 
-> You can test out these features for free with an [Enterprise trial](/graphos/org/plans/#enterprise-trials).
+<Tip>
+
+Try out these Enterprise features for free with an [Enterprise trial](/graphos/org/plans/#enterprise-trials).
+
+</Tip>
 
 ## List of features
 
@@ -18,11 +22,11 @@ The Apollo Router provides expanded performance, security, and customization fea
 
 Articles specifically about Enterprise features are marked with a **❖** icon in the left navigation.
 
-> **For details on these features,** see [this blog post](https://blog.apollographql.com/apollo-router-v1-12-improved-router-security-performance-and-extensibility) in addition to the documentation links above.
+For details on these features, see [this blog post](https://blog.apollographql.com/apollo-router-v1-12-improved-router-security-performance-and-extensibility) in addition to the documentation links above.
 
 ## Enabling Enterprise features
 
-**To enable support for Apollo Router Enterprise features:**
+To enable support for Apollo Router Enterprise features:
 
 - Your organization must have a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
 - You must run v1.12 or later of the Apollo Router. [Download the latest version.](./quickstart#download-options)
@@ -48,11 +52,9 @@ flowchart LR;
   router--"Fetches supergraph schema<br/>and license"-->uplink;
 ```
 
-A router instance retains its license for the duration of its execution. If you terminate a router instance and then later start a new instance on the same machine, it must fetch a new license.
+A router instance retains its license for the duration of its execution. If you terminate a router instance and then later start a new instance on the same machine, it must fetch a new license. 
 
-Licenses are served via [Apollo Uplink](/federation/managed-federation/uplink/), the same multi-cloud endpoint that your router uses to fetch its supergraph schema from GraphOS. Because of this, licenses introduce no additional network dependencies, meaning your router's uptime remains unaffected.
-
-> [Learn more about multi-cloud Uplink.](https://www.apollographql.com/blog/announcement/backend/introducing-multi-cloud-support-for-apollo-uplink)
+Licenses are served via [Apollo Uplink](/federation/managed-federation/uplink/), the same multi-cloud endpoint that your router uses to fetch its supergraph schema from GraphOS. Because of this, licenses introduce no additional network dependencies, meaning your router's uptime remains unaffected. To learn more about multi-cloud Uplink, read the [Apollo blog post](https://www.apollographql.com/blog/announcement/backend/introducing-multi-cloud-support-for-apollo-uplink).
 
 A router instance's license is valid for the duration of your organization's current subscription billing period (plus a [grace period](#grace-period-for-expired-plans)), even if the router temporarily becomes disconnected from GraphOS.
 
@@ -101,6 +103,10 @@ These steps work both for running the router executable directly (`./router`) an
 | `License not found.`        | The router connected to GraphOS with credentials that are not associated with a GraphOS Enterprise plan. |
 | `License has expired.`      | Your organization's GraphOS Enterprise subscription has ended. **Your router will stop processing incoming requests at the end of the standard [grace period](#grace-period-for-expired-plans).** |
 
+## Disabling Enterprise features
+
+To disable an Enterprise feature, remove all of its associated configuration keys from your router's [YAML config file](./configuration/overview/#yaml-config-file).
+
 ## Grace period for expired plans
 
 If your organization terminates its GraphOS Enterprise subscription, your router's Enterprise license is considered expired at the end of your final paid subscription period. GraphOS provides a grace period for expired licenses so that you can disable Enterprise features before they produce breaking errors in your router.
@@ -112,5 +118,3 @@ If your router has an expired Enterprise license, its behavior degrades accordin
 - **After 28 days,** your router begins a **hard outage**. It no longer processes incoming client requests and continues emitting logs and metrics from the soft outage.
 
 Your router resumes normal functioning whenever you renew your GraphOS Enterprise subscription or disable all [Enterprise features](#list-of-features).
-
-> You disable an Enterprise feature by removing all of its associated configuration keys from your router's [YAML config file](./configuration/overview/#yaml-config-file).

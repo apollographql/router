@@ -129,8 +129,12 @@ pub(crate) struct AuthenticatedVisitor<'a> {
     implementers_map: &'a HashMap<Name, HashSet<Name>>,
     pub(crate) query_requires_authentication: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
+    // store the error paths from fragments so we can  add them at
+    // the point of application
+    fragments_unauthorized_paths: HashMap<&'a ast::Name, Vec<Path>>,
     current_path: Path,
     authenticated_directive_name: String,
+    dry_run: bool,
 }
 
 impl<'a> AuthenticatedVisitor<'a> {
@@ -138,13 +142,16 @@ impl<'a> AuthenticatedVisitor<'a> {
         schema: &'a schema::Schema,
         executable: &'a ast::Document,
         implementers_map: &'a HashMap<Name, HashSet<Name>>,
+        dry_run: bool,
     ) -> Option<Self> {
         Some(Self {
             schema,
             fragments: transform::collect_fragments(executable),
             implementers_map,
+            dry_run,
             query_requires_authentication: false,
             unauthorized_paths: Vec::new(),
+            fragments_unauthorized_paths: HashMap::new(),
             current_path: Path::default(),
             authenticated_directive_name: Schema::directive_name(
                 schema,
@@ -267,7 +274,11 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         if operation_requires_authentication {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_authentication = true;
-            Ok(None)
+            if self.dry_run {
+                transform::operation(self, root_type, node)
+            } else {
+                Ok(None)
+            }
         } else {
             transform::operation(self, root_type, node)
         }
@@ -303,7 +314,12 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_authentication = true;
-            Ok(None)
+
+            if self.dry_run {
+                transform::field(self, field_def, node)
+            } else {
+                Ok(None)
+            }
         } else {
             transform::field(self, field_def, node)
         };
@@ -326,22 +342,50 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
             .get(&node.type_condition)
             .is_some_and(|type_definition| self.is_type_authenticated(type_definition));
 
-        if fragment_requires_authentication {
-            Ok(None)
-        } else {
+        let current_unauthorized_paths_index = self.unauthorized_paths.len();
+        let res = if !fragment_requires_authentication || self.dry_run {
             transform::fragment_definition(self, node)
+        } else {
+            self.unauthorized_paths.push(self.current_path.clone());
+            Ok(None)
+        };
+
+        if self.unauthorized_paths.len() > current_unauthorized_paths_index {
+            if let Some((name, _)) = self.fragments.get_key_value(&node.name) {
+                self.fragments_unauthorized_paths.insert(
+                    name,
+                    self.unauthorized_paths
+                        .split_off(current_unauthorized_paths_index),
+                );
+            }
         }
+
+        if let Ok(None) = res {
+            self.fragments.remove(&node.name);
+        }
+
+        res
     }
 
     fn fragment_spread(
         &mut self,
         node: &ast::FragmentSpread,
     ) -> Result<Option<ast::FragmentSpread>, BoxError> {
-        let condition = &self
-            .fragments
-            .get(&node.fragment_name)
-            .ok_or("MissingFragment")?
-            .type_condition;
+        // record the fragment errors at the point of application
+        if let Some(paths) = self.fragments_unauthorized_paths.get(&node.fragment_name) {
+            for path in paths {
+                let path = self.current_path.join(path);
+                self.unauthorized_paths.push(path);
+            }
+        }
+
+        let fragment = match self.fragments.get(&node.fragment_name) {
+            Some(fragment) => fragment,
+            None => return Ok(None),
+        };
+
+        let condition = &fragment.type_condition;
+
         self.current_path
             .push(PathElement::Fragment(condition.as_str().into()));
 
@@ -355,7 +399,11 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
             self.query_requires_authentication = true;
             self.unauthorized_paths.push(self.current_path.clone());
 
-            Ok(None)
+            if self.dry_run {
+                transform::fragment_spread(self, node)
+            } else {
+                Ok(None)
+            }
         } else {
             transform::fragment_spread(self, node)
         };
@@ -389,7 +437,12 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
                 let res = if fragment_requires_authentication {
                     self.query_requires_authentication = true;
                     self.unauthorized_paths.push(self.current_path.clone());
-                    Ok(None)
+
+                    if self.dry_run {
+                        transform::inline_fragment(self, parent_type, node)
+                    } else {
+                        Ok(None)
+                    }
                 } else {
                     transform::inline_fragment(self, parent_type, node)
                 };
@@ -500,7 +553,7 @@ mod tests {
         doc.to_executable(&schema).validate(&schema).unwrap();
 
         let map = schema.implementers_map();
-        let mut visitor = AuthenticatedVisitor::new(&schema, &doc, &map).unwrap();
+        let mut visitor = AuthenticatedVisitor::new(&schema, &doc, &map, false).unwrap();
 
         (
             transform::document(&mut visitor, &doc).unwrap(),
@@ -674,6 +727,32 @@ mod tests {
 
         fragment F on User {
             name
+        }
+        "#;
+
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
+    fn fragment_fields() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+                ...F
+            }
+        }
+
+        fragment F on Product {
+            reviews {
+                body
+            }
         }
         "#;
 
