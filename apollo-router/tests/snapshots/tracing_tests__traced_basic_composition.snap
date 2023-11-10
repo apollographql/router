@@ -104,10 +104,6 @@ expression: get_spans()
                 "INTERNAL"
               ],
               [
-                "trace_id",
-                "[REDACTED]"
-              ],
-              [
                 "apollo_private.duration_ns",
                 0
               ],
