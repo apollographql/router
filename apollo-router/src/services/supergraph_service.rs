@@ -3,7 +3,10 @@
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::Poll;
+use std::time::Duration;
 use std::time::Instant;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use futures::channel::mpsc::SendError;
 use futures::future::BoxFuture;
@@ -14,6 +17,7 @@ use http::StatusCode;
 use indexmap::IndexMap;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
+use serde_json::Value;
 use tokio::sync::mpsc;
 use tower::BoxError;
 use tower::Layer;
@@ -44,6 +48,7 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::notification::HandleStream;
 use crate::plugin::DynPlugin;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::plugins::telemetry::Telemetry;
@@ -424,11 +429,64 @@ async fn subscription_task(
     let mut configuration_updated_rx = notify.subscribe_configuration();
     let mut schema_updated_rx = notify.subscribe_schema();
 
+    let claims = supergraph_req
+        .context
+        .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .expect("XXX FIX ME LATER");
+    let ts_opt = claims.as_ref().and_then(|x: &Value| {
+        if !x.is_object() {
+            tracing::error!("JWT claims should be an object");
+            return None;
+        }
+        let claims = x.as_object().expect("claims should be an object");
+        let exp = claims.get("exp")?;
+        if !exp.is_number() {
+            tracing::error!("JWT 'exp' (expiry) claim should be a number");
+            return None;
+        }
+        exp.as_i64()
+    });
+    let expires_at = match ts_opt {
+        Some(ts) => {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("we should not run before EPOCH")
+                .as_secs() as i64;
+            if now <= ts {
+                Instant::now()
+            } else {
+                Instant::now() + Duration::from_secs((ts - now) as u64)
+            }
+        }
+        None => Instant::now() + Duration::MAX,
+    };
+
+    let mut my_sender = sender.clone();
+    let fut = async move {
+        let response = Response::builder()
+            .subscribed(false)
+            .error(
+                crate::error::Error::builder()
+                    .message("subscription closed because the JWT has expired")
+                    .extension_code("SUBSCRIPTION_JWT_EXPIRED")
+                    .build(),
+            )
+            .build();
+        let _ = my_sender.send(response).await;
+    };
+
+    let mut timeout = Box::pin(tokio::time::timeout_at(expires_at.into(), fut));
+
     loop {
         tokio::select! {
+            // We prefer to specify the order of checks within the select
+            biased;
             _ = subscription_handle.closed_signal.recv() => {
                 break;
             }
+            _ = &mut timeout => {
+                break;
+            },
             message = receiver.next() => {
                 match message {
                     Some(mut val) => {
