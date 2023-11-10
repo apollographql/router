@@ -3,7 +3,5 @@
 Adds a configuration option for custom health check endpoints, using `/health` as default
 
 
-<!-- start metadata -->
----
 
 By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/4145
