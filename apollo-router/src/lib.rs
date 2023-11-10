@@ -116,5 +116,7 @@ pub mod _private {
 
 #[cfg(test)]
 use ecdsa as _;
+#[cfg(all(target_os = "linux", test))]
+use rstack as _;
 #[cfg(test)]
 use test_span as _;
