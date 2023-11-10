@@ -453,7 +453,7 @@ async fn subscription_task(
                 .expect("we should not run before EPOCH")
                 .as_secs() as i64;
             if now <= ts {
-                Duration::from_secs(0)
+                Duration::ZERO
             } else {
                 Duration::from_secs((ts - now) as u64)
             }
