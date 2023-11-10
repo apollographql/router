@@ -225,7 +225,7 @@ pub(super) fn serve_router_on_listen_addr(
 
                             let session_count = SESSION_COUNT.fetch_add(1, Ordering::Acquire)+1;
                             tracing::info!(
-                                gauge.apollo_router_session_count_total = session_count,
+                                value.apollo_router_session_count = session_count,
                                 listener = &address
                             );
 
@@ -343,7 +343,7 @@ pub(super) fn serve_router_on_listen_addr(
 
                                 let session_count = SESSION_COUNT.fetch_sub(1, Ordering::Acquire)-1;
                                 tracing::info!(
-                                    gauge.apollo_router_session_count_total = session_count,
+                                    value.apollo_router_session_count = session_count,
                                     listener = &address
                                 );
 
