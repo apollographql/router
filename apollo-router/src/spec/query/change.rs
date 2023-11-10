@@ -361,6 +361,13 @@ mod tests {
         // id is nullable in 1, non nullable in 2
         let query2 = "query { me { id name } }";
         assert_ne!(hash(BASIC_SCHEMA1, query2), hash(BASIC_SCHEMA2, query2));
-        panic!()
+
+        // simple normalization
+        let query3 = "query {  moi: me { id name   } }";
+        assert_eq!(hash(BASIC_SCHEMA1, query2), hash(BASIC_SCHEMA1, query3));
+
+        // it is not robust against field order though
+        let query3 = "query { me { name id } }";
+        assert_ne!(hash(BASIC_SCHEMA1, query2), hash(BASIC_SCHEMA1, query3));
     }
 }
