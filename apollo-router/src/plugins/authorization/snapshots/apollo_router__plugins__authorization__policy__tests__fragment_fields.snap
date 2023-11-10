@@ -7,27 +7,23 @@ query:
         query {
             topProducts {
                 type
-            }
-            itf {
-                id
                 ...F
             }
         }
 
-        fragment F on User {
-            name
+        fragment F on Product {
+            reviews {
+                body
+            }
         }
         
-extracted_policies: {"read user", "read username"}
+extracted_policies: {"review"}
 successful policies: []
 filtered:
 {
   topProducts {
     type
   }
-  itf {
-    id
-  }
 }
 
-paths: ["/itf"]
+paths: ["/topProducts/reviews/@"]

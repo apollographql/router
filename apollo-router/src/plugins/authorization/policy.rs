@@ -149,6 +149,9 @@ pub(crate) struct PolicyFilteringVisitor<'a> {
     request_policies: HashSet<String>,
     pub(crate) query_requires_policies: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
+    // store the error paths from fragments so we can  add them at
+    // the point of application
+    fragments_unauthorized_paths: HashMap<&'a ast::Name, Vec<Path>>,
     current_path: Path,
     policy_directive_name: String,
 }
@@ -188,6 +191,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
             request_policies: successful_policies,
             query_requires_policies: false,
             unauthorized_paths: vec![],
+            fragments_unauthorized_paths: HashMap::new(),
             current_path: Path::default(),
             policy_directive_name: Schema::directive_name(
                 schema,
@@ -459,22 +463,51 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
             .get(&node.type_condition)
             .is_some_and(|ty| self.is_type_authorized(ty));
 
-        if fragment_is_authorized || self.dry_run {
+        let current_unauthorized_paths_index = self.unauthorized_paths.len();
+
+        let res = if fragment_is_authorized || self.dry_run {
             transform::fragment_definition(self, node)
         } else {
+            self.unauthorized_paths.push(self.current_path.clone());
             Ok(None)
+        };
+
+        if self.unauthorized_paths.len() > current_unauthorized_paths_index {
+            if let Some((name, _)) = self.fragments.get_key_value(&node.name) {
+                self.fragments_unauthorized_paths.insert(
+                    name,
+                    self.unauthorized_paths
+                        .split_off(current_unauthorized_paths_index),
+                );
+            }
         }
+
+        if let Ok(None) = res {
+            self.fragments.remove(&node.name);
+        }
+
+        res
     }
 
     fn fragment_spread(
         &mut self,
         node: &ast::FragmentSpread,
     ) -> Result<Option<ast::FragmentSpread>, BoxError> {
-        let condition = &self
-            .fragments
-            .get(&node.fragment_name)
-            .ok_or("MissingFragment")?
-            .type_condition;
+        // record the fragment errors at the point of application
+        if let Some(paths) = self.fragments_unauthorized_paths.get(&node.fragment_name) {
+            for path in paths {
+                let path = self.current_path.join(path);
+                self.unauthorized_paths.push(path);
+            }
+        }
+
+        let fragment = match self.fragments.get(&node.fragment_name) {
+            Some(fragment) => fragment,
+            None => return Ok(None),
+        };
+
+        let condition = &fragment.type_condition;
+
         self.current_path
             .push(PathElement::Fragment(condition.as_str().into()));
 
@@ -976,6 +1009,35 @@ mod tests {
             successful_policies: ["read user".to_string(), "read username".to_string()]
                 .into_iter()
                 .collect(),
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
+    fn fragment_fields() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+                ...F
+            }
+        }
+
+        fragment F on Product {
+            reviews {
+                body
+            }
+        }
+        "#;
+
+        let extracted_policies = extract(BASIC_SCHEMA, QUERY);
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
             result: doc,
             paths
         });
