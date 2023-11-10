@@ -432,7 +432,9 @@ async fn subscription_task(
     let claims = supergraph_req
         .context
         .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
-        .expect("XXX FIX ME LATER");
+        .map_err(|err| tracing::error!("could not read JWT claims: {err}"))
+        .ok()
+        .flatten();
     let ts_opt = claims.as_ref().and_then(|x: &Value| {
         if !x.is_object() {
             tracing::error!("JWT claims should be an object");
@@ -452,10 +454,10 @@ async fn subscription_task(
                 .duration_since(UNIX_EPOCH)
                 .expect("we should not run before EPOCH")
                 .as_secs() as i64;
-            if now <= ts {
-                Duration::ZERO
-            } else {
+            if now < ts {
                 Duration::from_secs((ts - now) as u64)
+            } else {
+                Duration::ZERO
             }
         }
         None => Duration::MAX,
