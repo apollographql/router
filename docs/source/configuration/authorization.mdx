@@ -810,9 +810,11 @@ With introspection turned off, you can use GraphOS's [schema registry](/graphos/
 
 ## Configuration options
 
-The authorization plugin behaviour can be modified with various options.
+The behavior of the authorization plugin can be modified with various options.
 
 ### reject_unauthorized
+
+The `reject_unauthorized` option configures whether to reject an entire query if any authorization directive failed, where any part of it is filtered by authorization directives. When enabled, a response contains the list of paths that are affected.
 
 ```yaml title="router.yaml"
 authorization:
@@ -820,8 +822,6 @@ authorization:
     enabled: true
     reject_unauthorized: true # default: false
 ```
-
-This option will entirely reject queries that would have some parts filtered by authorization directives. The response will contain the list of paths that are affected.
 
 ### errors
 
