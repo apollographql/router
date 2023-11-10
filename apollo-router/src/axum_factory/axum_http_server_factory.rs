@@ -14,6 +14,7 @@ use axum::middleware::Next;
 use axum::response::*;
 use axum::routing::get;
 use axum::Router;
+use bytes::Bytes;
 use futures::channel::oneshot;
 use futures::future::join_all;
 use futures::prelude::*;
@@ -517,7 +518,7 @@ async fn handle_graphql(
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    let session_count = ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+    let session_count = ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire) + 1;
     tracing::info!(gauge.apollo_router_session_count_active = session_count,);
 
     let request: router::Request = http_request.into();
@@ -536,7 +537,8 @@ async fn handle_graphql(
 
     match res {
         Err(e) => {
-            let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Relaxed) - 1;
+            let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire) - 1;
+
             tracing::info!(gauge.apollo_router_session_count_active = session_count,);
 
             if let Some(source_err) = e.source() {
@@ -561,7 +563,6 @@ async fn handle_graphql(
                 .into_response()
         }
         Ok(response) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1i64,);
             let (mut parts, body) = response.response.into_parts();
 
             let opt_compressor = accept_encoding
@@ -578,6 +579,12 @@ async fn handle_graphql(
                     Body::wrap_stream(compressor.process(body))
                 }
             };
+            let body = Body::wrap_stream(body.chain(stream::once(async move {
+                let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire) - 1;
+
+                tracing::info!(gauge.apollo_router_session_count_active = session_count,);
+                Ok(Bytes::new())
+            })));
 
             http::Response::from_parts(parts, body).into_response()
         }

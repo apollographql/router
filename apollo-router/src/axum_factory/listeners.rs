@@ -1,9 +1,9 @@
 //! Listeners and endpoints
 
-use std::atomic::AtomicU64;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -223,7 +223,7 @@ pub(super) fn serve_router_on_listen_addr(
                                 max_open_file_warning = None;
                             }
 
-                            let session_count = SESSION_COUNT.fetch_add(1, Ordering::Relaxed)+1;
+                            let session_count = SESSION_COUNT.fetch_add(1, Ordering::Acquire)+1;
                             tracing::info!(
                                 gauge.apollo_router_session_count_total = session_count,
                                 listener = &address
@@ -341,7 +341,7 @@ pub(super) fn serve_router_on_listen_addr(
                                     }
                                 }
 
-                                let session_count = SESSION_COUNT.fetch_sub(1, Ordering::Relaxed)-1;
+                                let session_count = SESSION_COUNT.fetch_sub(1, Ordering::Acquire)-1;
                                 tracing::info!(
                                     gauge.apollo_router_session_count_total = session_count,
                                     listener = &address
