@@ -98,7 +98,7 @@
       }
     },
     "Telemetry and Monitoring": {
-      "Signals": {
+      "Exporters": {
         "Metrics": {
           "Configuration": "/configuration/metrics",
           "Prometheus": "/configuration/exporters/prometheus",
