@@ -11,7 +11,7 @@ value.apollo.router.config.telemetry:
     opt__metrics__prometheus__: true
     opt__spans__: true
     opt__spans__default_attribute_requirement_level__: recommended
-    opt__spans__mode__: new
+    opt__spans__mode__: spec_compliant
     opt__spans__router__: true
     opt__spans__subgraph__: true
     opt__spans__supergraph__: true

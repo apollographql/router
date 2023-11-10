@@ -3,6 +3,8 @@ use std::fmt;
 
 use nu_ansi_term::Color;
 use nu_ansi_term::Style;
+use opentelemetry::sdk::Resource;
+use serde_json::Value;
 use tracing_core::Event;
 use tracing_core::Level;
 use tracing_core::Subscriber;
@@ -22,11 +24,13 @@ use tracing_subscriber::registry::SpanRef;
 
 use crate::plugins::telemetry::config_new::logging::TextFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
+use crate::plugins::telemetry::formatters::to_map;
 use crate::plugins::telemetry::tracing::APOLLO_PRIVATE_PREFIX;
 
 #[derive(Default)]
 pub(crate) struct Text {
     timer: SystemTime,
+    resource: BTreeMap<String, Value>,
     config: TextFormat,
 }
 
@@ -37,10 +41,11 @@ impl Text {
     const WARN_STR: &'static str = "WARN";
     const ERROR_STR: &'static str = "ERROR";
 
-    pub(crate) fn new(config: TextFormat) -> Self {
+    pub(crate) fn new(resource: Resource, config: TextFormat) -> Self {
         Self {
             timer: Default::default(),
             config,
+            resource: to_map(resource),
         }
     }
 
@@ -115,7 +120,7 @@ impl Text {
     }
 
     #[inline]
-    fn format_target(&self, target: &str, writer: &mut Writer<'_>) -> fmt::Result {
+    fn format_target(&self, writer: &mut Writer<'_>, target: &str) -> fmt::Result {
         if writer.has_ansi_escapes() {
             let style = Style::new().dimmed();
             write!(writer, "{}", style.prefix())?;
@@ -243,6 +248,38 @@ impl Text {
         )?;
         Ok(())
     }
+
+    pub(crate) fn format_resource(
+        &self,
+        writer: &mut Writer,
+        resource: &BTreeMap<String, Value>,
+    ) -> fmt::Result {
+        if !resource.is_empty() {
+            if writer.has_ansi_escapes() {
+                let style = Style::new().dimmed();
+                write!(writer, "{}", style.prefix())?;
+                Self::write_resource(writer, resource)?;
+                write!(writer, "{}", style.suffix())?;
+            } else {
+                Self::write_resource(writer, resource)?;
+            }
+            writer.write_char(' ')?;
+        }
+
+        Ok(())
+    }
+    fn write_resource(writer: &mut Writer, resources: &BTreeMap<String, Value>) -> fmt::Result {
+        write!(
+            writer,
+            "resource{{{}}}",
+            resources
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<String>>()
+                .join(",")
+        )?;
+        Ok(())
+    }
 }
 
 impl<S, N> FormatEvent<S, N> for Text
@@ -263,6 +300,9 @@ where
         }
         if self.config.display_level {
             self.format_level(meta.level(), &mut writer)?;
+        }
+        if self.config.display_resource {
+            self.format_resource(&mut writer, &self.resource)?;
         }
 
         if self.config.display_thread_name {
@@ -285,7 +325,7 @@ where
 
         self.format_attributes(ctx, &mut writer, event)?;
         if self.config.display_target {
-            self.format_target(meta.target(), &mut writer)?;
+            self.format_target(&mut writer, meta.target())?;
         }
         self.format_location(event, &mut writer)?;
 

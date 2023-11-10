@@ -303,10 +303,6 @@ pub(crate) struct JsonFormat {
     pub(crate) display_current_span: bool,
     /// Include all of the containing span information with the log event.
     pub(crate) display_span_list: bool,
-    /// Include the service namespace with the log event.
-    pub(crate) display_service_namespace: bool,
-    /// Include the service name with the log event.
-    pub(crate) display_service_name: bool,
     /// Include the resource with the log event.
     pub(crate) display_resource: bool,
 }
@@ -323,8 +319,6 @@ impl Default for JsonFormat {
             display_line_number: false,
             display_current_span: false,
             display_span_list: true,
-            display_service_namespace: true,
-            display_service_name: true,
             display_resource: true,
         }
     }

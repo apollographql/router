@@ -3,6 +3,7 @@ use std::fmt;
 use std::fmt::Write;
 use std::io;
 
+use opentelemetry::sdk::Resource;
 use opentelemetry_api::Array;
 use opentelemetry_api::Value;
 use serde::ser::SerializeMap;
@@ -26,16 +27,22 @@ use tracing_subscriber::registry::SpanRef;
 
 use crate::plugins::telemetry::config_new::logging::JsonFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
+use crate::plugins::telemetry::formatters::to_map;
+
 const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
 
 #[derive(Debug, Default)]
 pub(crate) struct Json {
     config: JsonFormat,
+    resource: BTreeMap<String, serde_json::Value>,
 }
 
 impl Json {
-    pub(crate) fn new(config: JsonFormat) -> Self {
-        Self { config }
+    pub(crate) fn new(resource: Resource, config: JsonFormat) -> Self {
+        Self {
+            resource: to_map(resource),
+            config,
+        }
     }
 }
 
@@ -235,6 +242,10 @@ where
                     "spans",
                     &SerializableContext(ctx.lookup_current(), format_field_marker),
                 )?;
+            }
+
+            if self.config.display_resource {
+                serializer.serialize_entry("resource", &self.resource)?;
             }
 
             serializer.end()

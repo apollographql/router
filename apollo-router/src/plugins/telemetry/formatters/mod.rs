@@ -2,8 +2,11 @@
 pub(crate) mod json;
 pub(crate) mod text;
 
+use std::collections::BTreeMap;
 use std::fmt;
 
+use opentelemetry::sdk::Resource;
+use serde_json::Number;
 use tracing::Subscriber;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::FormatEvent;
@@ -70,4 +73,52 @@ pub(crate) fn filter_metric_events(event: &tracing::Event<'_>) -> bool {
             || f.name().starts_with(METRIC_PREFIX_MONOTONIC_COUNTER)
             || f.name().starts_with(METRIC_PREFIX_VALUE)
     })
+}
+
+pub(crate) fn to_map(resource: Resource) -> BTreeMap<String, serde_json::Value> {
+    resource
+        .into_iter()
+        .map(|(k, v)| {
+            (
+                k.into(),
+                match v {
+                    opentelemetry::Value::Bool(value) => serde_json::Value::Bool(value),
+                    opentelemetry::Value::I64(value) => {
+                        serde_json::Value::Number(Number::from(value))
+                    }
+                    opentelemetry::Value::F64(value) => serde_json::Value::Number(
+                        Number::from_f64(value).unwrap_or(Number::from(0)),
+                    ),
+                    opentelemetry::Value::String(value) => serde_json::Value::String(value.into()),
+                    opentelemetry::Value::Array(value) => match value {
+                        opentelemetry::Array::Bool(array) => serde_json::Value::Array(
+                            array.into_iter().map(serde_json::Value::Bool).collect(),
+                        ),
+                        opentelemetry::Array::I64(array) => serde_json::Value::Array(
+                            array
+                                .into_iter()
+                                .map(|value| serde_json::Value::Number(Number::from(value)))
+                                .collect(),
+                        ),
+                        opentelemetry::Array::F64(array) => serde_json::Value::Array(
+                            array
+                                .into_iter()
+                                .map(|value| {
+                                    serde_json::Value::Number(
+                                        Number::from_f64(value).unwrap_or(Number::from(0)),
+                                    )
+                                })
+                                .collect(),
+                        ),
+                        opentelemetry::Array::String(array) => serde_json::Value::Array(
+                            array
+                                .into_iter()
+                                .map(|s| serde_json::Value::String(s.to_string()))
+                                .collect(),
+                        ),
+                    },
+                },
+            )
+        })
+        .collect()
 }
