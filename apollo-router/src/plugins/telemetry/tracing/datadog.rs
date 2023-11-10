@@ -16,7 +16,7 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::GenericWith;
-use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::spans::Spans;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
@@ -63,7 +63,7 @@ impl TracingConfigurator for Config {
     fn apply(
         &self,
         builder: Builder,
-        trace: &Trace,
+        trace: &TracingCommon,
         _spans_config: &Spans,
     ) -> Result<Builder, BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);

@@ -143,7 +143,7 @@ pub(crate) struct Tracing {
     /// Propagation configuration
     pub(crate) propagation: Propagation,
     /// Common configuration
-    pub(crate) common: Trace,
+    pub(crate) common: TracingCommon,
     /// OpenTelemetry native exporter configuration
     pub(crate) otlp: otlp::Config,
     /// Jaeger exporter configuration
@@ -198,7 +198,7 @@ pub(crate) struct RequestPropagation {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 #[non_exhaustive]
-pub(crate) struct Trace {
+pub(crate) struct TracingCommon {
     /// The trace service name
     pub(crate) service_name: Option<String>,
     /// The trace service namespace
@@ -221,7 +221,7 @@ pub(crate) struct Trace {
     pub(crate) resource: BTreeMap<String, AttributeValue>,
 }
 
-impl ConfigResource for Trace {
+impl ConfigResource for TracingCommon {
     fn service_name(&self) -> &Option<String> {
         &self.service_name
     }
@@ -253,7 +253,7 @@ fn default_sampler() -> SamplerOption {
     SamplerOption::Always(Sampler::AlwaysOn)
 }
 
-impl Default for Trace {
+impl Default for TracingCommon {
     fn default() -> Self {
         Self {
             service_name: Default::default(),
@@ -464,8 +464,8 @@ impl From<SamplerOption> for opentelemetry::sdk::trace::Sampler {
     }
 }
 
-impl From<&Trace> for opentelemetry::sdk::trace::Config {
-    fn from(config: &Trace) -> Self {
+impl From<&TracingCommon> for opentelemetry::sdk::trace::Config {
+    fn from(config: &TracingCommon) -> Self {
         let mut common = opentelemetry::sdk::trace::config();
 
         let mut sampler: opentelemetry::sdk::trace::Sampler = config.sampler.clone().into();
