@@ -178,7 +178,7 @@ impl From<ServerError> for Vec<graphql::Error> {
 }
 
 impl ServerMessage {
-    fn into_graphql_response(self) -> (Option<graphql::Response>, bool) {
+    pub(super) fn into_graphql_response(self) -> (Option<graphql::Response>, bool) {
         match self {
             ServerMessage::Next { id: _, mut payload } => {
                 payload.subscribed = Some(true);
@@ -200,7 +200,7 @@ impl ServerMessage {
         }
     }
 
-    fn id(&self) -> Option<String> {
+    pub(super) fn id(&self) -> Option<String> {
         match self {
             ServerMessage::ConnectionAck
             | ServerMessage::KeepAlive

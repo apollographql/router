@@ -95,6 +95,9 @@ pub(crate) struct SubscriptionModeConfig {
     pub(crate) callback: Option<CallbackMode>,
     /// Enable passthrough mode for subgraph(s)
     pub(crate) passthrough: Option<SubgraphPassthroughMode>,
+    #[serde(rename = "experimental_sse")]
+    /// Enable sse mode for subgraph(s)
+    pub(crate) sse: Option<SubgraphSSEMode>,
 }
 
 impl SubscriptionModeConfig {
@@ -120,6 +123,15 @@ impl SubscriptionModeConfig {
             }
         }
 
+        if let Some(sse_cfg) = &self.sse {
+            if let Some(subgraph_cfg) = sse_cfg.subgraphs.get(service_name) {
+                return SubscriptionMode::Sse(subgraph_cfg.clone()).into();
+            }
+            if let Some(all_cfg) = &sse_cfg.all {
+                return SubscriptionMode::Sse(all_cfg.clone()).into();
+            }
+        }
+
         None
     }
 }
@@ -133,12 +145,23 @@ pub(crate) struct SubgraphPassthroughMode {
     pub(crate) subgraphs: HashMap<String, WebSocketConfiguration>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct SubgraphSSEMode {
+    /// Configuration for all subgraphs
+    pub(crate) all: Option<SseConfiguration>,
+    /// Configuration for specific subgraphs
+    pub(crate) subgraphs: HashMap<String, SseConfiguration>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum SubscriptionMode {
     /// Using a callback url
     Callback(CallbackMode),
     /// Using websocket to directly connect to subgraph
     Passthrough(WebSocketConfiguration),
+    // Using SSE to connect to subgraph
+    Sse(SseConfiguration),
 }
 
 /// Using a callback url
@@ -171,6 +194,14 @@ pub(crate) struct PassthroughMode {
     subgraph: SubgraphPassthroughMode,
 }
 
+/// Using SSE to directly connect to subgraph
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct SSEMode {
+    /// SSE configuration for specific subgraphs
+    subgraph: SubgraphSSEMode,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 /// WebSocket configuration for a specific subgraph
@@ -179,6 +210,96 @@ pub(crate) struct WebSocketConfiguration {
     pub(crate) path: Option<String>,
     /// Which WebSocket GraphQL protocol to use for this subgraph possible values are: 'graphql_ws' | 'graphql_transport_ws' (default: graphql_ws)
     pub(crate) protocol: WebSocketProtocol,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct SseConfiguration {
+    /// Enable configuration
+    #[serde(default = "default_sse_config_enabled")]
+    pub(crate) enabled: bool,
+
+    /// Path use to get the SSE stream
+    pub(crate) path: Option<String>,
+
+    /// If `reconnect` is `true`, the client will automatically
+    /// try to reconnect if the stream ends due to an error. If it is `false`  (the [default]),
+    /// the client will stop receiving events after an error.
+    pub(crate) reconnect: bool,
+
+    /// If `true` the client will automatically retry the connection, with the
+    /// same delay and backoff behaviour as for reconnects due to stream error.
+    /// If `false` (the [default]), the client will not retry the initial
+    /// connection.
+    pub(crate) retry_initial: bool,
+
+    /// After an error, the client will wait this long before the first attempt
+    /// to reconnect.  Subsequent reconnect attempts may wait longer, depending
+    /// on the [`backoff_factor`].
+    #[serde(with = "humantime_serde", default = "default_delay")]
+    #[schemars(with = "Option<String>")]
+    pub(crate) delay: std::time::Duration,
+
+    /// Configure the factor by which delays between reconnect attempts will
+    /// exponentially increase, up to [`delay_max`]. The [default] factor is 2,
+    /// so each reconnect attempt will wait twice as long as the previous one.
+    ///
+    #[serde(default = "default_backoff_factor")]
+    pub(crate) backoff_factor: u32,
+
+    /// Configure the maximum delay between reconnects (the [default] is 1
+    /// minute). The exponential backoff configured by [`backoff_factor`] will
+    /// not cause a delay greater than this value.
+    #[serde(with = "humantime_serde", default = "default_delay_max")]
+    #[schemars(with = "Option<String>")]
+    pub(crate) delay_max: std::time::Duration,
+
+    /// Set a read timeout for the underlying connection. There is no read timeout by default.
+    #[serde(with = "humantime_serde")]
+    #[schemars(with = "Option<String>")]
+    pub(crate) read_timeout: Option<std::time::Duration>,
+
+    /// Configure the maximum time it will retry to get a successful connection
+    /// before giving up. The [default] is 60 seconds.
+    #[serde(with = "humantime_serde", default = "default_reconnect_timeout")]
+    #[schemars(with = "Option<String>")]
+    pub(crate) reconnect_timeout: std::time::Duration,
+}
+
+impl Default for SseConfiguration {
+    fn default() -> Self {
+        Self {
+            enabled: default_sse_config_enabled(),
+            path: None,
+            reconnect: false,
+            retry_initial: false,
+            delay: default_delay(),
+            backoff_factor: default_backoff_factor(),
+            delay_max: default_delay_max(),
+            read_timeout: None,
+            reconnect_timeout: default_reconnect_timeout(),
+        }
+    }
+}
+
+fn default_sse_config_enabled() -> bool {
+    true
+}
+
+fn default_backoff_factor() -> u32 {
+    2
+}
+
+fn default_delay() -> std::time::Duration {
+    std::time::Duration::from_secs(1)
+}
+
+fn default_reconnect_timeout() -> std::time::Duration {
+    std::time::Duration::from_secs(60)
+}
+
+fn default_delay_max() -> std::time::Duration {
+    std::time::Duration::from_secs(60)
 }
 
 fn default_path() -> String {
@@ -216,7 +337,9 @@ impl Plugin for Subscription {
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
         let enabled = self.config.enabled
-            && (self.config.mode.callback.is_some() || self.config.mode.passthrough.is_some());
+            && (self.config.mode.callback.is_some()
+                || self.config.mode.passthrough.is_some()
+                || self.config.mode.sse.is_some());
         ServiceBuilder::new()
             .checkpoint(move |req: subgraph::Request| {
                 if req.operation_kind == OperationKind::Subscription && !enabled {

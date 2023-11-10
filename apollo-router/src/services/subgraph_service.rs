@@ -63,6 +63,7 @@ use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
+use crate::plugins::subscription::SseConfiguration;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::subscription::WebSocketConfiguration;
@@ -70,6 +71,10 @@ use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::traffic_shaping::Http2Config;
+use crate::protocols::sse::client::ClientBuilder;
+use crate::protocols::sse::config::ReconnectOptions;
+use crate::protocols::sse::convert_sse_stream;
+use crate::protocols::sse::GraphqlSSE;
 use crate::protocols::websocket::convert_websocket_stream;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
@@ -419,6 +424,19 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             })?,
                         );
                     }
+                    Some(SubscriptionMode::Sse(cfg)) => {
+                        // call_sse for sse mode
+                        return call_sse(
+                            notify,
+                            client.into_inner(),
+                            request,
+                            context,
+                            service_name,
+                            cfg,
+                            hashed_request,
+                        )
+                        .await;
+                    }
                     _ => {
                         return Err(Box::new(FetchError::SubrequestWsError {
                             service: service_name.clone(),
@@ -491,6 +509,165 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
 
         Box::pin(make_calls)
     }
+}
+
+/// call sse makes  calls with modified graphql::Request (body)
+async fn call_sse(
+    mut notify: Notify<String, graphql::Response>,
+    client: Client<HttpsConnector<HttpConnector>>,
+    request: SubgraphRequest,
+    context: Context,
+    service_name: String,
+    subgraph_cfg: &SseConfiguration,
+    subscription_hash: String,
+) -> Result<SubgraphResponse, BoxError> {
+    let SubgraphRequest {
+        subgraph_request,
+        subscription_stream,
+        ..
+    } = request;
+    let operation_name = subgraph_request
+        .body()
+        .operation_name
+        .clone()
+        .unwrap_or_default();
+    let mut subscription_stream_tx =
+        subscription_stream.ok_or_else(|| FetchError::SubrequestWsError {
+            service: service_name.clone(),
+            reason: "cannot get the websocket stream".to_string(),
+        })?;
+
+    let (handle, created) = notify
+        .create_or_subscribe(subscription_hash.clone(), false)
+        .await?;
+    if !created {
+        subscription_stream_tx.send(handle.into_stream()).await?;
+        tracing::info!(
+            monotonic_counter.apollo_router_deduplicated_subscriptions_total = 1u64,
+            mode = %"sse",
+        );
+
+        // Dedup happens here
+        return Ok(SubgraphResponse::builder()
+            .context(context)
+            .extensions(Object::default())
+            .build());
+    }
+
+    let (parts, body) = subgraph_request.into_parts();
+
+    let mut builder = get_sse_client(service_name.clone(), parts, subgraph_cfg)?;
+    let body = serde_json::to_string(&body)?;
+    builder = builder.body(body);
+
+    let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
+    let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
+    if display_headers {
+        tracing::info!(http.request.headers = ?builder.get_headers(), apollo.subgraph.name = %service_name, "SSE request headers to subgraph {service_name:?}");
+    }
+    if display_body {
+        tracing::info!(http.request.body = ?builder.get_body().unwrap_or_default(), apollo.subgraph.name = %service_name, "SSE request body to subgraph {service_name:?}");
+    }
+
+    let uri = builder.get_url();
+    let path = uri.path();
+    let host = uri.host().unwrap_or_default();
+    let port = uri.port_u16().unwrap_or_else(|| {
+        let scheme = uri.scheme_str();
+        if scheme == Some("https") {
+            443
+        } else if scheme == Some("http") {
+            80
+        } else {
+            0
+        }
+    });
+
+    let subgraph_req_span = tracing::info_span!("subgraph_request",
+        "otel.kind" = "CLIENT",
+        "net.peer.name" = %host,
+        "net.peer.port" = %port,
+        "http.route" = %path,
+        "http.url" = %uri,
+        "net.transport" = "ip_tcp",
+        "apollo.subgraph.name" = %service_name,
+        "graphql.operation.name" = %operation_name,
+    );
+
+    get_text_map_propagator(|propagator| {
+        propagator.inject_context(
+            &subgraph_req_span.context(),
+            &mut opentelemetry_http::HeaderInjector(builder.headers_mut()),
+        );
+    });
+
+    let gql_stream = GraphqlSSE::new(
+        convert_sse_stream(
+            builder.build_with_http_client(client),
+            subscription_hash.clone(),
+        ),
+        subscription_hash,
+    )
+    .map_err(|err| FetchError::SubrequestWsError {
+        service: service_name,
+        reason: format!("cannot send the subgraph request to sse stream: {err:?}"),
+    })?;
+    let mut closed_receiver = handle.closed_receiver();
+    let (mut handle_sink, handle_stream) = handle.split();
+
+    // Forward messages from SSE stream to notify stream
+    tokio::task::spawn(async move {
+        let mut stream = gql_stream;
+
+        loop {
+            tokio::select! {
+                _ = closed_receiver.recv() => {
+                    tracing::trace!("The stream was closed");
+                    break;
+                }
+                message = stream.next() => {
+                    match message {
+                        Some(Ok(val)) => {
+                            if let Err(err) = handle_sink.send(val).await {
+                                tracing::trace!("cannot send the sse stream to the subscription stream: {err:?}");
+                                break;
+                            }
+                        }
+                        Some(Err(err)) => {
+                            let resp = graphql::Response::builder().error(graphql::Error::builder()
+                                .message(format!("cannot read message from sse: {err:?}"))
+                                .extension_code("SSE_MESSAGE_ERROR")
+                                .build())
+                                .subscribed(false)
+                                .build();
+
+                            if let Err(err) = handle_sink.send(resp).await {
+                                tracing::trace!("cannot send the sse stream to the subscription stream: {err:?}");
+                            }
+                            tracing::error!("cannot read the sse stream: {err:?}");
+                            break;
+                        }
+                        None => {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Err(err) = handle_sink.close().await {
+            tracing::trace!("cannot close the sse stream: {err:?}");
+        }
+
+        tracing::trace!("SSE stream closed");
+    });
+
+    subscription_stream_tx.send(handle_stream).await?;
+
+    Ok(SubgraphResponse::new_from_response(
+        http::Response::new(graphql::Response::default()),
+        context,
+    ))
 }
 
 /// call websocket makes websocket calls with modified graphql::Request (body)
@@ -1046,6 +1223,96 @@ fn get_websocket_request(
     Ok(request)
 }
 
+fn get_sse_client(
+    service_name: String,
+    parts: http::request::Parts,
+    subgraph_sse_cfg: &SseConfiguration,
+) -> Result<crate::protocols::sse::client::ClientBuilder, FetchError> {
+    let subgraph_url = url::Url::parse(&parts.uri.to_string()).map_err(|err| {
+        tracing::error!("cannot parse subgraph url {}: {err:?}", parts.uri);
+        FetchError::SubrequestHttpError {
+            service: service_name.clone(),
+            reason: "cannot parse subgraph url".to_string(),
+            status_code: None,
+        }
+    })?;
+
+    let subgraph_url = match &subgraph_sse_cfg.path {
+        Some(path) if subgraph_sse_cfg.enabled => {
+            subgraph_url
+                .join(path)
+                .map_err(|_| FetchError::SubrequestHttpError {
+                    service: service_name.clone(),
+                    reason: "cannot parse subgraph url with the specific sse path".to_string(),
+                    status_code: None,
+                })?
+        }
+        _ => subgraph_url,
+    };
+
+    let mut builder = ClientBuilder::for_url(subgraph_url.as_str()).map_err(|e| {
+        FetchError::SubrequestHttpError {
+            service: service_name.clone(),
+            reason: format!("cannot parse subgraph url with the specific sse path {e:?}"),
+            status_code: None,
+        }
+    })?;
+
+    builder = if subgraph_sse_cfg.enabled {
+        if let Some(timeout) = subgraph_sse_cfg.read_timeout {
+            builder = builder.read_timeout(timeout);
+        }
+
+        builder.reconnect(
+            ReconnectOptions::reconnect(subgraph_sse_cfg.reconnect)
+                .retry_initial(subgraph_sse_cfg.retry_initial)
+                .delay(subgraph_sse_cfg.delay)
+                .backoff_factor(subgraph_sse_cfg.backoff_factor)
+                .delay_max(subgraph_sse_cfg.delay_max)
+                .timeout(subgraph_sse_cfg.reconnect_timeout)
+                .build(),
+        )
+    } else {
+        builder.reconnect(
+            ReconnectOptions::reconnect(false)
+                .retry_initial(false)
+                .build(),
+        )
+    };
+
+    for (key, value) in parts.headers.iter() {
+        builder = builder
+            .header(key.as_str(), value.to_str().unwrap_or_default())
+            .map_err(|e| FetchError::SubrequestHttpError {
+                service: service_name.clone(),
+                reason: format!("can not add header to sse client: {e:?}"),
+                status_code: None,
+            })?;
+    }
+    builder = builder
+        .header(http::header::ACCEPT.as_str(), "text/event-stream")
+        .map_err(|e| FetchError::SubrequestHttpError {
+            service: service_name.clone(),
+            reason: format!("can not add header to sse client: {e:?}"),
+            status_code: None,
+        })?;
+
+    if !builder
+        .get_headers()
+        .contains_key(http::header::CONTENT_TYPE)
+    {
+        builder = builder
+            .header(http::header::CONTENT_TYPE.as_str(), "application/json")
+            .map_err(|e| FetchError::SubrequestHttpError {
+                service: service_name.clone(),
+                reason: format!("can not add header to sse client: {e:?}"),
+                status_code: None,
+            })?;
+    }
+    builder = builder.method(http::Method::POST.to_string());
+    Ok(builder)
+}
+
 fn get_apq_error(gql_response: &graphql::Response) -> APQError {
     for error in &gql_response.errors {
         // Check if error message is an APQ error
@@ -1166,17 +1433,22 @@ mod tests {
     use std::net::SocketAddr;
     use std::net::TcpListener;
     use std::str::FromStr;
+    use std::sync::atomic::AtomicI32;
+    use std::sync::atomic::Ordering;
 
     use axum::extract::ws::Message;
     use axum::extract::ConnectInfo;
     use axum::extract::WebSocketUpgrade;
+    use axum::response::sse::Event;
     use axum::response::IntoResponse;
+    use axum::response::Sse;
     use axum::routing::get;
+    use axum::Extension;
     use axum::Router;
     use axum::Server;
     use bytes::Buf;
     use futures::channel::mpsc;
-    use futures::StreamExt;
+    use futures::stream::Stream;
     use http::header::HOST;
     use http::StatusCode;
     use http::Uri;
@@ -1191,6 +1463,7 @@ mod tests {
     use rustls::ServerConfig;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
+    use tokio_stream::StreamExt;
     use tower::service_fn;
     use tower::ServiceExt;
     use url::Url;
@@ -1205,6 +1478,7 @@ mod tests {
     use crate::graphql::Request;
     use crate::graphql::Response;
     use crate::plugins::subscription::SubgraphPassthroughMode;
+    use crate::plugins::subscription::SubgraphSSEMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
     use crate::protocols::websocket::ClientMessage;
@@ -1819,6 +2093,86 @@ mod tests {
         server.await.unwrap();
     }
 
+    // starts a local server emulating a subgraph returning bad response format
+    async fn emulate_subgraph_sse_ok(
+        listener: TcpListener,
+        num_events: i32,
+        total_handler_calls: Arc<AtomicI32>,
+        total_messages: Arc<AtomicI32>,
+    ) {
+        async fn sse_handle(
+            Extension(num_events): Extension<i32>,
+            Extension((total_handler_calls, total_messages)): Extension<(
+                Arc<AtomicI32>,
+                Arc<AtomicI32>,
+            )>,
+            request: http::Request<Body>,
+        ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+            let (parts, body) = request.into_parts();
+            let body_bytes = hyper::body::to_bytes(body).await.unwrap();
+
+            total_handler_calls.fetch_add(1, Ordering::SeqCst);
+
+            let accept = parts.headers.get(ACCEPT).unwrap().to_str().unwrap();
+
+            assert_eq!(accept, "text/event-stream");
+
+            let payload = serde_json_bytes::serde_json::from_slice::<Request>(&body_bytes).unwrap();
+
+            assert_eq!(
+                payload,
+                Request::builder()
+                    .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                    .build()
+            );
+
+            let stream = futures::stream::iter(0..num_events)
+                .map(|_| {
+                    let response = graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build();
+                    Event::default()
+                        .event("next")
+                    .data(serde_json_bytes::serde_json::to_string(&response).unwrap())
+                })
+                .throttle(Duration::from_millis(10))
+                .map(move |m| {
+                    total_messages.fetch_add(1, Ordering::SeqCst);
+                    m
+                })
+                .chain(futures::stream::once(futures::future::ready(
+                    Event::default().event("complete"),
+                )))
+                .map(Ok);
+
+            Sse::new(stream)
+        }
+        let router = axum::Router::new()
+            .route("/sse", axum::routing::post(sse_handle))
+            .layer(Extension(num_events))
+            .layer(Extension((total_handler_calls, total_messages)))
+            .layer(tower_http::trace::TraceLayer::new_for_http());
+
+        let server = Server::from_tcp(listener)
+            .unwrap()
+            .serve(router.into_make_service());
+        server.await.unwrap();
+    }
+
+    async fn emulate_subgraph_sse_bad_request(listener: TcpListener) {
+        async fn sse_handle(
+            _request: http::Request<Body>,
+        ) -> Result<impl IntoResponse, Infallible> {
+            Ok((http::StatusCode::BAD_REQUEST, "bad request"))
+        }
+        let router = axum::Router::new()
+            .route("/sse", axum::routing::post(sse_handle))
+            .layer(tower_http::trace::TraceLayer::new_for_http());
+
+        let server = Server::from_tcp(listener)
+            .unwrap()
+            .serve(router.into_make_service());
+        server.await.unwrap();
+    }
+
     fn subscription_config() -> SubscriptionConfig {
         SubscriptionConfig {
             enabled: true,
@@ -1836,6 +2190,17 @@ mod tests {
                         WebSocketConfiguration {
                             path: Some(String::from("/ws")),
                             protocol: WebSocketProtocol::default(),
+                        },
+                    )]
+                    .into(),
+                }),
+                sse: Some(SubgraphSSEMode {
+                    all: None,
+                    subgraphs: [(
+                        "testsse".to_string(),
+                        SseConfiguration {
+                            path: Some(String::from("/sse")),
+                            ..Default::default()
                         },
                     )]
                     .into(),
@@ -2207,6 +2572,481 @@ mod tests {
                 .build()
         );
         spawned_task.abort();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_sse() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let total_handler_calls = Arc::new(AtomicI32::new(0));
+        let total_messages = Arc::new(AtomicI32::new(0));
+        let spawned_task = tokio::task::spawn(emulate_subgraph_sse_ok(
+            listener,
+            1,
+            total_handler_calls.clone(),
+            total_messages.clone(),
+        ));
+        let subgraph_service = SubgraphService::new(
+            "testsse",
+            true,
+            Http2Config::Disable,
+            subscription_config().into(),
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::builder().build(),
+        );
+        let (tx, mut rx) = mpsc::channel(2);
+
+        let url = Uri::from_str(&format!("http://{socket_addr}/sse")).unwrap();
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(
+                            Request::builder()
+                                .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                                .build(),
+                        )
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(
+                        Request::builder()
+                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Subscription,
+                context: Context::new(),
+                subscription_stream: Some(tx),
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+        assert!(response.response.body().errors.is_empty());
+
+        let mut gql_stream = rx.next().await.unwrap();
+        let message = gql_stream.next().await.unwrap();
+        assert_eq!(
+            message,
+            graphql::Response::builder()
+                .subscribed(true)
+                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                .build()
+        );
+        spawned_task.abort();
+        assert_eq!(total_handler_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(total_messages.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_sse_with_error() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let spawned_task = tokio::task::spawn(emulate_subgraph_sse_bad_request(listener));
+        let subgraph_service = SubgraphService::new(
+            "testsse",
+            true,
+            Http2Config::Disable,
+            subscription_config().into(),
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::builder().build(),
+        );
+        let (tx, mut rx) = mpsc::channel(2);
+
+        let url = Uri::from_str(&format!("http://{socket_addr}/sse")).unwrap();
+        // The first initial response should be ok
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(
+                            Request::builder()
+                                .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                                .build(),
+                        )
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(
+                        Request::builder()
+                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Subscription,
+                context: Context::new(),
+                subscription_stream: Some(tx),
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+        assert!(response.response.body().errors.is_empty());
+
+        let mut gql_stream = rx.next().await.unwrap();
+
+        let message = gql_stream.next().await.unwrap();
+
+        assert_eq!(
+            message,
+            graphql::Response::builder()
+                .subscribed(false)
+                .errors(vec![Error::builder()
+                    .message("cannot read message from sse: UnexpectedResponse(400)")
+                    .extension_code("SSE_MESSAGE_ERROR")
+                    .build()])
+                .build()
+        );
+        spawned_task.abort();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_sse_complete() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let total_handler_calls = Arc::new(AtomicI32::new(0));
+        let total_messages = Arc::new(AtomicI32::new(0));
+        let spawned_task = tokio::task::spawn(emulate_subgraph_sse_ok(
+            listener,
+            2,
+            total_handler_calls.clone(),
+            total_messages.clone(),
+        ));
+
+        let subgraph_service = SubgraphService::new(
+            "testsse",
+            true,
+            Http2Config::Disable,
+            subscription_config().into(),
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::builder().build(),
+        );
+        let (tx, mut rx) = mpsc::channel(2);
+
+        let url = Uri::from_str(&format!("http://{socket_addr}/sse")).unwrap();
+        // The first initial response should be ok
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(
+                            Request::builder()
+                                .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                                .build(),
+                        )
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(
+                        Request::builder()
+                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Subscription,
+                context: Context::new(),
+                subscription_stream: Some(tx),
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+        assert!(response.response.body().errors.is_empty());
+
+        let mut gql_stream = rx.next().await.unwrap();
+        let mut messages = 0;
+        while let Some(response) = gql_stream.next().await {
+            assert_eq!(
+                response,
+                graphql::Response::builder()
+                    .subscribed(true)
+                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .build()
+            );
+            messages += 1;
+        }
+
+        assert_eq!(messages, 2);
+        spawned_task.abort();
+        assert_eq!(total_handler_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(total_messages.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_sse_close() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let total_handler_calls = Arc::new(AtomicI32::new(0));
+        let total_messages = Arc::new(AtomicI32::new(0));
+        let spawned_task = tokio::task::spawn(emulate_subgraph_sse_ok(
+            listener,
+            200,
+            total_handler_calls.clone(),
+            total_messages.clone(),
+        ));
+        let subgraph_service = SubgraphService::new(
+            "testsse",
+            true,
+            Http2Config::Disable,
+            subscription_config().into(),
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::builder().build(),
+        );
+        let (tx, mut rx) = mpsc::channel(2);
+
+        let url = Uri::from_str(&format!("http://{socket_addr}/sse")).unwrap();
+        // The first initial response should be ok
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(
+                            Request::builder()
+                                .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                                .build(),
+                        )
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(
+                        Request::builder()
+                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Subscription,
+                context: Context::new(),
+                subscription_stream: Some(tx),
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+        assert!(response.response.body().errors.is_empty());
+
+        let mut gql_stream = rx.next().await.unwrap();
+        let message = gql_stream.next().await.unwrap();
+        assert_eq!(
+            message,
+            graphql::Response::builder()
+                .subscribed(true)
+                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                .build()
+        );
+        drop(gql_stream);
+        //Sleep to make sure no more events are processed
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        assert_eq!(total_handler_calls.load(Ordering::SeqCst), 1);
+        let total_messages = total_messages.load(Ordering::SeqCst);
+        assert!(total_messages < 10);
+        spawned_task.abort();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_sse_close_reconnect() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        let total_handler_calls = Arc::new(AtomicI32::new(0));
+        let total_messages = Arc::new(AtomicI32::new(0));
+        let spawned_task = tokio::task::spawn(emulate_subgraph_sse_ok(
+            listener,
+            20,
+            total_handler_calls.clone(),
+            total_messages.clone(),
+        ));
+        let mut subscription_config = subscription_config();
+        let sse_config = subscription_config
+            .mode
+            .sse
+            .as_mut()
+            .unwrap()
+            .subgraphs
+            .get_mut("testsse")
+            .unwrap();
+        sse_config.reconnect = true;
+        sse_config.retry_initial = true;
+        sse_config.delay = std::time::Duration::from_millis(10);
+        let subgraph_service = SubgraphService::new(
+            "testsse",
+            true,
+            Http2Config::Disable,
+            subscription_config.into(),
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::builder().build(),
+        );
+        let (tx, mut rx) = mpsc::channel(2);
+
+        let url = Uri::from_str(&format!("http://{socket_addr}/sse")).unwrap();
+        // The first initial response should be ok
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(
+                            Request::builder()
+                                .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                                .build(),
+                        )
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(
+                        Request::builder()
+                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Subscription,
+                context: Context::new(),
+                subscription_stream: Some(tx),
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+        assert!(response.response.body().errors.is_empty());
+
+        let mut gql_stream = rx.next().await.unwrap();
+        let message = gql_stream.next().await.unwrap();
+        assert_eq!(
+            message,
+            graphql::Response::builder()
+                .subscribed(true)
+                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                .build()
+        );
+
+        let abort_handle = spawned_task.abort_handle();
+        abort_handle.abort();
+        while !abort_handle.is_finished() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        //Sleep to make sure no more events are processed
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        let total_calls = total_handler_calls.load(Ordering::SeqCst);
+        assert!(total_calls >= 1);
+        drop(gql_stream);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_service_sse_timeout() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+
+        let mut subscription_config = subscription_config();
+        let sse_config = subscription_config
+            .mode
+            .sse
+            .as_mut()
+            .unwrap()
+            .subgraphs
+            .get_mut("testsse")
+            .unwrap();
+        sse_config.reconnect = true;
+        sse_config.retry_initial = true;
+        sse_config.delay = std::time::Duration::from_millis(10);
+        sse_config.delay_max = std::time::Duration::from_millis(200);
+        sse_config.reconnect_timeout = std::time::Duration::from_millis(500);
+        sse_config.read_timeout = Some(std::time::Duration::from_millis(10));
+        let subgraph_service = SubgraphService::new(
+            "testsse",
+            true,
+            Http2Config::Disable,
+            subscription_config.into(),
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth(),
+            Notify::builder().build(),
+        );
+        let (tx, mut rx) = mpsc::channel(2);
+
+        let url = Uri::from_str(&format!("http://{socket_addr}/sse")).unwrap();
+        // The first initial response should be ok
+        let response = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(
+                            Request::builder()
+                                .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                                .build(),
+                        )
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(
+                        Request::builder()
+                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Subscription,
+                context: Context::new(),
+                subscription_stream: Some(tx),
+                connection_closed_signal: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(response.response.body().errors.is_empty());
+
+        let mut gql_stream = rx.next().await.unwrap();
+
+        let message = gql_stream.next().await.unwrap();
+
+        assert_eq!(
+            message,
+            graphql::Response::builder()
+                .subscribed(false)
+                .errors(vec![Error::builder()
+                    .message("cannot read message from sse: ReconnectTimeOut")
+                    .extension_code("SSE_MESSAGE_ERROR")
+                    .build()])
+                .build()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

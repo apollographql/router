@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 30
 expression: "&schema"
 ---
 {
@@ -1880,10 +1881,143 @@ expression: "&schema"
           "description": "Select a subscription mode (callback or passthrough)",
           "default": {
             "preview_callback": null,
-            "passthrough": null
+            "passthrough": null,
+            "experimental_sse": null
           },
           "type": "object",
           "properties": {
+            "experimental_sse": {
+              "description": "Enable sse mode for subgraph(s)",
+              "type": "object",
+              "properties": {
+                "all": {
+                  "description": "Configuration for all subgraphs",
+                  "default": null,
+                  "type": "object",
+                  "properties": {
+                    "backoff_factor": {
+                      "description": "Configure the factor by which delays between reconnect attempts will exponentially increase, up to [`delay_max`]. The [default] factor is 2, so each reconnect attempt will wait twice as long as the previous one.",
+                      "default": 2,
+                      "type": "integer",
+                      "format": "uint32",
+                      "minimum": 0.0
+                    },
+                    "delay": {
+                      "description": "After an error, the client will wait this long before the first attempt to reconnect.  Subsequent reconnect attempts may wait longer, depending on the [`backoff_factor`].",
+                      "default": "1s",
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "delay_max": {
+                      "description": "Configure the maximum delay between reconnects (the [default] is 1 minute). The exponential backoff configured by [`backoff_factor`] will not cause a delay greater than this value.",
+                      "default": "1m",
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "enabled": {
+                      "description": "Enable configuration",
+                      "default": true,
+                      "type": "boolean"
+                    },
+                    "path": {
+                      "description": "Path use to get the SSE stream",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "read_timeout": {
+                      "description": "Set a read timeout for the underlying connection. There is no read timeout by default.",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "reconnect": {
+                      "description": "If `reconnect` is `true`, the client will automatically try to reconnect if the stream ends due to an error. If it is `false`  (the [default]), the client will stop receiving events after an error.",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "reconnect_timeout": {
+                      "description": "Configure the maximum time it will retry to get a successful connection before giving up. The [default] is 60 seconds.",
+                      "default": "1m",
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "retry_initial": {
+                      "description": "If `true` the client will automatically retry the connection, with the same delay and backoff behaviour as for reconnects due to stream error. If `false` (the [default]), the client will not retry the initial connection.",
+                      "default": false,
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                },
+                "subgraphs": {
+                  "description": "Configuration for specific subgraphs",
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "backoff_factor": {
+                        "description": "Configure the factor by which delays between reconnect attempts will exponentially increase, up to [`delay_max`]. The [default] factor is 2, so each reconnect attempt will wait twice as long as the previous one.",
+                        "default": 2,
+                        "type": "integer",
+                        "format": "uint32",
+                        "minimum": 0.0
+                      },
+                      "delay": {
+                        "description": "After an error, the client will wait this long before the first attempt to reconnect.  Subsequent reconnect attempts may wait longer, depending on the [`backoff_factor`].",
+                        "default": "1s",
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "delay_max": {
+                        "description": "Configure the maximum delay between reconnects (the [default] is 1 minute). The exponential backoff configured by [`backoff_factor`] will not cause a delay greater than this value.",
+                        "default": "1m",
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "enabled": {
+                        "description": "Enable configuration",
+                        "default": true,
+                        "type": "boolean"
+                      },
+                      "path": {
+                        "description": "Path use to get the SSE stream",
+                        "default": null,
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "read_timeout": {
+                        "description": "Set a read timeout for the underlying connection. There is no read timeout by default.",
+                        "default": null,
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "reconnect": {
+                        "description": "If `reconnect` is `true`, the client will automatically try to reconnect if the stream ends due to an error. If it is `false`  (the [default]), the client will stop receiving events after an error.",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "reconnect_timeout": {
+                        "description": "Configure the maximum time it will retry to get a successful connection before giving up. The [default] is 60 seconds.",
+                        "default": "1m",
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "retry_initial": {
+                        "description": "If `true` the client will automatically retry the connection, with the same delay and backoff behaviour as for reconnects due to stream error. If `false` (the [default]), the client will not retry the initial connection.",
+                        "default": false,
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
             "passthrough": {
               "description": "Enable passthrough mode for subgraph(s)",
               "type": "object",
