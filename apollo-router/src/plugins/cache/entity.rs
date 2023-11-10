@@ -222,15 +222,12 @@ async fn cache_lookup_entities(
 }
 
 fn update_cache_control(context: &Context, cache_control: &CacheControl) {
-    match context.private_entries.lock().get_mut::<CacheControl>() {
-        Some(c) => {
-            *c = c.merge(cache_control);
-        }
-        //FIXME: race condition. We need an Entry API for private entries
-        None => {
-            context.private_entries.lock().insert(cache_control.clone());
-        }
+    if let Some(c) = context.private_entries.lock().get_mut::<CacheControl>() {
+        *c = c.merge(cache_control);
+        return;
     }
+    //FIXME: race condition. We need an Entry API for private entries
+    context.private_entries.lock().insert(cache_control.clone());
 }
 
 async fn cache_store_from_response(
@@ -408,11 +405,9 @@ fn extract_cache_key_root(
 
 // build a list of keys to get from the cache in one query
 fn extract_cache_keys(
-    //representations: &mut Vec<Value>,
     subgraph_name: &str,
     body: &mut graphql::Request,
     context: &Context,
-    //query_hash: &str,
 ) -> Result<Vec<String>, BoxError> {
     // hash the query and operation name
     let query_hash = hash_query(body);

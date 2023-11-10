@@ -358,21 +358,7 @@ impl TrafficShaping {
         subgraph::Request,
         Response = subgraph::Response,
         Error = BoxError,
-        Future = TrafficShapingSubgraphFuture<S>, /*Either<
-                                                      Either<
-                                                          BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-                                                          timeout::future::ResponseFuture<
-                                                              Oneshot<
-                                                                  Either<
-                                                                      Retry<RetryPolicy, Either<rate::service::RateLimit<S>, S>>,
-                                                                      Either<rate::service::RateLimit<S>, S>,
-                                                                  >,
-                                                                  subgraph::Request,
-                                                              >,
-                                                          >,
-                                                      >,
-                                                      <S as Service<subgraph::Request>>::Future,
-                                                  >*/
+        Future = TrafficShapingSubgraphFuture<S>,
     > + Clone
            + Send
            + Sync
