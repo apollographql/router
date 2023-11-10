@@ -28,7 +28,7 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::ListenAddr;
 
-pub(crate) const SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
+pub(crate) static SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug)]
 pub(crate) struct ListenAddrAndRouter(pub(crate) ListenAddr, pub(crate) Router);

@@ -59,7 +59,7 @@ use crate::services::router;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
-const ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
+static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
