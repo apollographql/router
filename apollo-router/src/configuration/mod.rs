@@ -894,6 +894,11 @@ pub(crate) struct RedisCache {
     #[schemars(with = "Option<String>", default)]
     /// Redis request timeout (default: 2ms)
     pub(crate) timeout: Option<Duration>,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    /// TTL for entries
+    pub(crate) ttl: Option<Duration>,
 }
 
 /// TLS related configuration options.
