@@ -1213,7 +1213,7 @@ impl HealthCheck {
     ) -> Self {
         let mut path = path.unwrap_or_else(default_health_check_path);
         if !path.starts_with('/') {
-            path = format!("/{path}").to_string();
+            path = format!("/{path}");
         }
 
         Self {
