@@ -89,6 +89,12 @@ expression: "&schema"
                       "type": "string",
                       "nullable": true
                     },
+                    "ttl": {
+                      "description": "TTL for entries",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
                     "urls": {
                       "description": "List of URLs to the Redis cluster",
                       "type": "array",
@@ -2109,6 +2115,12 @@ expression: "&schema"
                   "properties": {
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "ttl": {
+                      "description": "TTL for entries",
                       "default": null,
                       "type": "string",
                       "nullable": true
@@ -5725,6 +5737,12 @@ expression: "&schema"
           "properties": {
             "timeout": {
               "description": "Redis request timeout (default: 2ms)",
+              "default": null,
+              "type": "string",
+              "nullable": true
+            },
+            "ttl": {
+              "description": "TTL for entries",
               "default": null,
               "type": "string",
               "nullable": true

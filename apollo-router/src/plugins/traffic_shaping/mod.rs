@@ -286,23 +286,8 @@ impl Plugin for TrafficShaping {
             .transpose()?;
 
         {
-            let storage = if let Some(urls) = init
-                .config
-                .experimental_cache
-                .as_ref()
-                .map(|cache| cache.urls.clone())
-            {
-                Some(
-                    RedisCacheStorage::new(
-                        urls,
-                        None,
-                        init.config
-                            .experimental_cache
-                            .as_ref()
-                            .and_then(|c| c.timeout),
-                    )
-                    .await?,
-                )
+            let storage = if let Some(config) = init.config.experimental_cache.as_ref() {
+                Some(RedisCacheStorage::new(config.clone()).await?)
             } else {
                 None
             };
