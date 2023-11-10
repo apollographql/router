@@ -49,10 +49,6 @@ use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tracing_core::callsite::DefaultCallsite;
-use tracing_core::Callsite;
-use tracing_core::Interest;
-use tracing_core::Metadata;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use self::apollo::ForwardValues;
@@ -360,10 +356,6 @@ impl Plugin for Telemetry {
                     async move {
                         let span = Span::current();
                         span.set_dyn_attributes(custom_attributes);
-                        let trace_id = TraceId::maybe_new()
-                            .map(|t| t.to_string())
-                            .unwrap_or_default();
-                        span.record("trace_id", trace_id);
                         let response: Result<router::Response, BoxError> = fut.await;
 
                         span.record(
