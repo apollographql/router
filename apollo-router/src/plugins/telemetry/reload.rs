@@ -210,7 +210,6 @@ where
 
         // we only make the sampling decision on the root span. If we reach here for any other span,
         // it means that the parent span was not enabled, so we should not enable this span either
-        // TODO take the conf option to check the root span name
         if meta.name() != REQUEST_SPAN_NAME && meta.name() != ROUTER_SPAN_NAME {
             return false;
         }

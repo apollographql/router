@@ -403,6 +403,7 @@ impl Plugin for Telemetry {
                                 span.record(OTEL_STATUS_CODE, "Ok");
                             }
                         } else if let Err(err) = &response {
+                            span.record(OTEL_STATUS_CODE, "Error");
                             span.set_dyn_attributes(config.spans.router.attributes.on_error(err));
                         }
 
@@ -624,20 +625,6 @@ impl Plugin for Telemetry {
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         self.custom_endpoints.clone()
-    }
-}
-
-struct LateCallsite {
-    callsite: std::sync::OnceLock<DefaultCallsite>,
-}
-
-impl Callsite for LateCallsite {
-    fn set_interest(&self, interest: Interest) {
-        self.callsite.get().unwrap().set_interest(interest);
-    }
-
-    fn metadata(&self) -> &Metadata<'_> {
-        self.callsite.get().unwrap().metadata()
     }
 }
 
