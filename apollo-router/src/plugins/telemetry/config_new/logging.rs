@@ -18,6 +18,7 @@ use serde::Deserializer;
 use crate::configuration::ConfigurationError;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::experimental_when_header::HeaderLoggingCondition;
+use crate::plugins::telemetry::resource::ConfigResource;
 use crate::services::SupergraphRequest;
 
 /// Logging configuration.
@@ -81,6 +82,20 @@ pub(crate) struct LoggingCommon {
     pub(crate) service_namespace: Option<String>,
     /// The Open Telemetry resource
     pub(crate) resource: BTreeMap<String, AttributeValue>,
+}
+
+impl ConfigResource for LoggingCommon {
+    fn service_name(&self) -> &Option<String> {
+        &self.service_name
+    }
+
+    fn service_namespace(&self) -> &Option<String> {
+        &self.service_namespace
+    }
+
+    fn resource(&self) -> &BTreeMap<String, AttributeValue> {
+        &self.resource
+    }
 }
 
 #[allow(dead_code)]
