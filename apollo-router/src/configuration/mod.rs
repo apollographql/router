@@ -168,6 +168,10 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_graphql_validation_mode: GraphQLValidationMode,
 
+    /// Set the API schema generation implementation to use.
+    #[serde(default)]
+    pub(crate) experimental_api_schema_generation_mode: ApiSchemaMode,
+
     /// Plugin configuration
     #[serde(default)]
     pub(crate) plugins: UserPlugins,
@@ -200,6 +204,21 @@ impl PartialEq for Configuration {
 #[derivative(Debug)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum GraphQLValidationMode {
+    /// Use the new Rust-based implementation.
+    New,
+    /// Use the old JavaScript-based implementation.
+    #[default]
+    Legacy,
+    /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
+    /// implementations disagree.
+    Both,
+}
+
+/// GraphQL validation modes.
+#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derivative(Debug)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ApiSchemaMode {
     /// Use the new Rust-based implementation.
     New,
     /// Use the old JavaScript-based implementation.
@@ -292,6 +311,7 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
+        experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
         experimental_batching: Option<Batching>,
     ) -> Result<Self, ConfigurationError> {
         #[cfg(not(test))]
@@ -319,6 +339,7 @@ impl Configuration {
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
             experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
+            experimental_api_schema_generation_mode:  experimental_api_schema_generation_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -367,6 +388,7 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         graphql_validation_mode: Option<GraphQLValidationMode>,
         experimental_batching: Option<Batching>,
+        experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -378,6 +400,8 @@ impl Configuration {
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
             experimental_graphql_validation_mode: graphql_validation_mode.unwrap_or_default(),
+            experimental_api_schema_generation_mode: experimental_api_schema_generation_mode
+                .unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },

@@ -1,25 +1,32 @@
+use std::any::type_name;
 use std::collections::HashMap;
+use std::fmt::Debug;
 
 use schemars::gen::SchemaGenerator;
 use schemars::schema::Schema;
 use schemars::JsonSchema;
+use serde::de::Error;
+use serde::de::MapAccess;
+use serde::de::Visitor;
 use serde::Deserialize;
+use serde::Deserializer;
+#[cfg(test)]
+use serde::Serialize;
+use serde_json::Map;
+use serde_json::Value;
 
 use crate::plugins::telemetry::config::AttributeValue;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[allow(dead_code)]
-#[derive(Clone, Deserialize, Debug)]
-#[serde(default)]
-pub(crate) struct Extendable<A, E>
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
+pub(crate) struct Extendable<Att, Ext>
 where
-    A: Default,
+    Att: Default,
 {
-    #[serde(flatten)]
-    attributes: A,
-
-    #[serde(flatten)]
-    custom: HashMap<String, E>,
+    attributes: Att,
+    custom: HashMap<String, Ext>,
 }
 
 impl Extendable<(), ()> {
@@ -31,13 +38,72 @@ impl Extendable<(), ()> {
     }
 }
 
+/// Custom Deserializer for attributes that will deserializse into a custom field if possible, but otherwise into one of the pre-defined attributes.
+impl<'de, Att, Ext> Deserialize<'de> for Extendable<Att, Ext>
+where
+    Att: Default + Deserialize<'de> + Debug + Sized,
+    Ext: Deserialize<'de> + Debug + Sized,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ExtendableVisitor<Att, Ext> {
+            _phantom: std::marker::PhantomData<(Att, Ext)>,
+        }
+        impl<'de, Att, Ext> Visitor<'de> for ExtendableVisitor<Att, Ext>
+        where
+            Att: Default + Deserialize<'de> + Debug,
+            Ext: Deserialize<'de> + Debug,
+        {
+            type Value = Extendable<Att, Ext>;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(formatter, "a map structure")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut attributes: Map<String, Value> = Map::new();
+                let mut custom: HashMap<String, Ext> = HashMap::new();
+                while let Some(key) = map.next_key()? {
+                    let value: Value = map.next_value()?;
+                    match Ext::deserialize(value.clone()) {
+                        Ok(value) => {
+                            custom.insert(key, value);
+                        }
+                        Err(_err) => {
+                            // We didn't manage to deserialize as a custom attribute, so stash the value and we'll try again later
+                            attributes.insert(key, value);
+                        }
+                    }
+                }
+
+                let attributes =
+                    Att::deserialize(Value::Object(attributes)).map_err(A::Error::custom)?;
+
+                Ok(Extendable { attributes, custom })
+            }
+        }
+
+        deserializer.deserialize_map(ExtendableVisitor::<Att, Ext> {
+            _phantom: Default::default(),
+        })
+    }
+}
+
 impl<A, E> JsonSchema for Extendable<A, E>
 where
     A: Default + JsonSchema,
     E: JsonSchema,
 {
     fn schema_name() -> String {
-        "extendable_attribute".to_string()
+        format!(
+            "extendable_attribute_{}_{}",
+            type_name::<A>(),
+            type_name::<E>()
+        )
     }
 
     fn json_schema(gen: &mut SchemaGenerator) -> Schema {
@@ -82,13 +148,12 @@ pub(crate) enum RouterEvent {
 #[derive(Deserialize, JsonSchema, Clone, Debug, Default)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum DefaultAttributeRequirementLevel {
+    /// Attributes that are marked as required or recommended in otel semantic conventions and apollo documentation will be included
+    Recommended,
+
     /// Attributes that are marked as required in otel semantic conventions and apollo documentation will be included (default)
     #[default]
     Required,
-    /// Attributes that are marked as required or recommended in otel semantic conventions and apollo documentation will be included
-    Recommended,
-    /// Attributes that are marked as required, recommended or opt-in in otel semantic conventions and apollo documentation will be included
-    OptIn,
 }
 
 #[allow(dead_code)]
@@ -158,6 +223,7 @@ pub(crate) enum RouterCustomAttribute {
 }
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationName {
     /// The raw operation name.
@@ -168,6 +234,16 @@ pub(crate) enum OperationName {
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum Query {
+    /// The raw query kind.
+    String,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationKind {
     /// The raw operation kind.
@@ -176,6 +252,7 @@ pub(crate) enum OperationKind {
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum SupergraphCustomAttribute {
     OperationName {
@@ -189,6 +266,14 @@ pub(crate) enum SupergraphCustomAttribute {
     OperationKind {
         /// The operation kind from the query (query|mutation|subscription).
         operation_kind: OperationKind,
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<String>,
+    },
+    Query {
+        /// The graphql query.
+        query: Query,
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -276,6 +361,14 @@ pub(crate) enum SubgraphCustomAttribute {
         /// The kind of the subgraph operation (query|mutation|subscription).
         subgraph_operation_kind: OperationKind,
     },
+    SubgraphQuery {
+        /// The graphql query to the subgraph.
+        subgraph_query: Query,
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<String>,
+    },
     SubgraphQueryVariable {
         /// The name of a subgraph query variable.
         subgraph_query_variable: String,
@@ -320,6 +413,14 @@ pub(crate) enum SubgraphCustomAttribute {
     SupergraphOperationKind {
         /// The supergraph query operation kind (query|mutation|subscription).
         supergraph_operation_kind: OperationKind,
+    },
+    SupergraphQuery {
+        /// The supergraph query to the subgraph.
+        supergraph_query: Query,
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<String>,
     },
     SupergraphQueryVariable {
         /// The supergraph query variable name.
@@ -389,7 +490,7 @@ pub(crate) enum SubgraphCustomAttribute {
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct RouterAttributes {
     /// Http attributes from Open Telemetry semantic conventions.
     #[serde(flatten)]
@@ -401,7 +502,8 @@ pub(crate) struct RouterAttributes {
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(default)]
+#[cfg_attr(test, derive(Serialize))]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct SupergraphAttributes {
     /// The GraphQL document being executed.
     /// Examples:
@@ -427,34 +529,34 @@ pub(crate) struct SupergraphAttributes {
 
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphAttributes {
     /// The name of the subgraph
     /// Examples:
     /// * products
     /// Requirement level: Required
-    #[serde(rename = "graphql.federation.subgraph.name")]
-    graphql_federation_subgraph_name: Option<bool>,
+    #[serde(rename = "subgraph.name")]
+    subgraph_name: Option<bool>,
     /// The GraphQL document being executed.
     /// Examples:
     /// * query findBookById { bookById(id: ?) { name } }
     /// Requirement level: Recommended
-    #[serde(rename = "graphql.document")]
-    graphql_document: Option<bool>,
+    #[serde(rename = "subgraph.graphql.document")]
+    subgraph_graphql_document: Option<bool>,
     /// The name of the operation being executed.
     /// Examples:
     /// * findBookById
     /// Requirement level: Recommended
-    #[serde(rename = "graphql.operation.name")]
-    graphql_operation_name: Option<bool>,
+    #[serde(rename = "subgraph.graphql.operation.name")]
+    subgraph_graphql_operation_name: Option<bool>,
     /// The type of the operation being executed.
     /// Examples:
     /// * query
     /// * subscription
     /// * mutation
     /// Requirement level: Recommended
-    #[serde(rename = "graphql.operation.type")]
-    graphql_operation_type: Option<bool>,
+    #[serde(rename = "subgraph.graphql.operation.type")]
+    subgraph_graphql_operation_type: Option<bool>,
 }
 
 /// Common attributes for http server and client.
@@ -642,7 +744,7 @@ pub(crate) struct HttpServerAttributes {
     url_scheme: Option<bool>,
 }
 
-/// Attrubtes for HTTP clients
+/// Attributes for HTTP clients
 /// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client
 #[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
@@ -695,4 +797,52 @@ pub(crate) struct HttpClientAttributes {
     /// Requirement level: Required
     #[serde(rename = "url.full")]
     url_full: Option<bool>,
+}
+
+#[cfg(test)]
+mod test {
+    use insta::assert_yaml_snapshot;
+
+    use crate::plugins::telemetry::config_new::attributes::Extendable;
+    use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
+    use crate::plugins::telemetry::config_new::attributes::SupergraphCustomAttribute;
+
+    #[test]
+    fn test_extendable_serde() {
+        let mut settings = insta::Settings::clone_current();
+        settings.set_sort_maps(true);
+        settings.bind(|| {
+            let o = serde_json::from_value::<
+                Extendable<SupergraphAttributes, SupergraphCustomAttribute>,
+            >(serde_json::json!({
+                    "graphql.operation.name": true,
+                    "graphql.operation.type": true,
+                    "custom_1": {
+                        "operation_name": "string"
+                    },
+                    "custom_2": {
+                        "operation_name": "string"
+                    }
+            }))
+            .unwrap();
+            assert_yaml_snapshot!(o);
+        });
+    }
+
+    #[test]
+    fn test_extendable_serde_fail() {
+        serde_json::from_value::<Extendable<SupergraphAttributes, SupergraphCustomAttribute>>(
+            serde_json::json!({
+                    "graphql.operation": true,
+                    "graphql.operation.type": true,
+                    "custom_1": {
+                        "operation_name": "string"
+                    },
+                    "custom_2": {
+                        "operation_name": "string"
+                    }
+            }),
+        )
+        .expect_err("Should have errored");
+    }
 }

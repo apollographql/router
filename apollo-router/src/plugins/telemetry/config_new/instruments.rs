@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -9,6 +11,7 @@ use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphCustomAttribute;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphCustomAttribute;
+use crate::plugins::telemetry::config_new::conditions::Condition;
 
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
@@ -35,19 +38,37 @@ pub(crate) struct Instruments {
 struct RouterInstruments {
     /// Histogram of server request duration
     #[serde(rename = "http.server.request.duration")]
-    http_server_request_duration: bool,
+    http_server_request_duration:
+        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterCustomAttribute>>,
 
     /// Gauge of active requests
     #[serde(rename = "http.server.active_requests")]
-    http_server_active_requests: bool,
+    http_server_active_requests:
+        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterCustomAttribute>>,
 
     /// Histogram of server request body size
     #[serde(rename = "http.server.request.body.size")]
-    http_server_request_body_size: bool,
+    http_server_request_body_size:
+        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterCustomAttribute>>,
 
     /// Histogram of server response body size
     #[serde(rename = "http.server.response.body.size")]
-    http_server_response_body_size: bool,
+    http_server_response_body_size:
+        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterCustomAttribute>>,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields, untagged)]
+enum DefaultedStandardInstrument<T> {
+    Bool(bool),
+    Extendable { attributes: T },
+}
+
+impl<T> Default for DefaultedStandardInstrument<T> {
+    fn default() -> Self {
+        DefaultedStandardInstrument::Bool(true)
+    }
 }
 
 #[allow(dead_code)]
@@ -76,14 +97,15 @@ struct SubgraphInstruments {
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 pub(crate) struct Instrument<A, E>
 where
-    A: Default,
+    A: Default + Debug,
+    E: Debug,
 {
     /// The type of instrument.
     #[serde(rename = "type")]
     ty: InstrumentType,
 
     /// The value of the instrument.
-    value: InstrumentValue,
+    value: InstrumentValue<E>,
 
     /// The description of the instrument.
     description: String,
@@ -94,6 +116,10 @@ where
     /// Attributes to include on the instrument.
     #[serde(default = "Extendable::empty::<A, E>")]
     attributes: Extendable<A, E>,
+
+    /// The instrument conditions.
+    #[serde(default = "Condition::empty::<E>")]
+    condition: Condition<E>,
 }
 
 #[allow(dead_code)]
@@ -115,8 +141,16 @@ pub(crate) enum InstrumentType {
 
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum InstrumentValue<T> {
+    Standard(Standard),
+    Custom(T),
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum InstrumentValue {
+pub(crate) enum Standard {
     Duration,
     Unit,
     Active,
