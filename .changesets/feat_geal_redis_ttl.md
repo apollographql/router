@@ -6,8 +6,8 @@ It is now possible to set an expiration for distributed caching entries, both fo
 supergraph:
   query_planning:
     experimental_cache:
-      redis: #highlight-line
-        urls: ["redis://..."] #highlight-line
+      redis:
+        urls: ["redis://..."]
         timeout: 5ms # Optional, by default: 2ms
         ttl: 24h # Optional, by default no expiration
 ```
