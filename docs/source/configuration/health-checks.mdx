@@ -11,7 +11,7 @@ You can change this by setting `health_check`:
 health_check:
   listen: 127.0.0.1:8088
   enabled: true
-  path: /health
+  path: /health # Optional, default: /health
 ```
 
 Each option is configurable. For example, we might want to set our health check to `127.0.0.1:8090/healthz`:
