@@ -226,7 +226,8 @@ impl RedisCacheStorage {
                         if result.scheme() == "redis" {
                             let _ = result.set_scheme("redis-cluster");
                         }
-                    } else if url.scheme() == "rediss" {
+                    }
+                    if url.scheme() == "rediss" {
                         let _ = url.set_scheme("rediss-cluster");
                         if result.scheme() == "rediss" {
                             let _ = result.set_scheme("rediss-cluster");
