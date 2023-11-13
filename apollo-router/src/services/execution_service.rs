@@ -5,6 +5,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use futures::channel::mpsc;
 use futures::channel::mpsc::Receiver;
@@ -36,6 +38,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
@@ -117,6 +120,10 @@ impl ExecutionService {
             .query_plan
             .is_deferred(operation_name.as_deref(), &variables);
         let is_subscription = req.query_plan.is_subscription(operation_name.as_deref());
+        let mut claims = None;
+        if is_deferred {
+            claims = context.get(APOLLO_AUTHENTICATION_JWT_CLAIMS)?
+        }
         let (tx_close_signal, subscription_handle) = if is_subscription {
             let (tx_close_signal, rx_close_signal) = broadcast::channel(1);
             (
@@ -175,6 +182,45 @@ impl ExecutionService {
         let execution_span = Span::current();
 
         let stream = stream
+            .map(move |mut response: Response| {
+                // Enforce JWT expiry for deferred responses
+                if is_deferred {
+                    let ts_opt = claims.as_ref().and_then(|x: &Value| {
+                        if !x.is_object() {
+                            tracing::error!("JWT claims should be an object");
+                            return None;
+                        }
+                        let claims = x.as_object().expect("claims should be an object");
+                        let exp = claims.get("exp")?;
+                        if !exp.is_number() {
+                            tracing::error!("JWT 'exp' (expiry) claim should be a number");
+                            return None;
+                        }
+                        exp.as_i64()
+                    });
+                    if let Some(ts) = ts_opt {
+                        let now = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .expect("we should not run before EPOCH")
+                            .as_secs() as i64;
+                        if ts < now {
+                            tracing::debug!("token has expired, shut down the subscription");
+                            response = Response::builder()
+                                .has_next(false)
+                                .error(
+                                    Error::builder()
+                                        .message(
+                                            "deferred response closed because the JWT has expired",
+                                        )
+                                        .extension_code("DEFERRED_RESPONSE_JWT_EXPIRED")
+                                        .build(),
+                                )
+                                .build()
+                        }
+                    }
+                }
+                response
+            })
             .filter_map(move |response: Response| {
                 ready(execution_span.in_scope(|| {
                     Self::process_graphql_response(
@@ -236,18 +282,33 @@ impl ExecutionService {
 
         tracing::debug_span!("format_response").in_scope(|| {
             let mut paths = Vec::new();
-            if ! query.unauthorized.paths.is_empty() {
-                if query.unauthorized.log_errors {
+            if !query.unauthorized.paths.is_empty() {
+                if query.unauthorized.errors.log {
                     let unauthorized_paths = query.unauthorized.paths.iter().map(|path| path.to_string()).collect::<Vec<_>>();
 
                     event!(Level::ERROR, unauthorized_query_paths = ?unauthorized_paths, "Authorization error",);
                 }
 
-                for path in &query.unauthorized.paths {
-                    response.errors.push(Error::builder()
-                    .message("Unauthorized field or type")
-                    .path(path.clone())
-                    .extension_code("UNAUTHORIZED_FIELD_OR_TYPE").build());
+                match query.unauthorized.errors.response {
+                    crate::plugins::authorization::ErrorLocation::Errors => for path in &query.unauthorized.paths {
+                        response.errors.push(Error::builder()
+                        .message("Unauthorized field or type")
+                        .path(path.clone())
+                        .extension_code("UNAUTHORIZED_FIELD_OR_TYPE").build());
+                    },
+                    crate::plugins::authorization::ErrorLocation::Extensions =>{
+                        if !query.unauthorized.paths.is_empty() {
+                            let mut v = vec![];
+                            for path in &query.unauthorized.paths{
+                                v.push(serde_json_bytes::to_value(Error::builder()
+                                .message("Unauthorized field or type")
+                                .path(path.clone())
+                                .extension_code("UNAUTHORIZED_FIELD_OR_TYPE").build()).expect("error serialization should not fail"));
+                            }
+                            response.extensions.insert("authorizationErrors", Value::Array(v));
+                        }
+                    },
+                    crate::plugins::authorization::ErrorLocation::Disabled => {},
                 }
             }
 

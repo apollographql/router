@@ -30,8 +30,6 @@ type Subscription {
 }
 ```
 
-> ⚠️ **Important:** To use subscriptions with your self-hosted router, you must first complete certain [prerequisites](#prerequisites).
-
 ## What are subscriptions for?
 
 GraphQL subscriptions enable clients to receive continual, real-time updates whenever new data becomes available. Unlike queries and mutations, subscriptions are _long-lasting_. This means a client can receive multiple updates from a single subscription:
@@ -76,14 +74,14 @@ flowchart LR;
     }
     ```
 
-   - **The client does _not_ use a WebSocket protocol!** Instead, it receives updates via [multipart HTTP responses](./subscription-multipart-protocol/).
+   - **The client does _not_ use a WebSocket protocol.** Instead, it receives updates via [multipart HTTP responses](./subscription-multipart-protocol/).
    - By using HTTP for subscriptions, clients can execute _all_ GraphQL operation types over HTTP instead of using two different protocols.
    - Apollo Client for [Web](/react/data/subscriptions#http), [Kotlin](/kotlin/essentials/subscriptions#configuring-http-subscriptions), and [iOS](/ios/fetching/subscriptions#http) all support GraphQL subscriptions over HTTP with minimal configuration. See each library's documentation for details.
 
 2. When your router receives a subscription, it executes that _same_ subscription against whichever subgraph defines the requested field (`stockPricesChanged` in the example above).
 
    - This communication usually _does_ use [a WebSocket subprotocol](#websocket-setup), for compatibility with most subgraph libraries.
-   - An HTTP-callback-based protocol is also available in preview. See [HTTP callback setup](#http-callback-setup-preview).
+   - An HTTP-callback-based protocol is also available in preview. See [HTTP callback setup](#http-callback-setup).
 
 3. The subgraph periodically sends new data to your router. Whenever it does, the router returns that data to the client in an additional HTTP response "chunk".
    - A subscription can include federated entity fields that are defined in _other_ subgraphs. If it does, the router _first_ fetches those fields by querying the corresponding subgraphs (such as **Portfolios** in the diagram above). These queries use HTTP as usual.
@@ -98,7 +96,7 @@ flowchart LR;
 
 ## Prerequisites
 
-⚠️ **Before you add `Subscription` fields to your subgraphs,** do _all_ of the following _in the order shown_ to prevent schema composition errors:
+**Before you add `Subscription` fields to your subgraphs,** do _all_ of the following _in the order shown_ to prevent schema composition errors:
 
 1. Update your Apollo Router instances to version `1.22.0` or later. [Download the latest version.](../quickstart/)
     - Previous versions of the Apollo Router don't support subscription operations.
@@ -134,11 +132,9 @@ After you complete these prerequisites, you can safely [configure your router](#
 
 ## Router setup
 
-> ⚠️ **Make sure you've completed all [prerequisites](#prerequisites)!**
+After completing all [prerequisites](#prerequisites), in your router's [YAML config file](../configuration/overview/#yaml-config-file), you configure how the router communicates with each of your subgraphs when executing GraphQL subscriptions.
 
-In your router's [YAML config file](../configuration/overview/#yaml-config-file), you configure how the router communicates with each of your subgraphs when executing GraphQL subscriptions.
-
-The Apollo Router supports two popular [WebSocket protocols](#websocket-setup) for subscriptions, and it also provides preview support for an [HTTP-callback-based protocol](#http-callback-setup-preview). **Your router must use whichever protocol is expected by each subgraph!**
+The Apollo Router supports two popular [WebSocket protocols](#websocket-setup) for subscriptions, and it also provides preview support for an [HTTP-callback-based protocol](#http-callback-setup). Your router must use whichever protocol is expected by each subgraph.
 
 ### WebSocket setup
 
@@ -150,11 +146,11 @@ subscription:
   mode:
     passthrough:
       all: # The router uses these subscription settings UNLESS overridden per-subgraph
-        path: /subscriptions # The URL path to use for subgraph subscription endpoints (Default: /ws)
+        path: /subscriptions # The absolute URL path to use for subgraph subscription endpoints (Default: /ws)
       subgraphs: # Overrides subscription settings for individual subgraphs
         reviews: # Overrides settings for the 'reviews' subgraph
-          path: /ws # Overrides '/subscriptions' defined above
-          protocol: graphql_transport_ws # The WebSocket-based subprotocol to use for subscription communication (Default: graphql_ws)
+          path: /ws # Absolute path that overrides '/subscriptions' defined above
+          protocol: graphql_ws # The WebSocket-based subprotocol to use for subscription communication (Default: graphql_ws)
 ```
 
 This example enables subscriptions in **passthrough mode**, which uses long-lived WebSocket connections.
@@ -162,19 +158,27 @@ This example enables subscriptions in **passthrough mode**, which uses long-live
 The router supports the following WebSocket subprotocols, specified via the `protocol` option:
 
 - `graphql_ws`
-  - Legacy subprotocol used by the [`subscriptions-transport-ws` library](https://github.com/apollographql/subscriptions-transport-ws), which is **unmaintained**
-  - For backward compatibility, this is the default value.
-- `graphql_transport_ws`
   - Used by the [graphql-ws](https://github.com/enisdenjo/graphql-ws) library
-  - This subprotocol is recommended for GraphQL server libraries implementing WebSocket-based subscriptions.
+  - This subprotocol is the **default value** and is recommended for GraphQL server libraries implementing WebSocket-based subscriptions.
+- `graphql_transport_ws`
+  - Legacy subprotocol used by the [`subscriptions-transport-ws` library](https://github.com/apollographql/subscriptions-transport-ws), which is **unmaintained** but provided for backward compatibility. 
 
-> ⚠️ **Your router must use whichever subprotocol is expected by each of your subgraphs!**
-
-By default, the router uses `graphql_ws` for all subgraphs. You can change this global default and/or override it for individual subgraphs by setting the `protocol` key as shown above.
+By default, the router uses the `graphql_ws` protocol option for all subgraphs. You can change this global default and/or override it for individual subgraphs by setting the `protocol` key as shown above.
 
 Your router creates a separate WebSocket connection for each client subscription, _unless_ it can perform [subscription deduplication](#subscription-deduplication).
 
-### HTTP callback setup (preview)
+### HTTP callback setup
+
+<PreviewFeature />
+
+<Note>
+  
+* Your router must use whichever subprotocol is expected by each of your subgraphs.
+* To disambiguate between `graph-ws` and `graph_ws`:
+  * `graph-ws` (with a hyphen `-`) is the name of the [library](https://github.com/enisdenjo/graphql-ws) that uses the recommended `graphql_ws` (with un underscore `_`) WebSocket subprotocol. 
+* Each `path` must be set as an _absolute path_. For example, given `http://localhost:8080/foo/bar/graphql/ws`, set the absolute path as `path: "/foo/bar/graphql/ws"`.
+
+</Note>
 
 The Apollo Router provides preview support for receiving subgraph subscription events via HTTP callbacks, _instead of_ over a persistent WebSocket connection. This **callback mode** provides the following advantages over WebSocket-based subscriptions:
 
@@ -183,13 +187,11 @@ The Apollo Router provides preview support for receiving subgraph subscription e
 
 Callback mode requires your subgraph library to support the router's [HTTP callback protocol](./subscription-callback-protocol/).
 
-<blockquote>
-
-**This [HTTP callback protocol](./subscription-callback-protocol/) is in [preview](/resources/product-launch-stages#preview)!** Breaking changes to the protocol might occur during the preview period.
+<Note>
 
 Currently, [Apollo Server 4.9](https://github.com/apollographql/apollo-server/releases/tag/%40apollo%2Fserver%404.9.0) supports a *preview* of this protocol. If you're implementing support in a subgraph library, please [create a GitHub discussion](https://github.com/apollographql/router/discussions/).
 
-</blockquote>
+</Note>
 
 Here's an example configuration that sets up subgraph subscriptions in callback mode:
 
@@ -207,7 +209,7 @@ subscription:
 
 ### Using a combination of modes
 
-If some of your subgraphs require [passthrough mode](#websocket-setup) and others require [callback mode](#http-callback-setup-preview) for subscriptions, you can apply different modes to different subgraphs in your configuration:
+If some of your subgraphs require [passthrough mode](#websocket-setup) and others require [callback mode](#http-callback-setup) for subscriptions, you can apply different modes to different subgraphs in your configuration:
 
 ```yaml title="router.yaml"
 subscription:
@@ -217,7 +219,7 @@ subscription:
       subgraphs:
         reviews: #highlight-line
           path: /ws
-          protocol: graphql_transport_ws
+          protocol: graphql_ws
     preview_callback:
       public_url: http://public_url_of_my_router_instance:4000
       listen: 0.0.0.0:4000
@@ -228,9 +230,13 @@ subscription:
 
 In this example, the `reviews` subgraph uses WebSocket and the `accounts` subgraph uses HTTP-based callbacks.
 
-> **Important:** If you configure both passthrough mode _and_ callback mode for a particular subgraph, the router uses the passthrough mode configuration.
->
-> If any subgraphs require callback mode, **do not set the `passthrough.all` key**. If you do, the router uses the passthrough mode configuration for _all_ subgraphs.
+<Caution>
+
+If you configure both passthrough mode _and_ callback mode for a particular subgraph, the router uses the passthrough mode configuration.
+
+If any subgraphs require callback mode, **do not set the `passthrough.all` key**. If you do, the router uses the passthrough mode configuration for _all_ subgraphs.
+
+</Caution>
 
 ## Example execution
 
@@ -265,7 +271,7 @@ type Review {
 
 </CodeColumns>
 
-Now, let's say a client executes the following subscription against our router ([over HTTP!](#how-it-works)):
+Now, let's say a client executes the following subscription against our router ([over HTTP](#how-it-works)):
 
 ```graphql
 subscription OnProductPriceChanged {
@@ -274,7 +280,7 @@ subscription OnProductPriceChanged {
     name
     price
     reviews {
-      # Defined in Reviews subgraph!
+      # Defined in Reviews subgraph
       score
     }
   }
@@ -289,21 +295,19 @@ subscription {
     id # Added for entity fetching
     name
     price
-    # Reviews fields removed!
+    # Reviews fields removed
   }
 }
 ```
 
-<blockquote>
-
-**Note the following:**
+<Note>
 
 - This operation _adds_ the `Product.id` field. The router needs `@key` fields of the `Product` entity to merge entity fields from across subgraphs.
 - This operation _removes_ all fields defined in the Reviews subgraph, because the Products subgraph can't resolve them.
 
-</blockquote>
+</Note>
 
-At any point after the subscription is initiated, the Products subgraph might send updated data to our router. Whenever this happens, the router _does not_ immediately return this data to the client, because it's missing requested fields from the Reviews subgraph!
+At any point after the subscription is initiated, the Products subgraph might send updated data to our router. Whenever this happens, the router _does not_ immediately return this data to the client, because it's missing requested fields from the Reviews subgraph.
 
 Instead, our router executes a standard GraphQL _query_ against the Reviews subgraph to fetch the missing entity fields:
 
@@ -354,15 +358,15 @@ content-type: application/json
 --graphql--
 ```
 
-> This example subscription only emits three events and then directly closes the connection.
->
-> For more information on this multipart HTTP subscription protocol, see [this article](./subscription-multipart-protocol/).
+This example subscription only emits three events and then directly closes the connection.
+
+For more information on this multipart HTTP subscription protocol, see [this article](./subscription-multipart-protocol/).
 
 ## Subscription deduplication
 
 **By default, the Apollo Router deduplicates identical subscriptions.** This can dramatically reduce load on both your router _and_ your subgraphs, because the router doesn't need to open a new connection if an _existing_ connection is already handling the exact same subscription.
 
-> For example, if thousands of clients all subscribe to real-time score updates for the same sports game, your router only needs to maintain _one_ connection to your `sportsgames` subgraph to receive events for _all_ of those subscriptions.
+For example, if thousands of clients all subscribe to real-time score updates for the same sports game, your router only needs to maintain _one_ connection to your `sportsgames` subgraph to receive events for _all_ of those subscriptions.
 
 The router considers subscription operations **identical** if _all_ of the following are true:
 
@@ -399,14 +403,10 @@ Disabling deduplication is useful if you _need_ to create a separate connection 
 
 Whenever your router's supergraph schema is updated, **the router terminates all active subscriptions.**
 
-<blockquote>
-
 Your router's supergraph schema is updated in the following cases:
 
 - Your router regularly polls GraphOS for its supergraph schema, and an updated schema becomes available.
 - Your router obtains its supergraph schema from a local file, which it watches for updates if the [`--hot-reload` option](../configuration/overview#--hr----hot-reload) is set.
-
-</blockquote>
 
 When the router terminates subscriptions this way, it sends the following as a final response payload to all active subscribing clients:
 
@@ -454,13 +454,17 @@ fn subgraph_service(service, subgraph) {
 }
 ```
 
-> **Note:** If you specify both a `context` entry _and_ an `Authorization` header, the `context` entry takes precedence.
+<Note>
+
+If you specify both a `context` entry _and_ an `Authorization` header, the `context` entry takes precedence.
+
+</Note>
 
 ### Expanding event queue capacity
 
 If your router receives a high volume of events for a particular subscription, it might accumulate a backlog of those events to send to clients. To handle this backlog, the router maintains an in-memory queue of unsent events.
 
-> The router maintains a _separate_ event queue for _each_ of its active subscription connections to subgraphs.
+The router maintains a _separate_ event queue for _each_ of its active subscription connections to subgraphs.
 
 You can configure the size of each event queue in your router's YAML config file, like so:
 
@@ -470,7 +474,7 @@ subscription:
   queue_capacity: 100000 # Default: 128
 ```
 
-> The value of `queue_capacity` corresponds to the _maximum number of subscription events for each queue_, not the _total size_ of those events.
+The value of `queue_capacity` corresponds to the _maximum number of subscription events for each queue_, not the _total size_ of those events.
 
 Whenever your router receives a subscription event when its queue is full, it _discards_ the _oldest_ unsent event in the queue and enqueues the newly received event. The discarded event is _not_ sent to subscribing clients.
 

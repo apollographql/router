@@ -402,13 +402,16 @@ impl RouterService {
         if results.len() == 1 {
             Ok(results.pop().expect("we should have at least one response"))
         } else {
-            let first = results.pop().expect("we should have at least one response");
+            let mut results_it = results.into_iter();
+            let first = results_it
+                .next()
+                .expect("we should have at least one response");
             let (parts, body) = first.response.into_parts();
             let context = first.context;
             let mut bytes = BytesMut::new();
             bytes.put_u8(b'[');
             bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
-            for result in results {
+            for result in results_it {
                 bytes.put(&b", "[..]);
                 bytes.extend_from_slice(&hyper::body::to_bytes(result.response.into_body()).await?);
             }
@@ -599,19 +602,22 @@ impl RouterService {
             }
         };
 
-        let mut ok_results = graphql_requests?;
+        let ok_results = graphql_requests?;
         let mut results = Vec::with_capacity(ok_results.len());
-        let first = ok_results
-            .pop()
-            .expect("We must have at least one response");
-        let sg = http::Request::from_parts(parts, first);
 
-        if !ok_results.is_empty() {
+        if ok_results.len() > 1 {
             context
                 .private_entries
                 .lock()
                 .insert(self.experimental_batching.clone());
         }
+
+        let mut ok_results_it = ok_results.into_iter();
+        let first = ok_results_it
+            .next()
+            .expect("we should have at least one request");
+        let sg = http::Request::from_parts(parts, first);
+
         // Building up the batch of supergraph requests is tricky.
         // Firstly note that any http extensions are only propagated for the first request sent
         // through the pipeline. This is because there is simply no way to clone http
@@ -626,7 +632,7 @@ impl RouterService {
         // would mean all the requests in a batch shared the same set of private entries and review
         // comments expressed the sentiment that this may be a bad thing...)
         //
-        for graphql_request in ok_results {
+        for graphql_request in ok_results_it {
             // XXX Lose http extensions, is that ok?
             let mut new = http_ext::clone_http_request(&sg);
             *new.body_mut() = graphql_request;
@@ -787,11 +793,14 @@ impl RouterCreator {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use http::Uri;
     use mime::APPLICATION_JSON;
     use serde_json_bytes::json;
 
     use super::*;
+    use crate::services::subgraph;
     use crate::services::supergraph;
     use crate::Context;
 
@@ -1055,13 +1064,23 @@ mod tests {
                 .build()
                 .unwrap()
                 .supergraph_request
-                .map(|req: crate::request::Request| {
-                    // Modify the request so that it is a valid array of requests.
-                    let mut json_bytes = serde_json::to_vec(&req).unwrap();
+                .map(|req_2: crate::request::Request| {
+                    // Create clones of our standard query and update it to have 3 unique queries
+                    let mut req_1 = req_2.clone();
+                    let mut req_3 = req_2.clone();
+                    req_1.query = req_2.query.clone().map(|x| x.replace("upc\n", ""));
+                    req_3.query = req_2.query.clone().map(|x| x.replace("id name", "name"));
+
+                    // Modify the request so that it is a valid array of 3 requests.
+                    let mut json_bytes_1 = serde_json::to_vec(&req_1).unwrap();
+                    let mut json_bytes_2 = serde_json::to_vec(&req_2).unwrap();
+                    let mut json_bytes_3 = serde_json::to_vec(&req_3).unwrap();
                     let mut result = vec![b'['];
-                    result.append(&mut json_bytes.clone());
+                    result.append(&mut json_bytes_1);
                     result.push(b',');
-                    result.append(&mut json_bytes);
+                    result.append(&mut json_bytes_2);
+                    result.push(b',');
+                    result.append(&mut json_bytes_3);
                     result.push(b']');
                     hyper::Body::from(result)
                 });
@@ -1290,5 +1309,71 @@ mod tests {
         let bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let data = String::from_utf8_lossy(&bytes);
         assert_eq!(expected_response, data);
+    }
+
+    /// <https://github.com/apollographql/router/issues/3541>
+    #[tokio::test]
+    async fn escaped_quotes_in_string_literal() {
+        let query = r#"
+            query TopProducts($first: Int) {
+                topProducts(first: $first) {
+                    name
+                    reviewsForAuthor(authorID: "\"1\"") {
+                        body
+                    }
+                }
+            }
+        "#;
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .variable("first", 2)
+            .build()
+            .unwrap();
+        let config = serde_json::json!({
+            "include_subgraph_errors": {"all": true},
+        });
+        let subgraph_query_log = Arc::new(Mutex::new(Vec::new()));
+        let subgraph_query_log_2 = subgraph_query_log.clone();
+        let mut response = crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .subgraph_hook(move |subgraph_name, service| {
+                let is_reviews = subgraph_name == "reviews";
+                let subgraph_name = subgraph_name.to_owned();
+                let subgraph_query_log_3 = subgraph_query_log_2.clone();
+                service
+                    .map_request(move |request: subgraph::Request| {
+                        subgraph_query_log_3.lock().unwrap().push((
+                            subgraph_name.clone(),
+                            request.subgraph_request.body().query.clone(),
+                        ));
+                        request
+                    })
+                    .map_response(move |mut response| {
+                        if is_reviews {
+                            // Replace "couldn't find mock for query" error with empty data
+                            let graphql_response = response.response.body_mut();
+                            graphql_response.errors.clear();
+                            graphql_response.data = Some(serde_json_bytes::json!({
+                                "_entities": {"reviews": []},
+                            }));
+                        }
+                        response
+                    })
+                    .boxed()
+            })
+            .build_supergraph()
+            .await
+            .unwrap()
+            .oneshot(request)
+            .await
+            .unwrap();
+        let graphql_response = response.next_response().await.unwrap();
+        let subgraph_query_log = subgraph_query_log.lock().unwrap();
+        insta::assert_debug_snapshot!((graphql_response, &subgraph_query_log));
+        let subgraph_query = subgraph_query_log[1].1.as_ref().unwrap();
+
+        // The string literal made it through unchanged:
+        assert!(subgraph_query.contains(r#"reviewsForAuthor(authorID:"\"1\"")"#));
     }
 }
