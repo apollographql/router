@@ -61,12 +61,7 @@ impl Plugin for EntityCache {
     where
         Self: Sized,
     {
-        let storage = RedisCacheStorage::new(
-            init.config.redis.urls,
-            init.config.ttl,
-            init.config.redis.timeout,
-        )
-        .await?;
+        let storage = RedisCacheStorage::new(init.config.redis).await?;
 
         Ok(Self { storage })
     }
