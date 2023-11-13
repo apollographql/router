@@ -1141,6 +1141,46 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "experimental_entity_cache": {
+      "description": "Configuration for entity caching",
+      "type": "object",
+      "required": [
+        "redis"
+      ],
+      "properties": {
+        "redis": {
+          "description": "Redis cache configuration",
+          "type": "object",
+          "required": [
+            "urls"
+          ],
+          "properties": {
+            "timeout": {
+              "description": "Redis request timeout (default: 2ms)",
+              "default": null,
+              "type": "string",
+              "nullable": true
+            },
+            "ttl": {
+              "description": "TTL for entries",
+              "default": null,
+              "type": "string",
+              "nullable": true
+            },
+            "urls": {
+              "description": "List of URLs to the Redis cluster",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uri"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "experimental_graphql_validation_mode": {
       "description": "Set the GraphQL validation implementation to use.",
       "default": "legacy",

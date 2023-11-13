@@ -159,7 +159,7 @@ where
     pub(crate) async fn insert(&self, key: K, value: V) {
         if let Some(redis) = self.redis.as_ref() {
             redis
-                .insert(RedisKey(key.clone()), RedisValue(value.clone()))
+                .insert(RedisKey(key.clone()), RedisValue(value.clone()), None)
                 .await;
         }
 

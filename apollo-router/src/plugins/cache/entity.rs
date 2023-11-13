@@ -1,0 +1,603 @@
+use std::collections::HashMap;
+use std::ops::ControlFlow;
+use std::time::Duration;
+
+use http::header;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Value;
+use sha2::Digest;
+use sha2::Sha256;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+use tracing::Level;
+
+use super::cache_control::CacheControl;
+use crate::cache::redis::RedisCacheStorage;
+use crate::cache::redis::RedisKey;
+use crate::cache::redis::RedisValue;
+use crate::configuration::RedisCache;
+use crate::error::FetchError;
+use crate::graphql;
+use crate::json_ext::Object;
+use crate::layers::ServiceBuilderExt;
+use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
+use crate::plugins::authorization::CacheKeyMetadata;
+use crate::services::subgraph;
+use crate::services::supergraph;
+use crate::spec::TYPENAME;
+use crate::Context;
+
+const ENTITIES: &str = "_entities";
+pub(crate) const REPRESENTATIONS: &str = "representations";
+
+register_plugin!("apollo", "experimental_entity_cache", EntityCache);
+
+struct EntityCache {
+    storage: RedisCacheStorage,
+}
+
+/// Configuration for entity caching
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+struct Config {
+    redis: RedisCache,
+}
+
+#[async_trait::async_trait]
+impl Plugin for EntityCache {
+    type Config = Config;
+
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError>
+    where
+        Self: Sized,
+    {
+        let storage = RedisCacheStorage::new(init.config.redis).await?;
+
+        Ok(Self { storage })
+    }
+
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+        ServiceBuilder::new()
+            .map_response(|mut response: supergraph::Response| {
+                if let Some(cache_control) = response
+                    .context
+                    .private_entries
+                    .lock()
+                    .get::<CacheControl>()
+                {
+                    let _ = cache_control.to_headers(response.response.headers_mut());
+                }
+
+                response
+            })
+            .service(service)
+            .boxed()
+    }
+
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+        let cache = self.storage.clone();
+        let cache2 = self.storage.clone();
+        let name = name.to_string();
+        ServiceBuilder::new()
+            .oneshot_checkpoint_async(move |request: subgraph::Request| {
+                let name = name.clone();
+                let cache = cache.clone();
+
+                async move {
+                    if !request
+                        .subgraph_request
+                        .body()
+                        .variables
+                        .contains_key(REPRESENTATIONS)
+                    {
+                        cache_lookup_root(name, cache, request).await
+                    } else {
+                        cache_lookup_entities(name, cache, request).await
+                    }
+                }
+            })
+            .map_future(move |response| {
+                let cache = cache2.clone();
+                async move { cache_store_from_response(cache, response.await?).await }
+            })
+            .service(service)
+            .boxed()
+    }
+}
+
+struct RootCacheKey(String);
+
+async fn cache_lookup_root(
+    name: String,
+    cache: RedisCacheStorage,
+    mut request: subgraph::Request,
+) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError> {
+    let body = request.subgraph_request.body_mut();
+
+    let key = extract_cache_key_root(&name, body, &request.context);
+
+    let cache_result: Option<RedisValue<CacheEntry>> = cache.get(RedisKey(key.clone())).await;
+
+    match cache_result {
+        Some(value) => {
+            request
+                .context
+                .private_entries
+                .lock()
+                .insert(value.0.control);
+
+            Ok(ControlFlow::Break(
+                subgraph::Response::builder()
+                    .data(value.0.data)
+                    .extensions(Object::new())
+                    .context(request.context)
+                    .build(),
+            ))
+        }
+        None => {
+            request
+                .context
+                .private_entries
+                .lock()
+                .insert(RootCacheKey(key));
+
+            Ok(ControlFlow::Continue(request))
+        }
+    }
+}
+
+struct EntityCacheResults(Vec<IntermediateResult>);
+
+async fn cache_lookup_entities(
+    name: String,
+    cache: RedisCacheStorage,
+    mut request: subgraph::Request,
+) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError> {
+    let body = request.subgraph_request.body_mut();
+
+    let keys = extract_cache_keys(&name, body, &request.context)?;
+
+    let cache_result: Vec<Option<CacheEntry>> = cache
+        .get_multiple(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
+        .await
+        .map(|res| res.into_iter().map(|r| r.map(|v| v.0)).collect())
+        .unwrap_or_else(|| std::iter::repeat(None).take(keys.len()).collect());
+
+    let representations = body
+        .variables
+        .get_mut(REPRESENTATIONS)
+        .and_then(|value| value.as_array_mut())
+        .expect("we already checked that representations exist");
+    // remove from representations the entities we already obtained from the cache
+    let (new_representations, cache_result, cache_control) =
+        filter_representations(&name, representations, keys, cache_result)?;
+
+    if let Some(control) = cache_control {
+        update_cache_control(&request.context, &control);
+    }
+
+    if !new_representations.is_empty() {
+        body.variables
+            .insert(REPRESENTATIONS, new_representations.into());
+
+        request
+            .context
+            .private_entries
+            .lock()
+            .insert(EntityCacheResults(cache_result));
+
+        Ok(ControlFlow::Continue(request))
+    } else {
+        let entities = cache_result
+            .into_iter()
+            .filter_map(|res| res.cache_entry)
+            .map(|entry| entry.data)
+            .collect::<Vec<_>>();
+        let mut data = Object::default();
+        data.insert(ENTITIES, entities.into());
+
+        Ok(ControlFlow::Break(
+            subgraph::Response::builder()
+                .data(data)
+                .extensions(Object::new())
+                .context(request.context)
+                .build(),
+        ))
+    }
+}
+
+fn update_cache_control(context: &Context, cache_control: &CacheControl) {
+    if let Some(c) = context.private_entries.lock().get_mut::<CacheControl>() {
+        *c = c.merge(cache_control);
+        return;
+    }
+    //FIXME: race condition. We need an Entry API for private entries
+    context.private_entries.lock().insert(cache_control.clone());
+}
+
+async fn cache_store_from_response(
+    cache: RedisCacheStorage,
+    mut response: subgraph::Response,
+) -> Result<subgraph::Response, BoxError> {
+    let (opt_root_cache_key, opt_entities_results) = {
+        let mut entries = response.context.private_entries.lock();
+        let opt_root_cache_key = entries.remove::<RootCacheKey>().map(|v| v.0);
+        let opt_entities_results = entries.remove::<EntityCacheResults>().map(|v| v.0);
+
+        drop(entries);
+
+        (opt_root_cache_key, opt_entities_results)
+    };
+
+    let cache_control = CacheControl::new(response.response.headers())?;
+    update_cache_control(&response.context, &cache_control);
+
+    if let Some(cache_key) = opt_root_cache_key {
+        cache_store_root_from_response(cache, &response, cache_control, cache_key).await?;
+    } else if let Some(result_from_cache) = opt_entities_results {
+        cache_store_entities_from_response(cache, &mut response, cache_control, result_from_cache)
+            .await?;
+    }
+
+    Ok(response)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct CacheEntry {
+    control: CacheControl,
+    data: Value,
+}
+
+async fn cache_store_root_from_response(
+    cache: RedisCacheStorage,
+    response: &subgraph::Response,
+    cache_control: CacheControl,
+    cache_key: String,
+) -> Result<(), BoxError> {
+    if let Some(data) = response.response.body().data.as_ref() {
+        let ttl: Option<Duration> = cache_control
+            .ttl()
+            .map(|secs| Duration::from_secs(secs as u64));
+
+        if cache_control.should_store() {
+            cache
+                .insert(
+                    RedisKey(cache_key),
+                    RedisValue(CacheEntry {
+                        control: cache_control,
+                        data: data.clone(),
+                    }),
+                    ttl,
+                )
+                .await;
+        }
+    }
+
+    Ok(())
+}
+
+async fn cache_store_entities_from_response(
+    cache: RedisCacheStorage,
+    response: &mut subgraph::Response,
+    cache_control: CacheControl,
+    mut result_from_cache: Vec<IntermediateResult>,
+) -> Result<(), BoxError> {
+    update_cache_control(&response.context, &cache_control);
+
+    let mut data = response.response.body_mut().data.take();
+
+    if let Some(mut entities) = data
+        .as_mut()
+        .and_then(|v| v.as_object_mut())
+        .and_then(|o| o.remove(ENTITIES))
+    {
+        let new_entities = insert_entities_in_result(
+            entities
+                .as_array_mut()
+                .ok_or_else(|| FetchError::MalformedResponse {
+                    reason: "expected an array of entities".to_string(),
+                })?,
+            &cache,
+            cache_control,
+            &mut result_from_cache,
+        )
+        .await?;
+
+        data.as_mut()
+            .and_then(|v| v.as_object_mut())
+            .map(|o| o.insert(ENTITIES, new_entities.into()));
+        response.response.body_mut().data = data;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
+    let mut digest = Sha256::new();
+
+    for vary_header_value in headers.get_all(header::VARY).into_iter() {
+        if vary_header_value == "*" {
+            return String::from("*");
+        } else {
+            let header_names = match vary_header_value.to_str() {
+                Ok(header_val) => header_val.split(", "),
+                Err(_) => continue,
+            };
+            header_names.for_each(|header_name| {
+                if let Some(header_value) = headers.get(header_name).and_then(|h| h.to_str().ok()) {
+                    digest.update(header_value);
+                    digest.update(&[0u8; 1][..]);
+                }
+            });
+        }
+    }
+
+    hex::encode(digest.finalize().as_slice())
+}
+
+pub(crate) fn hash_query(body: &graphql::Request) -> String {
+    let mut digest = Sha256::new();
+    digest.update(body.query.as_deref().unwrap_or("-").as_bytes());
+    digest.update(&[0u8; 1][..]);
+    digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
+    digest.update(&[0u8; 1][..]);
+
+    hex::encode(digest.finalize().as_slice())
+}
+
+pub(crate) fn hash_additional_data(body: &mut graphql::Request, context: &Context) -> String {
+    let mut digest = Sha256::new();
+
+    let repr_key = ByteString::from(REPRESENTATIONS);
+    // Removing the representations variable because it's already part of the cache key
+    let representations = body.variables.remove(&repr_key);
+    digest.update(&serde_json::to_vec(&body.variables).unwrap());
+    if let Some(representations) = representations {
+        body.variables.insert(repr_key, representations);
+    }
+
+    let cache_key = context
+        .private_entries
+        .lock()
+        .get::<CacheKeyMetadata>()
+        .cloned()
+        .unwrap_or_default();
+    digest.update(&serde_json::to_vec(&cache_key).unwrap());
+
+    hex::encode(digest.finalize().as_slice())
+}
+
+// build a cache key for the root operation
+fn extract_cache_key_root(
+    subgraph_name: &str,
+    body: &mut graphql::Request,
+    context: &Context,
+) -> String {
+    // hash the query and operation name
+    let query_hash = hash_query(body);
+    // hash more data like variables and authorization status
+    let additional_data_hash = hash_additional_data(body, context);
+
+    // the cache key is written to easily find keys matching a prefix for deletion:
+    // - subgraph name: caching is done per subgraph
+    // - query hash: invalidate the entry for a specific query and operation name
+    // - additional data: separate cache entries depending on info like authorization status
+    format!(
+        "subgraph.{}|{}|{}",
+        subgraph_name, query_hash, additional_data_hash
+    )
+}
+
+// build a list of keys to get from the cache in one query
+fn extract_cache_keys(
+    subgraph_name: &str,
+    body: &mut graphql::Request,
+    context: &Context,
+) -> Result<Vec<String>, BoxError> {
+    // hash the query and operation name
+    let query_hash = hash_query(body);
+    // hash more data like variables and authorization status
+    let additional_data_hash = hash_additional_data(body, context);
+
+    let representations = body
+        .variables
+        .get_mut(REPRESENTATIONS)
+        .and_then(|value| value.as_array_mut())
+        .expect("we already checked that representations exist");
+
+    let mut res = Vec::new();
+    for representation in representations {
+        let opt_type = representation
+            .as_object_mut()
+            .and_then(|o| o.remove(TYPENAME))
+            .ok_or_else(|| FetchError::MalformedRequest {
+                reason: "missing __typename in representation".to_string(),
+            })?;
+
+        let typename = opt_type.as_str().unwrap_or("-");
+
+        // We have to hash the representation because it can contains PII
+        let mut digest = Sha256::new();
+        digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
+        let hashed_entity_key = hex::encode(digest.finalize().as_slice());
+
+        // the cache key is written to easily find keys matching a prefix for deletion:
+        // - subgraph name: caching is done per subgraph
+        // - type: can invalidate all instances of a type
+        // - entity key: invalidate a specific entity
+        // - query hash: invalidate the entry for a specific query and operation name
+        // - additional data: separate cache entries depending on info like authorization status
+        let key = format!(
+            "subgraph.{}|{}|{}|{}|{}",
+            subgraph_name, &typename, hashed_entity_key, query_hash, additional_data_hash
+        );
+
+        representation
+            .as_object_mut()
+            .map(|o| o.insert(TYPENAME, opt_type));
+        res.push(key);
+    }
+    Ok(res)
+}
+
+/// represents the result of a cache lookup for an entity type and key
+struct IntermediateResult {
+    key: String,
+    typename: String,
+    cache_entry: Option<CacheEntry>,
+}
+
+// build a new list of representations without the ones we got from the cache
+#[allow(clippy::type_complexity)]
+fn filter_representations(
+    subgraph_name: &str,
+    representations: &mut Vec<Value>,
+    keys: Vec<String>,
+    mut cache_result: Vec<Option<CacheEntry>>,
+) -> Result<(Vec<Value>, Vec<IntermediateResult>, Option<CacheControl>), BoxError> {
+    let mut new_representations: Vec<Value> = Vec::new();
+    let mut result = Vec::new();
+    let mut cache_hit: HashMap<String, (usize, usize)> = HashMap::new();
+    let mut cache_control = None;
+
+    for ((mut representation, key), mut cache_entry) in representations
+        .drain(..)
+        .zip(keys)
+        .zip(cache_result.drain(..))
+    {
+        let opt_type = representation
+            .as_object_mut()
+            .and_then(|o| o.remove(TYPENAME))
+            .ok_or_else(|| FetchError::MalformedRequest {
+                reason: "missing __typename in representation".to_string(),
+            })?;
+
+        let typename = opt_type.as_str().unwrap_or("-").to_string();
+
+        // do not use that cache entry if it is stale
+        if let Some(false) = cache_entry.as_ref().map(|c| !c.control.can_use()) {
+            cache_entry = None;
+        }
+
+        match cache_entry.as_ref() {
+            None => {
+                cache_hit.entry(typename.clone()).or_default().1 += 1;
+
+                representation
+                    .as_object_mut()
+                    .map(|o| o.insert(TYPENAME, opt_type));
+                new_representations.push(representation);
+            }
+            Some(entry) => {
+                cache_hit.entry(typename.clone()).or_default().0 += 1;
+                match cache_control.as_mut() {
+                    None => cache_control = Some(entry.control.clone()),
+                    Some(c) => *c = c.merge(&entry.control),
+                }
+            }
+        }
+
+        result.push(IntermediateResult {
+            key,
+            typename,
+            cache_entry,
+        });
+    }
+
+    for (ty, (hit, miss)) in cache_hit {
+        tracing::info!(
+            monotonic_counter.apollo.router.operations.entity.cache = hit as u64,
+            entity_type = ty.as_str(),
+            hit = %true,
+            %subgraph_name
+        );
+        tracing::info!(
+            monotonic_counter.apollo.router.operations.entity.cache = miss as u64,
+            entity_type = ty.as_str(),
+            miss = %true,
+            %subgraph_name
+        );
+        tracing::event!(
+            Level::INFO,
+            entity_type = ty.as_str(),
+            cache_hit = hit,
+            cache_miss = miss
+        );
+    }
+
+    Ok((new_representations, result, cache_control))
+}
+
+// fill in the entities for the response
+async fn insert_entities_in_result(
+    entities: &mut Vec<Value>,
+    cache: &RedisCacheStorage,
+    cache_control: CacheControl,
+    result: &mut Vec<IntermediateResult>,
+) -> Result<Vec<Value>, BoxError> {
+    let ttl: Option<Duration> = cache_control
+        .ttl()
+        .map(|secs| Duration::from_secs(secs as u64));
+
+    let mut new_entities = Vec::new();
+
+    let mut inserted_types: HashMap<String, usize> = HashMap::new();
+    let mut to_insert: Vec<_> = Vec::new();
+    let mut entities_it = entities.drain(..);
+
+    // insert requested entities and cached entities in the same order as
+    // they were requested
+    for IntermediateResult {
+        key,
+        typename,
+        cache_entry,
+    } in result.drain(..)
+    {
+        match cache_entry {
+            Some(v) => new_entities.push(v.data),
+            None => {
+                let value = entities_it
+                    .next()
+                    .ok_or_else(|| FetchError::MalformedResponse {
+                        reason: "invalid number of entities".to_string(),
+                    })?;
+
+                if cache_control.should_store() {
+                    *inserted_types.entry(typename).or_default() += 1;
+
+                    to_insert.push((
+                        RedisKey(key),
+                        RedisValue(CacheEntry {
+                            control: cache_control.clone(),
+                            data: value.clone(),
+                        }),
+                    ));
+                }
+
+                new_entities.push(value);
+            }
+        }
+    }
+
+    if !to_insert.is_empty() {
+        cache.insert_multiple(&to_insert, ttl).await;
+    }
+
+    for (ty, nb) in inserted_types {
+        tracing::event!(Level::INFO, entity_type = ty.as_str(), cache_insert = nb,);
+    }
+
+    Ok(new_entities)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Key {
+    #[serde(rename = "type")]
+    opt_type: Option<Value>,
+    id: Value,
+}

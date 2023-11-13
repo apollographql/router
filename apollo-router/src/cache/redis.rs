@@ -236,6 +236,7 @@ impl RedisCacheStorage {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_ttl(&mut self, ttl: Option<Duration>) {
         self.ttl = ttl;
     }
@@ -310,11 +311,12 @@ impl RedisCacheStorage {
         &self,
         key: RedisKey<K>,
         value: RedisValue<V>,
+        ttl: Option<Duration>,
     ) {
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
-        let expiration = self
-            .ttl
+        let expiration = ttl
             .as_ref()
+            .or(self.ttl.as_ref())
             .map(|ttl| Expiration::EX(ttl.as_secs() as i64));
 
         let r = self
@@ -327,10 +329,11 @@ impl RedisCacheStorage {
     pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
         &self,
         data: &[(RedisKey<K>, RedisValue<V>)],
+        ttl: Option<Duration>,
     ) {
         tracing::trace!("inserting into redis: {:#?}", data);
 
-        let r = match self.ttl.as_ref() {
+        let r = match ttl.as_ref().or(self.ttl.as_ref()) {
             None => self.inner.mset(data.to_owned()).await,
             Some(ttl) => {
                 let expiration = Some(Expiration::EX(ttl.as_secs() as i64));

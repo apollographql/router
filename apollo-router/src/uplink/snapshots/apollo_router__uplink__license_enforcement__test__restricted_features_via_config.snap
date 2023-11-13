@@ -19,10 +19,7 @@ Configuration yaml:
   .apq.router.cache.redis
 
 * Subgraph caching
-  .traffic_shaping.experimental_cache
-
-* Subgraph entity caching
-  .traffic_shaping..experimental_entity_caching
+  .experimental_entity_cache
 
 * Federated subscriptions
   .subscription.enabled
