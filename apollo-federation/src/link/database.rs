@@ -134,10 +134,11 @@ fn parse_link_if_bootstrap_directive(schema: &Schema, directive: &Directive) -> 
             .and_then(|value| value.as_str())
         {
             let url = url.parse::<Url>();
+            let default_link_name = DEFAULT_LINK_NAME;
             let expected_name = directive
                 .argument_by_name("as")
                 .and_then(|value| value.as_str())
-                .unwrap_or(DEFAULT_LINK_NAME);
+                .unwrap_or(default_link_name.as_str());
             return url.map_or(false, |url| {
                 url.identity == Identity::link_identity() && directive.name == expected_name
             });

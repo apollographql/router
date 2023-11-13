@@ -352,6 +352,8 @@ impl SingleFederationError {
     }
 }
 
+// TODO: Once InvalidNameError includes the invalid name in the error, we can replace this with an
+// implementation for From<InvalidNameError>.
 pub(crate) fn graphql_name(name: &str) -> Result<Name, FederationError> {
     Name::new(name).map_err(|_| {
         SingleFederationError::InvalidGraphQL {

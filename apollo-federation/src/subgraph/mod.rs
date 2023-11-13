@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-use apollo_compiler::ast::{Name, NamedType};
-use apollo_compiler::schema::{ComponentStr, ExtendedType, ObjectType};
-use apollo_compiler::{Node, Schema};
+use apollo_compiler::ast::Name;
+use apollo_compiler::schema::{ComponentName, ExtendedType, ObjectType};
+use apollo_compiler::{name, Node, Schema};
 use indexmap::map::Entry;
 use indexmap::{IndexMap, IndexSet};
 
@@ -29,8 +29,8 @@ pub struct SubgraphError {
     pub msg: String,
 }
 
-impl From<apollo_compiler::Diagnostics> for SubgraphError {
-    fn from(value: apollo_compiler::Diagnostics) -> Self {
+impl From<apollo_compiler::DiagnosticList> for SubgraphError {
+    fn from(value: apollo_compiler::DiagnosticList) -> Self {
         SubgraphError {
             msg: value.to_string_no_color(),
         }
@@ -51,6 +51,14 @@ impl From<FederationSpecError> for SubgraphError {
             msg: value.to_string(),
         }
     }
+}
+
+// TODO: Once InvalidNameError includes the invalid name in the error, we can replace this with an
+// implementation for From<InvalidNameError>.
+pub(crate) fn graphql_name_or_subgraph_error(name: &str) -> Result<Name, SubgraphError> {
+    Name::new(name).map_err(|_| SubgraphError {
+        msg: format!("Invalid GraphQL name \"{}\"", name),
+    })
 }
 
 pub struct Subgraph {
@@ -90,25 +98,22 @@ impl Subgraph {
 
         let mut imported_federation_definitions: Option<FederationSpecDefinitions> = None;
         let mut imported_link_definitions: Option<LinkSpecDefinitions> = None;
+        let default_link_name = DEFAULT_LINK_NAME;
         let link_directives = schema
             .schema_definition
             .directives
-            .get_all(DEFAULT_LINK_NAME);
+            .get_all(&default_link_name);
 
         for directive in link_directives {
             let link_directive = Link::from_directive_application(directive)?;
-            if link_directive
-                .url
-                .identity
-                .eq(&Identity::federation_identity())
-            {
+            if link_directive.url.identity == Identity::federation_identity() {
                 if imported_federation_definitions.is_some() {
                     return Err(SubgraphError { msg: "invalid graphql schema - multiple @link imports for the federation specification are not supported".to_owned() });
                 }
 
                 imported_federation_definitions =
                     Some(FederationSpecDefinitions::from_link(link_directive)?);
-            } else if link_directive.url.identity.eq(&Identity::link_identity()) {
+            } else if link_directive.url.identity == Identity::link_identity() {
                 // user manually imported @link specification
                 if imported_link_definitions.is_some() {
                     return Err(SubgraphError { msg: "invalid graphql schema - multiple @link imports for the link specification are not supported".to_owned() });
@@ -176,18 +181,29 @@ impl Subgraph {
         schema: &mut Schema,
         link_spec_definitions: LinkSpecDefinitions,
     ) -> Result<(), SubgraphError> {
+        let purpose_enum_name =
+            graphql_name_or_subgraph_error(&link_spec_definitions.purpose_enum_name)?;
         schema
             .types
-            .entry(link_spec_definitions.purpose_enum_name.as_str().into())
-            .or_insert_with(|| link_spec_definitions.link_purpose_enum_definition().into());
+            .entry(purpose_enum_name.clone())
+            .or_insert_with(|| {
+                link_spec_definitions
+                    .link_purpose_enum_definition(purpose_enum_name)
+                    .into()
+            });
+        let import_scalar_name =
+            graphql_name_or_subgraph_error(&link_spec_definitions.import_scalar_name)?;
         schema
             .types
-            .entry(link_spec_definitions.import_scalar_name.as_str().into())
-            .or_insert_with(|| link_spec_definitions.import_scalar_definition().into());
-        schema
-            .directive_definitions
-            .entry(DEFAULT_LINK_NAME.into())
-            .or_insert_with(|| link_spec_definitions.link_directive_definition().into());
+            .entry(import_scalar_name.clone())
+            .or_insert_with(|| {
+                link_spec_definitions
+                    .import_scalar_definition(import_scalar_name)
+                    .into()
+            });
+        if let Entry::Vacant(entry) = schema.directive_definitions.entry(DEFAULT_LINK_NAME) {
+            entry.insert(link_spec_definitions.link_directive_definition()?.into());
+        }
         Ok(())
     }
 
@@ -195,17 +211,24 @@ impl Subgraph {
         schema: &mut Schema,
         fed_definitions: &FederationSpecDefinitions,
     ) -> Result<(), SubgraphError> {
+        let fieldset_scalar_name =
+            graphql_name_or_subgraph_error(&fed_definitions.fieldset_scalar_name)?;
         schema
             .types
-            .entry(fed_definitions.fieldset_scalar_name.as_str().into())
-            .or_insert_with(|| fed_definitions.fieldset_scalar_definition().into());
+            .entry(fieldset_scalar_name.clone())
+            .or_insert_with(|| {
+                fed_definitions
+                    .fieldset_scalar_definition(fieldset_scalar_name)
+                    .into()
+            });
 
-        for directive_name in FEDERATION_V2_DIRECTIVE_NAMES {
-            let namespaced_directive_name =
-                fed_definitions.namespaced_type_name(directive_name, true);
+        for directive_name in &FEDERATION_V2_DIRECTIVE_NAMES {
+            let namespaced_directive_name = graphql_name_or_subgraph_error(
+                &fed_definitions.namespaced_type_name(directive_name, true),
+            )?;
             if let Entry::Vacant(entry) = schema
                 .directive_definitions
-                .entry(namespaced_directive_name.as_str().into())
+                .entry(namespaced_directive_name.clone())
             {
                 let directive_definition = fed_definitions.directive_definition(
                     directive_name,
@@ -223,7 +246,7 @@ impl Subgraph {
     ) -> Result<(), SubgraphError> {
         schema
             .types
-            .entry(NamedType::new(SERVICE_TYPE))
+            .entry(SERVICE_TYPE)
             .or_insert_with(|| fed_definitions.service_object_type_definition());
 
         let entities = Self::locate_entities(schema, fed_definitions);
@@ -231,11 +254,11 @@ impl Subgraph {
         if entities_present {
             schema
                 .types
-                .entry(NamedType::new(ENTITY_UNION_NAME))
+                .entry(ENTITY_UNION_NAME)
                 .or_insert_with(|| fed_definitions.entity_union_definition(entities));
             schema
                 .types
-                .entry(NamedType::new(ANY_SCALAR_NAME))
+                .entry(ANY_SCALAR_NAME)
                 .or_insert_with(|| fed_definitions.any_scalar_definition());
         }
 
@@ -243,12 +266,13 @@ impl Subgraph {
             .schema_definition
             .make_mut()
             .query
-            .get_or_insert(ComponentStr::new("Query"));
+            .get_or_insert(ComponentName::from(name!("Query")));
         if let ExtendedType::Object(query_type) = schema
             .types
-            .entry(NamedType::new(query_type_name.as_str()))
+            .entry(query_type_name.name.clone())
             .or_insert(ExtendedType::Object(Node::new(ObjectType {
                 description: None,
+                name: query_type_name.name.clone(),
                 directives: Default::default(),
                 fields: IndexMap::new(),
                 implements_interfaces: IndexSet::new(),
@@ -257,13 +281,13 @@ impl Subgraph {
             let query_type = query_type.make_mut();
             query_type
                 .fields
-                .entry(Name::new(SERVICE_SDL_QUERY))
+                .entry(SERVICE_SDL_QUERY)
                 .or_insert_with(|| fed_definitions.service_sdl_query_field());
             if entities_present {
                 // _entities(representations: [_Any!]!): [_Entity]!
                 query_type
                     .fields
-                    .entry(Name::new(ENTITIES_QUERY))
+                    .entry(ENTITIES_QUERY)
                     .or_insert_with(|| fed_definitions.entities_query_field());
             }
         }
@@ -273,7 +297,7 @@ impl Subgraph {
     fn locate_entities(
         schema: &mut Schema,
         fed_definitions: &FederationSpecDefinitions,
-    ) -> IndexSet<ComponentStr> {
+    ) -> IndexSet<ComponentName> {
         let mut entities = Vec::new();
         let immutable_type_map = schema.types.to_owned();
         for (named_type, extended_type) in immutable_type_map.iter() {
@@ -281,11 +305,10 @@ impl Subgraph {
                 .directives()
                 .iter()
                 .find(|d| {
-                    d.name.eq(&Name::new(
-                        fed_definitions
-                            .namespaced_type_name(KEY_DIRECTIVE_NAME, true)
-                            .as_str(),
-                    ))
+                    d.name
+                        == fed_definitions
+                            .namespaced_type_name(&KEY_DIRECTIVE_NAME, true)
+                            .as_str()
                 })
                 .map(|_| true)
                 .unwrap_or(false);
@@ -293,10 +316,8 @@ impl Subgraph {
                 entities.push(named_type);
             }
         }
-        let entity_set: IndexSet<ComponentStr> = entities
-            .iter()
-            .map(|e| ComponentStr::new(e.as_str()))
-            .collect();
+        let entity_set: IndexSet<ComponentName> =
+            entities.iter().map(|e| ComponentName::from(*e)).collect();
         entity_set
     }
 }

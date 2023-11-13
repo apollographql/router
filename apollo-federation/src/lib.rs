@@ -1,5 +1,5 @@
 #![allow(dead_code)] // TODO: This is fine while we're iterating, but should be removed later.
-use apollo_compiler::ast::Directives;
+use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Schema;
 
@@ -60,7 +60,7 @@ impl Supergraph {
                 && !graphql_type
                     .directives()
                     .iter()
-                    .any(|d| d.name.eq("inaccessible"))
+                    .any(|d| d.name == "inaccessible")
         });
         // remove directive applications
         for (_, graphql_type) in api_schema.types.iter_mut() {
@@ -146,8 +146,8 @@ fn is_join_type(type_name: &str) -> bool {
     JOIN_TYPES.contains(&type_name)
 }
 
-fn is_inaccessible_applied(directives: &Directives) -> bool {
-    directives.iter().any(|d| d.name.eq("inaccessible"))
+fn is_inaccessible_applied(directives: &DirectiveList) -> bool {
+    directives.iter().any(|d| d.name == "inaccessible")
 }
 
 #[cfg(test)]

@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::{
     Argument, Directive, DirectiveDefinition, DirectiveLocation, EnumValueDefinition,
-    FieldDefinition, InputValueDefinition, Name, NamedType, Type, Value,
+    FieldDefinition, InputValueDefinition, Name, Type, Value,
 };
 use apollo_compiler::schema::{
-    Component, ComponentStr, EnumType, ExtendedType, ObjectType, ScalarType, UnionType,
+    Component, ComponentName, EnumType, ExtendedType, ObjectType, ScalarType, UnionType,
 };
-use apollo_compiler::Node;
+use apollo_compiler::{name, Node};
 use indexmap::{IndexMap, IndexSet};
+use lazy_static::lazy_static;
 use thiserror::Error;
 
 use crate::link::spec::{Identity, Url, Version};
@@ -19,28 +20,28 @@ use crate::subgraph::spec::FederationSpecError::{
     UnsupportedFederationDirective, UnsupportedVersionError,
 };
 
-pub const COMPOSE_DIRECTIVE_NAME: &str = "composeDirective";
-pub const KEY_DIRECTIVE_NAME: &str = "key";
-pub const EXTENDS_DIRECTIVE_NAME: &str = "extends";
-pub const EXTERNAL_DIRECTIVE_NAME: &str = "external";
-pub const INACCESSIBLE_DIRECTIVE_NAME: &str = "inaccessible";
-pub const INTF_OBJECT_DIRECTIVE_NAME: &str = "interfaceObject";
-pub const OVERRIDE_DIRECTIVE_NAME: &str = "override";
-pub const PROVIDES_DIRECTIVE_NAME: &str = "provides";
-pub const REQUIRES_DIRECTIVE_NAME: &str = "requires";
-pub const SHAREABLE_DIRECTIVE_NAME: &str = "shareable";
-pub const TAG_DIRECTIVE_NAME: &str = "tag";
-pub const FIELDSET_SCALAR_NAME: &str = "FieldSet";
+pub const COMPOSE_DIRECTIVE_NAME: Name = name!("composeDirective");
+pub const KEY_DIRECTIVE_NAME: Name = name!("key");
+pub const EXTENDS_DIRECTIVE_NAME: Name = name!("extends");
+pub const EXTERNAL_DIRECTIVE_NAME: Name = name!("external");
+pub const INACCESSIBLE_DIRECTIVE_NAME: Name = name!("inaccessible");
+pub const INTF_OBJECT_DIRECTIVE_NAME: Name = name!("interfaceObject");
+pub const OVERRIDE_DIRECTIVE_NAME: Name = name!("override");
+pub const PROVIDES_DIRECTIVE_NAME: Name = name!("provides");
+pub const REQUIRES_DIRECTIVE_NAME: Name = name!("requires");
+pub const SHAREABLE_DIRECTIVE_NAME: Name = name!("shareable");
+pub const TAG_DIRECTIVE_NAME: Name = name!("tag");
+pub const FIELDSET_SCALAR_NAME: Name = name!("FieldSet");
 
 // federated types
-pub const ANY_SCALAR_NAME: &str = "_Any";
-pub const ENTITY_UNION_NAME: &str = "_Entity";
-pub const SERVICE_TYPE: &str = "_Service";
+pub const ANY_SCALAR_NAME: Name = name!("_Any");
+pub const ENTITY_UNION_NAME: Name = name!("_Entity");
+pub const SERVICE_TYPE: Name = name!("_Service");
 
-pub const ENTITIES_QUERY: &str = "_entities";
-pub const SERVICE_SDL_QUERY: &str = "_service";
+pub const ENTITIES_QUERY: Name = name!("_entities");
+pub const SERVICE_SDL_QUERY: Name = name!("_service");
 
-pub const FEDERATION_V1_DIRECTIVE_NAMES: [&str; 5] = [
+pub const FEDERATION_V1_DIRECTIVE_NAMES: [Name; 5] = [
     KEY_DIRECTIVE_NAME,
     EXTENDS_DIRECTIVE_NAME,
     EXTERNAL_DIRECTIVE_NAME,
@@ -48,7 +49,7 @@ pub const FEDERATION_V1_DIRECTIVE_NAMES: [&str; 5] = [
     REQUIRES_DIRECTIVE_NAME,
 ];
 
-pub const FEDERATION_V2_DIRECTIVE_NAMES: [&str; 11] = [
+pub const FEDERATION_V2_DIRECTIVE_NAMES: [Name; 11] = [
     COMPOSE_DIRECTIVE_NAME,
     KEY_DIRECTIVE_NAME,
     EXTENDS_DIRECTIVE_NAME,
@@ -61,6 +62,46 @@ pub const FEDERATION_V2_DIRECTIVE_NAMES: [&str; 11] = [
     SHAREABLE_DIRECTIVE_NAME,
     TAG_DIRECTIVE_NAME,
 ];
+
+// This type and the subsequent IndexMap exist purely so we can use match with Names; see comment
+// in FederationSpecDefinitions.directive_definition() for more information.
+enum FederationDirectiveName {
+    Compose,
+    Key,
+    Extends,
+    External,
+    Inaccessible,
+    IntfObject,
+    Override,
+    Provides,
+    Requires,
+    Shareable,
+    Tag,
+}
+
+lazy_static! {
+    static ref FEDERATION_DIRECTIVE_NAMES_TO_ENUM: IndexMap<Name, FederationDirectiveName> = {
+        IndexMap::from([
+            (COMPOSE_DIRECTIVE_NAME, FederationDirectiveName::Compose),
+            (KEY_DIRECTIVE_NAME, FederationDirectiveName::Key),
+            (EXTENDS_DIRECTIVE_NAME, FederationDirectiveName::Extends),
+            (EXTERNAL_DIRECTIVE_NAME, FederationDirectiveName::External),
+            (
+                INACCESSIBLE_DIRECTIVE_NAME,
+                FederationDirectiveName::Inaccessible,
+            ),
+            (
+                INTF_OBJECT_DIRECTIVE_NAME,
+                FederationDirectiveName::IntfObject,
+            ),
+            (OVERRIDE_DIRECTIVE_NAME, FederationDirectiveName::Override),
+            (PROVIDES_DIRECTIVE_NAME, FederationDirectiveName::Provides),
+            (REQUIRES_DIRECTIVE_NAME, FederationDirectiveName::Requires),
+            (SHAREABLE_DIRECTIVE_NAME, FederationDirectiveName::Shareable),
+            (TAG_DIRECTIVE_NAME, FederationDirectiveName::Tag),
+        ])
+    };
+}
 
 const MIN_FEDERATION_VERSION: Version = Version { major: 2, minor: 0 };
 const MAX_FEDERATION_VERSION: Version = Version { major: 2, minor: 5 };
@@ -77,6 +118,18 @@ pub enum FederationSpecError {
     },
     #[error("Unsupported federation directive import {0}")]
     UnsupportedFederationDirective(String),
+    #[error("Invalid GraphQL name {0}")]
+    InvalidGraphQLName(String),
+}
+
+// TODO: Once InvalidNameError includes the invalid name in the error, we can replace this with an
+// implementation for From<InvalidNameError>.
+pub(crate) fn graphql_name_or_federation_spec_error(
+    name: &str,
+) -> Result<Name, FederationSpecError> {
+    Name::new(name).map_err(|_| {
+        FederationSpecError::InvalidGraphQLName(format!("Invalid GraphQL name \"{}\"", name))
+    })
 }
 
 #[derive(Debug)]
@@ -108,8 +161,8 @@ macro_rules! applied_specification {
                     .map(|i| {
                         if i.alias.is_some() {
                             Value::Object(vec![
-                                ("name".into(), i.element.as_str().into()),
-                                ("as".into(), i.imported_display_name().into()),
+                                (name!("name"), i.element.as_str().into()),
+                                (name!("as"), i.imported_display_name().into()),
                             ])
                         } else {
                             i.imported_display_name().into()
@@ -117,28 +170,28 @@ macro_rules! applied_specification {
                     })
                     .collect::<Vec<Node<Value>>>();
                 let mut applied_link_directive = Directive {
-                    name: DEFAULT_LINK_NAME.into(),
+                    name: DEFAULT_LINK_NAME,
                     arguments: vec![
                         Argument {
-                            name: "url".into(),
+                            name: name!("url"),
                             value: self.link.url.to_string().into(),
                         }.into(),
                         Argument {
-                            name: "import".into(),
+                            name: name!("import"),
                             value: Value::List(imports).into(),
                         }.into(),
                     ]
                 };
                 if let Some(spec_alias) = &self.link.spec_alias {
                     applied_link_directive.arguments.push(Argument {
-                        name: "as".into(),
+                        name: name!("as"),
                         value: spec_alias.into(),
                     }.into())
                 }
                 if let Some(purpose) = &self.link.purpose {
                     applied_link_directive.arguments.push(Argument {
-                        name: "for".into(),
-                        value: Value::Enum(purpose.to_string().into()).into(),
+                        name: name!("for"),
+                        value: Value::Enum(purpose.into()).into(),
                     }.into())
                 }
                 applied_link_directive
@@ -162,7 +215,7 @@ impl FederationSpecDefinitions {
                 max: MAX_FEDERATION_VERSION.to_string(),
             })
         } else {
-            let fieldset_scalar_name = link.type_name_in_schema(FIELDSET_SCALAR_NAME);
+            let fieldset_scalar_name = link.type_name_in_schema(&FIELDSET_SCALAR_NAME);
             Ok(Self {
                 link,
                 fieldset_scalar_name,
@@ -201,54 +254,65 @@ impl FederationSpecDefinitions {
 
     pub fn directive_definition(
         &self,
-        name: &str,
-        alias: &Option<String>,
+        name: &Name,
+        alias: &Option<Name>,
     ) -> Result<DirectiveDefinition, FederationSpecError> {
-        match name {
-            COMPOSE_DIRECTIVE_NAME => Ok(self.compose_directive_definition(alias)),
-            KEY_DIRECTIVE_NAME => Ok(self.key_directive_definition(alias)),
-            EXTENDS_DIRECTIVE_NAME => Ok(self.extends_directive_definition(alias)),
-            EXTERNAL_DIRECTIVE_NAME => Ok(self.external_directive_definition(alias)),
-            INACCESSIBLE_DIRECTIVE_NAME => Ok(self.inaccessible_directive_definition(alias)),
-            INTF_OBJECT_DIRECTIVE_NAME => Ok(self.interface_object_directive_definition(alias)),
-            OVERRIDE_DIRECTIVE_NAME => Ok(self.override_directive_definition(alias)),
-            PROVIDES_DIRECTIVE_NAME => Ok(self.provides_directive_definition(alias)),
-            REQUIRES_DIRECTIVE_NAME => Ok(self.requires_directive_definition(alias)),
-            SHAREABLE_DIRECTIVE_NAME => Ok(self.shareable_directive_definition(alias)),
-            TAG_DIRECTIVE_NAME => Ok(self.tag_directive_definition(alias)),
-            _ => Err(UnsupportedFederationDirective(name.to_string())),
-        }
+        // TODO: NodeStr is not annotated with #[derive(PartialEq, Eq)], so Clippy warns it should
+        // not be used in pattern matching (as some future Rust version will likely turn this into
+        // a hard error). We resort instead to indexing into a static IndexMap to get an enum, which
+        // can be used in a match.
+        let Some(enum_name) = FEDERATION_DIRECTIVE_NAMES_TO_ENUM.get(name) else {
+            return Err(UnsupportedFederationDirective(name.to_string()));
+        };
+        Ok(match enum_name {
+            FederationDirectiveName::Compose => self.compose_directive_definition(alias),
+            FederationDirectiveName::Key => self.key_directive_definition(alias)?,
+            FederationDirectiveName::Extends => self.extends_directive_definition(alias),
+            FederationDirectiveName::External => self.external_directive_definition(alias),
+            FederationDirectiveName::Inaccessible => self.inaccessible_directive_definition(alias),
+            FederationDirectiveName::IntfObject => {
+                self.interface_object_directive_definition(alias)
+            }
+            FederationDirectiveName::Override => self.override_directive_definition(alias),
+            FederationDirectiveName::Provides => self.provides_directive_definition(alias)?,
+            FederationDirectiveName::Requires => self.requires_directive_definition(alias)?,
+            FederationDirectiveName::Shareable => self.shareable_directive_definition(alias),
+            FederationDirectiveName::Tag => self.tag_directive_definition(alias),
+        })
     }
 
     /// scalar FieldSet
-    pub fn fieldset_scalar_definition(&self) -> ScalarType {
+    pub fn fieldset_scalar_definition(&self, name: Name) -> ScalarType {
         ScalarType {
             description: None,
+            name,
             directives: Default::default(),
         }
     }
 
-    fn fields_argument_definition(&self) -> InputValueDefinition {
-        InputValueDefinition {
+    fn fields_argument_definition(&self) -> Result<InputValueDefinition, FederationSpecError> {
+        Ok(InputValueDefinition {
             description: None,
-            name: "fields".into(),
-            ty: Type::new_named(&self.namespaced_type_name(FIELDSET_SCALAR_NAME, false))
-                .non_null()
-                .into(),
+            name: name!("fields"),
+            ty: Type::Named(graphql_name_or_federation_spec_error(
+                &self.namespaced_type_name(&FIELDSET_SCALAR_NAME, false),
+            )?)
+            .non_null()
+            .into(),
             default_value: None,
             directives: Default::default(),
-        }
+        })
     }
 
     /// directive @composeDirective(name: String!) repeatable on SCHEMA
-    fn compose_directive_definition(&self, alias: &Option<String>) -> DirectiveDefinition {
+    fn compose_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
         DirectiveDefinition {
             description: None,
-            name: alias.as_deref().unwrap_or(COMPOSE_DIRECTIVE_NAME).into(),
+            name: alias.clone().unwrap_or(COMPOSE_DIRECTIVE_NAME),
             arguments: vec![InputValueDefinition {
                 description: None,
-                name: "name".into(),
-                ty: Type::new_named("String").non_null().into(),
+                name: name!("name"),
+                ty: Type::Named(name!("String")).non_null().into(),
                 default_value: None,
                 directives: Default::default(),
             }
@@ -259,16 +323,19 @@ impl FederationSpecDefinitions {
     }
 
     /// directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-    fn key_directive_definition(&self, alias: &Option<String>) -> DirectiveDefinition {
-        DirectiveDefinition {
+    fn key_directive_definition(
+        &self,
+        alias: &Option<Name>,
+    ) -> Result<DirectiveDefinition, FederationSpecError> {
+        Ok(DirectiveDefinition {
             description: None,
-            name: alias.as_deref().unwrap_or(KEY_DIRECTIVE_NAME).into(),
+            name: alias.clone().unwrap_or(KEY_DIRECTIVE_NAME),
             arguments: vec![
-                self.fields_argument_definition().into(),
+                self.fields_argument_definition()?.into(),
                 InputValueDefinition {
                     description: None,
-                    name: "resolvable".into(),
-                    ty: Type::new_named("Boolean").into(),
+                    name: name!("resolvable"),
+                    ty: Type::Named(name!("Boolean")).into(),
                     default_value: Some(true.into()),
                     directives: Default::default(),
                 }
@@ -276,14 +343,14 @@ impl FederationSpecDefinitions {
             ],
             repeatable: true,
             locations: vec![DirectiveLocation::Object, DirectiveLocation::Interface],
-        }
+        })
     }
 
     /// directive @extends on OBJECT | INTERFACE
-    fn extends_directive_definition(&self, alias: &Option<String>) -> DirectiveDefinition {
+    fn extends_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
         DirectiveDefinition {
             description: None,
-            name: alias.as_deref().unwrap_or(EXTENDS_DIRECTIVE_NAME).into(),
+            name: alias.clone().unwrap_or(EXTENDS_DIRECTIVE_NAME),
             arguments: Vec::new(),
             repeatable: false,
             locations: vec![DirectiveLocation::Object, DirectiveLocation::Interface],
@@ -291,10 +358,10 @@ impl FederationSpecDefinitions {
     }
 
     /// directive @external on OBJECT | FIELD_DEFINITION
-    fn external_directive_definition(&self, alias: &Option<String>) -> DirectiveDefinition {
+    fn external_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
         DirectiveDefinition {
             description: None,
-            name: alias.as_deref().unwrap_or(EXTERNAL_DIRECTIVE_NAME).into(),
+            name: alias.clone().unwrap_or(EXTERNAL_DIRECTIVE_NAME),
             arguments: Vec::new(),
             repeatable: false,
             locations: vec![
@@ -315,13 +382,10 @@ impl FederationSpecDefinitions {
     ///   | OBJECT
     ///   | SCALAR
     ///   | UNION
-    fn inaccessible_directive_definition(&self, alias: &Option<String>) -> DirectiveDefinition {
+    fn inaccessible_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
         DirectiveDefinition {
             description: None,
-            name: alias
-                .as_deref()
-                .unwrap_or(INACCESSIBLE_DIRECTIVE_NAME)
-                .into(),
+            name: alias.clone().unwrap_or(INACCESSIBLE_DIRECTIVE_NAME),
             arguments: Vec::new(),
             repeatable: false,
             locations: vec![
@@ -340,13 +404,10 @@ impl FederationSpecDefinitions {
     }
 
     /// directive @interfaceObject on OBJECT
-    fn interface_object_directive_definition(&self, alias: &Option<String>) -> DirectiveDefinition {
+    fn interface_object_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
         DirectiveDefinition {
             description: None,
-            name: alias
-                .as_deref()
-                .unwrap_or(INTF_OBJECT_DIRECTIVE_NAME)
-                .into(),
+            name: alias.clone().unwrap_or(INTF_OBJECT_DIRECTIVE_NAME),
             arguments: Vec::new(),
             repeatable: false,
             locations: vec![DirectiveLocation::Object],
@@ -354,14 +415,14 @@ impl FederationSpecDefinitions {
     }
 
     /// directive @override(from: String!) on FIELD_DEFINITION
-    fn override_directive_definition(&self, alias: &Option<String>) -> DirectiveDefinition {
+    fn override_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
         DirectiveDefinition {
             description: None,
-            name: alias.as_deref().unwrap_or(OVERRIDE_DIRECTIVE_NAME).into(),
+            name: alias.clone().unwrap_or(OVERRIDE_DIRECTIVE_NAME),
             arguments: vec![InputValueDefinition {
                 description: None,
-                name: "from".into(),
-                ty: Type::new_named("String").non_null().into(),
+                name: name!("from"),
+                ty: Type::Named(name!("String")).non_null().into(),
                 default_value: None,
                 directives: Default::default(),
             }
@@ -372,32 +433,38 @@ impl FederationSpecDefinitions {
     }
 
     /// directive @provides(fields: FieldSet!) on FIELD_DEFINITION
-    fn provides_directive_definition(&self, alias: &Option<String>) -> DirectiveDefinition {
-        DirectiveDefinition {
+    fn provides_directive_definition(
+        &self,
+        alias: &Option<Name>,
+    ) -> Result<DirectiveDefinition, FederationSpecError> {
+        Ok(DirectiveDefinition {
             description: None,
-            name: alias.as_deref().unwrap_or(PROVIDES_DIRECTIVE_NAME).into(),
-            arguments: vec![self.fields_argument_definition().into()],
+            name: alias.clone().unwrap_or(PROVIDES_DIRECTIVE_NAME),
+            arguments: vec![self.fields_argument_definition()?.into()],
             repeatable: false,
             locations: vec![DirectiveLocation::FieldDefinition],
-        }
+        })
     }
 
     /// directive @requires(fields: FieldSet!) on FIELD_DEFINITION
-    fn requires_directive_definition(&self, alias: &Option<String>) -> DirectiveDefinition {
-        DirectiveDefinition {
+    fn requires_directive_definition(
+        &self,
+        alias: &Option<Name>,
+    ) -> Result<DirectiveDefinition, FederationSpecError> {
+        Ok(DirectiveDefinition {
             description: None,
-            name: alias.as_deref().unwrap_or(REQUIRES_DIRECTIVE_NAME).into(),
-            arguments: vec![self.fields_argument_definition().into()],
+            name: alias.clone().unwrap_or(REQUIRES_DIRECTIVE_NAME),
+            arguments: vec![self.fields_argument_definition()?.into()],
             repeatable: false,
             locations: vec![DirectiveLocation::FieldDefinition],
-        }
+        })
     }
 
     /// directive @shareable repeatable on FIELD_DEFINITION | OBJECT
-    fn shareable_directive_definition(&self, alias: &Option<String>) -> DirectiveDefinition {
+    fn shareable_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
         DirectiveDefinition {
             description: None,
-            name: alias.as_deref().unwrap_or(SHAREABLE_DIRECTIVE_NAME).into(),
+            name: alias.clone().unwrap_or(SHAREABLE_DIRECTIVE_NAME),
             arguments: Vec::new(),
             repeatable: true,
             locations: vec![
@@ -418,14 +485,14 @@ impl FederationSpecDefinitions {
     ///   | OBJECT
     ///   | SCALAR
     ///   | UNION
-    fn tag_directive_definition(&self, alias: &Option<String>) -> DirectiveDefinition {
+    fn tag_directive_definition(&self, alias: &Option<Name>) -> DirectiveDefinition {
         DirectiveDefinition {
             description: None,
-            name: alias.as_deref().unwrap_or(TAG_DIRECTIVE_NAME).into(),
+            name: alias.clone().unwrap_or(TAG_DIRECTIVE_NAME),
             arguments: vec![InputValueDefinition {
                 description: None,
-                name: "name".into(),
-                ty: Type::new_named("String").non_null().into(),
+                name: name!("name"),
+                ty: Type::Named(name!("String")).non_null().into(),
                 default_value: None,
                 directives: Default::default(),
             }
@@ -449,14 +516,19 @@ impl FederationSpecDefinitions {
     pub(crate) fn any_scalar_definition(&self) -> ExtendedType {
         let any_scalar = ScalarType {
             description: None,
+            name: ANY_SCALAR_NAME,
             directives: Default::default(),
         };
         ExtendedType::Scalar(Node::new(any_scalar))
     }
 
-    pub(crate) fn entity_union_definition(&self, entities: IndexSet<ComponentStr>) -> ExtendedType {
+    pub(crate) fn entity_union_definition(
+        &self,
+        entities: IndexSet<ComponentName>,
+    ) -> ExtendedType {
         let service_type = UnionType {
             description: None,
+            name: ENTITY_UNION_NAME,
             directives: Default::default(),
             members: entities,
         };
@@ -465,18 +537,19 @@ impl FederationSpecDefinitions {
     pub(crate) fn service_object_type_definition(&self) -> ExtendedType {
         let mut service_type = ObjectType {
             description: None,
+            name: SERVICE_TYPE,
             directives: Default::default(),
             fields: IndexMap::new(),
             implements_interfaces: IndexSet::new(),
         };
         service_type.fields.insert(
-            Name::new("_sdl"),
+            name!("_sdl"),
             Component::new(FieldDefinition {
-                name: Name::new("_sdl"),
+                name: name!("_sdl"),
                 description: None,
                 directives: Default::default(),
                 arguments: Vec::new(),
-                ty: Type::Named(NamedType::new("String")),
+                ty: Type::Named(name!("String")),
             }),
         );
         ExtendedType::Object(Node::new(service_type))
@@ -484,37 +557,37 @@ impl FederationSpecDefinitions {
 
     pub(crate) fn entities_query_field(&self) -> Component<FieldDefinition> {
         Component::new(FieldDefinition {
-            name: Name::new(ENTITIES_QUERY),
+            name: ENTITIES_QUERY,
             description: None,
             directives: Default::default(),
             arguments: vec![Node::new(InputValueDefinition {
-                name: Name::new("representations"),
+                name: name!("representations"),
                 description: None,
                 directives: Default::default(),
                 ty: Node::new(Type::NonNullList(Box::new(Type::NonNullNamed(
-                    NamedType::new(ANY_SCALAR_NAME),
+                    ANY_SCALAR_NAME,
                 )))),
                 default_value: None,
             })],
-            ty: Type::NonNullList(Box::new(Type::Named(NamedType::new(ENTITY_UNION_NAME)))),
+            ty: Type::NonNullList(Box::new(Type::Named(ENTITY_UNION_NAME))),
         })
     }
 
     pub(crate) fn service_sdl_query_field(&self) -> Component<FieldDefinition> {
         Component::new(FieldDefinition {
-            name: Name::new(SERVICE_SDL_QUERY),
+            name: SERVICE_SDL_QUERY,
             description: None,
             directives: Default::default(),
             arguments: Vec::new(),
-            ty: Type::NonNullNamed(NamedType::new(SERVICE_TYPE)),
+            ty: Type::NonNullNamed(SERVICE_TYPE),
         })
     }
 }
 
 impl LinkSpecDefinitions {
     pub fn new(link: Link) -> Self {
-        let import_scalar_name = link.type_name_in_schema(DEFAULT_IMPORT_SCALAR_NAME);
-        let purpose_enum_name = link.type_name_in_schema(DEFAULT_PURPOSE_ENUM_NAME);
+        let import_scalar_name = link.type_name_in_schema(&DEFAULT_IMPORT_SCALAR_NAME);
+        let purpose_enum_name = link.type_name_in_schema(&DEFAULT_PURPOSE_ENUM_NAME);
         Self {
             link,
             import_scalar_name,
@@ -540,9 +613,10 @@ impl LinkSpecDefinitions {
     }
 
     ///   scalar Import
-    pub fn import_scalar_definition(&self) -> ScalarType {
+    pub fn import_scalar_definition(&self, name: Name) -> ScalarType {
         ScalarType {
             description: None,
+            name,
             directives: Default::default(),
         }
     }
@@ -551,25 +625,26 @@ impl LinkSpecDefinitions {
     ///     SECURITY
     ///     EXECUTION
     ///   }
-    pub fn link_purpose_enum_definition(&self) -> EnumType {
+    pub fn link_purpose_enum_definition(&self, name: Name) -> EnumType {
         EnumType {
             description: None,
+            name,
             directives: Default::default(),
             values: [
                 (
-                    "SECURITY".into(),
+                    name!("SECURITY"),
                     EnumValueDefinition {
                         description: None,
-                        value: "SECURITY".into(),
+                        value: name!("SECURITY"),
                         directives: Default::default(),
                     }
                     .into(),
                 ),
                 (
-                    "EXECUTION".into(),
+                    name!("EXECUTION"),
                     EnumValueDefinition {
                         description: None,
-                        value: "EXECUTION".into(),
+                        value: name!("EXECUTION"),
                         directives: Default::default(),
                     }
                     .into(),
@@ -580,40 +655,47 @@ impl LinkSpecDefinitions {
     }
 
     ///   directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
-    pub fn link_directive_definition(&self) -> DirectiveDefinition {
-        DirectiveDefinition {
+    pub fn link_directive_definition(&self) -> Result<DirectiveDefinition, FederationSpecError> {
+        Ok(DirectiveDefinition {
             description: None,
-            name: DEFAULT_LINK_NAME.into(),
+            name: DEFAULT_LINK_NAME,
             arguments: vec![
                 InputValueDefinition {
                     description: None,
-                    name: "url".into(),
+                    name: name!("url"),
                     // TODO: doc-comment disagrees with non-null here
-                    ty: Type::new_named("String").non_null().into(),
+                    ty: Type::Named(name!("String")).non_null().into(),
                     default_value: None,
                     directives: Default::default(),
                 }
                 .into(),
                 InputValueDefinition {
                     description: None,
-                    name: "as".into(),
-                    ty: Type::new_named("String").into(),
+                    name: name!("as"),
+                    ty: Type::Named(name!("String")).into(),
                     default_value: None,
                     directives: Default::default(),
                 }
                 .into(),
                 InputValueDefinition {
                     description: None,
-                    name: "import".into(),
-                    ty: Type::new_named(&self.import_scalar_name).list().into(),
+                    name: name!("import"),
+                    ty: Type::Named(graphql_name_or_federation_spec_error(
+                        &self.import_scalar_name,
+                    )?)
+                    .list()
+                    .into(),
                     default_value: None,
                     directives: Default::default(),
                 }
                 .into(),
                 InputValueDefinition {
                     description: None,
-                    name: "for".into(),
-                    ty: Type::new_named(&self.purpose_enum_name).into(),
+                    name: name!("for"),
+                    ty: Type::Named(graphql_name_or_federation_spec_error(
+                        &self.purpose_enum_name,
+                    )?)
+                    .into(),
                     default_value: None,
                     directives: Default::default(),
                 }
@@ -621,7 +703,7 @@ impl LinkSpecDefinitions {
             ],
             repeatable: true,
             locations: vec![DirectiveLocation::Schema],
-        }
+        })
     }
 }
 

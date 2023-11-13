@@ -4,6 +4,8 @@ use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec_definition::spec_definitions;
 use apollo_compiler::ast::{Directive, Value};
+use apollo_compiler::name;
+use apollo_compiler::schema::Name;
 use std::fmt;
 use std::ops::Deref;
 use std::str;
@@ -18,9 +20,9 @@ pub(crate) mod link_spec_definition;
 pub mod spec;
 pub(crate) mod spec_definition;
 
-pub const DEFAULT_LINK_NAME: &str = "link";
-pub const DEFAULT_IMPORT_SCALAR_NAME: &str = "Import";
-pub const DEFAULT_PURPOSE_ENUM_NAME: &str = "Purpose";
+pub const DEFAULT_LINK_NAME: Name = name!("link");
+pub const DEFAULT_IMPORT_SCALAR_NAME: Name = name!("Import");
+pub const DEFAULT_PURPOSE_ENUM_NAME: Name = name!("Purpose");
 
 // TODO: we should provide proper "diagnostic" here, linking to ast, accumulating more than one
 // error and whatnot.
@@ -80,6 +82,15 @@ impl fmt::Display for Purpose {
             Purpose::EXECUTION => "EXECUTION",
         };
         write!(f, "{}", str)
+    }
+}
+
+impl From<&Purpose> for Name {
+    fn from(value: &Purpose) -> Self {
+        match value {
+            Purpose::SECURITY => name!("SECURITY"),
+            Purpose::EXECUTION => name!("EXECUTION"),
+        }
     }
 }
 
