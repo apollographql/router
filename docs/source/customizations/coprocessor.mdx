@@ -891,7 +891,30 @@ You can _also_ use this mechanism to immediately return a _successful_ response:
   }
 }
 ```
+
+<Tip>
+
+The `body` in the `RouterRequest` and `RouterResponse` stages is always a string, but you can still `break` with a GraphQL response if it's encoded as JSON.
+
+</Tip>
+
+<ExpansionPanel title="Examples of coprocessor responses for Router stages">
+
+```json
+{
+  "control": { "break": 500 },
+  "body": "{ \"errors\": [ { \"message\": \"Something went wrong\", \"extensions\": { \"code\": \"INTERNAL_SERVER_ERRROR\" } } ] }"
+}
 ```
+
+```json
+{
+  "control": { "break": 200 },
+  "body": "{ \"data\": { \"currentUser\": { \"name\": \"Ada Lovelace\" } }"
+}
+```
+
+</ExpansionPanel>
 
 <Note>
 
