@@ -76,6 +76,15 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     #[serde(skip)]
     pub(crate) validation_error: Option<ValidationErrors>,
+
+    /// This is a hash that depends on:
+    /// - the query itself
+    /// - the relevant parts of the schema
+    ///
+    /// if a schema update does not affect a query, then this will be the same hash
+    /// with the old and new schema
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) schema_aware_hash: Vec<u8>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -108,6 +117,7 @@ impl Query {
             },
             is_original: true,
             validation_error: None,
+            schema_aware_hash: vec![],
         }
     }
 
@@ -286,12 +296,18 @@ impl Query {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
+        use self::change::QueryHashVisitor;
+
         let query = query.into();
 
         let doc = Self::parse_document(&query, schema, configuration);
         Self::check_errors(&doc.ast)?;
         let (fragments, operations, defer_stats) =
             Self::extract_query_information(schema, &doc.executable)?;
+
+        let mut visitor = QueryHashVisitor::new(&schema.definitions, &doc.ast).unwrap();
+        traverse::document(&mut visitor, &doc.ast).unwrap();
+        let hash = visitor.finish();
 
         Ok(Query {
             string: query,
@@ -303,6 +319,7 @@ impl Query {
             defer_stats,
             is_original: true,
             validation_error: None,
+            schema_aware_hash: hash,
         })
     }
 
