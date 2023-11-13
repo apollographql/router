@@ -1669,7 +1669,7 @@ fn variable_validation() {
               id: ID!
           }
           type Query{
-              send(message: MessageInput): String}",
+              send(message: MessageInput): Receipt}",
         "query($msg: MessageInput) {
             send(message: $msg) {
                 id
@@ -1680,8 +1680,23 @@ fn variable_validation() {
         }})
     );
 
-    assert_validation!(
-        "type Mutation{
+    let schema = r#"
+        schema
+            @core(feature: "https://specs.apollo.dev/core/v0.1")
+            @core(feature: "https://specs.apollo.dev/join/v0.1")
+            @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+             {
+            query: Query
+            mutation: Mutation
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        type Mutation{
             foo(input: FooInput!): FooResponse!
         }
         type Query{
@@ -1698,13 +1713,18 @@ fn variable_validation() {
         enum EnumWithDefault {
           WEB
           MOBILE
-        }",
+        }
+        "#;
+
+    let res = run_validation!(
+        schema,
         "mutation foo($input: FooInput!) {
             foo (input: $input) {
             __typename
         }}",
         json!({"input":{}})
     );
+    assert!(res.is_ok(), "validation should have succeeded: {:?}", res);
 }
 
 #[test]
