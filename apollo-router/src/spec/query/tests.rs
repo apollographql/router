@@ -1,3 +1,4 @@
+use apollo_compiler::Parser;
 use insta::assert_json_snapshot;
 use serde_json_bytes::json;
 use test_log::test;
@@ -1648,7 +1649,7 @@ fn variable_validation() {
               id: ID!
           }
           type Query{
-              send(message: MessageInput): String}",
+              send(message: MessageInput): Receipt}",
         "query {
             send(message: {
                 content: \"Hello\"
@@ -5641,9 +5642,10 @@ fn filtered_defer_fragment() {
         }
       }";
 
-    let doc = ExecutableDocument::parse(&schema.definitions, query, "query.graphql");
-    let (fragments, operations, defer_stats) =
-        Query::extract_query_information(&schema, &doc).unwrap();
+    let ast = Parser::new().parse_ast(filtered_query, "filtered_query.graphql");
+    let doc = ast.to_executable(&schema.definitions);
+    let (fragments, operations, defer_stats, schema_aware_hash) =
+        Query::extract_query_information(&schema, &doc, &ast).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5662,15 +5664,13 @@ fn filtered_defer_fragment() {
         is_original: true,
         unauthorized: UnauthorizedPaths::default(),
         validation_error: None,
+        schema_aware_hash,
     };
 
-    let doc = ExecutableDocument::parse(
-        &schema.definitions,
-        filtered_query,
-        "filtered_query.graphql",
-    );
-    let (fragments, operations, defer_stats) =
-        Query::extract_query_information(&schema, &doc).unwrap();
+    let ast = Parser::new().parse_ast(filtered_query, "filtered_query.graphql");
+    let doc = ast.to_executable(&schema.definitions);
+    let (fragments, operations, defer_stats, schema_aware_hash) =
+        Query::extract_query_information(&schema, &doc, &ast).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5690,6 +5690,7 @@ fn filtered_defer_fragment() {
         is_original: false,
         unauthorized: UnauthorizedPaths::default(),
         validation_error: None,
+        schema_aware_hash,
     };
 
     query.filtered_query = Some(Arc::new(filtered));

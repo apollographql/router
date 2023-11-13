@@ -273,8 +273,8 @@ impl BridgeQueryPlanner {
             GraphQLValidationMode::Both => Query::validate_query(&self.schema, executable).err(),
         };
 
-        let (fragments, operations, defer_stats) =
-            Query::extract_query_information(&self.schema, executable)?;
+        let (fragments, operations, defer_stats, schema_aware_hash) =
+            Query::extract_query_information(&self.schema, executable, ast)?;
 
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,
@@ -295,6 +295,7 @@ impl BridgeQueryPlanner {
             defer_stats,
             is_original: true,
             validation_error,
+            schema_aware_hash,
         })
     }
 

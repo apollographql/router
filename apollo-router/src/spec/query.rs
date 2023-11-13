@@ -18,6 +18,7 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use tracing::level_filters::LevelFilter;
 
+use self::change::QueryHashVisitor;
 use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
@@ -296,18 +297,12 @@ impl Query {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
-        use self::change::QueryHashVisitor;
-
         let query = query.into();
 
         let doc = Self::parse_document(&query, schema, configuration);
         Self::check_errors(&doc.ast)?;
-        let (fragments, operations, defer_stats) =
-            Self::extract_query_information(schema, &doc.executable)?;
-
-        let mut visitor = QueryHashVisitor::new(&schema.definitions, &doc.ast).unwrap();
-        traverse::document(&mut visitor, &doc.ast).unwrap();
-        let hash = visitor.finish();
+        let (fragments, operations, defer_stats, schema_aware_hash) =
+            Self::extract_query_information(schema, &doc.executable, &doc.ast)?;
 
         Ok(Query {
             string: query,
@@ -319,7 +314,7 @@ impl Query {
             defer_stats,
             is_original: true,
             validation_error: None,
-            schema_aware_hash: hash,
+            schema_aware_hash,
         })
     }
 
@@ -344,7 +339,8 @@ impl Query {
     pub(crate) fn extract_query_information(
         schema: &Schema,
         document: &ExecutableDocument,
-    ) -> Result<(Fragments, Vec<Operation>, DeferStats), SpecError> {
+        ast: &ast::Document,
+    ) -> Result<(Fragments, Vec<Operation>, DeferStats, Vec<u8>), SpecError> {
         let mut defer_stats = DeferStats {
             has_defer: false,
             has_unconditional_defer: false,
@@ -356,7 +352,11 @@ impl Query {
             .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
-        Ok((fragments, operations, defer_stats))
+        let mut visitor = QueryHashVisitor::new(&schema.definitions, ast).unwrap();
+        traverse::document(&mut visitor, ast).unwrap();
+        let hash = visitor.finish();
+
+        Ok((fragments, operations, defer_stats, hash))
     }
 
     #[allow(clippy::too_many_arguments)]
