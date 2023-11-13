@@ -1161,6 +1161,12 @@ expression: "&schema"
               "type": "string",
               "nullable": true
             },
+            "ttl": {
+              "description": "TTL for entries",
+              "default": null,
+              "type": "string",
+              "nullable": true
+            },
             "urls": {
               "description": "List of URLs to the Redis cluster",
               "type": "array",
@@ -1171,12 +1177,6 @@ expression: "&schema"
             }
           },
           "additionalProperties": false
-        },
-        "ttl": {
-          "description": "Default time to live for cache entries",
-          "default": null,
-          "type": "string",
-          "nullable": true
         }
       },
       "additionalProperties": false
