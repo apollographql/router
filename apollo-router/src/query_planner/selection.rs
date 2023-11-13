@@ -63,10 +63,10 @@ pub(crate) fn execute_selection_set<'a>(
 
     let mut output = Object::with_capacity(selections.len());
     for selection in selections {
-        println!(
-            "execute_selection_set: selection {selection:?} from {}",
+        /*println!(
+            "execute_selection_set(current_type={current_type:?}): selection {selection:?} from {}",
             serde_json::to_string(&content).unwrap(),
-        );
+        );*/
 
         match selection {
             Selection::Field(Field {
@@ -115,6 +115,7 @@ pub(crate) fn execute_selection_set<'a>(
                         }
                     }
                     Some((key, value)) => {
+                        //println!("selected field named {}: {value:?}", key.as_str());
                         if let Some(elements) = value.as_array() {
                             let selected = elements
                                 .iter()
@@ -154,12 +155,11 @@ pub(crate) fn execute_selection_set<'a>(
                 None => continue,
                 Some(condition) => {
                     let b = is_object_of_type(current_type, condition, schema);
-                    println!(
+                    /*println!(
                         "is_object_of_type({condition})={b} for {}",
                         serde_json::to_string(&content).unwrap(),
-                    );
+                    );*/
                     if is_object_of_type(current_type, condition, schema) {
-                        //output.deep_merge(execute_selection_set(schema, content, selections))
                         if let Value::Object(selected) =
                             execute_selection_set(input_content, selections, schema, current_type)
                         {
@@ -178,10 +178,10 @@ pub(crate) fn execute_selection_set<'a>(
                 }
             },
         }
-        println!(
+        /*println!(
             "execute_selection_set: output is now: {}",
             serde_json::to_string(&output).unwrap(),
-        );
+        );*/
     }
 
     Value::Object(output)

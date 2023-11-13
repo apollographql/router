@@ -131,7 +131,6 @@ impl Variables {
         request: &Arc<http::Request<Request>>,
         schema: &Schema,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
-        //document: &ParsedDocument,
     ) -> Option<Variables> {
         let body = request.body();
         if !requires.is_empty() {
