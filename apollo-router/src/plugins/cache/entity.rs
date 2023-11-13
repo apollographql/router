@@ -46,11 +46,6 @@ struct EntityCache {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Config {
     redis: RedisCache,
-
-    /// Default time to live for cache entries
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
-    #[schemars(with = "Option<String>", default)]
-    ttl: Option<Duration>,
 }
 
 #[async_trait::async_trait]
