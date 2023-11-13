@@ -245,101 +245,7 @@ mod tests {
 
     use super::QueryHashVisitor;
 
-    static BASIC_SCHEMA1: &str = r#"
-    schema {
-      query: Query
-      mutation: Mutation
-    }
-    directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
-
-    type Query {
-      topProducts: Product
-      customer: User
-      me: User @authenticated
-      itf: I!
-    }
-
-    type Mutation @authenticated {
-        ping: User
-        other: String
-    }
-
-    interface I {
-        id: ID
-    }
-
-    type Product {
-      type: String
-      price(setPrice: Int): Int
-      reviews: [Review] @authenticated
-      internal: Internal
-      publicReviews: [Review]
-      nonNullId: ID! @authenticated
-    }
-
-    scalar Internal @authenticated @specifiedBy(url: "http///example.com/test")
-
-    type Review {
-        body: String
-        author: User
-    }
-
-    type User
-        implements I
-        @authenticated {
-      id: ID
-      name: String
-    }
-    "#;
-
-    static BASIC_SCHEMA2: &str = r#"
-    schema {
-        query: Query
-        mutation: Mutation
-      }
-      directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
-
-
-    type Query {
-      topProducts(nb: Int): Product
-      customer: User
-      me: User @authenticated
-      itf: I!
-    }
-
-    type Mutation @authenticated {
-        ping: User
-        other: String
-    }
-
-    interface I {
-        id: ID
-    }
-
-    type Product {
-      type: String
-      price(setPrice: Int): Int
-      reviews: [Review] @authenticated
-      internal: Internal
-      publicReviews: [Review]
-      nonNullId: ID! @authenticated
-    }
-
-    scalar Internal @authenticated @specifiedBy(url: "http///example.com/test")
-
-    type Review {
-        body: String
-        author: User
-    }
-
-    type User
-        implements I
-        @authenticated {
-      id: ID!
-      name: String
-    }
-    "#;
-
+    #[track_caller]
     fn hash(schema: &str, query: &str) -> String {
         let schema = Schema::parse(schema, "schema.graphql");
         let doc = Document::parse(query, "query.graphql");
@@ -355,19 +261,185 @@ mod tests {
 
     #[test]
     fn me() {
+        let schema1: &str = r#"
+        schema {
+          query: Query
+        }
+    
+        type Query {
+          me: User
+          customer: User
+        }
+    
+        type User {
+          id: ID
+          name: String
+        }
+        "#;
+
+        let schema2: &str = r#"
+        schema {
+            query: Query
+        }
+    
+        type Query {
+          me: User
+        }
+    
+    
+        type User {
+          id: ID!
+          name: String
+        }
+        "#;
         let query = "query { me { name } }";
-        assert_eq!(hash(BASIC_SCHEMA1, query), hash(BASIC_SCHEMA2, query));
+        assert_eq!(hash(schema1, query), hash(schema2, query));
 
         // id is nullable in 1, non nullable in 2
-        let query2 = "query { me { id name } }";
-        assert_ne!(hash(BASIC_SCHEMA1, query2), hash(BASIC_SCHEMA2, query2));
+        let query = "query { me { id name } }";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
 
         // simple normalization
-        let query3 = "query {  moi: me { id name   } }";
-        assert_eq!(hash(BASIC_SCHEMA1, query2), hash(BASIC_SCHEMA1, query3));
+        let query = "query {  moi: me { name   } }";
+        assert_eq!(hash(schema1, query), hash(schema2, query));
 
-        // it is not robust against field order though
-        let query3 = "query { me { name id } }";
-        assert_ne!(hash(BASIC_SCHEMA1, query2), hash(BASIC_SCHEMA1, query3));
+        assert_ne!(
+            hash(schema1, "query { me { id name } }"),
+            hash(schema1, "query { me { name id } }")
+        );
+    }
+
+    #[test]
+    fn directive() {
+        let schema1: &str = r#"
+        schema {
+          query: Query
+        }
+        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    
+        type Query {
+          me: User
+          customer: User
+        }
+    
+        type User {
+          id: ID!
+          name: String
+        }
+        "#;
+
+        let schema2: &str = r#"
+        schema {
+            query: Query
+        }
+        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    
+        type Query {
+          me: User
+          customer: User @test
+        }
+    
+    
+        type User {
+          id: ID! @test
+          name: String
+        }
+        "#;
+        let query = "query { me { name } }";
+        assert_eq!(hash(schema1, query), hash(schema2, query));
+
+        let query = "query { me { id name } }";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
+
+        let query = "query { customer { id } }";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
+    }
+
+    #[test]
+    fn interface() {
+        let schema1: &str = r#"
+        schema {
+          query: Query
+        }
+        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    
+        type Query {
+          me: User
+          customer: I
+        }
+
+        interface I {
+            id: ID
+        }
+    
+        type User implements I {
+          id: ID!
+          name: String
+        }
+        "#;
+
+        let schema2: &str = r#"
+        schema {
+            query: Query
+        }
+        directive @test on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    
+        type Query {
+          me: User
+          customer: I
+        }
+
+        interface I @test {
+            id: ID
+        }
+    
+        type User implements I {
+          id: ID!
+          name: String
+        }
+        "#;
+
+        let query = "query { me { id name } }";
+        assert_eq!(hash(schema1, query), hash(schema2, query));
+
+        let query = "query { customer { id } }";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
+
+        let query = "query { customer { ... on User { name } } }";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
+    }
+
+    #[test]
+    fn arguments() {
+        let schema1: &str = r#"
+        type Query {
+          a(i: Int): Int
+          b(i: Int = 1): Int
+          c(i: Int = 1, j: Int): Int
+        }
+        "#;
+
+        let schema2: &str = r#"
+        type Query {
+            a(i: Int!): Int
+            b(i: Int = 2): Int
+            c(i: Int = 2, j: Int): Int
+          }
+        "#;
+
+        let query = "query { a(i: 0) }";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
+
+        let query = "query { b }";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
+
+        let query = "query { b(i: 0)}";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
+
+        let query = "query { c(j: 0)}";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
+
+        let query = "query { c(i:0, j: 0)}";
+        assert_ne!(hash(schema1, query), hash(schema2, query));
     }
 }
