@@ -36,10 +36,6 @@ impl<'a> QueryHashVisitor<'a> {
     }
 
     pub(crate) fn finish(self) -> Vec<u8> {
-        println!(
-            "finish:\nknown types: {:?}\nknown fields: {:?}",
-            self.hashed_types, self.hashed_fields
-        );
         self.hasher.finalize().as_slice().into()
     }
 
@@ -59,8 +55,6 @@ impl<'a> QueryHashVisitor<'a> {
         if self.hashed_types.contains(t) {
             return;
         }
-
-        println!("will hash type {t}");
 
         self.hashed_types.insert(t.to_string());
 
@@ -123,8 +117,6 @@ impl<'a> QueryHashVisitor<'a> {
     }
 
     fn hash_type(&mut self, t: &ast::Type) {
-        println!("will hash field type {t:?}");
-
         match t {
             schema::Type::Named(name) => self.hash_type_by_name(name.as_str()),
             schema::Type::NonNullNamed(name) => {
@@ -158,10 +150,6 @@ impl<'a> Hasher for QueryHashVisitor<'a> {
     }
 
     fn write(&mut self, bytes: &[u8]) {
-        match std::str::from_utf8(bytes) {
-            Ok(s) => println!("hasher write {s}"),
-            Err(_) => println!("hasher write {bytes:?}"),
-        }
         self.hasher.update(bytes);
     }
 }
@@ -187,11 +175,7 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
         let parent = parent_type.to_string();
         let name = field_def.name.as_str().to_string();
         if self.hashed_fields.insert((parent, name)) {
-            println!("will hash {parent_type}::{}", field_def.name.as_str());
-
             self.hash_type_by_name(parent_type);
-
-            println!("hashing field name");
 
             field_def.name.hash(self);
 
@@ -245,10 +229,10 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
 #[cfg(test)]
 mod tests {
     use apollo_compiler::ast::Document;
+    use apollo_compiler::schema::Schema;
 
     use super::QueryHashVisitor;
     use crate::spec::query::traverse;
-    use crate::spec::Schema;
 
     #[track_caller]
     fn hash(schema: &str, query: &str) -> String {
@@ -259,9 +243,7 @@ mod tests {
         let mut visitor = QueryHashVisitor::new(&schema, &doc).unwrap();
         traverse::document(&mut visitor, &doc).unwrap();
 
-        let res = hex::encode(visitor.finish());
-        println!("hash for {query}: {res}");
-        res
+        hex::encode(visitor.finish())
     }
 
     #[test]
