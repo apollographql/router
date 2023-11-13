@@ -378,7 +378,12 @@ impl BridgeQueryPlanner {
             .map_err(QueryPlannerError::RouterBridgeError)?
             .into_result()
         {
-            Ok(plan) => plan,
+            Ok(mut plan) => {
+                plan.data
+                    .query_plan
+                    .hash_subqueries(&self.schema.definitions);
+                plan
+            }
             Err(err) => {
                 if matches!(
                     self.configuration.experimental_graphql_validation_mode,
@@ -669,6 +674,14 @@ pub(crate) struct QueryPlanResult {
 struct QueryPlan {
     /// The hierarchical nodes that make up the query plan
     node: Option<PlanNode>,
+}
+
+impl QueryPlan {
+    fn hash_subqueries(&mut self, schema: &apollo_compiler::Schema) {
+        if let Some(node) = self.node.as_mut() {
+            node.hash_subqueries(schema);
+        }
+    }
 }
 
 #[cfg(test)]
