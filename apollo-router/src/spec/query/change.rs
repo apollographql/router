@@ -1,13 +1,18 @@
-use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::hash::Hash;
+use std::hash::Hasher;
 
+use apollo_compiler::ast;
+use apollo_compiler::schema;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::{ast, schema, Node};
+use apollo_compiler::Node;
 use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
 
-use super::{transform, traverse};
+use super::transform;
+use super::traverse;
 
 pub(crate) struct QueryHashVisitor<'a> {
     schema: &'a schema::Schema,
@@ -41,7 +46,7 @@ impl<'a> QueryHashVisitor<'a> {
     fn hash_directive(&mut self, directive: &Node<ast::Directive>) {
         directive.name.as_str().hash(self);
         for argument in &directive.arguments {
-            self.hash_argument(&argument)
+            self.hash_argument(argument)
         }
     }
 
@@ -98,7 +103,7 @@ impl<'a> QueryHashVisitor<'a> {
                 for (value, def) in &e.values {
                     value.hash(self);
                     for directive in &def.directives {
-                        self.hash_directive(&directive);
+                        self.hash_directive(directive);
                     }
                 }
             }
@@ -140,7 +145,7 @@ impl<'a> QueryHashVisitor<'a> {
     fn hash_input_value_definition(&mut self, t: &Node<ast::InputValueDefinition>) {
         self.hash_type(&t.ty);
         for directive in &t.directives {
-            self.hash_directive(&directive);
+            self.hash_directive(directive);
         }
         t.default_value.hash(self);
     }
@@ -216,7 +221,7 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
             .get(&node.fragment_name)
             .ok_or("MissingFragment")?
             .type_condition;
-        self.hash_type_by_name(&type_condition);
+        self.hash_type_by_name(type_condition);
 
         traverse::fragment_spread(self, node)
     }
@@ -227,7 +232,7 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
         node: &ast::InlineFragment,
     ) -> Result<(), BoxError> {
         if let Some(type_condition) = &node.type_condition {
-            self.hash_type_by_name(&type_condition);
+            self.hash_type_by_name(type_condition);
         }
         traverse::inline_fragment(self, parent_type, node)
     }
@@ -239,11 +244,11 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::{ast::Document, Schema};
-
-    use crate::spec::query::traverse;
+    use apollo_compiler::ast::Document;
 
     use super::QueryHashVisitor;
+    use crate::spec::query::traverse;
+    use crate::spec::Schema;
 
     #[track_caller]
     fn hash(schema: &str, query: &str) -> String {
