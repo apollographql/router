@@ -467,6 +467,7 @@ impl FetchNode {
         let doc = Document::parse(&self.operation, "query.graphql");
 
         let mut visitor = QueryHashVisitor::new(&schema, &doc).unwrap();
+        visitor.subgraph_query = true;
         traverse::document(&mut visitor, &doc).unwrap();
 
         self.schema_aware_hash = Arc::new(visitor.finish());

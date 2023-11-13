@@ -4,6 +4,7 @@ use std::hash::Hash;
 use std::hash::Hasher;
 
 use apollo_compiler::ast;
+use apollo_compiler::ast::Selection;
 use apollo_compiler::schema;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Node;
@@ -21,6 +22,7 @@ pub(crate) struct QueryHashVisitor<'a> {
     hashed_types: HashSet<String>,
     // name, field
     hashed_fields: HashSet<(String, String)>,
+    pub(crate) subgraph_query: bool,
 }
 
 #[allow(dead_code)]
@@ -32,6 +34,7 @@ impl<'a> QueryHashVisitor<'a> {
             fragments: transform::collect_fragments(executable),
             hashed_types: HashSet::new(),
             hashed_fields: HashSet::new(),
+            subgraph_query: false,
         })
     }
 
@@ -160,10 +163,49 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
         root_type: &str,
         node: &ast::OperationDefinition,
     ) -> Result<(), BoxError> {
+        println!("looking at root type {root_type} and operation {:#?}", node);
         root_type.hash(self);
         self.hash_type_by_name(root_type);
 
-        traverse::operation(self, root_type, node)
+        if !self.subgraph_query {
+            traverse::operation(self, root_type, node)
+        } else {
+            if node.selection_set.len() != 1 {
+                return Err("invalid number of selections for _entities query".into());
+            }
+
+            match node.selection_set.first() {
+                Some(Selection::Field(field)) => {
+                    if field.name.as_str() != "_entities" {
+                        return Err("expected _entities field".into());
+                    }
+
+                    "_entities".hash(self);
+
+                    for selection in &field.selection_set {
+                        match selection {
+                            Selection::InlineFragment(f) => {
+                                match f.type_condition.as_ref() {
+                                    None => {
+                                        return Err("expected type condition".into());
+                                    }
+                                    Some(condition) => {
+                                        self.inline_fragment(condition.as_str(), f)?
+                                    }
+                                };
+                            }
+                            _ => return Err("expected inline fragment".into()),
+                        }
+                    }
+                    Ok(())
+                }
+                _ => Err("expected _entities field".into()),
+            }
+            //todo!()
+            /*for selection in node.selection_set {
+                match
+            }*/
+        }
     }
 
     fn field(
@@ -428,5 +470,70 @@ mod tests {
 
         let query = "query { c(i:0, j: 0)}";
         assert_ne!(hash(schema1, query), hash(schema2, query));
+    }
+
+    #[test]
+    fn entities() {
+        let schema1: &str = r#"
+        schema {
+          query: Query
+        }
+    
+        type Query {
+          me: User
+          customer: User
+        }
+    
+        type User {
+          id: ID
+          name: String
+        }
+        "#;
+
+        let schema2: &str = r#"
+        schema {
+            query: Query
+        }
+    
+        type Query {
+          me: User
+        }
+    
+    
+        type User {
+          id: ID!
+          name: String
+        }
+        "#;
+        let query = r#"Query1($representations:[_Any!]!){
+            _entities(representations:$representations){
+                ...on User {
+                    id
+                    name
+                }
+            }
+        }"#;
+        //assert_eq!(hash(schema1, query), hash(schema2, query));
+
+        let schema = Schema::parse(schema1, "schema.graphql");
+        let doc = Document::parse(query, "query.graphql");
+        //schema.validate().unwrap();
+        //doc.to_executable(&schema).validate(&schema).unwrap();
+        let mut visitor = QueryHashVisitor::new(&schema, &doc).unwrap();
+        visitor.subgraph_query = true;
+        traverse::document(&mut visitor, &doc).unwrap();
+
+        let hash1 = hex::encode(visitor.finish());
+        println!("hash1: {hash1}");
+        let doc = Document::parse(query, "query.graphql");
+        //schema.validate().unwrap();
+        //doc.to_executable(&schema).validate(&schema).unwrap();
+        let mut visitor = QueryHashVisitor::new(&schema, &doc).unwrap();
+        visitor.subgraph_query = true;
+        traverse::document(&mut visitor, &doc).unwrap();
+
+        let hash2 = hex::encode(visitor.finish());
+        println!("hash2: {hash2}");
+        assert_eq!(hash1, hash2);
     }
 }
