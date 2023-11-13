@@ -30,6 +30,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
+use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::fetch::OperationKind;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -59,7 +60,7 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<SubSelectionKey, SubSelectionValue>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) unauthorized_paths: Vec<Path>,
+    pub(crate) unauthorized: UnauthorizedPaths,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) filtered_query: Option<Arc<Query>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
@@ -97,7 +98,7 @@ impl Query {
             },
             operations: Vec::new(),
             subselections: HashMap::new(),
-            unauthorized_paths: Vec::new(),
+            unauthorized: UnauthorizedPaths::default(),
             filtered_query: None,
             defer_stats: DeferStats {
                 has_defer: false,
@@ -296,7 +297,7 @@ impl Query {
             fragments,
             operations,
             subselections: HashMap::new(),
-            unauthorized_paths: Vec::new(),
+            unauthorized: UnauthorizedPaths::default(),
             filtered_query: None,
             defer_stats,
             is_original: true,

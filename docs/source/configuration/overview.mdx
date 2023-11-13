@@ -3,13 +3,7 @@ title: Configuring the Apollo Router
 description: Command arguments and YAML config
 ---
 
-> For router installation instructions, see the [quickstart](../quickstart/).
-
-You run the Apollo Router with the following command (assuming you're in the same directory as the `router` executable):
-
-```bash
-./router --config router.yaml --supergraph supergraph-schema.graphql
-```
+Learn how to customize the behavior of your Apollo Router with environment variables, command-line commands and options, and YAML file configuration.
 
 Arguments for this command are described below.
 
@@ -66,7 +60,13 @@ The [graph API key](/graphos/api-keys/#graph-api-keys) that the router should us
 
 ## Command-line options
 
-Where indicated, some of these options can also be provided via an environment variable. If an option is provided _both_ ways, the command-line value takes precedence.
+After [installing the Apollo Router](../quickstart/) in your current working directory, you can run the Apollo Router with the following example command:
+
+```bash
+./router --config router.yaml --supergraph supergraph-schema.graphql
+```
+
+This reference lists and describes the options supported by the `router` binary. Where indicated, some of these options can also be provided via an environment variable. If an option is provided _both_ ways, the command-line value takes precedence.
 
 <table class="field-table api-ref">
   <thead>
@@ -277,7 +277,11 @@ If set, the router prints a JSON schema representation of its full supported con
 
 ### Dev mode defaults
 
-> **⚠️ Do not set the `--dev` option in production!** If you want to replicate any specific dev mode functionality in production, instead make the corresponding modifications to your [YAML config file](#yaml-config-file).
+<Caution>
+
+**Do not set the `--dev` option in production.** If you want to replicate any specific dev mode functionality in production, instead make the corresponding modifications to your [YAML config file](#yaml-config-file).
+
+</Caution>
 
 Setting the [`--dev`](#--dev) flag is equivalent to running `./router --hot-reload` with the following configuration options:
 
@@ -357,7 +361,7 @@ The Apollo Router takes an optional YAML configuration file as input via the [`-
 
 This file enables you to customize numerous aspects of your router's behavior, covered in the subsections below.
 
-> If you pass the [`--hot-reload`](#--hr----hot-reload) flag to the `router` command, your router automatically restarts whenever changes are made to its configuration file.
+If you pass the [`--hot-reload`](#--hr----hot-reload) flag to the `router` command, your router automatically restarts whenever changes are made to its configuration file.
 
 ### Listen address
 
@@ -382,7 +386,11 @@ supergraph:
 
 #### Unix socket
 
-> Listening on a Unix socket is not supported on Windows.
+<Note>
+
+Listening on a Unix socket is not supported on Windows.
+
+</Note>
 
 ```yaml title="router_unix.yaml"
 supergraph:
@@ -411,7 +419,11 @@ Path parameters and wildcards are supported. For example:
 - `/graphql/*` matches `/graphql/my_project_a` and `/graphql/my_project_b`.
 - `/g*` matches `/graphql` and `/gateway`.
 
-> **Note:** The router does _not_ support wildcards in the _middle_ of a path (e.g., `/*/graphql`). Instead, use a path parameter (e.g., `/:parameter/graphql`).
+<Note>
+
+The router does _not_ support wildcards in the _middle_ of a path (e.g., `/*/graphql`). Instead, use a path parameter (e.g., `/:parameter/graphql`).
+
+</Note>
 
 ### Introspection
 
@@ -422,6 +434,12 @@ By default, the router does _not_ resolve introspection queries. You can enable 
 supergraph:
   introspection: true
 ```
+
+### Debugging
+
+- To configure logging, see [Logging in the Apollo Router](./logging).
+
+- To configure the inclusion of subgraph errors, see [Subgraph error inclusion](./subgraph-error-inclusion).
 
 ### Landing pages
 
@@ -459,7 +477,11 @@ The Apollo Router can serve any of the following landing pages to browsers that 
       enabled: false
     ```
 
-    > ⚠️ **Do not enable Sandbox in production!** Sandbox requires enabling introspection, which is strongly discouraged in production environments.
+    <Caution>
+
+    **Do not enable Sandbox in production.** Sandbox requires enabling introspection, which is strongly discouraged in production environments.
+
+    </Caution>
 
 ### Subgraph routing URLs
 
@@ -501,6 +523,10 @@ See [Safelisting with persisted queries](./persisted-queries) for more informati
 
 See [Sending HTTP headers to subgraphs](./header-propagation/).
 
+### Traffic shaping
+
+To configure the shape of traffic between clients, routers, and subgraphs, see [Traffic shaping in the Apollo Router](./traffic-shaping).
+
 ### Cross-Origin Resource Sharing (CORS)
 
 See [Configuring CORS in the Apollo Router](./cors).
@@ -517,9 +543,23 @@ See [Apollo Router's _experimental_ support for query batching](../executing-ope
 
 See [GraphQL subscriptions in the Apollo Router](../executing-operations/subscription-support/#router-setup).
 
-### Authorization directives support
+### Authorization support
 
-See [Authorization in the Apollo Router](./authorization#authorization-directives).
+- To configure authorization directives, see [Authorization directives](./authorization/#authorization-directives).
+
+- To configure the authorization plugin, see [Configuration options](./authorization/#configuration-options).
+
+### JWT authentication
+
+To enable and configure JWT authentication, see [JWT authentication in the Apollo Router](./authn-jwt).
+
+### Cross-site request forgery (CSRF) prevention
+
+To configure CSRF prevention, see [CSRF prevention in the Apollo Router](./csrf).
+
+### Subgraph authentication
+
+To configure subgraph authentication with AWS SigV4, see a [configuration example](./authn-subgraph/#configuration-example).
 
 ### External coprocessing
 
@@ -569,7 +609,7 @@ tls:
     key: ${file./path/to/key.pem}
 ```
 
-> To set the file paths in your configuration with Unix-style expansion, you can follow the examples in the [variable expansion](#variable-expansion) guide. 
+To set the file paths in your configuration with Unix-style expansion, you can follow the examples in the [variable expansion](#variable-expansion) guide. 
 
 The router expects the file referenced in the `certificate_chain` value to be a combination of several PEM certificates concatenated together into a single file (as is commonplace with Apache TLS configuration).
 
@@ -593,8 +633,7 @@ The router expects the file referenced in the `certificate_chain` value to be a 
 
 You can only configure these certificates via the router's configuration since using `SSL_CERT_FILE` also overrides certificates for sending telemetry and communicating with Apollo Uplink.
 
-> **Note**: If the subgraph is presenting a self-signed certificate, it must be generated with the proper file extension and with `basicConstraints` disabled.
-> You can generate it with the following command line command from a certificate signing request, in this example, `server.csr`:
+If the subgraph is presenting a self-signed certificate, it must be generated with the proper file extension and with `basicConstraints` disabled. You can generate it with the following command line command from a certificate signing request, in this example, `server.csr`:
 
 ```
 openssl x509 -req -in server.csr -signkey server.key -out server.crt -extfile v3.ext
@@ -612,7 +651,12 @@ subjectAltName         = DNS:local.apollo.dev
 issuerAltName          = issuer:copy
 ```
 
-> Make sure to change the `subjectAltName` field to the subgraph's name.
+<Note>
+
+Make sure to change the `subjectAltName` field to the subgraph's name.
+
+</Note>
+
 This produces the file as `server.crt` which can be used in `certificate_authorities`.
 
 #### TLS client authentication for subgraph requests
@@ -669,7 +713,7 @@ See [this article](./operation-limits/).
 
 ##### `http_max_request_bytes`
 
-> **This configuration is currently [experimental](/resources/product-launch-stages#experimental-features).**
+<ExperimentalFeature />
 
 Limits the amount of data read from the network for the body of HTTP requests,
 to protect against unbounded memory consumption.
@@ -717,7 +761,11 @@ fragment ProductVariation on Product {
 
 Note that the router calculates the recursion depth for each operation and fragment _separately_.  Even if a fragment is included in an operation, that fragment's recursion depth does not contribute to the _operation's_ recursion depth.
 
-> In versions of the Apollo Router prior to 1.17, this limit was defined via the config option `experimental_parser_recursion_limit`.
+<Note>
+
+In versions of the Apollo Router prior to 1.17, this limit was defined via the config option `experimental_parser_recursion_limit`.
+
+</Note>
 
 ### GraphQL Validation Mode
 
