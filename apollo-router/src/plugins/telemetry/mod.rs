@@ -226,23 +226,35 @@ impl Plugin for Telemetry {
             .expect("otel error handler lock poisoned, fatal");
 
         let mut config = init.config;
-        config.spans.update_defaults();
-        config.logging.validate()?;
+        config.instrumentation.spans.update_defaults();
+        config.exporters.logging.validate()?;
 
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
+        // TODO move cache metrics to cache plugin.
         let metrics_builder = Self::create_metrics_builder(&config)?;
 
-        let counter = if config.metrics.common.experimental_cache_metrics.enabled {
+        let counter = if config
+            .exporters
+            .metrics
+            .common
+            .experimental_cache_metrics
+            .enabled
+        {
             Some(Arc::new(Mutex::new(CacheCounter::new(
-                config.metrics.common.experimental_cache_metrics.ttl,
+                config
+                    .exporters
+                    .metrics
+                    .common
+                    .experimental_cache_metrics
+                    .ttl,
             ))))
         } else {
             None
         };
         let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
 
-        if config.spans.mode == SpanMode::Deprecated {
+        if config.instrumentation.spans.mode == SpanMode::Deprecated {
             ::tracing::warn!("telemetry.span.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
         }
 
@@ -268,8 +280,9 @@ impl Plugin for Telemetry {
         let config = self.config.clone();
         let config_later = self.config.clone();
         let config_request = self.config.clone();
-        let span_mode = config.spans.mode;
-        let use_legacy_request_span = matches!(config.spans.mode, SpanMode::Deprecated);
+        let span_mode = config.instrumentation.spans.mode;
+        let use_legacy_request_span =
+            matches!(config.instrumentation.spans.mode, SpanMode::Deprecated);
 
         ServiceBuilder::new()
             .map_response(move |response: router::Response| {
@@ -330,8 +343,12 @@ impl Plugin for Telemetry {
                         .and_then(|h| h.to_str().ok())
                         .unwrap_or("");
 
-                    let mut custom_attributes =
-                        config_request.spans.router.attributes.on_request(request);
+                    let mut custom_attributes = config_request
+                        .instrumentation
+                        .spans
+                        .router
+                        .attributes
+                        .on_request(request);
                     custom_attributes.extend([
                         (CLIENT_NAME_KEY, client_name.to_string().into()),
                         (CLIENT_VERSION_KEY, client_version.to_string().into()),
@@ -367,10 +384,15 @@ impl Plugin for Telemetry {
                             start.elapsed().as_nanos() as i64,
                         );
 
-                        let expose_trace_id = &config.tracing.response_trace_id;
+                        let expose_trace_id = &config.exporters.tracing.response_trace_id;
                         if let Ok(response) = &response {
                             span.set_dyn_attributes(
-                                config.spans.router.attributes.on_response(response),
+                                config
+                                    .instrumentation
+                                    .spans
+                                    .router
+                                    .attributes
+                                    .on_response(response),
                             );
                             if expose_trace_id.enabled {
                                 if let Some(header_name) = &expose_trace_id.header_name {
@@ -400,7 +422,9 @@ impl Plugin for Telemetry {
                             }
                         } else if let Err(err) = &response {
                             span.record(OTEL_STATUS_CODE, "Error");
-                            span.set_dyn_attributes(config.spans.router.attributes.on_error(err));
+                            span.set_dyn_attributes(
+                                config.instrumentation.spans.router.attributes.on_error(err),
+                            );
                         }
 
                         response
@@ -413,7 +437,7 @@ impl Plugin for Telemetry {
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let metrics_sender = self.apollo_metrics_sender.clone();
-        let span_mode = self.config.spans.mode;
+        let span_mode = self.config.instrumentation.spans.mode;
         let config = self.config.clone();
         let config_instrument = self.config.clone();
         let config_map_res_first = config.clone();
@@ -437,8 +461,8 @@ impl Plugin for Telemetry {
                     );
                 }
                 // To expose trace_id or not
-                let expose_trace_id_header = config.tracing.response_trace_id.enabled.then(|| {
-                    config.tracing.response_trace_id
+                let expose_trace_id_header = config.exporters.tracing.response_trace_id.enabled.then(|| {
+                    config.exporters.tracing.response_trace_id
                         .header_name
                         .clone()
                         .unwrap_or_else(|| DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME.clone())
@@ -464,7 +488,7 @@ impl Plugin for Telemetry {
             })
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
-                    let custom_attributes = config.spans.supergraph.attributes.on_request(req);
+                    let custom_attributes = config.instrumentation.spans.supergraph.attributes.on_request(req);
                     Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
                     (req.context.clone(), custom_attributes)
                 },
@@ -478,8 +502,8 @@ impl Plugin for Telemetry {
                         span.set_dyn_attributes(custom_attributes);
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
                         match &result {
-                            Ok(resp) => span.set_dyn_attributes(config.spans.supergraph.attributes.on_response(resp)),
-                            Err(err) => span.set_dyn_attributes(config.spans.supergraph.attributes.on_error(err)),
+                            Ok(resp) => span.set_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_response(resp)),
+                            Err(err) => span.set_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err)),
                         }
                         result = Self::update_otel_metrics(
                             config.clone(),
@@ -526,7 +550,7 @@ impl Plugin for Telemetry {
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let config = self.config.clone();
-        let span_mode = self.config.spans.mode;
+        let span_mode = self.config.instrumentation.spans.mode;
         let conf = self.config.clone();
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
@@ -556,8 +580,12 @@ impl Plugin for Telemetry {
                         sub_request,
                     );
                     let cache_attributes = sub_request.context.private_entries.lock().remove();
-                    let custom_attributes =
-                        config.spans.subgraph.attributes.on_request(sub_request);
+                    let custom_attributes = config
+                        .instrumentation
+                        .spans
+                        .subgraph
+                        .attributes
+                        .on_request(sub_request);
 
                     (
                         sub_request.context.clone(),
@@ -590,14 +618,18 @@ impl Plugin for Telemetry {
                                     span.record(OTEL_STATUS_CODE, "Ok");
                                 }
                                 span.set_dyn_attributes(
-                                    conf.spans.subgraph.attributes.on_response(resp),
+                                    conf.instrumentation
+                                        .spans
+                                        .subgraph
+                                        .attributes
+                                        .on_response(resp),
                                 );
                             }
                             Err(err) => {
                                 span.record(OTEL_STATUS_CODE, "Error");
 
                                 span.set_dyn_attributes(
-                                    conf.spans.subgraph.attributes.on_error(err),
+                                    conf.instrumentation.spans.subgraph.attributes.on_error(err),
                                 );
                             }
                         }
@@ -663,9 +695,9 @@ impl Telemetry {
     }
 
     fn create_propagator(config: &config::Conf) -> TextMapCompositePropagator {
-        let propagation = &config.tracing.propagation;
+        let propagation = &config.exporters.tracing.propagation;
 
-        let tracing = &config.tracing;
+        let tracing = &config.exporters.tracing;
 
         let mut propagators: Vec<Box<dyn TextMapPropagator + Send + Sync + 'static>> = Vec::new();
         // TLDR the jaeger propagator MUST BE the first one because the version of opentelemetry_jaeger is buggy.
@@ -702,8 +734,8 @@ impl Telemetry {
     fn create_tracer_provider(
         config: &config::Conf,
     ) -> Result<(SamplerOption, opentelemetry::sdk::trace::TracerProvider), BoxError> {
-        let tracing_config = &config.tracing;
-        let spans_config = &config.spans;
+        let tracing_config = &config.exporters.tracing;
+        let spans_config = &config.instrumentation.spans;
         let mut common = tracing_config.common.clone();
         let mut sampler = common.sampler.clone();
         // set it to AlwaysOn: it is now done in the SamplingFilter, so whatever is sent to an exporter
@@ -733,7 +765,7 @@ impl Telemetry {
     }
 
     fn create_metrics_builder(config: &config::Conf) -> Result<MetricsBuilder, BoxError> {
-        let metrics_config = &config.metrics;
+        let metrics_config = &config.exporters.metrics;
         let metrics_common_config = &metrics_config.common;
         let mut builder = MetricsBuilder::new(config);
         builder = setup_metrics_exporter(builder, &config.apollo, metrics_common_config)?;
@@ -814,6 +846,7 @@ impl Telemetry {
                 let (first_response, rest) = stream.into_future().await;
 
                 let attributes = config
+                    .exporters
                     .metrics
                     .common
                     .attributes
@@ -884,7 +917,7 @@ impl Telemetry {
             let _ = context.insert(CLIENT_VERSION, version);
         }
 
-        let (should_log_headers, should_log_body) = config.logging.should_log(req);
+        let (should_log_headers, should_log_body) = config.exporters.logging.should_log(req);
         if should_log_headers {
             ::tracing::info!(http.request.headers = ?req.supergraph_request.headers(), "Supergraph request headers");
 
@@ -905,7 +938,7 @@ impl Telemetry {
             );
         }
 
-        let router_attributes_conf = &config.metrics.common.attributes.supergraph;
+        let router_attributes_conf = &config.exporters.metrics.common.attributes.supergraph;
         attributes.extend(
             router_attributes_conf
                 .get_attributes_from_request(headers, req.supergraph_request.body()),
@@ -922,7 +955,7 @@ impl Telemetry {
     }
 
     fn create_subgraph_metrics_conf(&self, name: &str) -> Arc<AttributesForwardConf> {
-        let subgraph_cfg = &self.config.metrics.common.attributes.subgraph;
+        let subgraph_cfg = &self.config.exporters.metrics.common.attributes.subgraph;
         macro_rules! extend_config {
             ($forward_kind: ident) => {{
                 let mut cfg = subgraph_cfg.all.$forward_kind.clone();
@@ -1168,6 +1201,7 @@ impl Telemetry {
 
                 metric_attrs.extend(
                     config
+                        .exporters
                         .metrics
                         .common
                         .attributes
@@ -1498,12 +1532,12 @@ impl Telemetry {
     }
 
     fn plugin_metrics(config: &Arc<Conf>) {
-        let metrics_prom_used = config.metrics.prometheus.enabled;
-        let metrics_otlp_used = MetricsConfigurator::enabled(&config.metrics.otlp);
-        let tracing_otlp_used = TracingConfigurator::enabled(&config.tracing.otlp);
-        let tracing_datadog_used = config.tracing.datadog.enabled();
-        let tracing_jaeger_used = config.tracing.jaeger.enabled();
-        let tracing_zipkin_used = config.tracing.zipkin.enabled();
+        let metrics_prom_used = config.exporters.metrics.prometheus.enabled;
+        let metrics_otlp_used = MetricsConfigurator::enabled(&config.exporters.metrics.otlp);
+        let tracing_otlp_used = TracingConfigurator::enabled(&config.exporters.tracing.otlp);
+        let tracing_datadog_used = config.exporters.tracing.datadog.enabled();
+        let tracing_jaeger_used = config.exporters.tracing.jaeger.enabled();
+        let tracing_zipkin_used = config.exporters.tracing.zipkin.enabled();
 
         if metrics_prom_used
             || metrics_otlp_used
@@ -2077,7 +2111,7 @@ mod tests {
             .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(
-                &serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}),
+                &serde_json::json!({"apollo": {"schema_id":"abc"}, "exporters": {"tracing": {}}}),
                 Default::default(),
                 Default::default(),
             )
