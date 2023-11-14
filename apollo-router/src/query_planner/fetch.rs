@@ -124,7 +124,7 @@ pub(crate) struct FetchNode {
 }
 
 #[derive(Clone, Default, PartialEq, Deserialize, Serialize)]
-pub(crate) struct QueryHash(#[serde(with = "hex")] Vec<u8>);
+pub(crate) struct QueryHash(#[serde(with = "hex")] pub(crate) Vec<u8>);
 
 impl std::fmt::Debug for QueryHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -259,7 +259,7 @@ impl FetchNode {
             }
         };
 
-        let subgraph_request = SubgraphRequest::builder()
+        let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
             .subgraph_request(
                 http_ext::Request::builder()
@@ -288,6 +288,7 @@ impl FetchNode {
             .operation_kind(*operation_kind)
             .context(parameters.context.clone())
             .build();
+        subgraph_request.query_hash = self.schema_aware_hash.clone();
 
         let service = parameters
             .service_factory

@@ -21,6 +21,7 @@ use crate::json_ext::Path;
 use crate::notification::HandleStream;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::query_planner::fetch::OperationKind;
+use crate::query_planner::fetch::QueryHash;
 use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
@@ -43,6 +44,8 @@ pub struct Request {
     pub(crate) subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
     /// Channel triggered when the client connection has been dropped
     pub(crate) connection_closed_signal: Option<broadcast::Receiver<()>>,
+
+    pub(crate) query_hash: Arc<QueryHash>,
 }
 
 #[buildstructor::buildstructor]
@@ -66,6 +69,7 @@ impl Request {
             context,
             subscription_stream,
             connection_closed_signal,
+            query_hash: Default::default(),
         }
     }
 
@@ -124,6 +128,7 @@ impl Clone for Request {
                 .connection_closed_signal
                 .as_ref()
                 .map(|s| s.resubscribe()),
+            query_hash: self.query_hash.clone(),
         }
     }
 }
