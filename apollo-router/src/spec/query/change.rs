@@ -25,7 +25,6 @@ pub(crate) struct QueryHashVisitor<'a> {
     pub(crate) subgraph_query: bool,
 }
 
-#[allow(dead_code)]
 impl<'a> QueryHashVisitor<'a> {
     pub(crate) fn new(schema: &'a schema::Schema, executable: &'a ast::Document) -> Option<Self> {
         Some(Self {
@@ -192,6 +191,40 @@ impl<'a> QueryHashVisitor<'a> {
             self.hash_value(value);
         }
     }
+
+    fn hash_entities_operation(&mut self, node: &ast::OperationDefinition) -> Result<(), BoxError> {
+        use crate::spec::query::traverse::Visitor;
+
+        if node.selection_set.len() != 1 {
+            return Err("invalid number of selections for _entities query".into());
+        }
+
+        match node.selection_set.first() {
+            Some(Selection::Field(field)) => {
+                if field.name.as_str() != "_entities" {
+                    return Err("expected _entities field".into());
+                }
+
+                "_entities".hash(self);
+
+                for selection in &field.selection_set {
+                    match selection {
+                        Selection::InlineFragment(f) => {
+                            match f.type_condition.as_ref() {
+                                None => {
+                                    return Err("expected type condition".into());
+                                }
+                                Some(condition) => self.inline_fragment(condition.as_str(), f)?,
+                            };
+                        }
+                        _ => return Err("expected inline fragment".into()),
+                    }
+                }
+                Ok(())
+            }
+            _ => Err("expected _entities field".into()),
+        }
+    }
 }
 
 impl<'a> Hasher for QueryHashVisitor<'a> {
@@ -217,37 +250,7 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
         if !self.subgraph_query {
             traverse::operation(self, root_type, node)
         } else {
-            if node.selection_set.len() != 1 {
-                return Err("invalid number of selections for _entities query".into());
-            }
-
-            match node.selection_set.first() {
-                Some(Selection::Field(field)) => {
-                    if field.name.as_str() != "_entities" {
-                        return Err("expected _entities field".into());
-                    }
-
-                    "_entities".hash(self);
-
-                    for selection in &field.selection_set {
-                        match selection {
-                            Selection::InlineFragment(f) => {
-                                match f.type_condition.as_ref() {
-                                    None => {
-                                        return Err("expected type condition".into());
-                                    }
-                                    Some(condition) => {
-                                        self.inline_fragment(condition.as_str(), f)?
-                                    }
-                                };
-                            }
-                            _ => return Err("expected inline fragment".into()),
-                        }
-                    }
-                    Ok(())
-                }
-                _ => Err("expected _entities field".into()),
-            }
+            self.hash_entities_operation(node)
         }
     }
 
