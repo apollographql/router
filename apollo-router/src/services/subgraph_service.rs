@@ -1894,6 +1894,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: Some(tx),
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -1942,6 +1943,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -1986,6 +1988,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2030,6 +2033,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2079,6 +2083,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2132,6 +2137,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2192,6 +2198,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: Some(tx),
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2256,6 +2263,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: Some(tx),
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap_err();
@@ -2303,6 +2311,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2355,6 +2364,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2403,6 +2413,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2453,6 +2464,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2503,6 +2515,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2559,6 +2572,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2611,6 +2625,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2662,6 +2677,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2713,6 +2729,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2764,6 +2781,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2862,6 +2880,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -2918,6 +2937,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -3027,6 +3047,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
@@ -3097,6 +3118,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();
