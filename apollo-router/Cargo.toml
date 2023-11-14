@@ -325,3 +325,7 @@ path = "tests/integration_tests.rs"
 [[bench]]
 name = "huge_requests"
 harness = false
+
+[[bench]]
+name = "deeply_nested"
+harness = false
