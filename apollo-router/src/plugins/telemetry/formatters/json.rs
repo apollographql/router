@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Write;
 use std::io;
@@ -18,23 +18,23 @@ use tracing_serde::AsSerde;
 use tracing_subscriber::field;
 use tracing_subscriber::field::VisitOutput;
 use tracing_subscriber::fmt::format::Writer;
-use tracing_subscriber::fmt::FmtContext;
-use tracing_subscriber::fmt::FormatEvent;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::fmt::FormattedFields;
+use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 
+use super::EventFormatter;
+use super::APOLLO_PRIVATE_PREFIX;
+use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config_new::logging::JsonFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::formatters::to_map;
 
-const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
-
 #[derive(Debug, Default)]
 pub(crate) struct Json {
     config: JsonFormat,
-    resource: BTreeMap<String, serde_json::Value>,
+    resource: HashMap<String, serde_json::Value>,
 }
 
 impl Json {
@@ -46,15 +46,13 @@ impl Json {
     }
 }
 
-struct SerializableContext<'a, Span, N>(Option<SpanRef<'a, Span>>, std::marker::PhantomData<N>)
+struct SerializableContext<'a, Span>(Option<SpanRef<'a, Span>>)
 where
-    Span: Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
-    N: for<'writer> FormatFields<'writer> + 'static;
+    Span: Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>;
 
-impl<'a, Span, N> serde::ser::Serialize for SerializableContext<'a, Span, N>
+impl<'a, Span> serde::ser::Serialize for SerializableContext<'a, Span>
 where
     Span: Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
-    N: for<'writer> FormatFields<'writer> + 'static,
 {
     fn serialize<Ser>(&self, serializer_o: Ser) -> Result<Ser::Ok, Ser::Error>
     where
@@ -65,7 +63,7 @@ where
 
         if let Some(leaf_span) = &self.0 {
             for span in leaf_span.scope().from_root() {
-                serializer.serialize_element(&SerializableSpan(&span, self.1))?;
+                serializer.serialize_element(&SerializableSpan(&span))?;
             }
         }
 
@@ -73,18 +71,13 @@ where
     }
 }
 
-struct SerializableSpan<'a, 'b, Span, N>(
-    &'b tracing_subscriber::registry::SpanRef<'a, Span>,
-    std::marker::PhantomData<N>,
-)
+struct SerializableSpan<'a, 'b, Span>(&'b tracing_subscriber::registry::SpanRef<'a, Span>)
 where
-    Span: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
-    N: for<'writer> FormatFields<'writer> + 'static;
+    Span: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>;
 
-impl<'a, 'b, Span, N> serde::ser::Serialize for SerializableSpan<'a, 'b, Span, N>
+impl<'a, 'b, Span> serde::ser::Serialize for SerializableSpan<'a, 'b, Span>
 where
     Span: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
-    N: for<'writer> FormatFields<'writer> + 'static,
 {
     fn serialize<Ser>(&self, serializer: Ser) -> Result<Ser::Ok, Ser::Error>
     where
@@ -93,101 +86,81 @@ where
         let mut serializer = serializer.serialize_map(None)?;
 
         let ext = self.0.extensions();
-        let data = ext
-            .get::<FormattedFields<N>>()
-            .expect("Unable to find FormattedFields in extensions; this is a bug");
 
-        if data.fields.is_empty() {
-            return serializer.end();
+        // Get otel attributes
+        let otel_attributes = ext
+            .get::<OtelData>()
+            .and_then(|otel_data| otel_data.builder.attributes.as_ref());
+        if let Some(otel_attributes) = otel_attributes {
+            for (key, value) in otel_attributes.iter().filter(|(k, _)| {
+                let key_name = k.as_str();
+                !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                    && !EXCLUDED_ATTRIBUTES.contains(&key_name)
+            }) {
+                serializer.serialize_entry(key.as_str(), &value.as_str())?;
+            }
+        }
+        // Get custom dynamic attributes
+        let custom_attributes = ext.get::<LogAttributes>().map(|attrs| attrs.attributes());
+        if let Some(custom_attributes) = custom_attributes {
+            for (key, value) in custom_attributes.iter().filter(|(k, _)| {
+                let key_name = k.as_str();
+                !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                    && !EXCLUDED_ATTRIBUTES.contains(&key_name)
+            }) {
+                match value {
+                    Value::Bool(value) => {
+                        serializer.serialize_entry(key.as_str(), value)?;
+                    }
+                    Value::I64(value) => {
+                        serializer.serialize_entry(key.as_str(), value)?;
+                    }
+                    Value::F64(value) => {
+                        serializer.serialize_entry(key.as_str(), value)?;
+                    }
+                    Value::String(value) => {
+                        serializer.serialize_entry(key.as_str(), value.as_str())?;
+                    }
+                    Value::Array(Array::Bool(array)) => {
+                        serializer.serialize_entry(key.as_str(), array)?;
+                    }
+                    Value::Array(Array::I64(array)) => {
+                        serializer.serialize_entry(key.as_str(), array)?;
+                    }
+                    Value::Array(Array::F64(array)) => {
+                        serializer.serialize_entry(key.as_str(), array)?;
+                    }
+                    Value::Array(Array::String(array)) => {
+                        let array = array.iter().map(|a| a.as_str()).collect::<Vec<_>>();
+                        serializer.serialize_entry(key.as_str(), &array)?;
+                    }
+                }
+            }
         }
 
-        match serde_json::from_str::<serde_json::Value>(data) {
-            Ok(serde_json::Value::Object(fields)) => {
-                for field in fields.into_iter().filter(|(key, _)| !key.starts_with(APOLLO_PRIVATE_PREFIX)) {
-                    serializer.serialize_entry(&field.0, &field.1)?;
-                }
-                // Get otel attributes
-                let otel_attributes = ext.get::<OtelData>().and_then(|otel_data| otel_data.builder.attributes.as_ref());
-                if let Some(otel_attributes) = otel_attributes {
-                    for (key, value) in otel_attributes.iter().filter(|(k, _)| {
-                        let key_name = k.as_str();
-                        !key_name.starts_with(APOLLO_PRIVATE_PREFIX) && !["code.filepath", "code.namespace", "code.lineno", "thread.id", "thread.name"].contains(&key_name)
-                    }) {
-                        serializer.serialize_entry(key.as_str(), &value.as_str())?;
-                    }
-                }
-                // Get custom dynamic attributes
-                let custom_attributes = ext.get::<LogAttributes>().map(|attrs| attrs.attributes());
-                if let Some(custom_attributes) = custom_attributes {
-                    for (key, value) in custom_attributes {
-                        match value {
-                            Value::Bool(value) => {serializer.serialize_entry(key.as_str(), value)?;}
-                            Value::I64(value) => {serializer.serialize_entry(key.as_str(), value)?;}
-                            Value::F64(value) => {serializer.serialize_entry(key.as_str(), value)?;}
-                            Value::String(value) => {serializer.serialize_entry(key.as_str(), value.as_str())?;}
-                            Value::Array(Array::Bool(array)) => {serializer.serialize_entry(key.as_str(), array)?;}
-                            Value::Array(Array::I64(array)) => {serializer.serialize_entry(key.as_str(), array)?;}
-                            Value::Array(Array::F64(array)) => {serializer.serialize_entry(key.as_str(), array)?;}
-                            Value::Array(Array::String(array)) => {
-                                let array = array.iter().map(|a| a.as_str()).collect::<Vec<_>>();
-                                serializer.serialize_entry(key.as_str(), &array)?;
-                            }
-                        }
-                    }
-                }
-            }
-            // We have fields for this span which are valid JSON but not an object.
-            // This is probably a bug, so panic if we're in debug mode
-            Ok(_) if cfg!(debug_assertions) => panic!(
-                "span '{}' had malformed fields! this is a bug.\n  error: invalid JSON object\n  fields: {:?}",
-                self.0.metadata().name(),
-                data
-            ),
-            // If we *aren't* in debug mode, it's probably best not to
-            // crash the program, let's log the field found but also an
-            // message saying it's type  is invalid
-            Ok(value) => {
-                serializer.serialize_entry("field", &value)?;
-                serializer.serialize_entry("field_error", "field was no a valid object")?
-            }
-            // We have previously recorded fields for this span
-            // should be valid JSON. However, they appear to *not*
-            // be valid JSON. This is almost certainly a bug, so
-            // panic if we're in debug mode
-            Err(e) if cfg!(debug_assertions) => panic!(
-                "span '{}' had malformed fields! this is a bug.\n  error: {}\n  fields: {:?}",
-                self.0.metadata().name(),
-                e,
-                data
-            ),
-            // If we *aren't* in debug mode, it's probably best not
-            // crash the program, but let's at least make sure it's clear
-            // that the fields are not supposed to be missing.
-            Err(e) => serializer.serialize_entry("field_error", &format!("{}", e))?,
-        };
         serializer.serialize_entry("name", self.0.metadata().name())?;
         serializer.end()
     }
 }
 
-impl<S, N> FormatEvent<S, N> for Json
+impl<S> EventFormatter<S> for Json
 where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
-    N: for<'writer> FormatFields<'writer> + 'static,
 {
-    fn format_event(
+    fn format_event<W>(
         &self,
-        ctx: &FmtContext<'_, S, N>,
-        mut writer: Writer<'_>,
+        ctx: &Context<'_, S>,
+        writer: &mut W,
         event: &Event<'_>,
     ) -> fmt::Result
     where
         S: Subscriber + for<'a> LookupSpan<'a>,
+        W: std::fmt::Write,
     {
         let meta = event.metadata();
 
         let mut visit = || {
-            let mut serializer = Serializer::new(WriteAdaptor::new(&mut writer));
+            let mut serializer = Serializer::new(WriteAdaptor::new(writer));
 
             let mut serializer = serializer.serialize_map(None)?;
 
@@ -201,8 +174,6 @@ where
             if self.config.display_level {
                 serializer.serialize_entry("level", &meta.level().as_serde())?;
             }
-
-            let format_field_marker: std::marker::PhantomData<N> = std::marker::PhantomData;
 
             let current_span = event
                 .parent()
@@ -232,16 +203,13 @@ where
             if self.config.display_current_span {
                 if let Some(ref span) = current_span {
                     serializer
-                        .serialize_entry("span", &SerializableSpan(span, format_field_marker))
+                        .serialize_entry("span", &SerializableSpan(span))
                         .unwrap_or(());
                 }
             }
 
             if self.config.display_span_list && current_span.is_some() {
-                serializer.serialize_entry(
-                    "spans",
-                    &SerializableContext(ctx.lookup_current(), format_field_marker),
-                )?;
+                serializer.serialize_entry("spans", &SerializableContext(ctx.lookup_current()))?;
             }
 
             if self.config.display_resource {
@@ -292,7 +260,7 @@ impl<'a> FormatFields<'a> for JsonFields {
         }
 
         let mut new = String::new();
-        let map: BTreeMap<&'_ str, serde_json::Value> =
+        let map: HashMap<&'_ str, serde_json::Value> =
             serde_json::from_str(current).map_err(|_| fmt::Error)?;
         let mut v = JsonVisitor::new(&mut new);
         v.values = map;
@@ -308,8 +276,8 @@ impl<'a> FormatFields<'a> for JsonFields {
 ///
 /// [visitor]: tracing_subscriber::field::Visit
 /// [`MakeVisitor`]: tracing_subscriber::field::MakeVisitor
-struct JsonVisitor<'a> {
-    values: BTreeMap<&'a str, serde_json::Value>,
+pub(crate) struct JsonVisitor<'a> {
+    pub(crate) values: HashMap<&'a str, serde_json::Value>,
     writer: &'a mut dyn Write,
 }
 
@@ -326,9 +294,9 @@ impl<'a> JsonVisitor<'a> {
     /// - `writer`: the writer to format to.
     /// - `is_empty`: whether or not any fields have been previously written to
     ///   that writer.
-    fn new(writer: &'a mut dyn Write) -> Self {
+    pub(crate) fn new(writer: &'a mut dyn Write) -> Self {
         Self {
-            values: BTreeMap::new(),
+            values: HashMap::new(),
             writer,
         }
     }

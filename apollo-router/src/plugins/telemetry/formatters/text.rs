@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fmt;
 
 use nu_ansi_term::Color;
@@ -12,16 +12,15 @@ use tracing_opentelemetry::OtelData;
 use tracing_subscriber::field;
 use tracing_subscriber::field::Visit;
 use tracing_subscriber::fmt::format::DefaultVisitor;
-use tracing_subscriber::fmt::format::FormatEvent;
-use tracing_subscriber::fmt::format::FormatFields;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::fmt::time::SystemTime;
-use tracing_subscriber::fmt::FmtContext;
-use tracing_subscriber::fmt::FormattedFields;
+use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 
+use super::EventFormatter;
+use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config_new::logging::TextFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::formatters::to_map;
@@ -30,7 +29,7 @@ use crate::plugins::telemetry::tracing::APOLLO_PRIVATE_PREFIX;
 #[derive(Default)]
 pub(crate) struct Text {
     timer: SystemTime,
-    resource: BTreeMap<String, Value>,
+    resource: HashMap<String, Value>,
     config: TextFormat,
 }
 
@@ -51,7 +50,7 @@ impl Text {
 
     #[inline]
     fn format_level(&self, level: &Level, writer: &mut Writer<'_>) -> fmt::Result {
-        if writer.has_ansi_escapes() {
+        if self.config.ansi {
             match *level {
                 Level::TRACE => write!(writer, "{}", Color::Purple.paint(Text::TRACE_STR)),
                 Level::DEBUG => write!(writer, "{}", Color::Blue.paint(Text::DEBUG_STR)),
@@ -73,7 +72,7 @@ impl Text {
 
     #[inline]
     fn format_timestamp(&self, writer: &mut Writer<'_>) -> fmt::Result {
-        if writer.has_ansi_escapes() {
+        if self.config.ansi {
             let style = Style::new().dimmed();
             write!(writer, "{}", style.prefix())?;
 
@@ -97,7 +96,7 @@ impl Text {
     #[inline]
     fn format_location(&self, event: &Event<'_>, writer: &mut Writer<'_>) -> fmt::Result {
         if let (Some(filename), Some(line)) = (event.metadata().file(), event.metadata().line()) {
-            if writer.has_ansi_escapes() {
+            if self.config.ansi {
                 let style = Style::new().dimmed();
                 write!(writer, "{}", style.prefix())?;
                 if self.config.display_filename {
@@ -121,7 +120,7 @@ impl Text {
 
     #[inline]
     fn format_target(&self, writer: &mut Writer<'_>, target: &str) -> fmt::Result {
-        if writer.has_ansi_escapes() {
+        if self.config.ansi {
             let style = Style::new().dimmed();
             write!(writer, "{}", style.prefix())?;
             write!(writer, "{target}:")?;
@@ -133,24 +132,23 @@ impl Text {
     }
 
     #[inline]
-    fn format_attributes<S, N>(
+    fn format_attributes<S>(
         &self,
-        ctx: &FmtContext<'_, S, N>,
+        ctx: &Context<'_, S>,
         writer: &mut Writer<'_>,
         event: &Event<'_>,
     ) -> fmt::Result
     where
         S: Subscriber + for<'a> LookupSpan<'a>,
-        N: for<'a> FormatFields<'a> + 'static,
     {
         let span = event
             .parent()
             .and_then(|id| ctx.span(id))
             .or_else(|| ctx.lookup_current());
         if let Some(mut span) = span {
-            Self::write_span(ctx, writer, &span)?;
+            self.write_span(writer, &span)?;
             while let Some(parent) = span.parent() {
-                Self::write_span(ctx, writer, &parent)?;
+                self.write_span(writer, &parent)?;
                 span = parent;
             }
         }
@@ -158,104 +156,79 @@ impl Text {
         Ok(())
     }
 
-    fn write_span<S, N>(
-        _ctx: &FmtContext<'_, S, N>,
-        writer: &mut Writer,
-        span: &SpanRef<S>,
-    ) -> fmt::Result
+    fn write_span<S>(&self, writer: &mut Writer, span: &SpanRef<S>) -> fmt::Result
     where
         S: Subscriber + for<'a> LookupSpan<'a>,
-        N: for<'a> FormatFields<'a> + 'static,
     {
         let ext = span.extensions();
-        let mut attributes = BTreeMap::new();
-        if let Some(data) = ext.get::<FormattedFields<N>>() {
-            if let Ok(serde_json::Value::Object(fields)) =
-                serde_json::from_str::<serde_json::Value>(data)
-            {
-                let attrs = fields.into_iter().filter_map(|(key, v)| {
-                    if !key.starts_with(APOLLO_PRIVATE_PREFIX) {
-                        Some((key, v.to_string()))
-                    } else {
-                        None
-                    }
-                });
-                attributes.extend(attrs);
-            };
+        let mut wrote_something = false;
+
+        // TODO directly write the attributes in buffer here to avoid allocations
+        let style = Style::new().dimmed();
+        if self.config.ansi {
+            write!(writer, "{}", style.prefix())?;
         }
 
         if let Some(dyn_attributes) = ext.get::<LogAttributes>() {
-            attributes.extend(
-                dyn_attributes
-                    .attributes()
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.to_string())),
-            );
+            let mut attrs = dyn_attributes
+                .attributes()
+                .iter()
+                .filter(|(k, _v)| {
+                    let key_name = k.as_str();
+                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                        && !EXCLUDED_ATTRIBUTES.contains(&key_name)
+                })
+                .peekable();
+            if attrs.peek().is_some() {
+                wrote_something = true;
+                write!(writer, "{}{{", span.name())?;
+            }
+            for (key, value) in attrs {
+                write!(writer, "{key}={value},")?;
+            }
         }
 
         if let Some(otel_attributes) = ext
             .get::<OtelData>()
             .and_then(|otel_data| otel_data.builder.attributes.as_ref())
         {
-            let attrs = otel_attributes.iter().filter_map(|(k, v)| {
-                let key_name = k.as_str();
-                if !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
-                    && ![
-                        "code.filepath",
-                        "code.namespace",
-                        "code.lineno",
-                        "thread.id",
-                        "thread.name",
-                    ]
-                    .contains(&key_name)
-                {
-                    Some((key_name.to_string(), v.to_string()))
-                } else {
-                    None
-                }
-            });
-
-            attributes.extend(attrs);
-        }
-        if !attributes.is_empty() {
-            if writer.has_ansi_escapes() {
-                let style = Style::new().dimmed();
-                write!(writer, "{}", style.prefix())?;
-                Self::write_attributes(writer, span.name(), attributes)?;
-                write!(writer, "{}", style.suffix())?;
-            } else {
-                Self::write_attributes(writer, span.name(), attributes)?;
+            let mut attrs = otel_attributes
+                .iter()
+                .filter(|(k, _v)| {
+                    let key_name = k.as_str();
+                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                        && !EXCLUDED_ATTRIBUTES.contains(&key_name)
+                })
+                .peekable();
+            if attrs.peek().is_some() && !wrote_something {
+                wrote_something = true;
+                write!(writer, "{}{{", span.name())?;
             }
+
+            for (key, value) in attrs {
+                write!(writer, "{key}={value},")?;
+            }
+        }
+
+        if wrote_something {
+            write!(writer, "}}")?;
+
             writer.write_char(' ')?;
         }
+        if self.config.ansi {
+            write!(writer, "{}", style.suffix())?;
+        }
 
-        Ok(())
-    }
-
-    fn write_attributes(
-        writer: &mut Writer,
-        span_name: &str,
-        attributes: BTreeMap<String, String>,
-    ) -> fmt::Result {
-        write!(
-            writer,
-            "{span_name}{{{}}}",
-            attributes
-                .into_iter()
-                .map(|(k, v)| format!("{}={}", k, v))
-                .collect::<Vec<String>>()
-                .join(",")
-        )?;
         Ok(())
     }
 
     pub(crate) fn format_resource(
         &self,
         writer: &mut Writer,
-        resource: &BTreeMap<String, Value>,
+        resource: &HashMap<String, Value>,
     ) -> fmt::Result {
         if !resource.is_empty() {
-            if writer.has_ansi_escapes() {
+            if self.config.ansi {
                 let style = Style::new().dimmed();
                 write!(writer, "{}", style.prefix())?;
                 Self::write_resource(writer, resource)?;
@@ -268,7 +241,7 @@ impl Text {
 
         Ok(())
     }
-    fn write_resource(writer: &mut Writer, resources: &BTreeMap<String, Value>) -> fmt::Result {
+    fn write_resource(writer: &mut Writer, resources: &HashMap<String, Value>) -> fmt::Result {
         write!(
             writer,
             "resource{{{}}}",
@@ -282,19 +255,21 @@ impl Text {
     }
 }
 
-impl<S, N> FormatEvent<S, N> for Text
+impl<S> EventFormatter<S> for Text
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
-    N: for<'a> FormatFields<'a> + 'static,
 {
-    fn format_event(
+    fn format_event<W>(
         &self,
-        ctx: &FmtContext<'_, S, N>,
-        mut writer: Writer<'_>,
+        ctx: &Context<'_, S>,
+        writer: &mut W,
         event: &Event<'_>,
-    ) -> fmt::Result {
+    ) -> fmt::Result
+    where
+        W: std::fmt::Write,
+    {
         let meta = event.metadata();
-
+        let mut writer = Writer::new(writer);
         if self.config.display_timestamp {
             self.format_timestamp(&mut writer)?;
         }

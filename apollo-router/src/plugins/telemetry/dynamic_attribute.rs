@@ -32,7 +32,7 @@ impl LogAttributes {
         self.attributes.insert(key, value);
     }
 
-    fn extend(&mut self, val: impl IntoIterator<Item = (Key, opentelemetry::Value)>) {
+    pub(crate) fn extend(&mut self, val: impl IntoIterator<Item = (Key, opentelemetry::Value)>) {
         self.attributes.extend(val);
     }
 }
