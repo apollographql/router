@@ -34,6 +34,8 @@ pub type Body = hyper::Body;
 pub type Error = hyper::Error;
 
 pub(crate) mod service;
+#[cfg(test)]
+mod tests;
 
 assert_impl_all!(Request: Send);
 /// Represents the router processing step of the processing pipeline.
