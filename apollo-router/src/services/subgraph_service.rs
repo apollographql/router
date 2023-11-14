@@ -360,13 +360,12 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             .await?;
 
                         // If it existed before just send the right stream (handle) and early return
-                        let mut stream_tx =
-                            request.subscription_stream.clone().ok_or_else(|| {
-                                FetchError::SubrequestWsError {
-                                    service: service_name.clone(),
-                                    reason: "cannot get the callback stream".to_string(),
-                                }
-                            })?;
+                        let stream_tx = request.subscription_stream.clone().ok_or_else(|| {
+                            FetchError::SubrequestWsError {
+                                service: service_name.clone(),
+                                reason: "cannot get the callback stream".to_string(),
+                            }
+                        })?;
                         stream_tx.send(handle.into_stream()).await?;
                         tracing::info!(
                             monotonic_counter.apollo.router.operations.subscriptions = 1u64,
@@ -514,7 +513,7 @@ async fn call_websocket(
         subscription_stream,
         ..
     } = request;
-    let mut subscription_stream_tx =
+    let subscription_stream_tx =
         subscription_stream.ok_or_else(|| FetchError::SubrequestWsError {
             service: service_name.clone(),
             reason: "cannot get the websocket stream".to_string(),
@@ -1175,7 +1174,6 @@ mod tests {
     use axum::Router;
     use axum::Server;
     use bytes::Buf;
-    use futures::channel::mpsc;
     use futures::StreamExt;
     use http::header::HOST;
     use http::StatusCode;
@@ -1191,6 +1189,8 @@ mod tests {
     use rustls::ServerConfig;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
+    use tokio::sync::mpsc;
+    use tokio_stream::wrappers::ReceiverStream;
     use tower::service_fn;
     use tower::ServiceExt;
     use url::Url;
@@ -2162,7 +2162,8 @@ mod tests {
             Notify::builder().build(),
         )
         .expect("can create a SubgraphService");
-        let (tx, mut rx) = mpsc::channel(2);
+        let (tx, rx) = mpsc::channel(2);
+        let mut rx_stream = ReceiverStream::new(rx);
 
         let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -2197,7 +2198,7 @@ mod tests {
             .unwrap();
         assert!(response.response.body().errors.is_empty());
 
-        let mut gql_stream = rx.next().await.unwrap();
+        let mut gql_stream = rx_stream.next().await.unwrap();
         let message = gql_stream.next().await.unwrap();
         assert_eq!(
             message,

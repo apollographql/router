@@ -5,16 +5,16 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::time::Instant;
 
-use futures::channel::mpsc::SendError;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
-use futures::SinkExt;
 use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::SendError;
+use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -338,10 +338,10 @@ async fn service_call(
 }
 
 pub struct SubscriptionTaskParams {
-    pub(crate) client_sender: futures::channel::mpsc::Sender<Response>,
+    pub(crate) client_sender: tokio::sync::mpsc::Sender<Response>,
     pub(crate) subscription_handle: SubscriptionHandle,
     pub(crate) subscription_config: SubscriptionConfig,
-    pub(crate) stream_rx: futures::channel::mpsc::Receiver<HandleStream<String, graphql::Response>>,
+    pub(crate) stream_rx: ReceiverStream<HandleStream<String, graphql::Response>>,
     pub(crate) service_name: String,
 }
 
@@ -363,7 +363,7 @@ async fn subscription_task(
     let subscription_handle = sub_params.subscription_handle;
     let service_name = sub_params.service_name;
     let mut receiver = sub_params.stream_rx;
-    let mut sender = sub_params.client_sender;
+    let sender = sub_params.client_sender;
 
     let graphql_document = &query_plan.query.string;
     // Get the rest of the query_plan to execute for subscription events
@@ -464,9 +464,7 @@ async fn subscription_task(
                                 apollo_private.duration_ns = field::Empty,)
                             ).await;
                         if let Err(err) = res {
-                             if !err.is_disconnected() {
                                 tracing::error!("cannot send the subscription to the client: {err:?}");
-                            }
                             break;
                         }
                     }
@@ -511,10 +509,7 @@ async fn subscription_task(
             }
         }
     }
-    if let Err(err) = sender.close().await {
-        tracing::trace!("cannot close the sender {err:?}");
-    }
-
+    drop(sender);
     tracing::trace!("Leaving the task for subscription");
     if limit_is_set {
         OPENED_SUBSCRIPTIONS.fetch_sub(1, Ordering::Relaxed);
@@ -527,8 +522,8 @@ async fn dispatch_event(
     query_plan: Option<&Arc<QueryPlan>>,
     context: Context,
     mut val: graphql::Response,
-    mut sender: futures::channel::mpsc::Sender<Response>,
-) -> Result<(), SendError> {
+    sender: mpsc::Sender<Response>,
+) -> Result<(), SendError<Response>> {
     let start = Instant::now();
     let span = Span::current();
     let res = match query_plan {
