@@ -34,22 +34,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
-use super::layers::apq::APQLayer;
-use super::layers::content_negotiation;
-use super::layers::query_analysis::QueryAnalysisLayer;
-use super::layers::static_page::StaticPageLayer;
-use super::new_service::ServiceFactory;
-use super::router;
-use super::router::ClientRequestAccepts;
-#[cfg(test)]
-use super::supergraph;
-use super::HasPlugins;
-#[cfg(test)]
-use super::HasSchema;
-use super::SupergraphCreator;
-use super::APPLICATION_JSON_HEADER_VALUE;
-use super::MULTIPART_DEFER_CONTENT_TYPE;
-use super::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
+use super::ClientRequestAccepts;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
@@ -62,12 +47,27 @@ use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::QueryPlanResult;
 use crate::query_planner::WarmUpCachingQueryKey;
 use crate::router_factory::RouterFactory;
+use crate::services::layers::apq::APQLayer;
+use crate::services::layers::content_negotiation;
 use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
+use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::layers::static_page::StaticPageLayer;
+use crate::services::new_service::ServiceFactory;
+use crate::services::router;
+#[cfg(test)]
+use crate::services::supergraph;
+use crate::services::HasPlugins;
+#[cfg(test)]
+use crate::services::HasSchema;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
+use crate::services::SupergraphCreator;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::services::APPLICATION_JSON_HEADER_VALUE;
+use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
 use crate::Configuration;
 use crate::Context;
 use crate::Endpoint;
@@ -1013,7 +1013,7 @@ mod tests {
     #[tokio::test]
     async fn it_only_accepts_batch_http_link_mode_for_query_batch() {
         let expected_response: serde_json::Value = serde_json::from_str(include_str!(
-            "query_batching/testdata/batching_not_enabled_response.json"
+            "../query_batching/testdata/batching_not_enabled_response.json"
         ))
         .unwrap();
 
@@ -1055,7 +1055,7 @@ mod tests {
     #[tokio::test]
     async fn it_processes_a_valid_query_batch() {
         let expected_response: serde_json::Value = serde_json::from_str(include_str!(
-            "query_batching/testdata/expected_good_response.json"
+            "../query_batching/testdata/expected_good_response.json"
         ))
         .unwrap();
 
@@ -1112,7 +1112,7 @@ mod tests {
     #[tokio::test]
     async fn it_will_not_process_a_query_batch_without_enablement() {
         let expected_response: serde_json::Value = serde_json::from_str(include_str!(
-            "query_batching/testdata/batching_not_enabled_response.json"
+            "../query_batching/testdata/batching_not_enabled_response.json"
         ))
         .unwrap();
 
@@ -1154,7 +1154,7 @@ mod tests {
     #[tokio::test]
     async fn it_will_not_process_a_poorly_formatted_query_batch() {
         let expected_response: serde_json::Value = serde_json::from_str(include_str!(
-            "query_batching/testdata/badly_formatted_batch_response.json"
+            "../query_batching/testdata/badly_formatted_batch_response.json"
         ))
         .unwrap();
 

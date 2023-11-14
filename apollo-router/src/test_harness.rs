@@ -23,7 +23,7 @@ use crate::services::execution;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::router;
-use crate::services::router_service::RouterCreator;
+use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::HasSchema;
