@@ -17,6 +17,8 @@ use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
+use self::service::MULTIPART_DEFER_HEADER_VALUE;
+use self::service::MULTIPART_SUBSCRIPTION_HEADER_VALUE;
 use super::supergraph;
 use crate::graphql;
 use crate::http_ext::header_map;
@@ -24,8 +26,6 @@ use crate::json_ext::Path;
 use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
 use crate::Context;
-use service::MULTIPART_DEFER_HEADER_VALUE;
-use service::MULTIPART_SUBSCRIPTION_HEADER_VALUE;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
