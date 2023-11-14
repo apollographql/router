@@ -48,12 +48,6 @@ We introduce a new GraphOS authorization directive called `@policy`, that is des
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3751
 
-### Add a router request builder ([Issue #3267](https://github.com/apollographql/router/issues/3267))
-
-The builder implementation was missing on the router request side, which means that router service level plugins cannot reuse the context if they unpack the request object.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3430
-
 ### Authorization directives are enabled by default ([Issue #3842](https://github.com/apollographql/router/issues/3842))
 
 If the router starts with an API key from an Enterprise account, and the schema contains the authorization directives, then they will be usable directly without further configuration.
