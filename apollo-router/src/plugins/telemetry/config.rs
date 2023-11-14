@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use std::io::IsTerminal;
 
 use axum::headers::HeaderName;
-use opentelemetry::sdk::trace::SpanLimits;
 use opentelemetry::Array;
 use opentelemetry::Value;
+use opentelemetry_sdk::trace::SpanLimits;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -562,31 +562,31 @@ pub(crate) enum Sampler {
     AlwaysOff,
 }
 
-impl From<Sampler> for opentelemetry::sdk::trace::Sampler {
+impl From<Sampler> for opentelemetry_sdk::trace::Sampler {
     fn from(s: Sampler) -> Self {
         match s {
-            Sampler::AlwaysOn => opentelemetry::sdk::trace::Sampler::AlwaysOn,
-            Sampler::AlwaysOff => opentelemetry::sdk::trace::Sampler::AlwaysOff,
+            Sampler::AlwaysOn => opentelemetry_sdk::trace::Sampler::AlwaysOn,
+            Sampler::AlwaysOff => opentelemetry_sdk::trace::Sampler::AlwaysOff,
         }
     }
 }
 
-impl From<SamplerOption> for opentelemetry::sdk::trace::Sampler {
+impl From<SamplerOption> for opentelemetry_sdk::trace::Sampler {
     fn from(s: SamplerOption) -> Self {
         match s {
             SamplerOption::Always(s) => s.into(),
             SamplerOption::TraceIdRatioBased(ratio) => {
-                opentelemetry::sdk::trace::Sampler::TraceIdRatioBased(ratio)
+                opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(ratio)
             }
         }
     }
 }
 
-impl From<&Trace> for opentelemetry::sdk::trace::Config {
+impl From<&Trace> for opentelemetry_sdk::trace::Config {
     fn from(config: &Trace) -> Self {
-        let mut common = opentelemetry::sdk::trace::config();
+        let mut common = opentelemetry_sdk::trace::config();
 
-        let mut sampler: opentelemetry::sdk::trace::Sampler = config.sampler.clone().into();
+        let mut sampler: opentelemetry_sdk::trace::Sampler = config.sampler.clone().into();
         if config.parent_based_sampler {
             sampler = parent_based(sampler);
         }
@@ -604,8 +604,8 @@ impl From<&Trace> for opentelemetry::sdk::trace::Config {
     }
 }
 
-fn parent_based(sampler: opentelemetry::sdk::trace::Sampler) -> opentelemetry::sdk::trace::Sampler {
-    opentelemetry::sdk::trace::Sampler::ParentBased(Box::new(sampler))
+fn parent_based(sampler: opentelemetry_sdk::trace::Sampler) -> opentelemetry_sdk::trace::Sampler {
+    opentelemetry_sdk::trace::Sampler::ParentBased(Box::new(sampler))
 }
 
 impl Conf {

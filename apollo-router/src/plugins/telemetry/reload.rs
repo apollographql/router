@@ -5,9 +5,9 @@ use std::sync::atomic::Ordering;
 use anyhow::anyhow;
 use anyhow::Result;
 use once_cell::sync::OnceCell;
-use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry_sdk::trace::Tracer;
 use rand::thread_rng;
 use rand::Rng;
 use tower::BoxError;
@@ -50,7 +50,7 @@ pub(super) type LayeredTracer = Layered<
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
 // generic types in the layer definition.
 pub(super) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
-    ReloadTracer<opentelemetry::sdk::trace::Tracer>,
+    ReloadTracer<opentelemetry_sdk::trace::Tracer>,
 > = OnceCell::new();
 
 static FMT_LAYER_HANDLE: OnceCell<
@@ -66,7 +66,7 @@ pub(crate) fn metrics_layer() -> &'static MetricsLayer {
 
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = ReloadTracer::new(
-        opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer(
+        opentelemetry_sdk::trace::TracerProvider::default().versioned_tracer(
             "noop",
             None::<String>,
             None::<String>,
@@ -190,7 +190,7 @@ where
 
         // if there's an exsting otel context set by the client request, and it is sampled,
         // then that trace is sampled
-        let current_otel_context = opentelemetry_api::Context::current();
+        let current_otel_context = opentelemetry::Context::current();
         if current_otel_context.span().span_context().is_sampled() {
             return true;
         }

@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 use std::env;
 use std::time::Duration;
 
-use opentelemetry::sdk::resource::EnvResourceDetector;
-use opentelemetry::sdk::resource::ResourceDetector;
-use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
+use opentelemetry_sdk::resource::EnvResourceDetector;
+use opentelemetry_sdk::resource::ResourceDetector;
+use opentelemetry_sdk::Resource;
 
 use crate::plugins::telemetry::config::AttributeValue;
 const UNKNOWN_SERVICE: &str = "unknown_service";
@@ -135,7 +135,7 @@ mod test {
     use std::collections::BTreeMap;
     use std::env;
 
-    use opentelemetry_api::Key;
+    use opentelemetry::Key;
 
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::resource::ConfigResource;
