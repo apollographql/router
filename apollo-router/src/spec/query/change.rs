@@ -26,15 +26,15 @@ pub(crate) struct QueryHashVisitor<'a> {
 }
 
 impl<'a> QueryHashVisitor<'a> {
-    pub(crate) fn new(schema: &'a schema::Schema, executable: &'a ast::Document) -> Option<Self> {
-        Some(Self {
+    pub(crate) fn new(schema: &'a schema::Schema, executable: &'a ast::Document) -> Self {
+        Self {
             schema,
             hasher: Sha256::new(),
             fragments: transform::collect_fragments(executable),
             hashed_types: HashSet::new(),
             hashed_fields: HashSet::new(),
             subgraph_query: false,
-        })
+        }
     }
 
     pub(crate) fn finish(self) -> Vec<u8> {
@@ -83,7 +83,7 @@ impl<'a> QueryHashVisitor<'a> {
             schema::Value::List(l) => {
                 "list[".hash(self);
                 for v in l.iter() {
-                    self.hash_value(&v);
+                    self.hash_value(v);
                 }
                 "]".hash(self);
             }
@@ -92,7 +92,7 @@ impl<'a> QueryHashVisitor<'a> {
                 for (k, v) in o.iter() {
                     k.hash(self);
                     ":".hash(self);
-                    self.hash_value(&v);
+                    self.hash_value(v);
                 }
                 "}".hash(self);
             }
@@ -331,7 +331,7 @@ mod tests {
         let doc = Document::parse(query, "query.graphql");
         schema.validate().unwrap();
         doc.to_executable(&schema).validate(&schema).unwrap();
-        let mut visitor = QueryHashVisitor::new(&schema, &doc).unwrap();
+        let mut visitor = QueryHashVisitor::new(&schema, &doc);
         traverse::document(&mut visitor, &doc).unwrap();
 
         hex::encode(visitor.finish())
@@ -342,7 +342,7 @@ mod tests {
         let schema = Schema::parse(schema, "schema.graphql");
         let doc = Document::parse(query, "query.graphql");
         //doc.to_executable(&schema);
-        let mut visitor = QueryHashVisitor::new(&schema, &doc).unwrap();
+        let mut visitor = QueryHashVisitor::new(&schema, &doc);
         visitor.subgraph_query = true;
         traverse::document(&mut visitor, &doc).unwrap();
 

@@ -352,8 +352,10 @@ impl Query {
             .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
-        let mut visitor = QueryHashVisitor::new(&schema.definitions, ast).unwrap();
-        traverse::document(&mut visitor, ast).unwrap();
+        let mut visitor = QueryHashVisitor::new(&schema.definitions, ast);
+        traverse::document(&mut visitor, ast).map_err(|e| {
+            SpecError::ParsingError(format!("could not calculate the query hash: {e}"))
+        })?;
         let hash = visitor.finish();
 
         Ok((fragments, operations, defer_stats, hash))

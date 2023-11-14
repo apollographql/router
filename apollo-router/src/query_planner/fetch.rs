@@ -478,7 +478,7 @@ impl FetchNode {
     pub(crate) fn hash_subquery(&mut self, schema: &apollo_compiler::Schema) {
         let doc = Document::parse(&self.operation, "query.graphql");
 
-        let mut visitor = QueryHashVisitor::new(&schema, &doc).unwrap();
+        let mut visitor = QueryHashVisitor::new(schema, &doc);
         visitor.subgraph_query = !self.requires.is_empty();
         traverse::document(&mut visitor, &doc).unwrap();
 
