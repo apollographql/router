@@ -65,11 +65,11 @@ impl FederationSpecDefinition {
             name: name_in_schema,
             arguments: vec![
                 Node::new(Argument {
-                    name: FEDERATION_FIELDS_ARGUMENT_NAME.clone(),
+                    name: FEDERATION_FIELDS_ARGUMENT_NAME,
                     value: Node::new(Value::String(fields)),
                 }),
                 Node::new(Argument {
-                    name: FEDERATION_RESOLVABLE_ARGUMENT_NAME.clone(),
+                    name: FEDERATION_RESOLVABLE_ARGUMENT_NAME,
                     value: Node::new(Value::Boolean(resolvable)),
                 }),
             ],
@@ -110,7 +110,7 @@ impl FederationSpecDefinition {
         let mut arguments = Vec::new();
         if let Some(reason) = reason {
             arguments.push(Node::new(Argument {
-                name: FEDERATION_REASON_ARGUMENT_NAME.clone(),
+                name: FEDERATION_REASON_ARGUMENT_NAME,
                 value: Node::new(Value::String(reason)),
             }));
         }
@@ -133,7 +133,7 @@ impl FederationSpecDefinition {
         Ok(Directive {
             name: name_in_schema,
             arguments: vec![Node::new(Argument {
-                name: FEDERATION_FIELDS_ARGUMENT_NAME.clone(),
+                name: FEDERATION_FIELDS_ARGUMENT_NAME,
                 value: Node::new(Value::String(fields)),
             })],
         })
@@ -152,7 +152,7 @@ impl FederationSpecDefinition {
         Ok(Directive {
             name: name_in_schema,
             arguments: vec![Node::new(Argument {
-                name: FEDERATION_FIELDS_ARGUMENT_NAME.clone(),
+                name: FEDERATION_FIELDS_ARGUMENT_NAME,
                 value: Node::new(Value::String(fields)),
             })],
         })
@@ -186,7 +186,7 @@ impl FederationSpecDefinition {
         Ok(Directive {
             name: name_in_schema,
             arguments: vec![Node::new(Argument {
-                name: FEDERATION_FROM_ARGUMENT_NAME.clone(),
+                name: FEDERATION_FROM_ARGUMENT_NAME,
                 value: Node::new(Value::String(from)),
             })],
         })

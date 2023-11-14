@@ -7,12 +7,11 @@ use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::{Identity, Version};
 use crate::link::spec_definition::{spec_definitions, SpecDefinition};
 use crate::schema::position::{
-    DirectiveDefinitionPosition, EnumTypeDefinitionPosition, EnumValueDefinitionPosition,
-    InputObjectFieldDefinitionPosition, InputObjectTypeDefinitionPosition,
-    InterfaceFieldDefinitionPosition, InterfaceTypeDefinitionPosition,
-    ObjectFieldDefinitionPosition, ObjectTypeDefinitionPosition, ScalarTypeDefinitionPosition,
-    SchemaRootDefinitionKind, SchemaRootDefinitionPosition, TypeDefinitionPosition,
-    UnionTypeDefinitionPosition,
+    DirectiveDefinitionPosition, EnumTypeDefinitionPosition, InputObjectFieldDefinitionPosition,
+    InputObjectTypeDefinitionPosition, InterfaceFieldDefinitionPosition,
+    InterfaceTypeDefinitionPosition, ObjectFieldDefinitionPosition, ObjectTypeDefinitionPosition,
+    ScalarTypeDefinitionPosition, SchemaRootDefinitionKind, SchemaRootDefinitionPosition,
+    TypeDefinitionPosition, UnionTypeDefinitionPosition,
 };
 use crate::schema::FederationSchema;
 use apollo_compiler::ast::FieldDefinition;
@@ -1192,6 +1191,7 @@ fn extract_enum_type_content<'schema>(
         let type_ = pos.get(supergraph_schema.schema())?;
 
         for (value_name, value) in type_.values.iter() {
+            let value_pos = pos.value(value_name.clone());
             let mut enum_value_directive_applications = Vec::new();
             if let Some(enum_value_directive_definition) = enum_value_directive_definition {
                 for directive in value.directives.iter() {
@@ -1209,11 +1209,7 @@ fn extract_enum_type_content<'schema>(
                         graph_enum_value_name_to_subgraph_name,
                         graph_enum_value,
                     )?;
-                    EnumValueDefinitionPosition {
-                        type_name: (*type_name).clone(),
-                        value_name: value_name.clone(),
-                    }
-                    .insert(
+                    value_pos.insert(
                         &mut subgraph.schema,
                         Component::new(EnumValueDefinition {
                             description: None,
@@ -1241,11 +1237,7 @@ fn extract_enum_type_content<'schema>(
                             }.into()
                         );
                     }
-                    EnumValueDefinitionPosition {
-                        type_name: (*type_name).clone(),
-                        value_name: value_name.clone(),
-                    }
-                    .insert(
+                    value_pos.insert(
                         &mut subgraph.schema,
                         Component::new(EnumValueDefinition {
                             description: None,
@@ -1696,7 +1688,7 @@ fn add_federation_operations(
 ) -> Result<(), FederationError> {
     // TODO: Use the JS/programmatic approach of checkOrAdd() instead of hard-coding the adds.
     let any_type_pos = ScalarTypeDefinitionPosition {
-        type_name: FEDERATION_ANY_TYPE_NAME.clone(),
+        type_name: FEDERATION_ANY_TYPE_NAME,
     };
     any_type_pos.pre_insert(&mut subgraph.schema)?;
     any_type_pos.insert(
@@ -1709,17 +1701,17 @@ fn add_federation_operations(
     )?;
     let mut service_fields = IndexMap::new();
     service_fields.insert(
-        FEDERATION_SDL_FIELD_NAME.clone(),
+        FEDERATION_SDL_FIELD_NAME,
         Component::new(FieldDefinition {
             description: None,
-            name: FEDERATION_SDL_FIELD_NAME.clone(),
+            name: FEDERATION_SDL_FIELD_NAME,
             arguments: Vec::new(),
             ty: Type::Named(name!("String")),
             directives: Default::default(),
         }),
     );
     let service_type_pos = ObjectTypeDefinitionPosition {
-        type_name: FEDERATION_SERVICE_TYPE_NAME.clone(),
+        type_name: FEDERATION_SERVICE_TYPE_NAME,
     };
     service_type_pos.pre_insert(&mut subgraph.schema)?;
     service_type_pos.insert(
@@ -1755,7 +1747,7 @@ fn add_federation_operations(
     let is_entity_type = !entity_members.is_empty();
     if is_entity_type {
         let entity_type_pos = UnionTypeDefinitionPosition {
-            type_name: FEDERATION_ENTITY_TYPE_NAME.clone(),
+            type_name: FEDERATION_ENTITY_TYPE_NAME,
         };
         entity_type_pos.pre_insert(&mut subgraph.schema)?;
         entity_type_pos.insert(
@@ -1796,24 +1788,24 @@ fn add_federation_operations(
     let query_root_type_name = query_root_pos.get(subgraph.schema.schema())?.name.clone();
     let entity_field_pos = ObjectFieldDefinitionPosition {
         type_name: query_root_type_name.clone(),
-        field_name: FEDERATION_ENTITIES_FIELD_NAME.clone(),
+        field_name: FEDERATION_ENTITIES_FIELD_NAME,
     };
     if is_entity_type {
         entity_field_pos.insert(
             &mut subgraph.schema,
             Component::new(FieldDefinition {
                 description: None,
-                name: FEDERATION_ENTITIES_FIELD_NAME.clone(),
+                name: FEDERATION_ENTITIES_FIELD_NAME,
                 arguments: vec![Node::new(InputValueDefinition {
                     description: None,
-                    name: FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME.clone(),
+                    name: FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME,
                     ty: Node::new(Type::NonNullList(Box::new(Type::NonNullNamed(
-                        FEDERATION_ANY_TYPE_NAME.clone(),
+                        FEDERATION_ANY_TYPE_NAME,
                     )))),
                     default_value: None,
                     directives: Default::default(),
                 })],
-                ty: Type::NonNullList(Box::new(Type::Named(FEDERATION_ENTITY_TYPE_NAME.clone()))),
+                ty: Type::NonNullList(Box::new(Type::Named(FEDERATION_ENTITY_TYPE_NAME))),
                 directives: Default::default(),
             }),
         )?;
@@ -1823,15 +1815,15 @@ fn add_federation_operations(
 
     ObjectFieldDefinitionPosition {
         type_name: query_root_type_name.clone(),
-        field_name: FEDERATION_SERVICE_FIELD_NAME.clone(),
+        field_name: FEDERATION_SERVICE_FIELD_NAME,
     }
     .insert(
         &mut subgraph.schema,
         Component::new(FieldDefinition {
             description: None,
-            name: FEDERATION_SERVICE_FIELD_NAME.clone(),
+            name: FEDERATION_SERVICE_FIELD_NAME,
             arguments: Vec::new(),
-            ty: Type::NonNullNamed(FEDERATION_SERVICE_TYPE_NAME.clone()),
+            ty: Type::NonNullNamed(FEDERATION_SERVICE_TYPE_NAME),
             directives: Default::default(),
         }),
     )?;
