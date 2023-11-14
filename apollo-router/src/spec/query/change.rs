@@ -15,6 +15,10 @@ use tower::BoxError;
 use super::transform;
 use super::traverse;
 
+/// Calculates a hash of the query and the schema, but only looking at the parts of the
+/// schema which affect the query.
+/// This means that if a schema update does not affect an existing query (example: adding a field),
+/// then the hash will stay the same
 pub(crate) struct QueryHashVisitor<'a> {
     schema: &'a schema::Schema,
     hasher: Sha256,
