@@ -211,7 +211,6 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
         root_type: &str,
         node: &ast::OperationDefinition,
     ) -> Result<(), BoxError> {
-        println!("looking at root type {root_type}");
         root_type.hash(self);
         self.hash_type_by_name(root_type);
 
@@ -260,6 +259,7 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
     ) -> Result<(), BoxError> {
         let parent = parent_type.to_string();
         let name = field_def.name.as_str().to_string();
+
         if self.hashed_fields.insert((parent, name)) {
             self.hash_type_by_name(parent_type);
 
@@ -287,6 +287,7 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
     }
 
     fn fragment_spread(&mut self, node: &ast::FragmentSpread) -> Result<(), BoxError> {
+        node.fragment_name.hash(self);
         let type_condition = &self
             .fragments
             .get(&node.fragment_name)
