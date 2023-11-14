@@ -4,11 +4,12 @@ expression: new_config
 ---
 ---
 telemetry:
-  metrics:
-    common:
-      attributes:
-        supergraph:
-          request:
-            header:
-              - named: fd
+  exporters:
+    metrics:
+      common:
+        attributes:
+          supergraph:
+            request:
+              header:
+                - named: fd
 

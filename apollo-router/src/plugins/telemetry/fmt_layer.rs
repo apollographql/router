@@ -27,15 +27,21 @@ use crate::plugins::telemetry::resource::ConfigResource;
 pub(crate) fn create_fmt_layer(
     config: &config::Conf,
 ) -> Box<dyn Layer<LayeredTracer> + Send + Sync> {
-    match &config.logging.stdout {
+    match &config.exporters.logging.stdout {
         StdOut { enabled, format } if *enabled => match format {
             Format::Json(format_config) => {
-                let format = Json::new(config.logging.common.to_resource(), format_config.clone());
+                let format = Json::new(
+                    config.exporters.logging.common.to_resource(),
+                    format_config.clone(),
+                );
                 FmtLayer::new(FilteringFormatter::new(format, filter_metric_events)).boxed()
             }
 
             Format::Text(format_config) => {
-                let format = Text::new(config.logging.common.to_resource(), format_config.clone());
+                let format = Text::new(
+                    config.exporters.logging.common.to_resource(),
+                    format_config.clone(),
+                );
                 FmtLayer::new(FilteringFormatter::new(format, filter_metric_events)).boxed()
             }
         },

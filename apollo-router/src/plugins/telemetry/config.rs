@@ -49,14 +49,32 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Conf {
+    /// Apollo reporting configuration
+    pub(crate) apollo: apollo::Config,
+
+    /// Instrumentation configuration
+    pub(crate) exporters: Exporters,
+
+    /// Instrumentation configuration
+    pub(crate) instrumentation: Instrumentation,
+}
+
+/// Exporter configuration
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct Exporters {
     /// Logging configuration
     pub(crate) logging: config_new::logging::Logging,
     /// Metrics configuration
     pub(crate) metrics: Metrics,
     /// Tracing configuration
     pub(crate) tracing: Tracing,
-    /// Apollo reporting configuration
-    pub(crate) apollo: apollo::Config,
+}
+
+/// Instrumentation configuration
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct Instrumentation {
     #[serde(skip)]
     /// Event configuration
     pub(crate) events: config_new::events::Events,
@@ -494,7 +512,7 @@ impl Conf {
     pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
         Ok(
             match (
-                &self.tracing.common.sampler,
+                &self.exporters.tracing.common.sampler,
                 &self.apollo.field_level_instrumentation_sampler,
             ) {
                 // Error conditions

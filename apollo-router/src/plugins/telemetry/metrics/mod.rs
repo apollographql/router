@@ -474,7 +474,7 @@ impl ResourceDetector for ConfigResourceDetector {
 
 impl MetricsBuilder {
     pub(crate) fn new(config: &Conf) -> Self {
-        let resource = config.metrics.common.to_resource();
+        let resource = config.exporters.metrics.common.to_resource();
 
         Self {
             resource: resource.clone(),

@@ -165,11 +165,14 @@ async fn simple_query_should_display_logs_for_subgraph_and_supergraph() {
     }))
     .expect("subscriber must be set");
 
-    let router = setup_router(serde_json::json!({"telemetry": {"tracing": {},
-    "logging": logging_config,
+    let router = setup_router(serde_json::json!({"telemetry": {
     "apollo": {
-        "schema_id": ""
-    }}}))
+            "schema_id": ""
+        },
+    "exporters": {
+        "tracing": {},
+        "logging": logging_config,
+        }}}))
     .await;
     let actual = query_with_router(router, request).await;
 

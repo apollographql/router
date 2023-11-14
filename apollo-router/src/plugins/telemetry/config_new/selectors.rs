@@ -13,7 +13,7 @@ use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::get_baggage;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
-use crate::plugins::telemetry::config_new::GetAttribute;
+use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::ToOtelValue;
 use crate::services::router;
 use crate::services::subgraph;
@@ -369,7 +369,7 @@ pub(crate) enum SubgraphSelector {
     },
 }
 
-impl GetAttribute<router::Request, router::Response> for RouterSelector {
+impl Selector<router::Request, router::Response> for RouterSelector {
     fn on_request(&self, request: &router::Request) -> Option<opentelemetry::Value> {
         match self {
             RouterSelector::RequestHeader {
@@ -445,7 +445,7 @@ impl GetAttribute<router::Request, router::Response> for RouterSelector {
     }
 }
 
-impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphSelector {
+impl Selector<supergraph::Request, supergraph::Response> for SupergraphSelector {
     fn on_request(&self, request: &supergraph::Request) -> Option<opentelemetry::Value> {
         match self {
             SupergraphSelector::OperationName {
@@ -556,7 +556,7 @@ impl GetAttribute<supergraph::Request, supergraph::Response> for SupergraphSelec
     }
 }
 
-impl GetAttribute<subgraph::Request, subgraph::Response> for SubgraphSelector {
+impl Selector<subgraph::Request, subgraph::Response> for SubgraphSelector {
     fn on_request(&self, request: &subgraph::Request) -> Option<opentelemetry::Value> {
         match self {
             SubgraphSelector::SubgraphOperationName {
@@ -777,7 +777,7 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
     use crate::plugins::telemetry::config_new::selectors::TraceIdFormat;
-    use crate::plugins::telemetry::config_new::GetAttribute;
+    use crate::plugins::telemetry::config_new::Selector;
 
     #[test]
     fn router_request_header() {
