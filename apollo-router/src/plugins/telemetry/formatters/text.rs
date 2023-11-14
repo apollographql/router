@@ -163,7 +163,6 @@ impl Text {
         let ext = span.extensions();
         let mut wrote_something = false;
 
-        // TODO directly write the attributes in buffer here to avoid allocations
         let style = Style::new().dimmed();
         if self.config.ansi {
             write!(writer, "{}", style.prefix())?;
@@ -228,29 +227,30 @@ impl Text {
         resource: &HashMap<String, Value>,
     ) -> fmt::Result {
         if !resource.is_empty() {
+            let style = Style::new().dimmed();
             if self.config.ansi {
-                let style = Style::new().dimmed();
                 write!(writer, "{}", style.prefix())?;
-                Self::write_resource(writer, resource)?;
+            }
+            let resource_not_empty = !resource.is_empty();
+
+            if resource_not_empty {
+                write!(writer, "resource{{")?;
+            }
+
+            for (k, v) in resource {
+                write!(writer, "{k}={v},")?;
+            }
+
+            if resource_not_empty {
+                write!(writer, "}}")?;
+            }
+
+            if self.config.ansi {
                 write!(writer, "{}", style.suffix())?;
-            } else {
-                Self::write_resource(writer, resource)?;
             }
             writer.write_char(' ')?;
         }
 
-        Ok(())
-    }
-    fn write_resource(writer: &mut Writer, resources: &HashMap<String, Value>) -> fmt::Result {
-        write!(
-            writer,
-            "resource{{{}}}",
-            resources
-                .iter()
-                .map(|(k, v)| format!("{}={}", k, v))
-                .collect::<Vec<String>>()
-                .join(",")
-        )?;
         Ok(())
     }
 }

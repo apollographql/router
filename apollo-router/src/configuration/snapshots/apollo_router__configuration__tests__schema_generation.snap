@@ -2656,6 +2656,11 @@ expression: "&schema"
                         "text": {
                           "type": "object",
                           "properties": {
+                            "ansi": {
+                              "description": "Enable ansi (default: true)",
+                              "default": true,
+                              "type": "boolean"
+                            },
                             "display_filename": {
                               "description": "Include the filename with the log event.",
                               "default": false,

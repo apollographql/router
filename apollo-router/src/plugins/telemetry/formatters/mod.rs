@@ -8,15 +8,12 @@ use std::fmt;
 use opentelemetry::sdk::Resource;
 use serde_json::Number;
 use tracing::Subscriber;
-use tracing_core::span::Record;
-use tracing_subscriber::field;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::FormatEvent;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 
-use super::dynamic_attribute::LogAttributes;
 use crate::metrics::layer::METRIC_PREFIX_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_HISTOGRAM;
 use crate::metrics::layer::METRIC_PREFIX_MONOTONIC_COUNTER;
@@ -168,10 +165,4 @@ pub(crate) trait EventFormatter<S> {
     ) -> fmt::Result
     where
         W: std::fmt::Write;
-}
-
-pub(crate) trait FieldsFormatter<'a> {
-    fn format_fields<R: field::RecordFields>(&self, writer: Writer<'_>, fields: R) -> fmt::Result;
-
-    fn add_fields(&self, current: &'a mut LogAttributes, fields: &Record<'_>) -> fmt::Result;
 }
