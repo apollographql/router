@@ -204,7 +204,7 @@ mod tests {
 
     async fn execute_supergraph_test(
         query: &str,
-        body: &Response,
+        expected: &Response,
         mut supergraph_service: supergraph::BoxCloneService,
     ) {
         let request = supergraph::Request::fake_builder()
@@ -225,10 +225,16 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            serde_json::to_string(&response).unwrap(),
-            serde_json::to_string(body).unwrap()
-        );
+        let response = serde_json::to_string_pretty(&response).unwrap();
+        let expected = serde_json::to_string_pretty(expected).unwrap();
+        for diff in diff::lines(&response, &expected) {
+            match diff {
+                diff::Result::Left(l) => println!("-{}", l),
+                diff::Result::Both(l, _) => println!(" {}", l),
+                diff::Result::Right(r) => println!("+{}", r),
+            }
+        }
+        assert_eq!(response, expected);
     }
 
     #[tokio::test]

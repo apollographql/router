@@ -51,7 +51,53 @@ impl<'a> QueryHashVisitor<'a> {
 
     fn hash_argument(&mut self, argument: &Node<ast::Argument>) {
         argument.name.hash(self);
-        argument.value.hash(self);
+        self.hash_value(&argument.value);
+    }
+
+    fn hash_value(&mut self, value: &ast::Value) {
+        match value {
+            schema::Value::Null => "null".hash(self),
+            schema::Value::Enum(e) => {
+                "enum".hash(self);
+                e.hash(self);
+            }
+            schema::Value::Variable(v) => {
+                "variable".hash(self);
+                v.hash(self);
+            }
+            schema::Value::String(s) => {
+                "string".hash(self);
+                s.hash(self);
+            }
+            schema::Value::Float(f) => {
+                "float".hash(self);
+                f.hash(self);
+            }
+            schema::Value::Int(i) => {
+                "int".hash(self);
+                i.hash(self);
+            }
+            schema::Value::Boolean(b) => {
+                "boolean".hash(self);
+                b.hash(self);
+            }
+            schema::Value::List(l) => {
+                "list[".hash(self);
+                for v in l.iter() {
+                    self.hash_value(&v);
+                }
+                "]".hash(self);
+            }
+            schema::Value::Object(o) => {
+                "object{".hash(self);
+                for (k, v) in o.iter() {
+                    k.hash(self);
+                    ":".hash(self);
+                    self.hash_value(&v);
+                }
+                "}".hash(self);
+            }
+        }
     }
 
     fn hash_type_by_name(&mut self, t: &str) {
@@ -142,7 +188,9 @@ impl<'a> QueryHashVisitor<'a> {
         for directive in &t.directives {
             self.hash_directive(directive);
         }
-        t.default_value.hash(self);
+        if let Some(value) = t.default_value.as_ref() {
+            self.hash_value(value);
+        }
     }
 }
 
@@ -163,7 +211,7 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
         root_type: &str,
         node: &ast::OperationDefinition,
     ) -> Result<(), BoxError> {
-        println!("looking at root type {root_type} and operation {:#?}", node);
+        println!("looking at root type {root_type}");
         root_type.hash(self);
         self.hash_type_by_name(root_type);
 
@@ -201,10 +249,6 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
                 }
                 _ => Err("expected _entities field".into()),
             }
-            //todo!()
-            /*for selection in node.selection_set {
-                match
-            }*/
         }
     }
 
@@ -236,6 +280,7 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
     }
 
     fn fragment_definition(&mut self, node: &ast::FragmentDefinition) -> Result<(), BoxError> {
+        node.name.hash(self);
         self.hash_type_by_name(&node.type_condition);
 
         traverse::fragment_definition(self, node)
@@ -283,6 +328,18 @@ mod tests {
         schema.validate().unwrap();
         doc.to_executable(&schema).validate(&schema).unwrap();
         let mut visitor = QueryHashVisitor::new(&schema, &doc).unwrap();
+        traverse::document(&mut visitor, &doc).unwrap();
+
+        hex::encode(visitor.finish())
+    }
+
+    #[track_caller]
+    fn hash_subgraph_query(schema: &str, query: &str) -> String {
+        let schema = Schema::parse(schema, "schema.graphql");
+        let doc = Document::parse(query, "query.graphql");
+        //doc.to_executable(&schema);
+        let mut visitor = QueryHashVisitor::new(&schema, &doc).unwrap();
+        visitor.subgraph_query = true;
         traverse::document(&mut visitor, &doc).unwrap();
 
         hex::encode(visitor.finish())
@@ -505,7 +562,8 @@ mod tests {
           name: String
         }
         "#;
-        let query = r#"Query1($representations:[_Any!]!){
+
+        let query1 = r#"Query1($representations:[_Any!]!){
             _entities(representations:$representations){
                 ...on User {
                     id
@@ -513,27 +571,33 @@ mod tests {
                 }
             }
         }"#;
-        //assert_eq!(hash(schema1, query), hash(schema2, query));
 
-        let schema = Schema::parse(schema1, "schema.graphql");
-        let doc = Document::parse(query, "query.graphql");
-        //schema.validate().unwrap();
-        //doc.to_executable(&schema).validate(&schema).unwrap();
-        let mut visitor = QueryHashVisitor::new(&schema, &doc).unwrap();
-        visitor.subgraph_query = true;
-        traverse::document(&mut visitor, &doc).unwrap();
+        println!("query1: {query1}");
 
-        let hash1 = hex::encode(visitor.finish());
+        let hash1 = hash_subgraph_query(schema1, query1);
         println!("hash1: {hash1}");
-        let doc = Document::parse(query, "query.graphql");
-        //schema.validate().unwrap();
-        //doc.to_executable(&schema).validate(&schema).unwrap();
-        let mut visitor = QueryHashVisitor::new(&schema, &doc).unwrap();
-        visitor.subgraph_query = true;
-        traverse::document(&mut visitor, &doc).unwrap();
 
-        let hash2 = hex::encode(visitor.finish());
+        let hash2 = hash_subgraph_query(schema2, query1);
         println!("hash2: {hash2}");
+
+        assert_ne!(hash1, hash2);
+
+        let query2 = r#"Query1($representations:[_Any!]!){
+            _entities(representations:$representations){
+                ...on User {
+                    name
+                }
+            }
+        }"#;
+
+        println!("query2: {query2}");
+
+        let hash1 = hash_subgraph_query(schema1, query2);
+        println!("hash1: {hash1}");
+
+        let hash2 = hash_subgraph_query(schema2, query2);
+        println!("hash2: {hash2}");
+
         assert_eq!(hash1, hash2);
     }
 }

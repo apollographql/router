@@ -260,7 +260,7 @@ async fn defer() {
                         id: Some("fetch1".to_string()),
                         input_rewrites: None,
                         output_rewrites: None,
-                        schema_aware_hash: Arc::new(Vec::new()),
+                        schema_aware_hash: Default::default(),
                     }))),
                 },
                 deferred: vec![DeferredNode {
@@ -303,7 +303,7 @@ async fn defer() {
                             id: Some("fetch2".to_string()),
                             input_rewrites: None,
                             output_rewrites: None,
-                            schema_aware_hash: Arc::new(Vec::new()),
+                            schema_aware_hash: Default::default(),
                         })),
                     }))),
                 }],

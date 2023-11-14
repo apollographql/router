@@ -120,7 +120,18 @@ pub(crate) struct FetchNode {
     // hash for the query and relevant parts of the schema. if two different schemas provide the exact same types, fields and directives
     // affecting the query, then they will have the same hash
     #[serde(default)]
-    pub(crate) schema_aware_hash: Arc<Vec<u8>>,
+    pub(crate) schema_aware_hash: Arc<QueryHash>,
+}
+
+#[derive(Clone, Default, PartialEq, Deserialize, Serialize)]
+pub(crate) struct QueryHash(#[serde(with = "hex")] Vec<u8>);
+
+impl std::fmt::Debug for QueryHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("QueryHash")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
 }
 
 pub(crate) struct Variables {
@@ -470,6 +481,6 @@ impl FetchNode {
         visitor.subgraph_query = !self.requires.is_empty();
         traverse::document(&mut visitor, &doc).unwrap();
 
-        self.schema_aware_hash = Arc::new(visitor.finish());
+        self.schema_aware_hash = Arc::new(QueryHash(visitor.finish()));
     }
 }
