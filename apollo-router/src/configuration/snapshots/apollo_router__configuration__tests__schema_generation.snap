@@ -89,6 +89,12 @@ expression: "&schema"
                       "type": "string",
                       "nullable": true
                     },
+                    "ttl": {
+                      "description": "TTL for entries",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
                     "urls": {
                       "description": "List of URLs to the Redis cluster",
                       "type": "array",
@@ -1557,12 +1563,13 @@ expression: "&schema"
       "description": "Health check configuration",
       "default": {
         "listen": "127.0.0.1:8088",
-        "enabled": true
+        "enabled": true,
+        "path": "/health"
       },
       "type": "object",
       "properties": {
         "enabled": {
-          "description": "Set to false to disable the health check endpoint",
+          "description": "Set to false to disable the health check",
           "default": true,
           "type": "boolean"
         },
@@ -1579,6 +1586,11 @@ expression: "&schema"
               "type": "string"
             }
           ]
+        },
+        "path": {
+          "description": "Optionally set a custom healthcheck path Defaults to /health",
+          "default": "/health",
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -2109,6 +2121,12 @@ expression: "&schema"
                   "properties": {
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "ttl": {
+                      "description": "TTL for entries",
                       "default": null,
                       "type": "string",
                       "nullable": true
@@ -5725,6 +5743,12 @@ expression: "&schema"
           "properties": {
             "timeout": {
               "description": "Redis request timeout (default: 2ms)",
+              "default": null,
+              "type": "string",
+              "nullable": true
+            },
+            "ttl": {
+              "description": "TTL for entries",
               "default": null,
               "type": "string",
               "nullable": true

@@ -19,6 +19,7 @@ use crate::json_ext::PathElement;
 use crate::spec::query::transform;
 use crate::spec::query::traverse;
 use crate::spec::Schema;
+use crate::spec::TYPENAME;
 
 pub(crate) struct PolicyExtractionVisitor<'a> {
     schema: &'a schema::Schema,
@@ -250,13 +251,16 @@ impl<'a> PolicyFilteringVisitor<'a> {
         field_def: &ast::FieldDefinition,
         node: &ast::Field,
     ) -> bool {
-        // if all selections under the interface field are fragments with type conditions
+        // we can request __typename outside of fragments even if the types have different
+        // authorization requirements
+        if node.name.as_str() == TYPENAME {
+            return false;
+        }
+        // if all selections under the interface field are __typename or fragments with type conditions
         // then we don't need to check that they have the same authorization requirements
-        if node.selection_set.iter().all(|sel| {
-            matches!(
-                sel,
-                ast::Selection::FragmentSpread(_) | ast::Selection::InlineFragment(_)
-            )
+        if node.selection_set.iter().all(|sel| match sel {
+            ast::Selection::Field(f) => f.name == TYPENAME,
+            ast::Selection::FragmentSpread(_) | ast::Selection::InlineFragment(_) => true,
         }) {
             return false;
         }
@@ -1476,5 +1480,97 @@ mod tests {
             result: doc,
             paths
         });
+    }
+
+    #[test]
+    fn interface_typename() {
+        static SCHEMA: &str = r#"
+        schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+      {
+        query: Query
+      }
+      directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+      directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+      directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+      scalar link__Import
+        enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+        type Query {
+            post(id: ID!): Post
+          }
+          
+          interface Post {
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+          }
+          
+          type Stats {
+            views: Int
+          }
+          
+          type PublicBlog implements Post {
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+            stats: Stats @policy(policies: ["a"])
+          }
+          
+          type PrivateBlog implements Post @policy(policies: ["b"]) {
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+            publishAt: String
+          }
+        "#;
+
+        static QUERY: &str = r#"
+        query Anonymous {
+            post(id: "1") {
+              ... on PublicBlog {
+                __typename
+                title
+              }
+            }
+          }
+        "#;
+
+        let (doc, paths) = filter(SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        static QUERY2: &str = r#"
+        query Anonymous {
+            post(id: "1") {
+              __typename
+              ... on PublicBlog {
+                __typename
+                title
+              }
+            }
+          }
+        "#;
+
+        let (doc, paths) = filter(SCHEMA, QUERY2, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
     }
 }

@@ -424,11 +424,30 @@ async fn subscription_task(
     let mut configuration_updated_rx = notify.subscribe_configuration();
     let mut schema_updated_rx = notify.subscribe_schema();
 
+    let expires_in = crate::plugins::authentication::jwt_expires_in(&supergraph_req.context);
+
+    let mut timeout = Box::pin(tokio::time::sleep(expires_in));
+
     loop {
         tokio::select! {
+            // We prefer to specify the order of checks within the select
+            biased;
             _ = subscription_handle.closed_signal.recv() => {
                 break;
             }
+            _ = &mut timeout => {
+                let response = Response::builder()
+                    .subscribed(false)
+                    .error(
+                        crate::error::Error::builder()
+                            .message("subscription closed because the JWT has expired")
+                            .extension_code("SUBSCRIPTION_JWT_EXPIRED")
+                            .build(),
+                    )
+                    .build();
+                let _ = sender.send(response).await;
+                break;
+            },
             message = receiver.next() => {
                 match message {
                     Some(mut val) => {

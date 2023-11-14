@@ -76,6 +76,9 @@ The CI checks require `cargo-deny` and `cargo-about` which can both be installed
 - `cargo install cargo-deny`
 - `cargo install cargo-about`
 
+Updating the snapshots used during testing requires installing `cargo-insta`:
+- `cargo install cargo-insta`
+
 They also need you to have the federation-demo project up and running,
 as explained in the Getting started section above.
 
