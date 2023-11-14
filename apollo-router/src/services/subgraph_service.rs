@@ -1857,6 +1857,15 @@ mod tests {
         )
     }
 
+    fn subgraph_http_request(uri: Uri, query: &str) -> http::Request<Request> {
+        http::Request::builder()
+            .header(HOST, "rhost")
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+            .uri(uri)
+            .body(Request::builder().query(query).build())
+            .expect("expecting valid request")
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_callback() {
         let _ = SUBSCRIPTION_CALLBACK_HMAC_KEY.set(String::from("TESTEST"));
@@ -1882,16 +1891,10 @@ mod tests {
                 supergraph_request: supergraph_request(
                     "subscription {\n  userWasCreated {\n    username\n  }\n}",
                 ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(
-                        Request::builder()
-                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
-                            .build(),
-                    )
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(
+                    url,
+                    "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                ),
                 operation_kind: OperationKind::Subscription,
                 context: Context::new(),
                 subscription_stream: Some(tx),
@@ -1928,12 +1931,7 @@ mod tests {
         let response = subgraph_service
             .oneshot(SubgraphRequest {
                 supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -1966,12 +1964,7 @@ mod tests {
         let response = subgraph_service
             .oneshot(SubgraphRequest {
                 supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2004,12 +1997,7 @@ mod tests {
         let response = subgraph_service
             .oneshot(SubgraphRequest {
                 supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2047,12 +2035,7 @@ mod tests {
         let response = subgraph_service
             .oneshot(SubgraphRequest {
                 supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2094,12 +2077,7 @@ mod tests {
         let response = subgraph_service
             .oneshot(SubgraphRequest {
                 supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2142,16 +2120,10 @@ mod tests {
                 supergraph_request: supergraph_request(
                     "subscription {\n  userWasCreated {\n    username\n  }\n}",
                 ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(
-                        Request::builder()
-                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
-                            .build(),
-                    )
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(
+                    url,
+                    "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                ),
                 operation_kind: OperationKind::Subscription,
                 context: Context::new(),
                 subscription_stream: Some(tx),
@@ -2198,16 +2170,10 @@ mod tests {
                 supergraph_request: supergraph_request(
                     "subscription {\n  userWasCreated {\n    username\n  }\n}",
                 ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(
-                        Request::builder()
-                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
-                            .build(),
-                    )
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(
+                    url,
+                    "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                ),
                 operation_kind: OperationKind::Subscription,
                 context: Context::new(),
                 subscription_stream: Some(tx),
@@ -2243,12 +2209,7 @@ mod tests {
         let response = subgraph_service
             .oneshot(SubgraphRequest {
                 supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2289,12 +2250,7 @@ mod tests {
         let response = subgraph_service
             .oneshot(SubgraphRequest {
                 supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2375,12 +2331,7 @@ mod tests {
         let response = subgraph_service
             .oneshot(SubgraphRequest {
                 supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2419,12 +2370,7 @@ mod tests {
             .clone()
             .oneshot(SubgraphRequest {
                 supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2469,12 +2415,7 @@ mod tests {
             .clone()
             .oneshot(SubgraphRequest {
                 supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2515,12 +2456,7 @@ mod tests {
             .clone()
             .oneshot(SubgraphRequest {
                 supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2560,12 +2496,7 @@ mod tests {
             .clone()
             .oneshot(SubgraphRequest {
                 supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2605,12 +2536,7 @@ mod tests {
             .clone()
             .oneshot(SubgraphRequest {
                 supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2650,12 +2576,7 @@ mod tests {
             .clone()
             .oneshot(SubgraphRequest {
                 supergraph_request: supergraph_request("query"),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2741,19 +2662,8 @@ mod tests {
         let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
         let response = subgraph_service
             .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                supergraph_request: supergraph_request("query"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2797,19 +2707,8 @@ mod tests {
         let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
         let response = subgraph_service
             .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                supergraph_request: supergraph_request("query"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2906,19 +2805,8 @@ mod tests {
         let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
         let response = subgraph_service
             .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                supergraph_request: supergraph_request("query"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
@@ -2976,19 +2864,8 @@ mod tests {
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
             .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
+                supergraph_request: supergraph_request("query"),
+                subgraph_request: subgraph_http_request(url, "query"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
                 subscription_stream: None,
