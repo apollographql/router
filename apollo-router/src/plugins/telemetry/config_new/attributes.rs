@@ -24,7 +24,7 @@ use serde::Serialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config_new::DefaultForLevel;
-use crate::plugins::telemetry::config_new::GetAttributes;
+use crate::plugins::telemetry::config_new::Selectors;
 use crate::services::router;
 
 #[allow(dead_code)]
@@ -351,7 +351,7 @@ pub(crate) struct HttpClientAttributes {
     url_full: Option<bool>,
 }
 
-impl GetAttributes<router::Request, router::Response> for RouterAttributes {
+impl Selectors<router::Request, router::Response> for RouterAttributes {
     fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
         self.common.on_request(request)
     }
@@ -365,7 +365,7 @@ impl GetAttributes<router::Request, router::Response> for RouterAttributes {
     }
 }
 
-impl GetAttributes<router::Request, router::Response> for HttpCommonAttributes {
+impl Selectors<router::Request, router::Response> for HttpCommonAttributes {
     fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = HashMap::new();
         if let Some(true) = &self.http_request_body_size {
@@ -435,7 +435,7 @@ impl GetAttributes<router::Request, router::Response> for HttpCommonAttributes {
     }
 }
 
-impl GetAttributes<router::Request, router::Response> for HttpServerAttributes {
+impl Selectors<router::Request, router::Response> for HttpServerAttributes {
     fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = HashMap::new();
         if let Some(true) = &self.http_route {

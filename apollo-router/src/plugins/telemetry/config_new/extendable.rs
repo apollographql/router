@@ -17,8 +17,8 @@ use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
 
-use crate::plugins::telemetry::config_new::GetAttribute;
-use crate::plugins::telemetry::config_new::GetAttributes;
+use crate::plugins::telemetry::config_new::Selector;
+use crate::plugins::telemetry::config_new::Selectors;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[allow(dead_code)]
@@ -135,10 +135,10 @@ where
     }
 }
 
-impl<A, E, Request, Response> GetAttributes<Request, Response> for Extendable<A, E>
+impl<A, E, Request, Response> Selectors<Request, Response> for Extendable<A, E>
 where
-    A: Default + GetAttributes<Request, Response>,
-    E: GetAttribute<Request, Response>,
+    A: Default + Selectors<Request, Response>,
+    E: Selector<Request, Response>,
 {
     fn on_request(&self, request: &Request) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = self.attributes.on_request(request);

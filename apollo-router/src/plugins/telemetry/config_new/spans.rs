@@ -21,7 +21,7 @@ use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
-use crate::plugins::telemetry::config_new::GetAttributes;
+use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::span_factory::SpanMode;
 use crate::query_planner::OperationKind;
 use crate::services::router;
@@ -112,7 +112,7 @@ pub(crate) struct SubgraphSpans {
     pub(crate) attributes: Extendable<SubgraphAttributes, SubgraphSelector>,
 }
 
-impl GetAttributes<router::Request, router::Response> for RouterAttributes {
+impl Selectors<router::Request, router::Response> for RouterAttributes {
     fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = self.common.on_request(request);
         if let Some(true) = &self.trace_id {
@@ -141,7 +141,7 @@ impl GetAttributes<router::Request, router::Response> for RouterAttributes {
     }
 }
 
-impl GetAttributes<supergraph::Request, supergraph::Response> for SupergraphAttributes {
+impl Selectors<supergraph::Request, supergraph::Response> for SupergraphAttributes {
     fn on_request(&self, request: &supergraph::Request) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = HashMap::new();
         if let Some(true) = &self.graphql_document {
@@ -179,7 +179,7 @@ impl GetAttributes<supergraph::Request, supergraph::Response> for SupergraphAttr
     }
 }
 
-impl GetAttributes<subgraph::Request, subgraph::Response> for SubgraphAttributes {
+impl Selectors<subgraph::Request, subgraph::Response> for SubgraphAttributes {
     fn on_request(&self, request: &subgraph::Request) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = HashMap::new();
         if let Some(true) = &self.graphql_document {

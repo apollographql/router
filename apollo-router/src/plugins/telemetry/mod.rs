@@ -11,7 +11,7 @@ use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
 use bloomfilter::Bloom;
-use config_new::GetAttributes;
+use config_new::Selectors;
 use dashmap::DashMap;
 use futures::future::ready;
 use futures::future::BoxFuture;
