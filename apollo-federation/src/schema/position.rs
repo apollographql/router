@@ -30,6 +30,68 @@ pub(crate) enum TypeDefinitionPosition {
     InputObject(InputObjectTypeDefinitionPosition),
 }
 
+impl TypeDefinitionPosition {
+    pub(crate) fn type_name(&self) -> &Name {
+        match self {
+            TypeDefinitionPosition::Scalar(type_) => &type_.type_name,
+            TypeDefinitionPosition::Object(type_) => &type_.type_name,
+            TypeDefinitionPosition::Interface(type_) => &type_.type_name,
+            TypeDefinitionPosition::Union(type_) => &type_.type_name,
+            TypeDefinitionPosition::Enum(type_) => &type_.type_name,
+            TypeDefinitionPosition::InputObject(type_) => &type_.type_name,
+        }
+    }
+
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema ExtendedType, FederationError> {
+        let type_name = self.type_name();
+        let type_ = schema
+            .types
+            .get(type_name)
+            .ok_or_else(|| SingleFederationError::Internal {
+                message: format!("Schema has no type \"{}\"", self),
+            })?;
+        let type_matches = match type_ {
+            ExtendedType::Scalar(_) => matches!(self, TypeDefinitionPosition::Scalar(_)),
+            ExtendedType::Object(_) => matches!(self, TypeDefinitionPosition::Object(_)),
+            ExtendedType::Interface(_) => matches!(self, TypeDefinitionPosition::Interface(_)),
+            ExtendedType::Union(_) => matches!(self, TypeDefinitionPosition::Union(_)),
+            ExtendedType::Enum(_) => matches!(self, TypeDefinitionPosition::Enum(_)),
+            ExtendedType::InputObject(_) => matches!(self, TypeDefinitionPosition::InputObject(_)),
+        };
+        if type_matches {
+            Ok(type_)
+        } else {
+            Err(SingleFederationError::Internal {
+                message: format!("Schema type \"{}\" is the wrong kind", self),
+            }
+            .into())
+        }
+    }
+
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema ExtendedType> {
+        self.get(schema).ok()
+    }
+}
+
+impl Display for TypeDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeDefinitionPosition::Scalar(type_) => type_.fmt(f),
+            TypeDefinitionPosition::Object(type_) => type_.fmt(f),
+            TypeDefinitionPosition::Interface(type_) => type_.fmt(f),
+            TypeDefinitionPosition::Union(type_) => type_.fmt(f),
+            TypeDefinitionPosition::Enum(type_) => type_.fmt(f),
+            TypeDefinitionPosition::InputObject(type_) => type_.fmt(f),
+        }
+    }
+}
+
 impl From<ScalarTypeDefinitionPosition> for TypeDefinitionPosition {
     fn from(value: ScalarTypeDefinitionPosition) -> Self {
         TypeDefinitionPosition::Scalar(value)
@@ -63,6 +125,82 @@ impl From<EnumTypeDefinitionPosition> for TypeDefinitionPosition {
 impl From<InputObjectTypeDefinitionPosition> for TypeDefinitionPosition {
     fn from(value: InputObjectTypeDefinitionPosition) -> Self {
         TypeDefinitionPosition::InputObject(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum OutputTypeDefinitionPosition {
+    Scalar(ScalarTypeDefinitionPosition),
+    Object(ObjectTypeDefinitionPosition),
+    Interface(InterfaceTypeDefinitionPosition),
+    Union(UnionTypeDefinitionPosition),
+    Enum(EnumTypeDefinitionPosition),
+}
+
+impl OutputTypeDefinitionPosition {
+    pub(crate) fn type_name(&self) -> &Name {
+        match self {
+            OutputTypeDefinitionPosition::Scalar(type_) => &type_.type_name,
+            OutputTypeDefinitionPosition::Object(type_) => &type_.type_name,
+            OutputTypeDefinitionPosition::Interface(type_) => &type_.type_name,
+            OutputTypeDefinitionPosition::Union(type_) => &type_.type_name,
+            OutputTypeDefinitionPosition::Enum(type_) => &type_.type_name,
+        }
+    }
+}
+
+impl Display for OutputTypeDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OutputTypeDefinitionPosition::Scalar(type_) => type_.fmt(f),
+            OutputTypeDefinitionPosition::Object(type_) => type_.fmt(f),
+            OutputTypeDefinitionPosition::Interface(type_) => type_.fmt(f),
+            OutputTypeDefinitionPosition::Union(type_) => type_.fmt(f),
+            OutputTypeDefinitionPosition::Enum(type_) => type_.fmt(f),
+        }
+    }
+}
+
+impl From<ScalarTypeDefinitionPosition> for OutputTypeDefinitionPosition {
+    fn from(value: ScalarTypeDefinitionPosition) -> Self {
+        OutputTypeDefinitionPosition::Scalar(value)
+    }
+}
+
+impl From<ObjectTypeDefinitionPosition> for OutputTypeDefinitionPosition {
+    fn from(value: ObjectTypeDefinitionPosition) -> Self {
+        OutputTypeDefinitionPosition::Object(value)
+    }
+}
+
+impl From<InterfaceTypeDefinitionPosition> for OutputTypeDefinitionPosition {
+    fn from(value: InterfaceTypeDefinitionPosition) -> Self {
+        OutputTypeDefinitionPosition::Interface(value)
+    }
+}
+
+impl From<UnionTypeDefinitionPosition> for OutputTypeDefinitionPosition {
+    fn from(value: UnionTypeDefinitionPosition) -> Self {
+        OutputTypeDefinitionPosition::Union(value)
+    }
+}
+
+impl From<EnumTypeDefinitionPosition> for OutputTypeDefinitionPosition {
+    fn from(value: EnumTypeDefinitionPosition) -> Self {
+        OutputTypeDefinitionPosition::Enum(value)
+    }
+}
+
+impl From<AbstractTypeDefinitionPosition> for OutputTypeDefinitionPosition {
+    fn from(value: AbstractTypeDefinitionPosition) -> Self {
+        match value {
+            AbstractTypeDefinitionPosition::Interface(value) => {
+                OutputTypeDefinitionPosition::Interface(value)
+            }
+            AbstractTypeDefinitionPosition::Union(value) => {
+                OutputTypeDefinitionPosition::Union(value)
+            }
+        }
     }
 }
 
@@ -138,6 +276,44 @@ impl From<UnionTypeDefinitionPosition> for AbstractTypeDefinitionPosition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum ObjectOrInterfaceTypeDefinitionPosition {
+    Object(ObjectTypeDefinitionPosition),
+    Interface(InterfaceTypeDefinitionPosition),
+}
+
+impl ObjectOrInterfaceTypeDefinitionPosition {
+    pub(crate) fn type_name(&self) -> &Name {
+        match self {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => &type_.type_name,
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => &type_.type_name,
+        }
+    }
+
+    pub(crate) fn field(&self, field_name: Name) -> ObjectOrInterfaceFieldDefinitionPosition {
+        match self {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => {
+                type_.field(field_name).into()
+            }
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => {
+                type_.field(field_name).into()
+            }
+        }
+    }
+}
+
+impl From<ObjectTypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPosition {
+    fn from(value: ObjectTypeDefinitionPosition) -> Self {
+        ObjectOrInterfaceTypeDefinitionPosition::Object(value)
+    }
+}
+
+impl From<InterfaceTypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPosition {
+    fn from(value: InterfaceTypeDefinitionPosition) -> Self {
+        ObjectOrInterfaceTypeDefinitionPosition::Interface(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum FieldDefinitionPosition {
     Object(ObjectFieldDefinitionPosition),
     Interface(InterfaceFieldDefinitionPosition),
@@ -165,6 +341,16 @@ impl FieldDefinitionPosition {
     }
 }
 
+impl Display for FieldDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FieldDefinitionPosition::Object(field) => field.fmt(f),
+            FieldDefinitionPosition::Interface(field) => field.fmt(f),
+            FieldDefinitionPosition::Union(field) => field.fmt(f),
+        }
+    }
+}
+
 impl From<ObjectFieldDefinitionPosition> for FieldDefinitionPosition {
     fn from(value: ObjectFieldDefinitionPosition) -> Self {
         FieldDefinitionPosition::Object(value)
@@ -180,6 +366,43 @@ impl From<InterfaceFieldDefinitionPosition> for FieldDefinitionPosition {
 impl From<UnionTypenameFieldDefinitionPosition> for FieldDefinitionPosition {
     fn from(value: UnionTypenameFieldDefinitionPosition) -> Self {
         FieldDefinitionPosition::Union(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum ObjectOrInterfaceFieldDefinitionPosition {
+    Object(ObjectFieldDefinitionPosition),
+    Interface(InterfaceFieldDefinitionPosition),
+}
+
+impl ObjectOrInterfaceFieldDefinitionPosition {
+    pub(crate) fn field_name(&self) -> &Name {
+        match self {
+            ObjectOrInterfaceFieldDefinitionPosition::Object(field) => &field.field_name,
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => &field.field_name,
+        }
+    }
+
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema Component<FieldDefinition>, FederationError> {
+        match self {
+            ObjectOrInterfaceFieldDefinitionPosition::Object(field) => field.get(schema),
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => field.get(schema),
+        }
+    }
+}
+
+impl From<ObjectFieldDefinitionPosition> for ObjectOrInterfaceFieldDefinitionPosition {
+    fn from(value: ObjectFieldDefinitionPosition) -> Self {
+        ObjectOrInterfaceFieldDefinitionPosition::Object(value)
+    }
+}
+
+impl From<InterfaceFieldDefinitionPosition> for ObjectOrInterfaceFieldDefinitionPosition {
+    fn from(value: InterfaceFieldDefinitionPosition) -> Self {
+        ObjectOrInterfaceFieldDefinitionPosition::Interface(value)
     }
 }
 

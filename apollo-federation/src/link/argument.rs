@@ -92,7 +92,6 @@ pub(crate) fn directive_optional_fieldset_argument(
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn directive_required_fieldset_argument(
     application: &Node<Directive>,
     name: &Name,

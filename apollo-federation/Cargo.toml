@@ -17,6 +17,7 @@ indexmap = "2.0.2"
 thiserror = "1.0"
 url = "2"
 lazy_static = "1.4.0"
+petgraph = "0.6.4"
 strum = "0.25.0"
 strum_macros = "0.25.2"
 

@@ -1,12 +1,18 @@
 use crate::error::{FederationError, SingleFederationError};
+use crate::link::argument::{
+    directive_optional_boolean_argument, directive_required_fieldset_argument,
+};
 use crate::link::spec::{Identity, Url, Version};
 use crate::link::spec_definition::{SpecDefinition, SpecDefinitions};
 use crate::schema::FederationSchema;
 use apollo_compiler::ast::Argument;
-use apollo_compiler::schema::{Directive, DirectiveDefinition, Name, Value};
+use apollo_compiler::schema::{
+    Directive, DirectiveDefinition, ExtendedType, Name, UnionType, Value,
+};
 use apollo_compiler::{name, Node, NodeStr};
 use lazy_static::lazy_static;
 
+pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
 pub(crate) const FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("interfaceObject");
 pub(crate) const FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC: Name = name!("external");
@@ -20,6 +26,11 @@ pub(crate) const FEDERATION_RESOLVABLE_ARGUMENT_NAME: Name = name!("resolvable")
 pub(crate) const FEDERATION_REASON_ARGUMENT_NAME: Name = name!("reason");
 pub(crate) const FEDERATION_FROM_ARGUMENT_NAME: Name = name!("from");
 
+pub(crate) struct KeyDirectiveArguments {
+    pub(crate) fields: NodeStr,
+    pub(crate) resolvable: bool,
+}
+
 pub(crate) struct FederationSpecDefinition {
     url: Url,
 }
@@ -31,6 +42,31 @@ impl FederationSpecDefinition {
                 identity: Identity::join_identity(),
                 version,
             },
+        }
+    }
+
+    pub(crate) fn entity_type_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<Option<&'schema Node<UnionType>>, FederationError> {
+        // Note that the _Entity type is special in that:
+        // 1. Spec renaming doesn't take place for it (there's no prefixing or importing needed),
+        //    in order to maintain backwards compatibility with Fed 1.
+        // 2. Its presence is optional; if absent, it means the subgraph has no resolvable keys.
+        match schema
+            .schema()
+            .types
+            .get(&FEDERATION_ENTITY_TYPE_NAME_IN_SPEC)
+        {
+            Some(ExtendedType::Union(type_)) => Ok(Some(type_)),
+            None => Ok(None),
+            _ => Err(SingleFederationError::Internal {
+                message: format!(
+                    "Unexpectedly found non-union for federation spec's \"{}\" type definition",
+                    FEDERATION_ENTITY_TYPE_NAME_IN_SPEC
+                ),
+            }
+            .into()),
         }
     }
 
@@ -76,6 +112,43 @@ impl FederationSpecDefinition {
         })
     }
 
+    pub(crate) fn key_directive_arguments(
+        &self,
+        application: &Node<Directive>,
+    ) -> Result<KeyDirectiveArguments, FederationError> {
+        Ok(KeyDirectiveArguments {
+            fields: directive_required_fieldset_argument(
+                application,
+                &FEDERATION_FIELDS_ARGUMENT_NAME,
+            )?,
+            resolvable: directive_optional_boolean_argument(
+                application,
+                &FEDERATION_RESOLVABLE_ARGUMENT_NAME,
+            )?
+            .unwrap_or(false),
+        })
+    }
+
+    pub(crate) fn interface_object_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<Option<&'schema Node<DirectiveDefinition>>, FederationError> {
+        if *self.version() < (Version { major: 2, minor: 3 }) {
+            return Ok(None);
+        }
+        self.directive_definition(schema, &FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                SingleFederationError::Internal {
+                    message: format!(
+                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
+                        FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC
+                    ),
+                }
+                    .into()
+            })
+            .map(Some)
+    }
+
     pub(crate) fn interface_object_directive(
         &self,
         schema: &FederationSchema,
@@ -95,6 +168,22 @@ impl FederationSpecDefinition {
             name: name_in_schema,
             arguments: Vec::new(),
         })
+    }
+
+    pub(crate) fn external_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                SingleFederationError::Internal {
+                    message: format!(
+                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
+                        FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC
+                    ),
+                }
+                    .into()
+            })
     }
 
     pub(crate) fn external_directive(
@@ -118,6 +207,22 @@ impl FederationSpecDefinition {
             name: name_in_schema,
             arguments,
         })
+    }
+
+    pub(crate) fn requires_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                SingleFederationError::Internal {
+                    message: format!(
+                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
+                        FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC
+                    ),
+                }
+                    .into()
+            })
     }
 
     pub(crate) fn requires_directive(
