@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-pub(crate) use self::execution_service::*;
+pub(crate) use self::execution::service::*;
 pub(crate) use self::query_planner::*;
 pub(crate) use self::subgraph_service::*;
 pub(crate) use self::supergraph_service::*;
@@ -23,7 +23,6 @@ pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
 pub(crate) use crate::services::supergraph_service::SupergraphCreator;
 
 pub mod execution;
-mod execution_service;
 pub(crate) mod external;
 pub(crate) mod layers;
 pub(crate) mod new_service;
