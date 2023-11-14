@@ -562,7 +562,7 @@ mod tests {
             Endpoint::from_router_service("/".to_string(), endpoint),
         );
 
-        let error = init_with_config(router!!service::empty().await, Arc::new(configuration), mm)
+        let error = init_with_config(router::service::empty().await, Arc::new(configuration), mm)
             .await
             .unwrap_err();
 
