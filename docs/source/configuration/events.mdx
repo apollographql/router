@@ -1,33 +1,31 @@
 ---
 title: Events
-subtitle: Log or trace events in the router's request lifecycle
-description:
+subtitle: Capture events from the router's request lifecycle
+description: Capture standard and custom events from the Apollo Router's request lifecycle services.
 ---
 
-Events are used to signal when something of note happens in the [Apollo Router's request lifecycle (pipeline)](../customizations/overview/#the-request-lifecycle). Events are output to both logs and traces.
+import RouterServices from '../../shared/router-lifecycle-services.mdx';
 
-The router's pipeline has three major services:
-
-* **Router service** - Handles an incoming request before it is parsed. Works within a context of opaque bytes.
-* **Supergraph service** - Handles a request after it has been parsed and before it is sent to the subgraph. Works within a GraphQL context.
-* **Subgraph service** - Handles a request after it has been sent to the subgraph. Works within a  GraphQL context.
+An **event** is used to signal when something of note happens in the [Apollo Router's request lifecycle (pipeline)](../customizations/overview/#the-request-lifecycle). Events are output to both logs and traces.
 
 You can configure events for each service in `router.yaml`. Events can be standard or custom, and they can be triggered by configurable conditions.
 
 ## Event configuration
 
-### `router`|`supergraph`|`subgraph`
+### Router request lifecycle services
 
-The `router`, `supergraph` and `subgraph` sections are used to define custom event configuration for the `router`, `supergraph` and `subgraph` services of the router, respectively.
+<RouterServices />
+
+The `router`, `supergraph` and `subgraph` sections are used to define custom event configuration for each service:
 
 ```yaml title="router.yaml"
 telemetry:
   events:
-    router:
+    router: # highlight-line
       # ...     
-    supergraph:
+    supergraph: # highlight-line
       # ...
-    subgraph:
+    subgraph: # highlight-line
       # ...
 ```
 

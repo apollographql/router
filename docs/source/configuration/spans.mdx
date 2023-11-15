@@ -4,19 +4,58 @@ subtitle: Add router lifecycle context to traces
 description: Use spans to add contextual information from the Apollo Router to traces displayed by your application performance monitors (APM).
 ---
 
-Spans in the Apollo Router capture contextual information about requests and responses as they're processed through the [router's request lifecycle (pipeline)](../customizations/overview/#the-request-lifecycle). The information from spans can be used when displaying traces in your application performance monitors (APM).
+import RouterServices from '../../shared/router-lifecycle-services.mdx';
 
-The router's pipeline has three major services:
-
-* **Router service** - Handles an incoming request before it is parsed. Works within a context of opaque bytes.
-* **Supergraph service** - Handles a request after it has been parsed and before it is sent to the subgraph. Works within a GraphQL context.
-* **Subgraph service** - Handles a request after it has been sent to the subgraph. Works within a  GraphQL context.
-
-Each service has a corresponding span, and each span is configurable in `router.yaml` with `telemetry.spans`. 
-
-You can apply [attributes](#attributes) to spans to 
+A **span** captures contextual information about requests and responses as they're processed through the [router's request lifecycle (pipeline)](../customizations/overview/#the-request-lifecycle). The information from spans can be used when displaying traces in your application performance monitors (APM).
 
 ## Spans configuration
+
+### Router request lifecycle services
+
+<RouterServices />
+
+The `router`, `supergraph` and `subgraph` sections are used to define custom span configuration for each service:
+
+```yaml title="router.yaml"
+telemetry:
+  spans:
+    router: # highlight-line
+      attributes:
+        # ...     
+    supergraph: # highlight-line
+      attributes:
+        # ...
+    subgraph: # highlight-line
+      attributes:
+        # ...
+        
+```
+
+### `attributes`
+
+Spans may have attributes attached to them from the Apollo Router pipeline. These attributes are used to filter and group spans in your APM.
+
+Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors). 
+
+<Note>
+
+Custom attributes for spans with selectors is an [Enterprise Feature <EnterpriseIcon style="display:inline-block;height:1em;width:auto;" />](../enterprise-features) that requires a GraphOS Enterprise plan.
+
+</Note>
+
+The attributes that are available depend on the service of the pipeline.
+
+```yaml title="desc.router.yaml"
+telemetry:
+  spans:
+    router:
+      attributes:
+        # Standard attributes
+        http.response.status_code: true
+        # Custom attributes
+        "my_attribute":
+          response_header: "x-my-header"
+```
 
 ### `default_attribute_requirement_level`
 
@@ -71,51 +110,6 @@ telemetry:
 The `legacy_request_span` option is not configurable and will be removed in a future release.
 
 </Note>
-
-### `router`|`supergraph`|`subgraph`
-
-The `router`, `supergraph` and `subgraph` sections are used to define custom span configuration for the `router`, `supergraph` and `subgraph` services in the router, respectively.
-
-```yaml title="router.yaml"
-telemetry:
-  spans:
-    router:
-      attributes:
-        # ...     
-    supergraph:
-      attributes:
-        # ...
-    subgraph:
-      attributes:
-        # ...
-        
-```
-
-### `attributes`
-
-Spans may have attributes attached to them from the Apollo Router pipeline. These attributes are used to filter and group spans in your APM.
-
-Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors). 
-
-<Note>
-
-Custom attributes for spans with selectors is an [Enterprise Feature <EnterpriseIcon style="display:inline-block;height:1em;width:auto;" />](../enterprise-features) that requires a GraphOS Enterprise plan.
-
-</Note>
-
-The attributes that are available depend on the service of the pipeline.
-
-```yaml title="desc.router.yaml"
-telemetry:
-  spans:
-    router:
-      attributes:
-        # Standard attributes
-        http.response.status_code: true
-        # Custom attributes
-        "my_attribute":
-          response_header: "x-my-header"
-```
 
 ## Span configuration example
 

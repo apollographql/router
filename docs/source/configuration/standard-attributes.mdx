@@ -1,13 +1,16 @@
 ---
 title: OpenTelemetry standard attributes
 subtitle: Attach standard attributes to router telemetry
+description: Attach OpenTelemetry standard attributes to Apollo Router telemetry
 ---
 
-[OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/) define a set of standard attributes that can be attached to [spans](./spans), [instruments](./instruments) and [events](./events). These attributes are used to filter and group data in your application performance monitor (APM).
+import RouterServices from '../../shared/router-lifecycle-services.mdx';
+
+[OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/) define a set of **standard attributes** that can be attached to [spans](./spans), [instruments](./instruments) and [events](./events). These attributes are used to filter and group data in your application performance monitor (APM).
 
 The attributes available depend on the service of the router pipeline.
 
-Here is an example of a standard attribute on the router span:
+For example, set the standard attribute `http.response.status_code` on the router span:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -20,8 +23,13 @@ telemetry:
 
 ### Configuration reference 
 
+<RouterServices />
+
+Each service supports a unique set of standard attributes.
+
 #### Router
-This Router stage is the initial entrypoint for all requests. It is HTTP centric and deals with bytes.
+
+Standard attributes of the `router` service:
 
 | Attribute                      | Value                               | Description                                                                                                                                        |
 |--------------------------------|-------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -49,9 +57,11 @@ This Router stage is the initial entrypoint for all requests. It is HTTP centric
 | `url.query`                    |                                     | The URI query component                                                                                                                            |
 | `url.scheme`                   |                                     | The scheme portion of the URL, such as "https" or "http".                                                                                          |
 
-Note that: `http.request.header.<key>` and `http.response.header.<key>` are not available as standard attributes, bu can be configured using a custom attribute.
+<Note>
 
-For instance, to configure an attribute for `x-my-header` on router spans:
+The `http.request.header.<key>` and `http.response.header.<key>` attributes are not available as standard attributes, but they can be configured using a custom attribute.
+
+For example, to configure an attribute for `x-my-header` on `router` spans:
 ```yaml title="router.yaml"
 telemetry:
   spans:
@@ -61,23 +71,26 @@ telemetry:
           request_header: "x-my-header"
 ```
 
+</Note>
+
 #### Supergraph
-The Supergraph stage is executed after query parse but before query execution. It is Graphql centric and deals with GraphQL queries and responses.
+
+Standard attributes of the `supergraph` service:
 
 | Attribute                   | Value                               | Description                                 |
 |-----------------------------|-------------------------------------|---------------------------------------------|
 | `graphql.operation.name`    |                                     | The operation name from the graphql query   |
 | `graphql.operation.type`    | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query  |
-| `graphql.document`          |                                     | The graphql query to the subgraph           |
+| `graphql.document`          |                                     | The GraphQL query to the subgraph           |
 
 
 #### Subgraph
-The subgraph stage executed multiple times during query execution each representing a call to a single subgraph.
-It is Graphql centric and deals with GraphQL queries and responses.
+
+Standard attributes of the `subgraph` service:
 
 | Attribute                          | Value                               | Description                                    |
 |------------------------------------|-------------------------------------|------------------------------------------------|
 | `subgraph.name`                    |                                     | The name of the subgraph                       |
 | `subgraph.graphql.operation.name`  |                                     | The operation name from the subgraph query     |
 | `subgraph.graphql.operation.type`  | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query     |
-| `subgraph.graphql.document`        |                                     | The graphql query to the subgraph              |
+| `subgraph.graphql.document`        |                                     | The GraphQL query to the subgraph              |
