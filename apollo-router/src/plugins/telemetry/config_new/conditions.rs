@@ -91,15 +91,15 @@ mod test {
 
     struct TestSelector;
     impl Selector for TestSelector {
-        type Request = ();
-        type Response = ();
+        type Request = Option<i64>;
+        type Response = Option<i64>;
 
-        fn on_request(&self, _request: &Self::Request) -> Option<Value> {
-            Some(Value::I64(1i64))
+        fn on_request(&self, request: &Self::Request) -> Option<Value> {
+            request.map(Value::I64)
         }
 
-        fn on_response(&self, _response: &Self::Response) -> Option<Value> {
-            Some(Value::I64(1i64))
+        fn on_response(&self, response: &Self::Response) -> Option<Value> {
+            response.map(Value::I64)
         }
     }
 
@@ -109,12 +109,48 @@ mod test {
             SelectorOrValue::Value(1i64.into()),
             SelectorOrValue::Value(1i64.into()),
         ])
-        .evaluate(&(), &()));
+        .evaluate(&None, &None));
         assert!(!Condition::<TestSelector>::Eq([
             SelectorOrValue::Value(1i64.into()),
             SelectorOrValue::Value(2i64.into()),
         ])
-        .evaluate(&(), &()));
+        .evaluate(&None, &None));
+    }
+
+    #[test]
+    fn test_condition_eq_selector() {
+        assert!(Condition::<TestSelector>::Eq([
+            SelectorOrValue::Selector(TestSelector),
+            SelectorOrValue::Value(1i64.into()),
+        ])
+        .evaluate(&Some(1i64), &None));
+        assert!(Condition::<TestSelector>::Eq([
+            SelectorOrValue::Value(1i64.into()),
+            SelectorOrValue::Selector(TestSelector),
+        ])
+        .evaluate(&Some(1i64), &None));
+
+        assert!(Condition::<TestSelector>::Eq([
+            SelectorOrValue::Selector(TestSelector),
+            SelectorOrValue::Value(2i64.into()),
+        ])
+        .evaluate(&None, &Some(2i64)));
+        assert!(Condition::<TestSelector>::Eq([
+            SelectorOrValue::Value(2i64.into()),
+            SelectorOrValue::Selector(TestSelector),
+        ])
+        .evaluate(&None, &Some(2i64)));
+
+        assert!(!Condition::<TestSelector>::Eq([
+            SelectorOrValue::Selector(TestSelector),
+            SelectorOrValue::Value(3i64.into()),
+        ])
+        .evaluate(&None, &None));
+        assert!(!Condition::<TestSelector>::Eq([
+            SelectorOrValue::Value(3i64.into()),
+            SelectorOrValue::Selector(TestSelector),
+        ])
+        .evaluate(&None, &None));
     }
 
     #[test]
@@ -123,13 +159,13 @@ mod test {
             SelectorOrValue::Value(1i64.into()),
             SelectorOrValue::Value(2i64.into()),
         ])))
-        .evaluate(&(), &()));
+        .evaluate(&None, &None));
 
         assert!(!Condition::<TestSelector>::Not(Box::new(Condition::Eq([
             SelectorOrValue::Value(1i64.into()),
             SelectorOrValue::Value(1i64.into()),
         ])))
-        .evaluate(&(), &()));
+        .evaluate(&None, &None));
     }
 
     #[test]
@@ -144,7 +180,7 @@ mod test {
                 SelectorOrValue::Value(2i64.into()),
             ])
         ])
-        .evaluate(&(), &()));
+        .evaluate(&None, &None));
 
         assert!(!Condition::<TestSelector>::All(vec![
             Condition::Eq([
@@ -156,7 +192,7 @@ mod test {
                 SelectorOrValue::Value(2i64.into()),
             ])
         ])
-        .evaluate(&(), &()));
+        .evaluate(&None, &None));
     }
     #[test]
     fn test_condition_any() {
@@ -170,7 +206,7 @@ mod test {
                 SelectorOrValue::Value(2i64.into()),
             ])
         ])
-        .evaluate(&(), &()));
+        .evaluate(&None, &None));
 
         assert!(!Condition::<TestSelector>::All(vec![
             Condition::Eq([
@@ -182,6 +218,6 @@ mod test {
                 SelectorOrValue::Value(2i64.into()),
             ])
         ])
-        .evaluate(&(), &()));
+        .evaluate(&None, &None));
     }
 }
