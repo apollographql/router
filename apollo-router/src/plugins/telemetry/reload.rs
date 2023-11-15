@@ -28,8 +28,8 @@ use tracing_subscriber::Registry;
 
 use super::config::SamplerOption;
 use super::dynamic_attribute::DynAttributeLayer;
+use super::fmt_layer::FmtLayer;
 use super::formatters::json::Json;
-use super::formatters::json::JsonFields;
 use super::metrics::span_metrics_exporter::SpanMetricsLayer;
 use super::ROUTER_SPAN_NAME;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
@@ -83,22 +83,17 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
 
     // We choose json or plain based on tty
     let fmt = if std::io::stdout().is_terminal() {
-        tracing_subscriber::fmt::Layer::new()
-            .event_format(FilteringFormatter::new(
-                Text::default(),
-                filter_metric_events,
-            ))
-            .fmt_fields(NullFieldFormatter)
-            .boxed()
+        FmtLayer::new(FilteringFormatter::new(
+            Text::default(),
+            filter_metric_events,
+        ))
+        .boxed()
     } else {
-        tracing_subscriber::fmt::Layer::new()
-            .event_format(FilteringFormatter::new(
-                Json::default(),
-                filter_metric_events,
-            ))
-            .map_fmt_fields(|_f| JsonFields {})
-            .fmt_fields(NullFieldFormatter)
-            .boxed()
+        FmtLayer::new(FilteringFormatter::new(
+            Json::default(),
+            filter_metric_events,
+        ))
+        .boxed()
     };
 
     let (fmt_layer, fmt_handle) = tracing_subscriber::reload::Layer::new(fmt);

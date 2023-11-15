@@ -2,7 +2,7 @@
 pub(crate) mod json;
 pub(crate) mod text;
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fmt;
 
 use opentelemetry::sdk::Resource;
@@ -11,12 +11,23 @@ use tracing::Subscriber;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::FormatEvent;
 use tracing_subscriber::fmt::FormatFields;
+use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 
 use crate::metrics::layer::METRIC_PREFIX_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_HISTOGRAM;
 use crate::metrics::layer::METRIC_PREFIX_MONOTONIC_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_VALUE;
+
+pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
+// This list comes from Otel https://opentelemetry.io/docs/specs/semconv/attributes-registry/code/ and
+pub(crate) const EXCLUDED_ATTRIBUTES: [&str; 5] = [
+    "code.filepath",
+    "code.namespace",
+    "code.lineno",
+    "thread.id",
+    "thread.name",
+];
 
 /// `FilteringFormatter` is useful if you want to not filter the entire event but only want to not display it
 /// ```ignore
@@ -65,6 +76,29 @@ where
     }
 }
 
+impl<T, F, S> EventFormatter<S> for FilteringFormatter<T, F>
+where
+    T: EventFormatter<S>,
+    F: Fn(&tracing::Event<'_>) -> bool,
+    S: Subscriber + for<'a> LookupSpan<'a>,
+{
+    fn format_event<W>(
+        &self,
+        ctx: &Context<'_, S>,
+        writer: &mut W,
+        event: &tracing::Event<'_>,
+    ) -> fmt::Result
+    where
+        W: std::fmt::Write,
+    {
+        if (self.filter_fn)(event) {
+            self.inner.format_event(ctx, writer, event)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 // Function to filter metric event for the filter formatter
 pub(crate) fn filter_metric_events(event: &tracing::Event<'_>) -> bool {
     !event.metadata().fields().iter().any(|f| {
@@ -75,7 +109,7 @@ pub(crate) fn filter_metric_events(event: &tracing::Event<'_>) -> bool {
     })
 }
 
-pub(crate) fn to_map(resource: Resource) -> BTreeMap<String, serde_json::Value> {
+pub(crate) fn to_map(resource: Resource) -> HashMap<String, serde_json::Value> {
     resource
         .into_iter()
         .map(|(k, v)| {
@@ -121,4 +155,15 @@ pub(crate) fn to_map(resource: Resource) -> BTreeMap<String, serde_json::Value> 
             )
         })
         .collect()
+}
+
+pub(crate) trait EventFormatter<S> {
+    fn format_event<W>(
+        &self,
+        ctx: &Context<'_, S>,
+        writer: &mut W,
+        event: &tracing::Event<'_>,
+    ) -> fmt::Result
+    where
+        W: std::fmt::Write;
 }
