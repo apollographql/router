@@ -83,5 +83,6 @@ where
 
 #[cfg(test)]
 mod test {
-    fn test() {}
+    #[test]
+    fn test_conditions() {}
 }
