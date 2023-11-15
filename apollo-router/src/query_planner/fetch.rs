@@ -118,6 +118,7 @@ pub(crate) struct FetchNode {
     pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
 
     // authorization metadata for the subgraph query
+    #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
 }
 
