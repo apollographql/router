@@ -21,7 +21,6 @@ use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Selectors;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 #[cfg_attr(test, derive(Serialize))]
 pub(crate) struct Extendable<Att, Ext>

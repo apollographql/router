@@ -4,6 +4,9 @@ use std::fmt::Debug;
 use http::header::CONTENT_LENGTH;
 use http::header::USER_AGENT;
 use opentelemetry_api::Key;
+use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
+use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_NAME;
+use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_TYPE;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE;
 use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_BODY_SIZE;
 use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE;
@@ -23,11 +26,16 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
+use crate::context::OPERATION_KIND;
+use crate::plugins::telemetry::config_new::trace_id;
+use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::query_planner::OperationKind;
 use crate::services::router;
+use crate::services::subgraph;
+use crate::services::supergraph;
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug, Default)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum DefaultAttributeRequirementLevel {
@@ -40,19 +48,27 @@ pub(crate) enum DefaultAttributeRequirementLevel {
     Recommended,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct RouterAttributes {
+    /// The datadog trace ID.
+    /// This can be output in logs and used to correlate traces in Datadog.
+    #[serde(rename = "dd.trace_id")]
+    pub(crate) datadog_trace_id: Option<bool>,
+
+    /// The OpenTelemetry trace ID.
+    /// This can be output in logs.
+    #[serde(rename = "trace_id")]
+    pub(crate) trace_id: Option<bool>,
+
     /// Http attributes from Open Telemetry semantic conventions.
     #[serde(flatten)]
-    common: HttpCommonAttributes,
+    pub(crate) common: HttpCommonAttributes,
     /// Http server attributes from Open Telemetry semantic conventions.
     #[serde(flatten)]
-    server: HttpServerAttributes,
+    pub(crate) server: HttpServerAttributes,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[cfg_attr(test, derive(Serialize))]
 #[serde(deny_unknown_fields, default)]
@@ -79,7 +95,6 @@ pub(crate) struct SupergraphAttributes {
     pub(crate) graphql_operation_type: Option<bool>,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphAttributes {
@@ -113,7 +128,6 @@ pub(crate) struct SubgraphAttributes {
 
 /// Common attributes for http server and client.
 /// See https://opentelemetry.io/docs/specs/semconv/http/http-spans/#common-attributes
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct HttpCommonAttributes {
@@ -210,7 +224,6 @@ pub(crate) struct HttpCommonAttributes {
 
 /// Attributes for Http servers
 /// See https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct HttpServerAttributes {
@@ -298,7 +311,6 @@ pub(crate) struct HttpServerAttributes {
 
 /// Attributes for HTTP clients
 /// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct HttpClientAttributes {
@@ -356,15 +368,38 @@ impl Selectors for RouterAttributes {
     type Response = router::Response;
 
     fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
-        self.common.on_request(request)
+        let mut attrs = self.common.on_request(request);
+        attrs.extend(self.server.on_request(request));
+        if let Some(true) = &self.trace_id {
+            if let Some(trace_id) = trace_id() {
+                attrs.insert(
+                    Key::from_static_str("trace_id"),
+                    trace_id.to_string().into(),
+                );
+            }
+        }
+        if let Some(true) = &self.datadog_trace_id {
+            if let Some(trace_id) = trace_id() {
+                attrs.insert(
+                    Key::from_static_str("dd.trace_id"),
+                    trace_id.to_datadog().into(),
+                );
+            }
+        }
+
+        attrs
     }
 
     fn on_response(&self, response: &router::Response) -> HashMap<Key, opentelemetry::Value> {
-        self.common.on_response(response)
+        let mut attrs = self.common.on_response(response);
+        attrs.extend(self.server.on_response(response));
+        attrs
     }
 
     fn on_error(&self, error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
-        self.common.on_error(error)
+        let mut attrs = self.common.on_error(error);
+        attrs.extend(self.server.on_error(error));
+        attrs
     }
 }
 
@@ -538,5 +573,101 @@ impl DefaultForLevel for HttpCommonAttributes {
             }
             DefaultAttributeRequirementLevel::None => {}
         }
+    }
+}
+
+impl Selectors for SupergraphAttributes {
+    type Request = supergraph::Request;
+    type Response = supergraph::Response;
+
+    fn on_request(&self, request: &supergraph::Request) -> HashMap<Key, opentelemetry::Value> {
+        let mut attrs = HashMap::new();
+        if let Some(true) = &self.graphql_document {
+            if let Some(query) = &request.supergraph_request.body().query {
+                attrs.insert(GRAPHQL_DOCUMENT, query.clone().into());
+            }
+        }
+        if let Some(true) = &self.graphql_operation_name {
+            if let Some(op_name) = &request.supergraph_request.body().operation_name {
+                attrs.insert(GRAPHQL_OPERATION_NAME, op_name.clone().into());
+            }
+        }
+        if let Some(true) = &self.graphql_operation_type {
+            let operation_kind: OperationKind = request
+                .context
+                .get(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            attrs.insert(
+                GRAPHQL_OPERATION_TYPE,
+                operation_kind.as_apollo_operation_type().clone().into(),
+            );
+        }
+
+        attrs
+    }
+
+    fn on_response(&self, _response: &supergraph::Response) -> HashMap<Key, opentelemetry::Value> {
+        HashMap::with_capacity(0)
+    }
+
+    fn on_error(&self, _error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
+        HashMap::with_capacity(0)
+    }
+}
+
+impl Selectors for SubgraphAttributes {
+    type Request = subgraph::Request;
+    type Response = subgraph::Response;
+
+    fn on_request(&self, request: &subgraph::Request) -> HashMap<Key, opentelemetry::Value> {
+        let mut attrs = HashMap::new();
+        if let Some(true) = &self.graphql_document {
+            if let Some(query) = &request.supergraph_request.body().query {
+                attrs.insert(
+                    Key::from_static_str("subgraph.graphql.document"),
+                    query.clone().into(),
+                );
+            }
+        }
+        if let Some(true) = &self.graphql_operation_name {
+            if let Some(op_name) = &request.supergraph_request.body().operation_name {
+                attrs.insert(
+                    Key::from_static_str("subgraph.graphql.operation.name"),
+                    op_name.clone().into(),
+                );
+            }
+        }
+        if let Some(true) = &self.graphql_operation_type {
+            let operation_kind: OperationKind = request
+                .context
+                .get(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            attrs.insert(
+                Key::from_static_str("subgraph.graphql.operation.type"),
+                operation_kind.as_apollo_operation_type().into(),
+            );
+        }
+        if let Some(true) = &self.graphql_federation_subgraph_name {
+            if let Some(subgraph_name) = &request.subgraph_name {
+                attrs.insert(
+                    Key::from_static_str("subgraph.name"),
+                    subgraph_name.clone().into(),
+                );
+            }
+        }
+
+        attrs
+    }
+
+    fn on_response(&self, _response: &subgraph::Response) -> HashMap<Key, opentelemetry::Value> {
+        HashMap::with_capacity(0)
+    }
+
+    fn on_error(&self, _error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
+        HashMap::with_capacity(0)
     }
 }

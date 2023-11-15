@@ -5706,7 +5706,7 @@ expression: "&schema"
                       "type": "object",
                       "properties": {
                         "dd.trace_id": {
-                          "description": "Attach the datadog trace ID to the router span as dd.trace_id. This can be output in logs and used to correlate traces in Datadog.",
+                          "description": "The datadog trace ID. This can be output in logs and used to correlate traces in Datadog.",
                           "default": null,
                           "type": "boolean",
                           "nullable": true
@@ -5790,7 +5790,7 @@ expression: "&schema"
                           "nullable": true
                         },
                         "trace_id": {
-                          "description": "Attach the opentelemetry trace ID to the router span as trace_id. This can be output in logs.",
+                          "description": "The OpenTelemetry trace ID. This can be output in logs.",
                           "default": null,
                           "type": "boolean",
                           "nullable": true
@@ -6297,11 +6297,6 @@ expression: "&schema"
                                 "type": "string",
                                 "nullable": true
                               },
-                              "redact": {
-                                "description": "Optional redaction pattern.",
-                                "type": "string",
-                                "nullable": true
-                              },
                               "subgraph_query": {
                                 "description": "The graphql query to the subgraph.",
                                 "oneOf": [
@@ -6587,11 +6582,6 @@ expression: "&schema"
                             "properties": {
                               "default": {
                                 "description": "Optional default value.",
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "redact": {
-                                "description": "Optional redaction pattern.",
                                 "type": "string",
                                 "nullable": true
                               },
@@ -7053,11 +7043,6 @@ expression: "&schema"
                                     ]
                                   }
                                 ]
-                              },
-                              "redact": {
-                                "description": "Optional redaction pattern.",
-                                "type": "string",
-                                "nullable": true
                               }
                             },
                             "additionalProperties": false

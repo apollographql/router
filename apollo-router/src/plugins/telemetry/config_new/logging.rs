@@ -22,7 +22,6 @@ use crate::plugins::telemetry::resource::ConfigResource;
 use crate::services::SupergraphRequest;
 
 /// Logging configuration.
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Logging {
@@ -98,7 +97,6 @@ impl ConfigResource for LoggingCommon {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct StdOut {
@@ -132,7 +130,6 @@ pub(crate) struct File {
 }
 
 /// The format for logging.
-#[allow(dead_code)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Format {
     // !!!!WARNING!!!!, if you change this enum then be sure to add the changes to the JsonSchema AND the custom deserializer.
@@ -281,7 +278,6 @@ impl Default for Format {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug, Eq, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct JsonFormat {
@@ -324,7 +320,6 @@ impl Default for JsonFormat {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug, Eq, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct TextFormat {

@@ -28,7 +28,6 @@ pub(crate) enum TraceIdFormat {
     Datadog,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[cfg_attr(test, derive(Serialize))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -39,7 +38,6 @@ pub(crate) enum OperationName {
     Hash,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[cfg_attr(test, derive(Serialize))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -48,16 +46,6 @@ pub(crate) enum Query {
     String,
 }
 
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum OperationKind {
-    /// The raw operation kind.
-    String,
-}
-
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[cfg_attr(test, derive(Serialize))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -68,7 +56,14 @@ pub(crate) enum ResponseStatus {
     Reason,
 }
 
-#[allow(dead_code)]
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(Serialize))]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum OperationKind {
+    /// The raw operation kind.
+    String,
+}
+
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum RouterSelector {
@@ -77,6 +72,7 @@ pub(crate) enum RouterSelector {
         /// The name of the request header.
         request_header: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -87,6 +83,7 @@ pub(crate) enum RouterSelector {
         /// The name of the request header.
         response_header: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -107,6 +104,7 @@ pub(crate) enum RouterSelector {
         /// The response context key.
         response_context: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -117,6 +115,7 @@ pub(crate) enum RouterSelector {
         /// The name of the baggage item.
         baggage: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -127,6 +126,7 @@ pub(crate) enum RouterSelector {
         /// The name of the environment variable
         env: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -134,7 +134,6 @@ pub(crate) enum RouterSelector {
     },
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[cfg_attr(test, derive(Serialize))]
 #[serde(deny_unknown_fields, untagged)]
@@ -143,6 +142,7 @@ pub(crate) enum SupergraphSelector {
         /// The operation name from the query.
         operation_name: OperationName,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -150,11 +150,17 @@ pub(crate) enum SupergraphSelector {
     },
     OperationKind {
         /// The operation kind from the query (query|mutation|subscription).
+        // Allow dead code is required because there is only one variant in OperationKind and we need to avoid the dead code warning.
+        #[allow(dead_code)]
         operation_kind: OperationKind,
     },
     Query {
         /// The graphql query.
+        // Allow dead code is required because there is only one variant in Query and we need to avoid the dead code warning.
+        #[allow(dead_code)]
         query: Query,
+        #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -164,6 +170,7 @@ pub(crate) enum SupergraphSelector {
         /// The name of a graphql query variable.
         query_variable: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -173,6 +180,7 @@ pub(crate) enum SupergraphSelector {
         /// The name of the request header.
         request_header: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -182,6 +190,7 @@ pub(crate) enum SupergraphSelector {
         /// The name of the response header.
         response_header: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -191,6 +200,7 @@ pub(crate) enum SupergraphSelector {
         /// The request context key.
         request_context: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -200,6 +210,7 @@ pub(crate) enum SupergraphSelector {
         /// The response context key.
         response_context: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -209,6 +220,7 @@ pub(crate) enum SupergraphSelector {
         /// The name of the baggage item.
         baggage: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -218,6 +230,7 @@ pub(crate) enum SupergraphSelector {
         /// The name of the environment variable
         env: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -225,7 +238,6 @@ pub(crate) enum SupergraphSelector {
     },
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 pub(crate) enum SubgraphSelector {
@@ -233,6 +245,7 @@ pub(crate) enum SubgraphSelector {
         /// The operation name from the subgraph query.
         subgraph_operation_name: OperationName,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -240,11 +253,17 @@ pub(crate) enum SubgraphSelector {
     },
     SubgraphOperationKind {
         /// The kind of the subgraph operation (query|mutation|subscription).
+        // Allow dead code is required because there is only one variant in OperationKind and we need to avoid the dead code warning.
+        #[allow(dead_code)]
         subgraph_operation_kind: OperationKind,
     },
     SubgraphQuery {
         /// The graphql query to the subgraph.
+        // Allow dead code is required because there is only one variant in Query and we need to avoid the dead code warning.
+        #[allow(dead_code)]
         subgraph_query: Query,
+        #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -254,6 +273,7 @@ pub(crate) enum SubgraphSelector {
         /// The name of a subgraph query variable.
         subgraph_query_variable: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -265,6 +285,7 @@ pub(crate) enum SubgraphSelector {
         #[serde(deserialize_with = "deserialize_json_query")]
         subgraph_response_body: JSONQuery,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -274,6 +295,7 @@ pub(crate) enum SubgraphSelector {
         /// The name of a subgraph request header.
         subgraph_request_header: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -283,6 +305,7 @@ pub(crate) enum SubgraphSelector {
         /// The name of a subgraph response header.
         subgraph_response_header: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -296,6 +319,7 @@ pub(crate) enum SubgraphSelector {
         /// The supergraph query operation name.
         supergraph_operation_name: OperationName,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -303,11 +327,17 @@ pub(crate) enum SubgraphSelector {
     },
     SupergraphOperationKind {
         /// The supergraph query operation kind (query|mutation|subscription).
+        // Allow dead code is required because there is only one variant in OperationKind and we need to avoid the dead code warning.
+        #[allow(dead_code)]
         supergraph_operation_kind: OperationKind,
     },
     SupergraphQuery {
         /// The supergraph query to the subgraph.
+        // Allow dead code is required because there is only one variant in Query and we need to avoid the dead code warning.
+        #[allow(dead_code)]
         supergraph_query: Query,
+        #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -317,6 +347,7 @@ pub(crate) enum SubgraphSelector {
         /// The supergraph query variable name.
         supergraph_query_variable: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -326,6 +357,7 @@ pub(crate) enum SubgraphSelector {
         /// The supergraph request header name.
         supergraph_request_header: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -335,6 +367,7 @@ pub(crate) enum SubgraphSelector {
         /// The request context key.
         request_context: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -344,6 +377,7 @@ pub(crate) enum SubgraphSelector {
         /// The response context key.
         response_context: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -353,6 +387,7 @@ pub(crate) enum SubgraphSelector {
         /// The name of the baggage item.
         baggage: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
@@ -362,6 +397,7 @@ pub(crate) enum SubgraphSelector {
         /// The name of the environment variable
         env: String,
         #[serde(skip)]
+        #[allow(dead_code)]
         /// Optional redaction pattern.
         redact: Option<String>,
         /// Optional default value.
