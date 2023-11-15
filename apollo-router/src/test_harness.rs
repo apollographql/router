@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::default::Default;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use tower::BoxError;
@@ -13,6 +14,7 @@ use tracing_futures::Instrument;
 use crate::axum_factory::span_mode;
 use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
+use crate::configuration::ConfigurationError;
 use crate::plugin::test::canned;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
@@ -145,6 +147,13 @@ impl<'a> TestHarness<'a> {
         configuration: serde_json::Value,
     ) -> Result<Self, serde_json::Error> {
         let configuration: Configuration = serde_json::from_value(configuration)?;
+        Ok(self.configuration(Arc::new(configuration)))
+    }
+
+    /// Specifies the (static) router configuration as a YAML string,
+    /// such as from the `serde_json::json!` macro.
+    pub fn configuration_yaml(self, configuration: &'a str) -> Result<Self, ConfigurationError> {
+        let configuration: Configuration = Configuration::from_str(configuration)?;
         Ok(self.configuration(Arc::new(configuration)))
     }
 
