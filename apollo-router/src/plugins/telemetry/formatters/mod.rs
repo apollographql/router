@@ -20,6 +20,7 @@ use crate::metrics::layer::METRIC_PREFIX_MONOTONIC_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_VALUE;
 
 pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
+// This list comes from Otel https://opentelemetry.io/docs/specs/semconv/attributes-registry/code/ and
 pub(crate) const EXCLUDED_ATTRIBUTES: [&str; 5] = [
     "code.filepath",
     "code.namespace",
