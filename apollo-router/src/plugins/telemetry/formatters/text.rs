@@ -81,17 +81,24 @@ impl Text {
 
             // If getting the timestamp failed, don't bail --- only bail on
             // formatting errors.
+            #[cfg(not(test))]
             if self.timer.format_time(writer).is_err() {
                 writer.write_str("<unknown time>")?;
             }
+            #[cfg(test)]
+            writer.write_str("[timestamp]")?;
 
             write!(writer, "{}", style.suffix())?;
         } else {
             // If getting the timestamp failed, don't bail --- only bail on
             // formatting errors.
+            #[cfg(not(test))]
             if self.timer.format_time(writer).is_err() {
                 writer.write_str("<unknown time>")?;
             }
+
+            #[cfg(test)]
+            writer.write_str("[timestamp]")?;
         }
         writer.write_char(' ')
     }

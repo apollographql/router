@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::marker::PhantomData;
 
 use tracing::field;
@@ -7,12 +8,14 @@ use tracing_core::span::Id;
 use tracing_core::span::Record;
 use tracing_core::Event;
 use tracing_core::Field;
+use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::Layer;
 
 use super::config_new::ToOtelValue;
 use super::dynamic_attribute::LogAttributes;
 use super::formatters::EventFormatter;
+use super::formatters::EXCLUDED_ATTRIBUTES;
 use super::reload::IsSampled;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::logging::Format;
@@ -34,7 +37,11 @@ pub(crate) fn create_fmt_layer(
                     config.exporters.logging.common.to_resource(),
                     format_config.clone(),
                 );
-                FmtLayer::new(FilteringFormatter::new(format, filter_metric_events)).boxed()
+                FmtLayer::new(
+                    FilteringFormatter::new(format, filter_metric_events),
+                    std::io::stdout,
+                )
+                .boxed()
             }
 
             Format::Text(format_config) => {
@@ -42,7 +49,11 @@ pub(crate) fn create_fmt_layer(
                     config.exporters.logging.common.to_resource(),
                     format_config.clone(),
                 );
-                FmtLayer::new(FilteringFormatter::new(format, filter_metric_events)).boxed()
+                FmtLayer::new(
+                    FilteringFormatter::new(format, filter_metric_events),
+                    std::io::stdout,
+                )
+                .boxed()
             }
         },
         _ => NoOpLayer.boxed(),
@@ -53,28 +64,34 @@ struct NoOpLayer;
 
 impl Layer<LayeredTracer> for NoOpLayer {}
 
-pub(crate) struct FmtLayer<T, S> {
+pub(crate) struct FmtLayer<T, S, W> {
     fmt_event: T,
+    excluded_attributes: HashSet<&'static str>,
+    make_writer: W,
     _inner: PhantomData<S>,
 }
 
-impl<T, S> FmtLayer<T, S>
+impl<T, S, W> FmtLayer<T, S, W>
 where
     S: tracing_core::Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
     T: EventFormatter<S>,
+    W: for<'writer> MakeWriter<'writer> + 'static,
 {
-    pub(crate) fn new(fmt_event: T) -> Self {
+    pub(crate) fn new(fmt_event: T, make_writer: W) -> Self {
         Self {
             fmt_event,
+            excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
+            make_writer,
             _inner: PhantomData,
         }
     }
 }
 
-impl<S, T> Layer<S> for FmtLayer<T, S>
+impl<S, T, W> Layer<S> for FmtLayer<T, S, W>
 where
     S: tracing_core::Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
     T: EventFormatter<S> + 'static,
+    W: for<'writer> MakeWriter<'writer> + 'static,
 {
     fn on_new_span(
         &self,
@@ -83,7 +100,7 @@ where
         ctx: Context<'_, S>,
     ) {
         let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut visitor = FieldsVisitor::default();
+        let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
         // We're checking if it's sampled to not add both attributes in OtelData and our LogAttributes
         if !span.is_sampled() {
             attrs.record(&mut visitor);
@@ -116,7 +133,7 @@ where
         let span = ctx.span(id).expect("Span not found, this is a bug");
         let mut extensions = span.extensions_mut();
         if let Some(fields) = extensions.get_mut::<LogAttributes>() {
-            let mut visitor = FieldsVisitor::default();
+            let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
             values.record(&mut visitor);
             fields.extend(
                 visitor
@@ -149,7 +166,7 @@ where
                 }
             };
             if self.fmt_event.format_event(&ctx, &mut buf, event).is_ok() {
-                let mut writer = std::io::stdout();
+                let mut writer = self.make_writer.make_writer();
                 if let Err(err) = std::io::Write::write_all(&mut writer, buf.as_bytes()) {
                     eprintln!("cannot flush the logging buffer, this is a bug: {err:?}");
                 }
@@ -160,19 +177,21 @@ where
 }
 
 #[derive(Debug)]
-pub(crate) struct FieldsVisitor<'a> {
+pub(crate) struct FieldsVisitor<'a, 'b> {
     pub(crate) values: HashMap<&'a str, serde_json::Value>,
+    excluded_attributes: &'b HashSet<&'static str>,
 }
 
-impl<'a> Default for FieldsVisitor<'a> {
-    fn default() -> Self {
+impl<'a, 'b> FieldsVisitor<'a, 'b> {
+    fn new(excluded_attributes: &'b HashSet<&'static str>) -> Self {
         Self {
             values: HashMap::with_capacity(0),
+            excluded_attributes,
         }
     }
 }
 
-impl<'a> field::Visit for FieldsVisitor<'a> {
+impl<'a, 'b> field::Visit for FieldsVisitor<'a, 'b> {
     /// Visit a double precision floating point value.
     fn record_f64(&mut self, field: &Field, value: f64) {
         self.values
@@ -200,12 +219,7 @@ impl<'a> field::Visit for FieldsVisitor<'a> {
     /// Visit a string value.
     fn record_str(&mut self, field: &Field, value: &str) {
         let field_name = field.name();
-        if field_name == "code.filepath"
-            || field_name == "code.namespace"
-            || field_name == "code.lineno"
-            || field_name == "thread.id"
-            || field_name == "thread.name"
-        {
+        if self.excluded_attributes.contains(field_name) {
             return;
         }
         self.values
@@ -214,12 +228,7 @@ impl<'a> field::Visit for FieldsVisitor<'a> {
 
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
         let field_name = field.name();
-        if field_name == "code.filepath"
-            || field_name == "code.namespace"
-            || field_name == "code.lineno"
-            || field_name == "thread.id"
-            || field_name == "thread.name"
-        {
+        if self.excluded_attributes.contains(field_name) {
             return;
         }
         match field_name {
@@ -232,5 +241,178 @@ impl<'a> field::Visit for FieldsVisitor<'a> {
                     .insert(name, serde_json::Value::from(format!("{:?}", value)));
             }
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::sync::MutexGuard;
+
+    use tracing::error;
+    use tracing::info;
+    use tracing::info_span;
+    use tracing_subscriber::fmt;
+    use tracing_subscriber::layer::SubscriberExt;
+
+    use super::*;
+    use crate::plugins::telemetry::dynamic_attribute::DynAttribute;
+
+    #[derive(Default, Clone)]
+    struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+    impl<'a> MakeWriter<'a> for LogBuffer {
+        type Writer = Guard<'a>;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            Guard(self.0.lock().unwrap())
+        }
+    }
+
+    struct Guard<'a>(MutexGuard<'a, Vec<u8>>);
+    impl<'a> std::io::Write for Guard<'a> {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.write(buf)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.0.flush()
+        }
+    }
+
+    impl std::fmt::Display for LogBuffer {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let content = String::from_utf8(self.0.lock().unwrap().clone()).unwrap();
+
+            write!(f, "{content}")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_text_logging_attributes() {
+        let buff = LogBuffer::default();
+        let format = Text::default();
+        let fmt_layer = FmtLayer::new(
+            FilteringFormatter::new(format, filter_metric_events),
+            buff.clone(),
+        )
+        .boxed();
+
+        ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), || {
+            let test_span = info_span!(
+                "test",
+                first = "one",
+                apollo_private.should_not_display = "this should be skipped"
+            );
+            test_span.set_dyn_attribute("another".into(), 2.into());
+            test_span.set_dyn_attribute("custom_dyn".into(), "test".into());
+            let _enter = test_span.enter();
+            info!(event_attr = "foo", "Hello from test");
+        });
+        insta::assert_display_snapshot!(buff);
+    }
+
+    #[tokio::test]
+    async fn test_text_logging_attributes_nested_spans() {
+        let buff = LogBuffer::default();
+        let format = Text::default();
+        let fmt_layer = FmtLayer::new(
+            FilteringFormatter::new(format, filter_metric_events),
+            buff.clone(),
+        )
+        .boxed();
+
+        ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), || {
+            let test_span = info_span!(
+                "test",
+                first = "one",
+                apollo_private.should_not_display = "this should be skipped"
+            );
+            test_span.set_dyn_attribute("another".into(), 2.into());
+            test_span.set_dyn_attribute("custom_dyn".into(), "test".into());
+            let _enter = test_span.enter();
+            {
+                let nested_test_span = info_span!(
+                    "nested_test",
+                    two = "two",
+                    apollo_private.is_private = "this should be skipped"
+                );
+                let _enter = nested_test_span.enter();
+
+                nested_test_span.set_dyn_attributes([
+                    ("inner".into(), (-42).into()),
+                    ("graphql.operation.kind".into(), "Subscription".into()),
+                ]);
+
+                error!(http.method = "GET", "Hello from nested test");
+            }
+            info!(event_attr = "foo", "Hello from test");
+        });
+
+        insta::assert_display_snapshot!(buff.to_string());
+    }
+
+    #[tokio::test]
+    async fn test_json_logging_attributes() {
+        let buff = LogBuffer::default();
+        let format = Json::default();
+        let fmt_layer = FmtLayer::new(
+            FilteringFormatter::new(format, filter_metric_events),
+            buff.clone(),
+        )
+        .boxed();
+
+        ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), || {
+            let test_span = info_span!(
+                "test",
+                first = "one",
+                apollo_private.should_not_display = "this should be skipped"
+            );
+            test_span.set_dyn_attribute("another".into(), 2.into());
+            test_span.set_dyn_attribute("custom_dyn".into(), "test".into());
+            let _enter = test_span.enter();
+            info!(event_attr = "foo", "Hello from test");
+        });
+        insta::assert_display_snapshot!(buff);
+    }
+
+    #[tokio::test]
+    async fn test_json_logging_attributes_nested_spans() {
+        let buff = LogBuffer::default();
+        let format = Json::default();
+        let fmt_layer = FmtLayer::new(
+            FilteringFormatter::new(format, filter_metric_events),
+            buff.clone(),
+        )
+        .boxed();
+
+        ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), || {
+            let test_span = info_span!(
+                "test",
+                first = "one",
+                apollo_private.should_not_display = "this should be skipped"
+            );
+            test_span.set_dyn_attribute("another".into(), 2.into());
+            test_span.set_dyn_attribute("custom_dyn".into(), "test".into());
+            let _enter = test_span.enter();
+            {
+                let nested_test_span = info_span!(
+                    "nested_test",
+                    two = "two",
+                    apollo_private.is_private = "this should be skipped"
+                );
+                let _enter = nested_test_span.enter();
+
+                nested_test_span.set_dyn_attributes([
+                    ("inner".into(), (-42).into()),
+                    ("graphql.operation.kind".into(), "Subscription".into()),
+                ]);
+
+                error!(http.method = "GET", "Hello from nested test");
+            }
+            info!(event_attr = "foo", "Hello from test");
+        });
+
+        insta::assert_display_snapshot!(buff.to_string());
     }
 }

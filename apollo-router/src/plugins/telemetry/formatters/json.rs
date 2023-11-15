@@ -166,10 +166,17 @@ where
             let mut serializer = serializer.serialize_map(None)?;
 
             if self.config.display_timestamp {
-                let timestamp = time::OffsetDateTime::now_utc()
-                    .format(&time::format_description::well_known::Iso8601::DEFAULT)
-                    .map_err(|e| serde::ser::Error::custom(e.to_string()))?;
-                serializer.serialize_entry("timestamp", &timestamp)?;
+                #[cfg(test)]
+                {
+                    serializer.serialize_entry("timestamp", "[timestamp]")?;
+                }
+                #[cfg(not(test))]
+                {
+                    let timestamp = time::OffsetDateTime::now_utc()
+                        .format(&time::format_description::well_known::Iso8601::DEFAULT)
+                        .map_err(|e| serde::ser::Error::custom(e.to_string()))?;
+                    serializer.serialize_entry("timestamp", &timestamp)?;
+                }
             }
 
             if self.config.display_level {

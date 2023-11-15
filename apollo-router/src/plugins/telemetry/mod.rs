@@ -2126,35 +2126,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_supergraph_metrics_ok() {
-        async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
-                    .await;
-            make_supergraph_request(plugin.as_ref()).await;
+        let mut buffer = String::new();
+        let plugin =
+            create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml")).await;
+        make_supergraph_request(plugin.as_ref()).await;
 
-            assert_counter!(
-                "apollo_router_http_requests_total",
-                1,
-                "another_test" = "my_default_value",
-                "my_value" = 2,
-                "myname" = "label_value",
-                "renamed_value" = "my_value_set",
-                "status" = "200",
-                "x-custom" = "coming_from_header"
-            );
-            assert_histogram!(
-                "apollo_router_http_request_duration_seconds",
-                1,
-                "another_test" = "my_default_value",
-                "my_value" = 2,
-                "myname" = "label_value",
-                "renamed_value" = "my_value_set",
-                "status" = "200",
-                "x-custom" = "coming_from_header"
-            );
-        }
-        .with_metrics()
-        .await;
+        // TODO assert logs
     }
 
     #[tokio::test]

@@ -83,16 +83,16 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
 
     // We choose json or plain based on tty
     let fmt = if std::io::stdout().is_terminal() {
-        FmtLayer::new(FilteringFormatter::new(
-            Text::default(),
-            filter_metric_events,
-        ))
+        FmtLayer::new(
+            FilteringFormatter::new(Text::default(), filter_metric_events),
+            std::io::stdout,
+        )
         .boxed()
     } else {
-        FmtLayer::new(FilteringFormatter::new(
-            Json::default(),
-            filter_metric_events,
-        ))
+        FmtLayer::new(
+            FilteringFormatter::new(Json::default(), filter_metric_events),
+            std::io::stdout,
+        )
         .boxed()
     };
 
