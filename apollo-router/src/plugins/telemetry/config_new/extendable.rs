@@ -135,12 +135,15 @@ where
     }
 }
 
-impl<A, E, Request, Response> Selectors<Request, Response> for Extendable<A, E>
+impl<A, E, Request, Response> Selectors for Extendable<A, E>
 where
-    A: Default + Selectors<Request, Response>,
-    E: Selector<Request, Response>,
+    A: Default + Selectors<Request = Request, Response = Response>,
+    E: Selector<Request = Request, Response = Response>,
 {
-    fn on_request(&self, request: &Request) -> HashMap<Key, opentelemetry::Value> {
+    type Request = Request;
+    type Response = Response;
+
+    fn on_request(&self, request: &Self::Request) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = self.attributes.on_request(request);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
@@ -152,7 +155,7 @@ where
         attrs
     }
 
-    fn on_response(&self, response: &Response) -> HashMap<Key, opentelemetry::Value> {
+    fn on_response(&self, response: &Self::Response) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = self.attributes.on_response(response);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value

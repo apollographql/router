@@ -369,7 +369,10 @@ pub(crate) enum SubgraphSelector {
     },
 }
 
-impl Selector<router::Request, router::Response> for RouterSelector {
+impl Selector for RouterSelector {
+    type Request = router::Request;
+    type Response = router::Response;
+
     fn on_request(&self, request: &router::Request) -> Option<opentelemetry::Value> {
         match self {
             RouterSelector::RequestHeader {
@@ -445,7 +448,10 @@ impl Selector<router::Request, router::Response> for RouterSelector {
     }
 }
 
-impl Selector<supergraph::Request, supergraph::Response> for SupergraphSelector {
+impl Selector for SupergraphSelector {
+    type Request = supergraph::Request;
+    type Response = supergraph::Response;
+
     fn on_request(&self, request: &supergraph::Request) -> Option<opentelemetry::Value> {
         match self {
             SupergraphSelector::OperationName {
@@ -556,7 +562,10 @@ impl Selector<supergraph::Request, supergraph::Response> for SupergraphSelector 
     }
 }
 
-impl Selector<subgraph::Request, subgraph::Response> for SubgraphSelector {
+impl Selector for SubgraphSelector {
+    type Request = subgraph::Request;
+    type Response = subgraph::Response;
+
     fn on_request(&self, request: &subgraph::Request) -> Option<opentelemetry::Value> {
         match self {
             SubgraphSelector::SubgraphOperationName {

@@ -112,7 +112,10 @@ pub(crate) struct SubgraphSpans {
     pub(crate) attributes: Extendable<SubgraphAttributes, SubgraphSelector>,
 }
 
-impl Selectors<router::Request, router::Response> for RouterAttributes {
+impl Selectors for RouterAttributes {
+    type Request = router::Request;
+    type Response = router::Response;
+
     fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = self.common.on_request(request);
         if let Some(true) = &self.trace_id {
@@ -141,7 +144,10 @@ impl Selectors<router::Request, router::Response> for RouterAttributes {
     }
 }
 
-impl Selectors<supergraph::Request, supergraph::Response> for SupergraphAttributes {
+impl Selectors for SupergraphAttributes {
+    type Request = supergraph::Request;
+    type Response = supergraph::Response;
+
     fn on_request(&self, request: &supergraph::Request) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = HashMap::new();
         if let Some(true) = &self.graphql_document {
@@ -179,7 +185,10 @@ impl Selectors<supergraph::Request, supergraph::Response> for SupergraphAttribut
     }
 }
 
-impl Selectors<subgraph::Request, subgraph::Response> for SubgraphAttributes {
+impl Selectors for SubgraphAttributes {
+    type Request = subgraph::Request;
+    type Response = subgraph::Response;
+
     fn on_request(&self, request: &subgraph::Request) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = HashMap::new();
         if let Some(true) = &self.graphql_document {
