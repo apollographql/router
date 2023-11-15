@@ -319,6 +319,7 @@ impl BridgeQueryPlanner {
         original_query: String,
         filtered_query: String,
         operation: Option<String>,
+        key: CacheKeyMetadata,
         selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         fn is_validation_error(errors: &router_bridge::planner::PlanErrors) -> bool {
@@ -379,7 +380,7 @@ impl BridgeQueryPlanner {
         {
             Ok(mut plan) => {
                 if let Some(node) = plan.data.query_plan.node.as_mut() {
-                    node.extract_authorization_metadata(&self.schema.definitions);
+                    node.extract_authorization_metadata(&self.schema.definitions, &key);
                 }
                 plan
             }
@@ -653,6 +654,7 @@ impl BridgeQueryPlanner {
             key.original_query,
             key.filtered_query,
             key.operation_name,
+            key.metadata,
             selections,
         )
         .await
@@ -764,6 +766,7 @@ mod tests {
                 include_str!("testdata/unknown_introspection_query.graphql").to_string(),
                 include_str!("testdata/unknown_introspection_query.graphql").to_string(),
                 None,
+                CacheKeyMetadata::default(),
                 selections,
             )
             .await

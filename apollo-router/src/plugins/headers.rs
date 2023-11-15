@@ -794,6 +794,7 @@ mod test {
             context: ctx,
             subscription_stream: None,
             connection_closed_signal: None,
+            authorization: Default::default(),
         }
     }
 

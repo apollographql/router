@@ -2301,6 +2301,7 @@ mod tests {
                 context: Context::new(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                authorization: Default::default(),
             })
             .await
             .unwrap();

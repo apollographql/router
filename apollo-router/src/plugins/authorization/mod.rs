@@ -287,6 +287,29 @@ impl AuthorizationPlugin {
         });
     }
 
+    pub(crate) fn intersect_cache_keys_subgraph(
+        left: &CacheKeyMetadata,
+        right: &CacheKeyMetadata,
+    ) -> CacheKeyMetadata {
+        CacheKeyMetadata {
+            is_authenticated: left.is_authenticated & &right.is_authenticated,
+            scopes: left
+                .scopes
+                .iter()
+                .collect::<HashSet<_>>()
+                .intersection(&right.scopes.iter().collect::<HashSet<_>>())
+                .map(|s| s.to_string())
+                .collect(),
+            policies: left
+                .policies
+                .iter()
+                .collect::<HashSet<_>>()
+                .intersection(&right.policies.iter().collect::<HashSet<_>>())
+                .map(|s| s.to_string())
+                .collect(),
+        }
+    }
+
     pub(crate) fn filter_query(
         configuration: &Configuration,
         key: &QueryKey,

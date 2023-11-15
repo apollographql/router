@@ -247,7 +247,7 @@ impl FetchNode {
             }
         };
 
-        let subgraph_request = SubgraphRequest::builder()
+        let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
             .subgraph_request(
                 http_ext::Request::builder()
@@ -276,6 +276,7 @@ impl FetchNode {
             .operation_kind(*operation_kind)
             .context(parameters.context.clone())
             .build();
+        subgraph_request.authorization = self.authorization.clone();
 
         let service = parameters
             .service_factory
@@ -462,13 +463,20 @@ impl FetchNode {
         &self.operation_kind
     }
 
-    pub(crate) fn extract_authorization_metadata(&mut self, schema: &apollo_compiler::Schema) {
+    pub(crate) fn extract_authorization_metadata(
+        &mut self,
+        schema: &apollo_compiler::Schema,
+        global_authorisation_cache_key: &CacheKeyMetadata,
+    ) {
         let doc = Document::parse(&self.operation, "query.graphql");
+        let subgraph_query_cache_key =
+            AuthorizationPlugin::generate_cache_metadata(&doc, schema, !self.requires.is_empty());
 
-        self.authorization = Arc::new(AuthorizationPlugin::generate_cache_metadata(
-            &doc,
-            schema,
-            !self.requires.is_empty(),
+        // we need to intersect the cache keys because the global key already takes into account
+        // the scopes and policies from the client request
+        self.authorization = Arc::new(AuthorizationPlugin::intersect_cache_keys_subgraph(
+            global_authorisation_cache_key,
+            &subgraph_query_cache_key,
         ));
     }
 }

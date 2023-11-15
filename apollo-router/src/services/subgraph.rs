@@ -20,6 +20,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::notification::HandleStream;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::OperationKind;
 use crate::Context;
 
@@ -43,6 +44,9 @@ pub struct Request {
     pub(crate) subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
     /// Channel triggered when the client connection has been dropped
     pub(crate) connection_closed_signal: Option<broadcast::Receiver<()>>,
+
+    // authorization metadata for this request
+    pub(crate) authorization: Arc<CacheKeyMetadata>,
 }
 
 #[buildstructor::buildstructor]
@@ -66,6 +70,7 @@ impl Request {
             context,
             subscription_stream,
             connection_closed_signal,
+            authorization: Default::default(),
         }
     }
 
@@ -124,6 +129,7 @@ impl Clone for Request {
                 .connection_closed_signal
                 .as_ref()
                 .map(|s| s.resubscribe()),
+            authorization: self.authorization.clone(),
         }
     }
 }
