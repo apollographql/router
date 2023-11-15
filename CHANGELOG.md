@@ -4,6 +4,206 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.34.0] - 2023-11-14
+
+## 🚀 Features
+
+### Authorization: dry run option ([Issue #3843](https://github.com/apollographql/router/issues/3843))
+
+It is now possible to execute authorization directives without modifying the query, but still return the list of affected paths as top-level errors in the response. This allows testing authorization without breaking existing traffic. See documentation for [`authorization.dry_run`](https://www.apollographql.com/docs/router/configuration/authorization#dry_run).
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4079
+
+### Rhai: support alternative base64 alphabets ([Issue #3783](https://github.com/apollographql/router/issues/3783))
+
+This adds support for alternative base64 alphabets:
+* `STANDARD`
+* `STANDARD_NO_PAD`
+* `URL_SAFE`
+* `URL_SAFE_NO_PAD`
+
+They can be used as follows:
+
+```
+let original = "alice and bob";
+let encoded = base64::encode(original, base64::URL_SAFE);
+// encoded will be "YWxpY2UgYW5kIGJvYgo="
+try {
+    let and_back = base64::decode(encoded, base64::URL_SAFE);
+    // and_back will be "alice and bob"
+}
+```
+
+The default when the alphabet argument is not specified is STANDARD.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3885
+
+### GraphOS authorization directives: policy directive ([PR #3751](https://github.com/apollographql/router/pull/3751))
+
+> ⚠️ This is an Enterprise feature of the Apollo Router. It requires an organization with a GraphOS Enterprise plan.
+> 
+> If your organization doesn't currently have an Enterprise plan, you can test out this functionality by signing up for a free Enterprise trial.
+
+We introduce a new GraphOS authorization directive called `@policy`, that is designed to offload authorization policy execution to a coprocessor or Rhai script. it extracts from the query the list of relevant policies, the coprocessor indicates which of those policies failed, then the router filters unauthorized fields, as it does with `@authenticated` and `@requiresScopes`. If you want to know more, check out the [documentation](https://www.apollographql.com/docs/router/configuration/authorization#authenticated).
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3751
+
+### Authorization directives are enabled by default ([Issue #3842](https://github.com/apollographql/router/issues/3842))
+
+If the router starts with an API key from an Enterprise account, and the schema contains the authorization directives, then they will be usable directly without further configuration.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3713
+
+### Add a flag to disable authorization error logs ([Issue #4077](https://github.com/apollographql/router/issues/4077) & [Issue #4116](https://github.com/apollographql/router/issues/4116))
+
+Authorization errors need flexible reporting depending on the use case. They can now be configured as follows:
+
+```yaml title="router.yaml"
+authorization:
+  preview_directives:
+    errors:
+      log: true # default: true
+      response: "errors" # possible values: "errors" (default), "extensions", "disabled"
+```
+
+Logging can be disabled if platform operators do not want to see the logs polluted by common authorization errors.
+Errors in responses may be:
+ - moved to extensions, to avoid raising exceptions in clients
+ - or disabled entirely, in which case clients will not receive any authorization errors.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4076 & https://github.com/apollographql/router/pull/4122
+
+### Add a new studio reporting metric ([Issue #3883](https://github.com/apollographql/router/issues/3883))
+
+Count how many reports we have submitted to studio, with a "type" attribute that indicates if reporting "traces" or "metrics".
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4039
+
+## 🐛 Fixes
+
+### Bring Otel `service.name` into line with the Otel spec ([PR #4034](https://github.com/apollographql/router/pull/4034))
+
+Handling of Otel `service.name` has been brought into line with the [Otel spec](https://opentelemetry.io/docs/concepts/sdk-configuration/general-sdk-configuration/#otel_service_name) across traces and metrics.
+
+Service name discovery is handled in the following order:
+1. `OTEL_SERVICE_NAME` env
+2. `OTEL_RESOURCE_ATTRIBUTES` env
+3. `router.yaml` `service_name`
+4. `router.yaml` `resources` (attributes)
+
+If none of the above are found then the service name will be set to `unknown_service:apollo_router` or `unknown_service` if the executable name cannot be determined.
+
+Users who have not explicitly configured their service name should do so either via the yaml config file or via the `OTEL_SERVICE_NAME` environment variable.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4034
+
+### Rename helm template from common\. to apollographql\. ([Issue #4002](https://github.com/apollographql/router/issues/4002))
+
+There is a naming clash with bitnami common templates used in other charts. This is unfortunate when used in a chart which has multiple dependencies where names may clash.
+
+The straightforward fix is to rename our templates from common to apollographql.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4005
+
+### Propagate headers for source stream events with subscription ([Issue #3731](https://github.com/apollographql/router/issues/3731))
+
+Before the headers coming from the request were not propagated to the subgraph request when configured with headers plugin on subscription events. You had to use a Rhai script as a workaround, it's not required anymore.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4057
+
+### Fix memory issues in the apollo metrics exporter ([PR #4107](https://github.com/apollographql/router/pull/4107))
+
+There were a number of issues with the apollo metrics exporter which meant that under load the router would look as though it was leaking memory. It isn't a leak, strictly speaking, but is in fact "lingering" memory.
+
+The root cause was a bounded `futures` channel which did not enforce the bounds as we expected and thus could over-consume memory. We have fixed the issue by:
+
+ - making the situation of channel overflow less likely to happen
+   - speeding up metrics processing
+   - altering the priority of metrics submission vs metrics gathering
+ - switching to use a `tokio` bounded channel which enforces the bound as we originally expected
+
+With these changes in place we have observed that the router behaves very well with respect to memory consumption under high load.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4107
+
+### Support authorization directive renaming ([PR #3949](https://github.com/apollographql/router/pull/3949))
+
+When importing directives through the `@link` directive, they can be renamed. This makes sure that the authorization plugin can still recognize its directives when they have been renamed.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3949
+
+## 📃 Configuration
+
+### Bring telemetry tracing config and metrics config into alignment ([Issue #4043](https://github.com/apollographql/router/issues/4043))
+
+Configuration between tracing and metrics was inconsistent and did not align with otel spec terminology. The following changes have been made to router.yaml configuration:
+
+`telemetry.tracing.trace_config` has been renamed to `common`
+  
+```diff
+telemetry
+  tracing:
+-   trace_config:
++   common:   
+```
+
+`telemetry.tracing.common.attributes` has been renamed to `resource`
+```diff
+telemetry
+  tracing:
+    common:
+-      attributes:
++      resource:   
+```
+
+`telemetry.metrics.common.resources` has been renamed to `resource`
+```diff
+telemetry
+  metrics:
+    common:
+-      resources:
++      resource:   
+```
+`telemetry.tracing.propagation.awsxray` has been renamed to `aws_xray`
+```diff
+telemetry
+  tracing:
+    propagation:
+-      awsxray: true
++      aws_xray: true
+```
+
+The Router will upgrade any existing configuration on startup. However, you should update your configuration to use the new format as soon as possible. 
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4044, https://github.com/apollographql/router/pull/4050 and https://github.com/apollographql/router/pull/4051
+
+## 🛠 Maintenance
+
+### Router should respond with subscription-protocol header for callback ([Issue #3929](https://github.com/apollographql/router/issues/3929))
+
+Callback protocol documentation specifies that router responds with `subscription-protocol: callback/1.0` header to the initialization (check) message. Currently router does not set this header on the response.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3939
+
+### Use trust dns for hyper client resolver ([Issue #4030](https://github.com/apollographql/router/issues/4030))
+
+Investigating memory revealed that the default hyper client DNS resolver had a negative impact on the memory footprint of the router.
+
+It may also not be respecting TTL correctly. Let's replace the default with Trust DNS.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4088
+
+## 📚 Documentation
+
+### Clarify and fix docs about supported WebSocket subprotocols ([PR #4063](https://github.com/apollographql/router/pull/4063))
+
+The way we previously documented the supported websocket protocols for router to subgraph communication was confusing.
+This changeset brings more clarity around how to customise the websocket protocol, including the subgraph path that exposes websocket capabilities.
+
+By [@shorgi](https://github.com/shorgi) in https://github.com/apollographql/router/pull/4063
+
+
+
 # [1.33.2] - 2023-10-26
 
 ## 🐛 Fixes
