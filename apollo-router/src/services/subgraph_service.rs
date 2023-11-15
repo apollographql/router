@@ -1847,6 +1847,25 @@ mod tests {
         }
     }
 
+    fn supergraph_request(query: &str) -> Arc<http::Request<Request>> {
+        Arc::new(
+            http::Request::builder()
+                .header(HOST, "host")
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(Request::builder().query(query).build())
+                .expect("expecting valid request"),
+        )
+    }
+
+    fn subgraph_http_request(uri: Uri, query: &str) -> http::Request<Request> {
+        http::Request::builder()
+            .header(HOST, "rhost")
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+            .uri(uri)
+            .body(Request::builder().query(query).build())
+            .expect("expecting valid request")
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_callback() {
         let _ = SUBSCRIPTION_CALLBACK_HMAC_KEY.set(String::from("TESTEST"));
@@ -1868,33 +1887,20 @@ mod tests {
         let (tx, _rx) = mpsc::channel(2);
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(
-                            Request::builder()
-                                .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
-                                .build(),
-                        )
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(
-                        Request::builder()
-                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
-                            .build(),
-                    )
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Subscription,
-                context: Context::new(),
-                subscription_stream: Some(tx),
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request(
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .subgraph_request(subgraph_http_request(
+                        url,
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .operation_kind(OperationKind::Subscription)
+                    .subscription_stream(tx)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
         response.response.body().errors.iter().for_each(|e| {
@@ -1924,25 +1930,14 @@ mod tests {
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
         assert!(response.response.body().errors.is_empty());
@@ -1968,25 +1963,14 @@ mod tests {
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
         assert!(response.response.body().errors.is_empty());
@@ -2012,25 +1996,14 @@ mod tests {
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -2061,25 +2034,14 @@ mod tests {
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -2114,25 +2076,14 @@ mod tests {
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -2167,33 +2118,20 @@ mod tests {
 
         let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
         let response = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(
-                            Request::builder()
-                                .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
-                                .build(),
-                        )
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(
-                        Request::builder()
-                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
-                            .build(),
-                    )
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Subscription,
-                context: Context::new(),
-                subscription_stream: Some(tx),
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request(
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .subgraph_request(subgraph_http_request(
+                        url,
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .operation_kind(OperationKind::Subscription)
+                    .subscription_stream(tx)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
         assert!(response.response.body().errors.is_empty());
@@ -2231,33 +2169,20 @@ mod tests {
 
         let url = Uri::from_str(&format!("ws://{socket_addr}")).unwrap();
         let err = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(
-                            Request::builder()
-                                .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
-                                .build(),
-                        )
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(
-                        Request::builder()
-                            .query("subscription {\n  userWasCreated {\n    username\n  }\n}")
-                            .build(),
-                    )
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Subscription,
-                context: Context::new(),
-                subscription_stream: Some(tx),
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request(
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .subgraph_request(subgraph_http_request(
+                        url,
+                        "subscription {\n  userWasCreated {\n    username\n  }\n}",
+                    ))
+                    .operation_kind(OperationKind::Subscription)
+                    .subscription_stream(tx)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap_err();
         assert_eq!(
@@ -2286,25 +2211,14 @@ mod tests {
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -2338,25 +2252,14 @@ mod tests {
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -2386,13 +2289,7 @@ mod tests {
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
             .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query".to_string()).build())
-                        .expect("expecting valid request"),
-                ),
+                supergraph_request: supergraph_request("query"),
                 subgraph_request: http::Request::builder()
                     .header(HOST, "rhost")
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
@@ -2436,25 +2333,14 @@ mod tests {
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -2486,25 +2372,14 @@ mod tests {
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
             .clone()
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
 
@@ -2542,25 +2417,14 @@ mod tests {
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
             .clone()
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
 
@@ -2594,25 +2458,14 @@ mod tests {
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
             .clone()
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
 
@@ -2645,25 +2498,14 @@ mod tests {
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
             .clone()
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
 
@@ -2696,25 +2538,14 @@ mod tests {
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
             .clone()
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
 
@@ -2747,25 +2578,14 @@ mod tests {
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
             .clone()
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
 
@@ -2845,25 +2665,14 @@ mod tests {
 
         let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
         let response = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
 
@@ -2901,25 +2710,14 @@ mod tests {
 
         let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
         let response = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
         assert_eq!(response.response.body().data, Some(Value::Null));
@@ -3010,25 +2808,14 @@ mod tests {
 
         let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
         let response = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
         assert_eq!(response.response.body().data, Some(Value::Null));
@@ -3080,25 +2867,14 @@ mod tests {
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
-            .oneshot(SubgraphRequest {
-                supergraph_request: Arc::new(
-                    http::Request::builder()
-                        .header(HOST, "host")
-                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(Request::builder().query("query").build())
-                        .expect("expecting valid request"),
-                ),
-                subgraph_request: http::Request::builder()
-                    .header(HOST, "rhost")
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .uri(url)
-                    .body(Request::builder().query("query").build())
-                    .expect("expecting valid request"),
-                operation_kind: OperationKind::Query,
-                context: Context::new(),
-                subscription_stream: None,
-                connection_closed_signal: None,
-            })
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .context(Context::new())
+                    .build(),
+            )
             .await
             .unwrap();
         assert!(response.response.body().errors.is_empty());
