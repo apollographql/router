@@ -55,9 +55,9 @@ const REQUIRED_POLICIES_KEY: &str = "apollo_authorization::policies::required";
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct CacheKeyMetadata {
-    is_authenticated: bool,
-    scopes: Vec<String>,
-    policies: Vec<String>,
+    pub(crate) is_authenticated: bool,
+    pub(crate) scopes: Vec<String>,
+    pub(crate) policies: Vec<String>,
 }
 
 /// Authorization plugin
@@ -179,7 +179,7 @@ impl AuthorizationPlugin {
             is_authenticated,
             scopes,
             policies,
-        } = Self::generate_cache_metadata(ast, schema);
+        } = Self::generate_cache_metadata(ast, &schema.definitions);
         if is_authenticated {
             context.insert(AUTHENTICATED_KEY, true).unwrap();
         }
@@ -195,9 +195,12 @@ impl AuthorizationPlugin {
         }
     }
 
-    pub(crate) fn generate_cache_metadata(ast: &Document, schema: &Schema) -> CacheKeyMetadata {
+    pub(crate) fn generate_cache_metadata(
+        ast: &Document,
+        schema: &apollo_compiler::Schema,
+    ) -> CacheKeyMetadata {
         let mut is_authenticated = false;
-        if let Some(mut visitor) = AuthenticatedCheckVisitor::new(&schema.definitions, ast) {
+        if let Some(mut visitor) = AuthenticatedCheckVisitor::new(schema, ast) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
@@ -207,7 +210,7 @@ impl AuthorizationPlugin {
         }
 
         let mut scopes = Vec::new();
-        if let Some(mut visitor) = ScopeExtractionVisitor::new(&schema.definitions, ast) {
+        if let Some(mut visitor) = ScopeExtractionVisitor::new(schema, ast) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
@@ -217,7 +220,7 @@ impl AuthorizationPlugin {
         }
 
         let mut policies: Vec<String> = Vec::new();
-        if let Some(mut visitor) = PolicyExtractionVisitor::new(&schema.definitions, ast) {
+        if let Some(mut visitor) = PolicyExtractionVisitor::new(schema, ast) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests

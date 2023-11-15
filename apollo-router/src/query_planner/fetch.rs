@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
+use apollo_compiler::ast::Document;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -22,6 +23,8 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
+use crate::plugins::authorization::AuthorizationPlugin;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::SubgraphRequest;
 use crate::spec::Schema;
 
@@ -113,6 +116,9 @@ pub(crate) struct FetchNode {
 
     // Optionally describes a number of "rewrites" to apply to the data that received from a fetch (and before it is applied to the current in-memory results).
     pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
+
+    // authorization metadata for the subgraph query
+    pub(crate) authorization: Arc<CacheKeyMetadata>,
 }
 
 pub(crate) struct Variables {
@@ -453,5 +459,12 @@ impl FetchNode {
 
     pub(crate) fn operation_kind(&self) -> &OperationKind {
         &self.operation_kind
+    }
+
+    pub(crate) fn extract_authorization_metadata(&mut self, schema: &apollo_compiler::Schema) {
+        let doc = Document::parse(&self.operation, "query.graphql");
+
+        //FIXME: handle the _entities case
+        self.authorization = Arc::new(AuthorizationPlugin::generate_cache_metadata(&doc, schema));
     }
 }
