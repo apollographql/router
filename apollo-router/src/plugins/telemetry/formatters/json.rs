@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt;
 use std::io;
 
@@ -27,6 +28,7 @@ use crate::plugins::telemetry::formatters::to_map;
 pub(crate) struct Json {
     config: JsonFormat,
     resource: HashMap<String, serde_json::Value>,
+    excluded_attributes: HashSet<&'static str>,
 }
 
 impl Json {
@@ -34,15 +36,16 @@ impl Json {
         Self {
             resource: to_map(resource),
             config,
+            excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
         }
     }
 }
 
-struct SerializableContext<'a, Span>(Option<SpanRef<'a, Span>>)
+struct SerializableContext<'a, 'b, Span>(Option<SpanRef<'a, Span>>, &'b HashSet<&'static str>)
 where
     Span: Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>;
 
-impl<'a, Span> serde::ser::Serialize for SerializableContext<'a, Span>
+impl<'a, 'b, Span> serde::ser::Serialize for SerializableContext<'a, 'b, Span>
 where
     Span: Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
 {
@@ -56,7 +59,7 @@ where
         if let Some(leaf_span) = &self.0 {
             for span in leaf_span.scope().from_root() {
                 // TODO: Here in the future we could try to memoize parent spans of the current span to not re serialize eveything if another log happens in the same span
-                serializer.serialize_element(&SerializableSpan(&span))?;
+                serializer.serialize_element(&SerializableSpan(&span, self.1))?;
             }
         }
 
@@ -64,7 +67,10 @@ where
     }
 }
 
-struct SerializableSpan<'a, 'b, Span>(&'b tracing_subscriber::registry::SpanRef<'a, Span>)
+struct SerializableSpan<'a, 'b, Span>(
+    &'b tracing_subscriber::registry::SpanRef<'a, Span>,
+    &'b HashSet<&'static str>,
+)
 where
     Span: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>;
 
@@ -88,8 +94,7 @@ where
             if let Some(otel_attributes) = otel_attributes {
                 for (key, value) in otel_attributes.iter().filter(|(k, _)| {
                     let key_name = k.as_str();
-                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
-                        && !EXCLUDED_ATTRIBUTES.contains(&key_name)
+                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX) && !self.1.contains(&key_name)
                 }) {
                     serializer.serialize_entry(key.as_str(), &value.as_str())?;
                 }
@@ -101,8 +106,7 @@ where
             if let Some(custom_attributes) = custom_attributes {
                 for (key, value) in custom_attributes.iter().filter(|(k, _)| {
                     let key_name = k.as_str();
-                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
-                        && !EXCLUDED_ATTRIBUTES.contains(&key_name)
+                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX) && !self.1.contains(&key_name)
                 }) {
                     match value {
                         Value::Bool(value) => {
@@ -200,13 +204,16 @@ where
             if self.config.display_current_span {
                 if let Some(ref span) = current_span {
                     serializer
-                        .serialize_entry("span", &SerializableSpan(span))
+                        .serialize_entry("span", &SerializableSpan(span, &self.excluded_attributes))
                         .unwrap_or(());
                 }
             }
 
             if self.config.display_span_list && current_span.is_some() {
-                serializer.serialize_entry("spans", &SerializableContext(ctx.lookup_current()))?;
+                serializer.serialize_entry(
+                    "spans",
+                    &SerializableContext(ctx.lookup_current(), &self.excluded_attributes),
+                )?;
             }
 
             if self.config.display_resource {

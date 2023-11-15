@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt;
 
 use nu_ansi_term::Color;
@@ -31,6 +32,7 @@ pub(crate) struct Text {
     timer: SystemTime,
     resource: HashMap<String, Value>,
     config: TextFormat,
+    excluded_attributes: HashSet<&'static str>,
 }
 
 impl Text {
@@ -45,6 +47,7 @@ impl Text {
             timer: Default::default(),
             config,
             resource: to_map(resource),
+            excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
         }
     }
 
@@ -175,7 +178,7 @@ impl Text {
                 .filter(|(k, _v)| {
                     let key_name = k.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
-                        && !EXCLUDED_ATTRIBUTES.contains(&key_name)
+                        && !self.excluded_attributes.contains(&key_name)
                 })
                 .peekable();
             if attrs.peek().is_some() {
@@ -196,7 +199,7 @@ impl Text {
                 .filter(|(k, _v)| {
                     let key_name = k.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
-                        && !EXCLUDED_ATTRIBUTES.contains(&key_name)
+                        && !self.excluded_attributes.contains(&key_name)
                 })
                 .peekable();
             if attrs.peek().is_some() && !wrote_something {
@@ -317,7 +320,6 @@ impl<N> CustomVisitor<N>
 where
     N: field::Visit,
 {
-    #[allow(dead_code)]
     fn new(inner: N) -> Self {
         Self(inner)
     }

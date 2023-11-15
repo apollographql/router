@@ -200,18 +200,29 @@ impl<'a> field::Visit for FieldsVisitor<'a> {
     /// Visit a string value.
     fn record_str(&mut self, field: &Field, value: &str) {
         let field_name = field.name();
-        match field_name {
-            "code.filepath" | "code.namespace" | "code.lineno" | "thread.id" | "thread.name" => {}
-            field_name => {
-                self.values
-                    .insert(field_name, serde_json::Value::from(value));
-            }
+        if field_name == "code.filepath"
+            || field_name == "code.namespace"
+            || field_name == "code.lineno"
+            || field_name == "thread.id"
+            || field_name == "thread.name"
+        {
+            return;
         }
+        self.values
+            .insert(field_name, serde_json::Value::from(value));
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        match field.name() {
-            "code.filepath" | "code.namespace" | "code.lineno" | "thread.id" | "thread.name" => {}
+        let field_name = field.name();
+        if field_name == "code.filepath"
+            || field_name == "code.namespace"
+            || field_name == "code.lineno"
+            || field_name == "thread.id"
+            || field_name == "thread.name"
+        {
+            return;
+        }
+        match field_name {
             name if name.starts_with("r#") => {
                 self.values
                     .insert(&name[2..], serde_json::Value::from(format!("{:?}", value)));
