@@ -205,6 +205,13 @@ expression: "&schema"
                         "type": "string",
                         "nullable": true
                       },
+                      "poll_interval": {
+                        "description": "Polling interval in seconds for each JWKS endpoint; defaults to 60",
+                        "default": 60,
+                        "type": "integer",
+                        "format": "uint32",
+                        "minimum": 0.0
+                      },
                       "url": {
                         "description": "Retrieve the JWK Set",
                         "type": "string"

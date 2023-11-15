@@ -90,7 +90,7 @@ enum AuthenticationError<'a> {
 }
 
 const DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT: Duration = Duration::from_secs(15);
-const DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL: Duration = Duration::from_secs(60);
+const DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL: u32 = 60;
 
 static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| Ok(Client::new()));
 
@@ -128,6 +128,9 @@ struct JWTConf {
 struct JwksConf {
     /// Retrieve the JWK Set
     url: String,
+    /// Polling interval in seconds for each JWKS endpoint; defaults to 60
+    #[serde(default="default_poll_interval")]
+    poll_interval: u32,
     /// Expected issuer for tokens verified by that JWKS
     issuer: Option<String>,
     /// List of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
@@ -161,6 +164,10 @@ fn default_header_name() -> String {
 
 fn default_header_value_prefix() -> String {
     "Bearer".to_string()
+}
+
+fn default_poll_interval() -> u32 {
+    DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL
 }
 
 #[derive(Debug, Default)]
@@ -381,6 +388,7 @@ impl Plugin for AuthenticationPlugin {
                         .algorithms
                         .as_ref()
                         .map(|algs| algs.iter().cloned().collect()),
+                    poll_interval: Duration::from_secs(jwks_conf.poll_interval.into()),
                 });
             }
 
