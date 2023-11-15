@@ -377,7 +377,12 @@ impl BridgeQueryPlanner {
             .map_err(QueryPlannerError::RouterBridgeError)?
             .into_result()
         {
-            Ok(plan) => plan,
+            Ok(mut plan) => {
+                if let Some(node) = plan.data.query_plan.node.as_mut() {
+                    node.extract_authorization_metadata(&self.schema.definitions);
+                }
+                plan
+            }
             Err(err) => {
                 if matches!(
                     self.configuration.experimental_graphql_validation_mode,

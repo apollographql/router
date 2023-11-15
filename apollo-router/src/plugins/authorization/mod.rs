@@ -179,7 +179,7 @@ impl AuthorizationPlugin {
             is_authenticated,
             scopes,
             policies,
-        } = Self::generate_cache_metadata(ast, &schema.definitions);
+        } = Self::generate_cache_metadata(ast, &schema.definitions, false);
         if is_authenticated {
             context.insert(AUTHENTICATED_KEY, true).unwrap();
         }
@@ -198,9 +198,10 @@ impl AuthorizationPlugin {
     pub(crate) fn generate_cache_metadata(
         ast: &Document,
         schema: &apollo_compiler::Schema,
+        entity_query: bool,
     ) -> CacheKeyMetadata {
         let mut is_authenticated = false;
-        if let Some(mut visitor) = AuthenticatedCheckVisitor::new(schema, ast) {
+        if let Some(mut visitor) = AuthenticatedCheckVisitor::new(schema, ast, entity_query) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
@@ -210,7 +211,7 @@ impl AuthorizationPlugin {
         }
 
         let mut scopes = Vec::new();
-        if let Some(mut visitor) = ScopeExtractionVisitor::new(schema, ast) {
+        if let Some(mut visitor) = ScopeExtractionVisitor::new(schema, ast, entity_query) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
@@ -220,7 +221,7 @@ impl AuthorizationPlugin {
         }
 
         let mut policies: Vec<String> = Vec::new();
-        if let Some(mut visitor) = PolicyExtractionVisitor::new(schema, ast) {
+        if let Some(mut visitor) = PolicyExtractionVisitor::new(schema, ast, entity_query) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests

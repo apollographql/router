@@ -465,7 +465,10 @@ impl FetchNode {
     pub(crate) fn extract_authorization_metadata(&mut self, schema: &apollo_compiler::Schema) {
         let doc = Document::parse(&self.operation, "query.graphql");
 
-        //FIXME: handle the _entities case
-        self.authorization = Arc::new(AuthorizationPlugin::generate_cache_metadata(&doc, schema));
+        self.authorization = Arc::new(AuthorizationPlugin::generate_cache_metadata(
+            &doc,
+            schema,
+            !self.requires.is_empty(),
+        ));
     }
 }
