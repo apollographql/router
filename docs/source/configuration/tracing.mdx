@@ -11,7 +11,7 @@ The Apollo Router supports tracing with [OpenTelemetry](https://opentelemetry.io
 * [Jaeger](https://www.jaegertracing.io/)
 * [Zipkin](https://zipkin.io/)
 * [Datadog](https://www.datadoghq.com/)
-* [OpenTelemetry Protocol (OTLP)](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/otlp.md) over HTTP or gRPC
+* [OpenTelemetry Protocol (OTLP)](https://github.com/open-telemetry/opentelemetry-proto/blob/main/docs/specification.md) over HTTP or gRPC
 
 The Apollo Router generates [**spans**](./spans) that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
 
@@ -31,9 +31,9 @@ To get the most out of distributed tracing, _all_ components in your system shou
 
 ### Service name
 
-Set a service name for your router traces so they can be easily searched and found in your metrics dashboards. 
+Set a service name for your router traces so you can easily locate them in external metrics dashboards.
 
-The service name can be set by an environment variable or in `router.yaml`, with the following order of precedence (first to last):
+The service name can be set by an environment variable or in [`router.yaml`](./overview#yaml-config-file), with the following order of precedence (first to last):
 
 1. `OTEL_SERVICE_NAME` environment variable
 2. `OTEL_RESOURCE_ATTRIBUTES` environment variable
@@ -71,13 +71,13 @@ The service name can be set by an environment variable or in `router.yaml`, with
 
       </ExpansionPanel>
 
-If the service name isn't explicitly set, then by default the service name will be set to `unknown_service:apollo_router` (or `unknown_service` if the executable name cannot be determined).
+If the service name isn't explicitly set, it defaults to `unknown_service:apollo_router` or `unknown_service` if the executable name cannot be determined.
 
 ### Resource attribute
 
 A resource attribute is a set of key-value pairs that provide additional information to an exporter. Application performance monitors (APM) may interpret and display resource information. 
 
-In `router.yaml`, resource attributes are set in `telemetry.tracing.common.resource`. For example:
+In [`router.yaml`](./overview#yaml-config-file), resource attributes are set in `telemetry.metrics.common.resource`. For example:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -92,7 +92,7 @@ For OpenTelemetry conventions for resources, see [Resource Semantic Conventions]
 
 ### Sampling
 
-You can configure the sampling rate of traces to match the rate of your application performance monitors (APM). To enable sampling configuration, in `router.yaml` set `telemetry.tracing.common.sampler` and `telemetry.tracing.common.parent_based_sampler`:
+You can configure the sampling rate of traces to match the rate of your application performance monitors (APM). To enable sampling configuration, in [`router.yaml`](./configuration/overview#yaml-config-file) set `telemetry.tracing.common.sampler` and `telemetry.tracing.common.parent_based_sampler`:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -110,7 +110,7 @@ telemetry:
 
 The `telemetry.tracing.propagation` section allows you to configure which propagators are active in addition to those automatically activated by using an exporter.
 
-Specifying explicit propagation is generally only required if you're using an exporter that supports multiple trace ID formats (e.g., OpenTelemetry Collector, Jaeger, or OpenTracing compatible exporters).
+Specifying explicit propagation is generally only required if you're using an exporter that supports multiple trace ID formats, for example, OpenTelemetry Collector, Jaeger, or OpenTracing compatible exporters.
 
 For example: 
 
@@ -179,6 +179,9 @@ Using this configuration you will have a response header called `my-trace-id` co
 All trace exporters (apollo|datadog|zipkin|jaeger|otlp) have batch span processor configuration, it will be necessary to tune this if you see the following in your logs:
 
 `OpenTelemetry trace error occurred: cannot send span to the batch span processor because the channel is full`
+
+
+You can use the following configurations for tuning:
 
 * `scheduled_delay` - The delay from receiving the first span to the batch being sent.
 * `max_concurrent_exports` - The maximum number of overlapping export requests. For instance if ingest is taking a long time to respond there may be several overlapping export requests.

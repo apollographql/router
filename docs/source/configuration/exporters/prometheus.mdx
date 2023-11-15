@@ -1,13 +1,13 @@
 ---
 title: Prometheus exporter
-description: Enable and configure the Prometheus exporter endpoint in the Apollo Router.
+description: Enable and configure the Prometheus exporter endpoint in the Apollo Router
 ---
 
 Enable and configure the Prometheus exporter endpoint in the Apollo Router.
 
 ## Enable Prometheus exporter
 
-To export metrics to Prometheus, in `router.yaml` you must enable the Prometheus endpoint and set its address and path. For example:
+To export metrics to Prometheus, enable the Prometheus endpoint and set its address and path in [`router.yaml`](./configuration/overview#yaml-config-file). For example:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -22,7 +22,7 @@ telemetry:
 
 ## Visualize with Grafana
 
-You can use [Prometheus with Grafana](https://prometheus.io/docs/visualization/grafana/) to collect metrics and visualize the router metrics.
+You can use [Prometheus with Grafana](https://prometheus.io/docs/visualization/grafana/) to collect and visualize router metrics.
 
 ## Using Prometheus with containers
 

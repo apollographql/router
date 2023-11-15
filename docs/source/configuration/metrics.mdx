@@ -6,7 +6,7 @@ description: Export and collect metrics from the Apollo Router with Prometheus a
 
 The Apollo Router exports metrics for collection by [Prometheus](./exporters/prometheus) and [OpenTelemetry Protocol (OTLP)](./exporters/opentelemetry), with support for [Datadog via OTLP](./exporters/datadog-otlp).
 
-In `router.yaml`, you configure router metrics with the following settings:
+In [`router.yaml`](./overview#yaml-config-file), you configure router metrics with the following settings:
 
 - `telemetry.metrics.common`. Configure values for the router which are common across metrics exporters.
 - `telemetry.metrics.prometheus`. Configure the Prometheus exporter.
@@ -22,9 +22,9 @@ Common settings for router metrics include:
 
 ### Service name
 
-Set a service name for your router metrics so they can be easily searched and found in your metrics dashboards. 
+Set a service name for your router metrics so you can easily locate them in external metrics dashboards. 
 
-The service name can be set by an environment variable or in `router.yaml`, with the following order of precedence (first to last):
+The service name can be set by an environment variable or in [`router.yaml`](./overview#yaml-config-file), with the following order of precedence (first to last):
 
 1. `OTEL_SERVICE_NAME` environment variable
 2. `OTEL_RESOURCE_ATTRIBUTES` environment variable
@@ -62,13 +62,13 @@ The service name can be set by an environment variable or in `router.yaml`, with
 
       </ExpansionPanel>
 
-If the service name isn't explicitly set, then by default the service name will be set to `unknown_service:apollo_router` (or `unknown_service` if the executable name cannot be determined).
+If the service name isn't explicitly set, it defaults to `unknown_service:apollo_router` or `unknown_service` if the executable name cannot be determined.
 
 ### Resource attribute
 
 A resource attribute is a set of key-value pairs that provide additional information to an exporter. Application performance monitors (APM) may interpret and display resource information. 
 
-In `router.yaml`, resource attributes are set in `telemetry.metrics.common.resource`. For example:
+In [`router.yaml`](./overview#yaml-config-file), resource attributes are set in `telemetry.metrics.common.resource`. For example:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -84,7 +84,7 @@ For OpenTelemetry conventions for resources, see [Resource Semantic Conventions]
 
 ### Custom histogram buckets
 
-You can customize bucket boundaries for all generated histograms by setting `telemetry.metrics.common.buckets` in `router.yaml`. For example:
+You can customize bucket boundaries for all generated histograms by setting `telemetry.metrics.common.buckets` in [`router.yaml`](./overview#yaml-config-file). For example:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -229,6 +229,11 @@ The coprocessor operations metric has the following attributes:
 
 ### Uplink
 
+<Tip>
+
+[Learn more about Apollo Uplink.](/federation/managed-federation/uplink/)
+
+</Tip>
 - `apollo_router_uplink_fetch_duration_seconds_bucket` - Uplink request duration, attributes:
 
   - `url`: The Uplink URL that was polled
@@ -243,12 +248,17 @@ The coprocessor operations metric has the following attributes:
 
 <Note>
 
-The initial call to uplink during router startup is not reflected in metrics.
+The initial call to Uplink during router startup is not reflected in metrics.
 
 </Note>
 
-### Subscription
+### Subscriptions
 
+<Tip>
+
+[Learn more about subscriptions.](../executing-operations/subscription-support/)
+
+</Tip>
 - `apollo_router_opened_subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated)
 - `apollo_router_deduplicated_subscriptions_total` - Number of subscriptions that has been deduplicated
 - `apollo_router_skipped_event_count` - Number of subscription events that has been skipped because too many events have been received from the subgraph but not yet sent to the client.
@@ -258,7 +268,7 @@ The initial call to uplink during router startup is not reflected in metrics.
 - `apollo_router.operations.batching` - A counter of the number of query batches received by the router.
 - `apollo_router.operations.batching.size` - A histogram tracking the number of queries contained within a query batch.
 
-### Studio
+### GraphOS Studio
 
-- `apollo.router.telemetry.studio.reports` - The number of reports submitted to Studio by the Router.
+- `apollo.router.telemetry.studio.reports` - The number of reports submitted to GraphOS Studio by the Router.
   - `type`: The type of report submitted: "traces" or "metrics"

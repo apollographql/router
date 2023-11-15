@@ -1,6 +1,6 @@
 ---
 title: OpenTelemetry exporter
-description: Enable and configure the OpenTelemetry Protocol (OTLP) exporter in the Apollo Router.
+description: Enable and configure the OpenTelemetry Protocol (OTLP) exporter in the Apollo Router
 ---
 
 Enable and configure the OpenTelemetry Protocol (OTLP) exporter in the Apollo Router.
@@ -9,7 +9,7 @@ Enable and configure the OpenTelemetry Protocol (OTLP) exporter in the Apollo Ro
 
 You can export metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) for processing and reporting metrics.
 
-To export metrics to OpenTelemetry Collector, in `router.yaml` you must enable the OTLP exporter and optionally customize its configuration. For example: 
+To export metrics to OpenTelemetry Collector, enable the OTLP exporter and optionally customize its configuration in [`router.yaml`](./configuration/overview#yaml-config-file). For example: 
 
 ```yaml title="router.yaml"
 telemetry:
@@ -22,7 +22,7 @@ telemetry:
       endpoint: default
 
       # Optional protocol. Only grpc is supported currently.
-      # Setting to http will result in configuration failure.
+      # Setting it to any other protocol will result in configuration failure.
       protocol: grpc
 
       # Optional Grpc configuration

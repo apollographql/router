@@ -1,6 +1,6 @@
 ---
 title: Router Logging
-subtitle: Logging in the Apollo Router
+subtitle: Configure logging in the Apollo Router, including log level and output format.
 description: Configure logging in the Apollo Router. Set the log level and output format.
 ---
 
@@ -158,14 +158,12 @@ telemetry:
 
 #### `format`
 
-Logging to stdout can be configured to output in different formats.
+You can configure the logging output format. The default format depends on how the router is run:
 
-The default format depends on how the router is run:
+* In an interactive shell, [`text`](#text) is the default.
+* In a non-interactive shell, [`json`](#json) is the default.
 
-* `text` - interactive shell.
-* `json` - non-interactive shell.
-
-The format can be explicitly set in `router.yaml` with `telemetry.logging.stdout.format`:
+You can explicitly set the format in [`router.yaml`](./configuration/overview#yaml-config-file) with `telemetry.logging.stdout.format`:
 
 ```yaml title="router.yaml"
 telemetry:

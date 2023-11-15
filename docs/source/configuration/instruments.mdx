@@ -67,7 +67,7 @@ When defining a custom instrument, make sure to reference the [OpenTelemetry sem
 
 </Note>
 
-In the example configuration below, three custom instruments are defined (`acme.request.duration`, `acme.graphql.requests`, `acme.graphql.subgraph.errors`), one for each service of the router pipeline (`router`, `supergraph`, `subgraph`):
+In the example configuration below, three custom instruments are defined (`acme.request.duration`, `acme.graphql.requests`, `acme.graphql.subgraph.errors`), one for each service of the router pipeline respectively (`router`, `supergraph`, `subgraph`):
 
 ```yaml title="router.yaml"
 telemetry:
@@ -103,14 +103,14 @@ telemetry:
 
 #### Instrument naming conventions
 
-Make sure to follow naming conventions for instruments. For reference, read the [Open Telemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/). It will help guide you to:
+Make sure to follow naming conventions for instruments. For reference, the [Open Telemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/) can help guide you to:
 
 * Choose a good name for your instrument.
 * See which standard attributes can be attached to your instrument. 
 
 Some particular guidelines to note:
 
-* **Don't include the unit name in the metric name**. For example `size_kb` should be `size` and the unit should be `kb`.
+* **Don't include the unit name in the metric name**. For example, `size_kb` should be `size` and the unit should be `kb`.
 * **Don't include `_total` as a suffix**. For example, use `http.server.active_requests`, not `http.server.active_requests_total`.
 * **Use dot notation to separate namespaces in the metric name**. For example, use `http.server.active_requests`, not `http_server_active_requests`.
 
