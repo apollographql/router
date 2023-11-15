@@ -292,7 +292,7 @@ impl AuthorizationPlugin {
         right: &CacheKeyMetadata,
     ) -> CacheKeyMetadata {
         CacheKeyMetadata {
-            is_authenticated: left.is_authenticated & &right.is_authenticated,
+            is_authenticated: left.is_authenticated && right.is_authenticated,
             scopes: left
                 .scopes
                 .iter()
