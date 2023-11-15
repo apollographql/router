@@ -351,7 +351,10 @@ pub(crate) struct HttpClientAttributes {
     url_full: Option<bool>,
 }
 
-impl Selectors<router::Request, router::Response> for RouterAttributes {
+impl Selectors for RouterAttributes {
+    type Request = router::Request;
+    type Response = router::Response;
+
     fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
         self.common.on_request(request)
     }
@@ -365,7 +368,10 @@ impl Selectors<router::Request, router::Response> for RouterAttributes {
     }
 }
 
-impl Selectors<router::Request, router::Response> for HttpCommonAttributes {
+impl Selectors for HttpCommonAttributes {
+    type Request = router::Request;
+    type Response = router::Response;
+
     fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = HashMap::new();
         if let Some(true) = &self.http_request_body_size {
@@ -435,7 +441,10 @@ impl Selectors<router::Request, router::Response> for HttpCommonAttributes {
     }
 }
 
-impl Selectors<router::Request, router::Response> for HttpServerAttributes {
+impl Selectors for HttpServerAttributes {
+    type Request = router::Request;
+    type Response = router::Response;
+
     fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
         let mut attrs = HashMap::new();
         if let Some(true) = &self.http_route {

@@ -24,15 +24,20 @@ pub(crate) mod logging;
 pub(crate) mod selectors;
 pub(crate) mod spans;
 
-pub(crate) trait Selectors<Request, Response> {
-    fn on_request(&self, request: &Request) -> HashMap<Key, opentelemetry::Value>;
-    fn on_response(&self, response: &Response) -> HashMap<Key, opentelemetry::Value>;
+pub(crate) trait Selectors {
+    type Request;
+    type Response;
+    fn on_request(&self, request: &Self::Request) -> HashMap<Key, opentelemetry::Value>;
+    fn on_response(&self, response: &Self::Response) -> HashMap<Key, opentelemetry::Value>;
     fn on_error(&self, error: &BoxError) -> HashMap<Key, opentelemetry::Value>;
 }
 
-pub(crate) trait Selector<Request, Response> {
-    fn on_request(&self, request: &Request) -> Option<opentelemetry::Value>;
-    fn on_response(&self, response: &Response) -> Option<opentelemetry::Value>;
+pub(crate) trait Selector {
+    type Request;
+    type Response;
+
+    fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value>;
+    fn on_response(&self, response: &Self::Response) -> Option<opentelemetry::Value>;
 }
 
 pub(crate) trait DefaultForLevel {
