@@ -1,3 +1,6 @@
+#[cfg(test)]
+use std::collections::BTreeMap;
+#[cfg(not(test))]
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
@@ -27,14 +30,20 @@ use crate::plugins::telemetry::formatters::to_map;
 #[derive(Debug, Default)]
 pub(crate) struct Json {
     config: JsonFormat,
+    #[cfg(not(test))]
     resource: HashMap<String, serde_json::Value>,
+    #[cfg(test)]
+    resource: BTreeMap<String, serde_json::Value>,
     excluded_attributes: HashSet<&'static str>,
 }
 
 impl Json {
     pub(crate) fn new(resource: Resource, config: JsonFormat) -> Self {
         Self {
+            #[cfg(not(test))]
             resource: to_map(resource),
+            #[cfg(test)]
+            resource: to_map(resource).into_iter().collect(),
             config,
             excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
         }
@@ -104,6 +113,11 @@ where
         {
             let custom_attributes = ext.get::<LogAttributes>().map(|attrs| attrs.attributes());
             if let Some(custom_attributes) = custom_attributes {
+                #[cfg(test)]
+                let custom_attributes: BTreeMap<
+                    &opentelemetry::Key,
+                    &opentelemetry::Value,
+                > = custom_attributes.iter().collect();
                 for (key, value) in custom_attributes.iter().filter(|(k, _)| {
                     let key_name = k.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX) && !self.1.contains(&key_name)

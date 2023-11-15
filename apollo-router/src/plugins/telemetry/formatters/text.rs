@@ -1,3 +1,6 @@
+#[cfg(test)]
+use std::collections::BTreeMap;
+#[cfg(not(test))]
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
@@ -14,6 +17,7 @@ use tracing_subscriber::field;
 use tracing_subscriber::field::Visit;
 use tracing_subscriber::fmt::format::DefaultVisitor;
 use tracing_subscriber::fmt::format::Writer;
+#[cfg(not(test))]
 use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::fmt::time::SystemTime;
 use tracing_subscriber::layer::Context;
@@ -29,8 +33,12 @@ use crate::plugins::telemetry::tracing::APOLLO_PRIVATE_PREFIX;
 
 #[derive(Default)]
 pub(crate) struct Text {
+    #[allow(dead_code)]
     timer: SystemTime,
+    #[cfg(not(test))]
     resource: HashMap<String, Value>,
+    #[cfg(test)]
+    resource: BTreeMap<String, Value>,
     config: TextFormat,
     excluded_attributes: HashSet<&'static str>,
 }
@@ -46,7 +54,10 @@ impl Text {
         Self {
             timer: Default::default(),
             config,
+            #[cfg(not(test))]
             resource: to_map(resource),
+            #[cfg(test)]
+            resource: to_map(resource).into_iter().collect(),
             excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
         }
     }
@@ -192,6 +203,8 @@ impl Text {
                 wrote_something = true;
                 write!(writer, "{}{{", span.name())?;
             }
+            #[cfg(test)]
+            let attrs: BTreeMap<&opentelemetry::Key, &opentelemetry::Value> = attrs.collect();
             for (key, value) in attrs {
                 write!(writer, "{key}={value},")?;
             }
@@ -213,7 +226,8 @@ impl Text {
                 wrote_something = true;
                 write!(writer, "{}{{", span.name())?;
             }
-
+            #[cfg(test)]
+            let attrs: BTreeMap<&opentelemetry::Key, &opentelemetry::Value> = attrs.collect();
             for (key, value) in attrs {
                 write!(writer, "{key}={value},")?;
             }
@@ -234,7 +248,8 @@ impl Text {
     pub(crate) fn format_resource(
         &self,
         writer: &mut Writer,
-        resource: &HashMap<String, Value>,
+        #[cfg(test)] resource: &BTreeMap<String, Value>,
+        #[cfg(not(test))] resource: &HashMap<String, Value>,
     ) -> fmt::Result {
         if !resource.is_empty() {
             let style = Style::new().dimmed();
