@@ -53,7 +53,7 @@ impl Text {
 
     #[inline]
     fn format_level(&self, level: &Level, writer: &mut Writer<'_>) -> fmt::Result {
-        if self.config.ansi {
+        if self.config.ansi_escape_codes {
             match *level {
                 Level::TRACE => write!(writer, "{}", Color::Purple.paint(Text::TRACE_STR)),
                 Level::DEBUG => write!(writer, "{}", Color::Blue.paint(Text::DEBUG_STR)),
@@ -75,7 +75,7 @@ impl Text {
 
     #[inline]
     fn format_timestamp(&self, writer: &mut Writer<'_>) -> fmt::Result {
-        if self.config.ansi {
+        if self.config.ansi_escape_codes {
             let style = Style::new().dimmed();
             write!(writer, "{}", style.prefix())?;
 
@@ -99,7 +99,7 @@ impl Text {
     #[inline]
     fn format_location(&self, event: &Event<'_>, writer: &mut Writer<'_>) -> fmt::Result {
         if let (Some(filename), Some(line)) = (event.metadata().file(), event.metadata().line()) {
-            if self.config.ansi {
+            if self.config.ansi_escape_codes {
                 let style = Style::new().dimmed();
                 write!(writer, "{}", style.prefix())?;
                 if self.config.display_filename {
@@ -123,7 +123,7 @@ impl Text {
 
     #[inline]
     fn format_target(&self, writer: &mut Writer<'_>, target: &str) -> fmt::Result {
-        if self.config.ansi {
+        if self.config.ansi_escape_codes {
             let style = Style::new().dimmed();
             write!(writer, "{}", style.prefix())?;
             write!(writer, "{target}:")?;
@@ -167,7 +167,7 @@ impl Text {
         let mut wrote_something = false;
 
         let style = Style::new().dimmed();
-        if self.config.ansi {
+        if self.config.ansi_escape_codes {
             write!(writer, "{}", style.prefix())?;
         }
 
@@ -217,7 +217,7 @@ impl Text {
 
             writer.write_char(' ')?;
         }
-        if self.config.ansi {
+        if self.config.ansi_escape_codes {
             write!(writer, "{}", style.suffix())?;
         }
 
@@ -231,7 +231,7 @@ impl Text {
     ) -> fmt::Result {
         if !resource.is_empty() {
             let style = Style::new().dimmed();
-            if self.config.ansi {
+            if self.config.ansi_escape_codes {
                 write!(writer, "{}", style.prefix())?;
             }
             let resource_not_empty = !resource.is_empty();
@@ -248,7 +248,7 @@ impl Text {
                 write!(writer, "}}")?;
             }
 
-            if self.config.ansi {
+            if self.config.ansi_escape_codes {
                 write!(writer, "{}", style.suffix())?;
             }
             writer.write_char(' ')?;

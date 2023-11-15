@@ -2660,8 +2660,8 @@ expression: "&schema"
                             "text": {
                               "type": "object",
                               "properties": {
-                                "ansi": {
-                                  "description": "Enable ansi (default: true)",
+                                "ansi_escape_codes": {
+                                  "description": "Process ansi escapes (default: true)",
                                   "default": true,
                                   "type": "boolean"
                                 },

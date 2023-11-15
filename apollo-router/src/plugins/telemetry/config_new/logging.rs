@@ -328,8 +328,8 @@ impl Default for JsonFormat {
 #[derive(Deserialize, JsonSchema, Clone, Debug, Eq, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct TextFormat {
-    /// Enable ansi (default: true)
-    pub(crate) ansi: bool,
+    /// Process ansi escapes (default: true)
+    pub(crate) ansi_escape_codes: bool,
     /// Include the timestamp with the log event.
     pub(crate) display_timestamp: bool,
     /// Include the target with the log event.
@@ -355,7 +355,7 @@ pub(crate) struct TextFormat {
 impl Default for TextFormat {
     fn default() -> Self {
         TextFormat {
-            ansi: true,
+            ansi_escape_codes: true,
             display_timestamp: true,
             display_target: false,
             display_level: true,
