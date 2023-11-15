@@ -4,7 +4,7 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
-# [1.34.0] - 2023-11-14
+# [1.34.0] - 2023-11-15
 
 ## 🚀 Features
 
