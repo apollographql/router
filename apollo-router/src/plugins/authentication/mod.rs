@@ -129,7 +129,10 @@ struct JwksConf {
     /// Retrieve the JWK Set
     url: String,
     /// Polling interval for each JWKS endpoint in human-readable format; defaults to 60s
-    #[serde(deserialize_with = "humantime_serde::deserialize", default = "default_poll_interval")]
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_poll_interval"
+    )]
     #[schemars(with = "String", default = "default_poll_interval")]
     poll_interval: Duration,
     /// Expected issuer for tokens verified by that JWKS
