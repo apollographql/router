@@ -1,7 +1,7 @@
 use std::fmt;
 
-use ansi_term::Color;
-use ansi_term::Style;
+use nu_ansi_term::Color;
+use nu_ansi_term::Style;
 use opentelemetry::trace::TraceContextExt;
 use tracing_core::Event;
 use tracing_core::Level;
@@ -16,6 +16,8 @@ use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::fmt::time::SystemTime;
 use tracing_subscriber::fmt::FmtContext;
 use tracing_subscriber::registry::LookupSpan;
+
+use crate::plugins::telemetry::reload::IsSampled;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TextFormatter {
@@ -34,8 +36,8 @@ impl Default for TextFormatter {
 impl TextFormatter {
     const TRACE_STR: &'static str = "TRACE";
     const DEBUG_STR: &'static str = "DEBUG";
-    const INFO_STR: &'static str = " INFO";
-    const WARN_STR: &'static str = " WARN";
+    const INFO_STR: &'static str = "INFO";
+    const WARN_STR: &'static str = "WARN";
     const ERROR_STR: &'static str = "ERROR";
 
     pub(crate) fn new() -> Self {
@@ -185,7 +187,11 @@ impl TextFormatter {
                     }
                     writer.write_char(' ')?;
                 }
-                None => eprintln!("Unable to find OtelData in extensions; this is a bug"),
+                None => {
+                    if span.is_sampled() {
+                        eprintln!("Unable to find OtelData in extensions; this is a bug");
+                    }
+                }
             }
         }
 

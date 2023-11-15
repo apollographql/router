@@ -1,0 +1,31 @@
+---
+source: apollo-router/src/plugins/authorization/scopes.rs
+expression: "TestResult {\n    query: QUERY,\n    extracted_scopes: &extracted_scopes,\n    scopes: [\"a\".to_string(), \"b\".to_string()].into_iter().collect(),\n    result: doc,\n    paths,\n}"
+---
+query:
+
+        query {
+            test
+            uni {
+                ... on A {
+                    id
+                }
+                ... on B {
+                    id
+                }
+            }
+        }
+        
+extracted_scopes: {"a", "b", "c", "d"}
+request scopes: ["a", "b"]
+filtered:
+{
+  test
+  uni {
+    ... on A {
+      id
+    }
+  }
+}
+
+paths: ["/uni/... on B"]

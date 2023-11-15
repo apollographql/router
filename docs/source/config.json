@@ -1,5 +1,5 @@
 {
-  "title": "Router",
+  "title": "Router (self-hosted)",
   "algoliaFilters": [
     "docset:router"
   ],
@@ -8,10 +8,23 @@
     "Quickstart": "/quickstart",
     "Moving from @apollo/gateway": "/migrating-from-gateway",
     "Federation version support": "/federation-version-support",
+    "Enterprise features": [
+      "/enterprise-features",
+      [
+        "enterprise"
+      ]
+    ],
     "Configuring the Router": {
       "Overview": "/configuration/overview",
-      "Caching": "/configuration/caching",
-      "External extensibility": "/configuration/external",
+      "Caching": {
+        "In-memory caching": "/configuration/in-memory-caching",
+        "Distributed caching": [
+          "/configuration/distributed-caching",
+          [
+            "enterprise"
+          ]
+        ]
+      },
       "Debugging": {
         "Logging": "/configuration/logging",
         "Subgraph error inclusion": "/configuration/subgraph-error-inclusion"
@@ -23,36 +36,94 @@
       "Security": {
         "CORS": "/configuration/cors",
         "CSRF prevention": "/configuration/csrf",
-        "JWT Authentication (experimental)": "/configuration/authn-jwt",
+        "JWT Authentication": [
+          "/configuration/authn-jwt",
+          [
+            "enterprise"
+          ]
+        ],
+        "Authorization": [
+          "/configuration/authorization",
+          [
+            "enterprise",
+            "preview"
+          ]
+        ],      
+        "Subgraph Authentication": "/configuration/authn-subgraph",
+        "Operation limits": [
+          "/configuration/operation-limits",
+          [
+            "enterprise"
+          ]
+        ],
+        "Safelisting with persisted queries": [
+          "/configuration/persisted-queries",
+          [
+            "enterprise"
+          ]
+        ],
         "Privacy and data collection": "/privacy"
       }
-    },
-    "Monitoring & Metrics": {
-      "Health check": "/configuration/health-checks",
-      "Apollo Studio reporting": "/configuration/apollo-telemetry",
-      "Collecting metrics": "/configuration/metrics",
-      "Tracing": "/configuration/tracing"
-    },
-    "Containerization": {
-      "Overview": "/containerization/overview",
-      "Docker": "/containerization/docker",
-      "Kubernetes": "/containerization/kubernetes"
     },
     "Executing Operations": {
       "Build and run queries": "/executing-operations/build-run-queries",
       "@defer support": "/executing-operations/defer-support",
-      "Request format": "/executing-operations/requests"
+      "Request format": "/executing-operations/requests",
+      "Query batching": [
+          "/executing-operations/query-batching",
+          [
+            "experimental"
+          ]
+      ],
+      "GraphQL Subscriptions": {
+        "Subscriptions setup": [
+          "/executing-operations/subscription-support",
+          [
+            "enterprise"
+          ]
+        ],
+        "Subgraph protocol: HTTP callback": [
+          "/executing-operations/subscription-callback-protocol",
+          [
+            "enterprise",
+            "preview"
+          ]
+        ],
+        "Client protocol: HTTP multipart": [
+          "/executing-operations/subscription-multipart-protocol",
+          [
+            "enterprise"
+          ]
+        ]
+      }
+    },
+    "Metrics & Monitoring": {
+      "GraphOS reporting": "/configuration/apollo-telemetry",
+      "OpenTelemetry tracing": "/configuration/tracing",
+      "Configuring metrics collectors": "/configuration/metrics",
+      "Client awareness": "/managed-federation/client-awareness",
+      "Health check": "/configuration/health-checks"
+    },
+    "Containerization": {
+      "Overview": "/containerization/overview",
+      "Deploy on Kubernetes": "/containerization/kubernetes",
+      "Run with Docker": "/containerization/docker"
     },
     "Managed Federation": {
-      "Overview": "/managed-federation/overview",
-      "Setup": "/managed-federation/setup",
-      "Client awareness": "/managed-federation/client-awareness",
-      "Studio features": "https://www.apollographql.com/docs/studio/federated-graphs/"
+      "Overview": "https://www.apollographql.com/docs/federation/managed-federation/overview",
+      "Setup": "https://www.apollographql.com/docs/federation/managed-federation/setup",
+      "GraphOS Studio features": "https://www.apollographql.com/docs/graphos/graphs/federated-graphs"
     },
     "Customizations": {
       "Overview": "/customizations/overview",
       "Rhai scripts": "/customizations/rhai",
       "Rhai API reference": "/customizations/rhai-api",
+      "External coprocessing": [
+        "/customizations/coprocessor",
+        [
+          "enterprise"
+        ]
+      ],
       "Native Rust plugins": "/customizations/native",
       "Custom router binary": "/customizations/custom-binary"
     },

@@ -1,5 +1,3 @@
-// With regards to ELv2 licensing, this entire file is license key functionality
-
 // tonic does not derive `Eq` for the gRPC message types, which causes a warning from Clippy. The
 // current suggestion is to explicitly allow the lint in the module that imports the protos.
 // Read more: https://github.com/hyperium/tonic/issues/1056
@@ -36,16 +34,16 @@ impl From<UplinkRequest> for supergraph_sdl_query::Variables {
 impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<String> {
     fn from(response: supergraph_sdl_query::ResponseData) -> Self {
         match response.router_config {
-            SupergraphSdlQueryRouterConfig::RouterConfigResult(result) => UplinkResponse::Result {
+            SupergraphSdlQueryRouterConfig::RouterConfigResult(result) => UplinkResponse::New {
                 response: result.supergraph_sdl,
                 id: result.id,
                 // this will truncate the number of seconds to under u64::MAX, which should be
                 // a large enough delay anyway
                 delay: result.min_delay_seconds as u64,
             },
-            SupergraphSdlQueryRouterConfig::Unchanged => UplinkResponse::Unchanged {
-                id: None,
-                delay: None,
+            SupergraphSdlQueryRouterConfig::Unchanged(response) => UplinkResponse::Unchanged {
+                id: Some(response.id),
+                delay: Some(response.min_delay_seconds as u64),
             },
             SupergraphSdlQueryRouterConfig::FetchError(err) => UplinkResponse::Error {
                 retry_later: err.code == FetchErrorCode::RETRY_LATER,
@@ -54,6 +52,9 @@ impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<String> {
                     FetchErrorCode::ACCESS_DENIED => "ACCESS_DENIED".to_string(),
                     FetchErrorCode::UNKNOWN_REF => "UNKNOWN_REF".to_string(),
                     FetchErrorCode::RETRY_LATER => "RETRY_LATER".to_string(),
+                    FetchErrorCode::NOT_IMPLEMENTED_ON_THIS_INSTANCE => {
+                        "NOT_IMPLEMENTED_ON_THIS_INSTANCE".to_string()
+                    }
                     FetchErrorCode::Other(other) => other,
                 },
                 message: err.message,
@@ -64,36 +65,46 @@ impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<String> {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
     use std::time::Duration;
 
     use futures::stream::StreamExt;
+    use url::Url;
 
     use crate::uplink::schema_stream::SupergraphSdlQuery;
     use crate::uplink::stream_from_uplink;
+    use crate::uplink::Endpoints;
+    use crate::uplink::UplinkConfig;
+    use crate::uplink::AWS_URL;
+    use crate::uplink::GCP_URL;
 
     #[tokio::test]
     async fn integration_test() {
-        if let (Ok(apollo_key), Ok(apollo_graph_ref)) = (
-            std::env::var("TEST_APOLLO_KEY"),
-            std::env::var("TEST_APOLLO_GRAPH_REF"),
-        ) {
-            let results = stream_from_uplink::<SupergraphSdlQuery, String>(
-                apollo_key,
-                apollo_graph_ref,
-                None,
-                Duration::from_secs(1),
-                Duration::from_secs(5),
-            )
-            .take(1)
-            .collect::<Vec<_>>()
-            .await;
+        for url in &[GCP_URL, AWS_URL] {
+            if let (Ok(apollo_key), Ok(apollo_graph_ref)) = (
+                std::env::var("TEST_APOLLO_KEY"),
+                std::env::var("TEST_APOLLO_GRAPH_REF"),
+            ) {
+                let results = stream_from_uplink::<SupergraphSdlQuery, String>(UplinkConfig {
+                    apollo_key,
+                    apollo_graph_ref,
+                    endpoints: Some(Endpoints::fallback(vec![
+                        Url::from_str(url).expect("url must be valid")
+                    ])),
+                    poll_interval: Duration::from_secs(1),
+                    timeout: Duration::from_secs(5),
+                })
+                .take(1)
+                .collect::<Vec<_>>()
+                .await;
 
-            assert!(!results
-                .get(0)
-                .expect("expected one result")
-                .as_ref()
-                .expect("schema should be OK")
-                .is_empty())
+                let schema = results
+                    .get(0)
+                    .unwrap_or_else(|| panic!("expected one result from {}", url))
+                    .as_ref()
+                    .unwrap_or_else(|_| panic!("schema should be OK from {}", url));
+                assert!(schema.contains("type Product"))
+            }
         }
     }
 }

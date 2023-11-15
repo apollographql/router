@@ -1,5 +1,3 @@
-// This entire file is license key functionality
-
 use std::fmt::Display;
 use std::fmt::{self};
 use std::hash::Hash;
@@ -13,6 +11,7 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use super::redis::*;
+use crate::configuration::RedisCache;
 
 pub(crate) trait KeyType:
     Clone + fmt::Debug + fmt::Display + Hash + Eq + Send + Sync
@@ -59,14 +58,14 @@ where
 {
     pub(crate) async fn new(
         max_capacity: NonZeroUsize,
-        _redis_urls: Option<Vec<String>>,
+        config: Option<RedisCache>,
         caller: &str,
     ) -> Self {
         Self {
             caller: caller.to_string(),
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            redis: if let Some(urls) = _redis_urls {
-                match RedisCacheStorage::new(urls, None).await {
+            redis: if let Some(config) = config {
+                match RedisCacheStorage::new(config).await {
                     Err(e) => {
                         tracing::error!(
                             "could not open connection to Redis for {} caching: {:?}",
@@ -84,9 +83,10 @@ where
     }
 
     pub(crate) async fn get(&self, key: &K) -> Option<V> {
-        let mut guard = self.inner.lock().await;
         let instant_memory = Instant::now();
-        match guard.get(key) {
+        let res = self.inner.lock().await.get(key).cloned();
+
+        match res {
             Some(v) => {
                 tracing::info!(
                     monotonic_counter.apollo_router_cache_hit_count = 1u64,
@@ -99,7 +99,7 @@ where
                     kind = %self.caller,
                     storage = &tracing::field::display(CacheStorageName::Memory),
                 );
-                Some(v.clone())
+                Some(v)
             }
             None => {
                 let duration = instant_memory.elapsed().as_secs_f64();
@@ -119,7 +119,8 @@ where
                     let inner_key = RedisKey(key.clone());
                     match redis.get::<K, V>(inner_key).await {
                         Some(v) => {
-                            guard.put(key.clone(), v.0.clone());
+                            self.inner.lock().await.put(key.clone(), v.0.clone());
+
                             tracing::info!(
                                 monotonic_counter.apollo_router_cache_hit_count = 1u64,
                                 kind = %self.caller,

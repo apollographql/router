@@ -2,7 +2,7 @@
 name: Feature request
 about: Suggest an idea for this project
 title: ''
-labels: ['triage', 'raised by user']
+labels: ['raised by user']
 assignees: ''
 
 ---

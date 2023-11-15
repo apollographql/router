@@ -3,9 +3,13 @@
 mod mock;
 #[macro_use]
 mod service;
+mod broken;
+mod restricted;
 
 pub use mock::subgraph::MockSubgraph;
 pub use service::MockExecutionService;
+pub use service::MockHttpClientService;
+pub use service::MockRouterService;
 pub use service::MockSubgraphService;
 pub use service::MockSupergraphService;
 

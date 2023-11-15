@@ -139,12 +139,11 @@ mod tests {
         });
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
-        let init = PluginInit::new(
-            PropagateStatusCodeConfig {
+        let init = PluginInit::fake_builder()
+            .config(PropagateStatusCodeConfig {
                 status_codes: vec![500, 403, 401],
-            },
-            Default::default(),
-        );
+            })
+            .build();
         let service_stack = PropagateStatusCode::new(init)
             .await
             .expect("couldn't create plugin")
@@ -176,12 +175,11 @@ mod tests {
         });
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
-        let init = PluginInit::new(
-            PropagateStatusCodeConfig {
+        let init = PluginInit::fake_builder()
+            .config(PropagateStatusCodeConfig {
                 status_codes: vec![500, 403, 401],
-            },
-            Default::default(),
-        );
+            })
+            .build();
         let service_stack = PropagateStatusCode::new(init)
             .await
             .expect("couldn't create plugin")
@@ -223,12 +221,11 @@ mod tests {
         );
 
         // StatusCode::INTERNAL_SERVER_ERROR should have precedence here
-        let init = PluginInit::new(
-            PropagateStatusCodeConfig {
+        let init = PluginInit::fake_builder()
+            .config(PropagateStatusCodeConfig {
                 status_codes: vec![500, 403, 401],
-            },
-            Default::default(),
-        );
+            })
+            .build();
         let service_stack = PropagateStatusCode::new(init)
             .await
             .expect("couldn't create plugin")
@@ -264,12 +261,11 @@ mod tests {
         );
 
         // In this service_stack, PropagateStatusCode is `decorating` or `wrapping` our mock_service.
-        let init = PluginInit::new(
-            PropagateStatusCodeConfig {
+        let init = PluginInit::fake_builder()
+            .config(PropagateStatusCodeConfig {
                 status_codes: vec![500, 403, 401],
-            },
-            Default::default(),
-        );
+            })
+            .build();
         let service_stack = PropagateStatusCode::new(init)
             .await
             .expect("couldn't create plugin")

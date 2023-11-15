@@ -4,7 +4,7 @@
 
 replicaCount: 1
 
-# -- See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure
+# -- See https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file for yaml structure
 router:
   configuration:
     supergraph:
@@ -76,6 +76,38 @@ containerPorts:
   metrics: 9090
   # -- For exposing the health check endpoint
   health: 8088
+
+# -- An array of extra containers to include in the router pod
+# Example:
+# extraContainers:
+#   - name: coprocessor
+#     image: acme/coprocessor:1.0
+#     ports:
+#       - containerPort: 4001
+extraContainers: []
+
+# -- An array of init containers to include in the router pod
+# Example:
+# initContainers:
+#   - name: init-myservice
+#     image: busybox:1.28
+#     command: ["sh"]
+initContainers: []
+
+# -- A map of extra labels to apply to the resources created by this chart
+# Example:
+# extraLabels:
+#   label_one_name: "label_one_value"
+#   label_two_name: "label_two_value"
+extraLabels: {}
+
+lifecycle: {}
+#  preStop:
+#    exec:
+#      command:
+#        - /bin/bash
+#        - -c
+#        - sleep 10
 
 imagePullSecrets: []
 nameOverride: ""
@@ -184,8 +216,22 @@ tolerations: []
 
 affinity: {}
 
+# -- Sets the [pod disruption budget](https://kubernetes.io/docs/tasks/run-application/configure-pdb/) for Deployment pods
+podDisruptionBudget: {}
+
 # -- Set to existing PriorityClass name to control pod preemption by the scheduler
 priorityClassName: ""
 
 # -- Sets the [termination grace period](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#hook-handler-execution) for Deployment pods
 terminationGracePeriodSeconds: 30
+
+probes:
+  # -- Configure readiness probe
+  readiness:
+    initialDelaySeconds: 0
+  # -- Configure liveness probe
+  liveness:
+    initialDelaySeconds: 0
+
+# -- Sets the [topology spread constraints](https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/) for Deployment pods
+topologySpreadConstraints: []

@@ -1,0 +1,34 @@
+---
+source: apollo-router/src/plugins/authorization/scopes.rs
+expression: "TestResult {\n    query: QUERY,\n    extracted_scopes: &extracted_scopes,\n    scopes: Vec::new(),\n    result: doc,\n    paths,\n}"
+---
+query:
+
+        query {
+            topProducts {
+                type
+            }
+            itf {
+                id
+                ...F
+            }
+        }
+
+        fragment F on User {
+            id2: id
+            name
+        }
+        
+extracted_scopes: {"read:user", "read:username"}
+request scopes: []
+filtered:
+{
+  topProducts {
+    type
+  }
+  itf {
+    id
+  }
+}
+
+paths: ["/itf"]

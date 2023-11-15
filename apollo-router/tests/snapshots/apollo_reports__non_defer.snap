@@ -30,6 +30,8 @@ traces_per_query:
           operation_name: ""
         client_name: ""
         client_version: ""
+        operation_type: query
+        operation_subtype: ""
         http:
           method: 4
           request_headers: {}
@@ -170,6 +172,8 @@ traces_per_query:
                         details: ~
                         client_name: ""
                         client_version: ""
+                        operation_type: ""
+                        operation_subtype: ""
                         http: ~
                         cache_policy: ~
                         query_plan: ~
@@ -411,6 +415,8 @@ traces_per_query:
                               details: ~
                               client_name: ""
                               client_version: ""
+                              operation_type: ""
+                              operation_subtype: ""
                               http: ~
                               cache_policy: ~
                               query_plan: ~
@@ -516,6 +522,8 @@ traces_per_query:
                               details: ~
                               client_name: ""
                               client_version: ""
+                              operation_type: ""
+                              operation_subtype: ""
                               http: ~
                               cache_policy: ~
                               query_plan: ~
@@ -541,7 +549,9 @@ traces_per_query:
     stats_with_context: []
     referenced_fields_by_type: {}
     internal_traces_contributing_to_stats: []
+    query_metadata: ~
 end_time: "[end_time]"
 operation_count: 0
+operation_count_by_type: []
 traces_pre_aggregated: true
 

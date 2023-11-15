@@ -1,0 +1,37 @@
+"""
+ISO 8601, extended format with nanoseconds, Zulu (or "[+-]seconds" as a string or number relative to now)
+"""
+scalar Timestamp
+type FetchError {
+  code: FetchErrorCode!
+  message: String!
+  "Minimum delay before the next fetch should occur, in seconds."
+  minDelaySeconds: Float!
+}
+
+type Query {
+  uplinkQuery(apiKey: String!,
+    ifAfterId: ID,
+    ref: String!
+  ): RouterTestResponse!
+}
+type Data {
+  name: String!
+  ordering: Int!
+}
+type New {
+  id: ID!
+  data: Data!
+  minDelaySeconds: Float!
+}
+type Unchanged {
+  id: ID!
+  minDelaySeconds: Float!
+}
+union RouterTestResponse = New | Unchanged | FetchError
+enum FetchErrorCode {
+  AUTHENTICATION_FAILED
+  ACCESS_DENIED
+  UNKNOWN_REF
+  RETRY_LATER
+}

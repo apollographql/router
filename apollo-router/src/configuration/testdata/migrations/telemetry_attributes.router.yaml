@@ -1,0 +1,6 @@
+telemetry:
+  tracing:
+    common:
+      attributes:
+        test: val
+

@@ -4,12 +4,15 @@ metadata:
   name: "{{ include "router.fullname" . }}-test-connection"
   labels:
     {{- include "router.labels" . | nindent 4 }}
+    {{- if .Values.extraLabels }}
+    {{- include "apollographql.templatizeExtraLabels" . | trim | nindent 4 }}
+    {{- end }}
   annotations:
     "helm.sh/hook": test
 spec:
   containers:
-    - name: wget
+    - name: netcat
       image: busybox
-      command: ['wget']
-      args: ['{{ include "router.fullname" . }}:{{ .Values.service.port }}']
+      command: ['nc']
+      args: ['-vz','-w','1','{{ include "router.fullname" . }}:{{.Values.service.port }}']
   restartPolicy: Never

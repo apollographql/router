@@ -14,8 +14,10 @@ use opentelemetry::global;
 use opentelemetry::trace::TraceContextExt;
 use tokio::io::AsyncWriteExt;
 use tower_http::trace::MakeSpan;
-use tracing::Level;
 use tracing::Span;
+
+use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
 pub(crate) const REQUEST_SPAN_NAME: &str = "request";
 
@@ -68,10 +70,12 @@ pub(super) async fn decompress_request_body(
                 unknown => {
                     let message = format!("unknown content-encoding header value {unknown:?}");
                     tracing::error!(message);
-                    ::tracing::error!(
-                       monotonic_counter.apollo_router_http_requests_total = 1u64,
-                       status = %400u16,
-                       error = %message,
+                    u64_counter!(
+                        "apollo_router_http_requests_total",
+                        "Total number of HTTP requests made.",
+                        1,
+                        status = StatusCode::BAD_REQUEST.as_u16() as i64,
+                        error = message.clone()
                     );
 
                     Err((StatusCode::BAD_REQUEST, message).into_response())
@@ -80,10 +84,12 @@ pub(super) async fn decompress_request_body(
 
             Err(err) => {
                 let message = format!("cannot read content-encoding header: {err}");
-                ::tracing::error!(
-                   monotonic_counter.apollo_router_http_requests_total = 1u64,
-                   status = %400u16,
-                   error = %message,
+                u64_counter!(
+                    "apollo_router_http_requests_total",
+                    "Total number of HTTP requests made.",
+                    1,
+                    status = 400,
+                    error = message.clone()
                 );
                 Err((StatusCode::BAD_REQUEST, message).into_response())
             }
@@ -93,7 +99,9 @@ pub(super) async fn decompress_request_body(
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct PropagatingMakeSpan;
+pub(crate) struct PropagatingMakeSpan {
+    pub(crate) license: LicenseState,
+}
 
 impl<B> MakeSpan<B> for PropagatingMakeSpan {
     fn make_span(&mut self, request: &http::Request<B>) -> Span {
@@ -111,24 +119,44 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         {
             // We have a valid remote span, attach it to the current thread before creating the root span.
             let _context_guard = context.attach();
-            tracing::span!(
-                Level::INFO,
-                REQUEST_SPAN_NAME,
-                "http.method" = %request.method(),
-                "http.route" = %request.uri(),
-                "http.flavor" = ?request.version(),
-                "otel.kind" = "SERVER",
-
-            )
+            self.create_span(request)
         } else {
             // No remote span, we can go ahead and create the span without context.
-            tracing::span!(
-                Level::INFO,
+            self.create_span(request)
+        }
+    }
+}
+
+impl PropagatingMakeSpan {
+    fn create_span<B>(&mut self, request: &Request<B>) -> Span {
+        if matches!(
+            self.license,
+            LicenseState::LicensedWarn | LicenseState::LicensedHalt
+        ) {
+            tracing::error_span!(
                 REQUEST_SPAN_NAME,
                 "http.method" = %request.method(),
                 "http.route" = %request.uri(),
                 "http.flavor" = ?request.version(),
+                "http.status" = 500, // This prevents setting later
+                "otel.name" = ::tracing::field::Empty,
                 "otel.kind" = "SERVER",
+                "graphql.operation.name" = ::tracing::field::Empty,
+                "graphql.operation.type" = ::tracing::field::Empty,
+                "apollo_router.license" = LICENSE_EXPIRED_SHORT_MESSAGE,
+                "apollo_private.request" = true,
+            )
+        } else {
+            tracing::info_span!(
+                REQUEST_SPAN_NAME,
+                "http.method" = %request.method(),
+                "http.route" = %request.uri(),
+                "http.flavor" = ?request.version(),
+                "otel.name" = ::tracing::field::Empty,
+                "otel.kind" = "SERVER",
+                "graphql.operation.name" = ::tracing::field::Empty,
+                "graphql.operation.type" = ::tracing::field::Empty,
+                "apollo_private.request" = true,
             )
         }
     }
