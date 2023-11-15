@@ -53,7 +53,7 @@ where
                 left == right
             }
             Condition::All(all) => all.iter().all(|c| c.evaluate(request, response)),
-            Condition::Any(any) => any.iter().all(|c| c.evaluate(request, response)),
+            Condition::Any(any) => any.iter().any(|c| c.evaluate(request, response)),
             Condition::Not(not) => !not.evaluate(request, response),
         }
     }
@@ -83,6 +83,105 @@ where
 
 #[cfg(test)]
 mod test {
+    use opentelemetry_api::Value;
+
+    use crate::plugins::telemetry::config_new::conditions::Condition;
+    use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
+    use crate::plugins::telemetry::config_new::Selector;
+
+    struct TestSelector;
+    impl Selector for TestSelector {
+        type Request = ();
+        type Response = ();
+
+        fn on_request(&self, _request: &Self::Request) -> Option<Value> {
+            Some(Value::I64(1i64))
+        }
+
+        fn on_response(&self, _response: &Self::Response) -> Option<Value> {
+            Some(Value::I64(1i64))
+        }
+    }
+
     #[test]
-    fn test_conditions() {}
+    fn test_condition_eq() {
+        assert!(Condition::<TestSelector>::Eq([
+            SelectorOrValue::Value(1i64.into()),
+            SelectorOrValue::Value(1i64.into()),
+        ])
+        .evaluate(&(), &()));
+        assert!(!Condition::<TestSelector>::Eq([
+            SelectorOrValue::Value(1i64.into()),
+            SelectorOrValue::Value(2i64.into()),
+        ])
+        .evaluate(&(), &()));
+    }
+
+    #[test]
+    fn test_condition_not() {
+        assert!(Condition::<TestSelector>::Not(Box::new(Condition::Eq([
+            SelectorOrValue::Value(1i64.into()),
+            SelectorOrValue::Value(2i64.into()),
+        ])))
+        .evaluate(&(), &()));
+
+        assert!(!Condition::<TestSelector>::Not(Box::new(Condition::Eq([
+            SelectorOrValue::Value(1i64.into()),
+            SelectorOrValue::Value(1i64.into()),
+        ])))
+        .evaluate(&(), &()));
+    }
+
+    #[test]
+    fn test_condition_all() {
+        assert!(Condition::<TestSelector>::All(vec![
+            Condition::Eq([
+                SelectorOrValue::Value(1i64.into()),
+                SelectorOrValue::Value(1i64.into()),
+            ]),
+            Condition::Eq([
+                SelectorOrValue::Value(2i64.into()),
+                SelectorOrValue::Value(2i64.into()),
+            ])
+        ])
+        .evaluate(&(), &()));
+
+        assert!(!Condition::<TestSelector>::All(vec![
+            Condition::Eq([
+                SelectorOrValue::Value(1i64.into()),
+                SelectorOrValue::Value(1i64.into()),
+            ]),
+            Condition::Eq([
+                SelectorOrValue::Value(1i64.into()),
+                SelectorOrValue::Value(2i64.into()),
+            ])
+        ])
+        .evaluate(&(), &()));
+    }
+    #[test]
+    fn test_condition_any() {
+        assert!(Condition::<TestSelector>::Any(vec![
+            Condition::Eq([
+                SelectorOrValue::Value(1i64.into()),
+                SelectorOrValue::Value(1i64.into()),
+            ]),
+            Condition::Eq([
+                SelectorOrValue::Value(1i64.into()),
+                SelectorOrValue::Value(2i64.into()),
+            ])
+        ])
+        .evaluate(&(), &()));
+
+        assert!(!Condition::<TestSelector>::All(vec![
+            Condition::Eq([
+                SelectorOrValue::Value(1i64.into()),
+                SelectorOrValue::Value(2i64.into()),
+            ]),
+            Condition::Eq([
+                SelectorOrValue::Value(1i64.into()),
+                SelectorOrValue::Value(2i64.into()),
+            ])
+        ])
+        .evaluate(&(), &()));
+    }
 }

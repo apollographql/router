@@ -325,6 +325,12 @@ impl From<&'static str> for AttributeValue {
     }
 }
 
+impl From<i64> for AttributeValue {
+    fn from(value: i64) -> Self {
+        AttributeValue::I64(value)
+    }
+}
+
 impl std::fmt::Display for AttributeValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
