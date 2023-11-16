@@ -934,6 +934,39 @@ fn test_deserialize_derive_default() {
     }
 }
 
+#[test]
+fn it_defaults_health_check_configuration() {
+    let conf = Configuration::default();
+    let addr: ListenAddr = SocketAddr::from_str("127.0.0.1:8088").unwrap().into();
+
+    assert_eq!(conf.health_check.listen, addr);
+    assert_eq!(&conf.health_check.path, "/health");
+
+    // Defaults to enabled: true
+    assert!(conf.health_check.enabled);
+}
+
+#[test]
+fn it_sets_custom_health_check_path() {
+    let conf = Configuration::builder()
+        .health_check(HealthCheck::new(None, None, Some("/healthz".to_string())))
+        .build()
+        .unwrap();
+
+    assert_eq!(&conf.health_check.path, "/healthz");
+}
+
+#[test]
+fn it_adds_slash_to_custom_health_check_path_if_missing() {
+    let conf = Configuration::builder()
+        // NB the missing `/`
+        .health_check(HealthCheck::new(None, None, Some("healthz".to_string())))
+        .build()
+        .unwrap();
+
+    assert_eq!(&conf.health_check.path, "/healthz");
+}
+
 fn has_field_level_serde_defaults(lines: &[&str], line_number: usize) -> bool {
     let serde_field_default = Regex::new(
         r#"^\s*#[\s\n]*\[serde\s*\((.*,)?\s*default\s*=\s*"[a-zA-Z0-9_:]+"\s*(,.*)?\)\s*\]\s*$"#,
