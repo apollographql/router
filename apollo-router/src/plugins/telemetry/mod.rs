@@ -23,6 +23,7 @@ use http::HeaderValue;
 use http::StatusCode;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
+use opentelemetry::global::GlobalTracerProvider;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
@@ -44,7 +45,6 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tokio::runtime::Handle;
-use tokio::runtime::TryCurrentError;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -167,8 +167,6 @@ pub(crate) struct Telemetry {
     public_prometheus_meter_provider: Option<FilterMeterProvider>,
     private_meter_provider: Option<FilterMeterProvider>,
     counter: Option<Arc<Mutex<CacheCounter>>>,
-    // important: last in struct, so last thing to be dropped
-    notifier: tokio::sync::mpsc::Sender<Box<dyn FnOnce() + Send + 'static>>,
 }
 
 #[derive(Debug)]
@@ -206,24 +204,15 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
 
 impl Drop for Telemetry {
     fn drop(&mut self) {
-        let metrics_providers = [
+        let metrics_providers: [Option<FilterMeterProvider>; 3] = [
             self.private_meter_provider.take(),
             self.public_meter_provider.take(),
             self.public_prometheus_meter_provider.take(),
         ];
-        for meter_provider in metrics_providers.into_iter().flatten() {
-            if let Err(err) = self.notify_msg(Box::new(move || {
-                if let Err(e) = meter_provider.shutdown() {
-                    ::tracing::error!(error = %e, "failed to shutdown meter provider")
-                }
-            })) {
-                ::tracing::error!("Cannot shutdown meter provider, no async runtime: {err}");
-            }
-        }
+        Self::checked_meter_shutdown(metrics_providers);
+
         if let Some(tracer_provider) = self.tracer_provider.take() {
-            if let Err(err) = self.notify_msg(Box::new(|| drop(tracer_provider))) {
-                ::tracing::error!("Cannot drop tracer provider, no async runtime: {err}");
-            }
+            Self::checked_tracer_shutdown(tracer_provider);
         }
     }
 }
@@ -252,16 +241,6 @@ impl Plugin for Telemetry {
         };
         let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
 
-        // We may need 4 slots during a drop, so make it at least 4
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<Box<dyn FnOnce() + Send + 'static>>(5);
-
-        // This task accepts blocking synchronous tasks and executes them
-        tokio::task::spawn_blocking(move || {
-            while let Some(msg) = rx.blocking_recv() {
-                msg();
-            }
-        });
-
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
@@ -277,7 +256,6 @@ impl Plugin for Telemetry {
             sampling_filter_ratio,
             config: Arc::new(config),
             counter,
-            notifier: tx,
         })
     }
 
@@ -600,9 +578,7 @@ impl Telemetry {
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
 
-            if let Err(err) = self.notify_msg(Box::new(move || drop(last_provider))) {
-                ::tracing::error!("Cannot drop previous tracer provider, no async runtime: {err}");
-            }
+            Self::checked_global_tracer_shutdown(last_provider);
 
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
         }
@@ -1543,48 +1519,69 @@ impl Telemetry {
     fn reload_metrics(&mut self) {
         let meter_provider = meter_provider();
         commit_prometheus();
-        let mut old_meter_providers = Vec::new();
-        if let Some(old_provider) = meter_provider.set(
+        let mut old_meter_providers: [Option<FilterMeterProvider>; 3] = Default::default();
+
+        old_meter_providers[0] = meter_provider.set(
             MeterProviderType::PublicPrometheus,
             self.public_prometheus_meter_provider.take(),
-        ) {
-            old_meter_providers.push((MeterProviderType::PublicPrometheus, old_provider));
-        }
+        );
 
-        if let Some(old_provider) = meter_provider.set(
+        old_meter_providers[1] = meter_provider.set(
             MeterProviderType::Apollo,
             self.private_meter_provider.take(),
-        ) {
-            old_meter_providers.push((MeterProviderType::Apollo, old_provider));
-        }
-        if let Some(old_provider) =
-            meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take())
-        {
-            old_meter_providers.push((MeterProviderType::Public, old_provider));
-        }
+        );
+
+        old_meter_providers[2] =
+            meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take());
 
         metrics_layer().clear();
 
-        if let Err(err) = self.notify_msg(Box::new(move || {
-            for (meter_provider_type, meter_provider) in old_meter_providers {
+        Self::checked_meter_shutdown(old_meter_providers);
+    }
+
+    fn checked_meter_shutdown(meters: [Option<FilterMeterProvider>; 3]) {
+        for meter_provider in meters.into_iter().flatten() {
+            Self::checked_spawn_task(Box::new(move || {
                 if let Err(e) = meter_provider.shutdown() {
-                    ::tracing::error!(error = %e, meter_provider_type = ?meter_provider_type, "failed to shutdown meter provider")
+                    ::tracing::error!(error = %e, "failed to shutdown meter provider")
                 }
-            }
-        })) {
-                ::tracing::error!("Cannot shutdown old meter providers, no async runtime: {err}");
+            }));
         }
     }
 
-    fn notify_msg(&self, msg: Box<dyn FnOnce() + Send + 'static>) -> Result<(), TryCurrentError> {
-        // Make sure we are in async context, error notification if not
-        let hdl = Handle::try_current()?;
-        let my_notifier = self.notifier.clone();
-        hdl.spawn(async move {
-            my_notifier.send(msg).await.expect("notifying msg");
-        });
-        // We don't join here since we can't await or block_on()
-        Ok(())
+    fn checked_tracer_shutdown(tracer_provider: opentelemetry::sdk::trace::TracerProvider) {
+        Self::checked_spawn_task(Box::new(move || {
+            drop(tracer_provider);
+        }));
+    }
+
+    fn checked_global_tracer_shutdown(global_tracer_provider: GlobalTracerProvider) {
+        Self::checked_spawn_task(Box::new(move || {
+            drop(global_tracer_provider);
+        }));
+    }
+
+    fn checked_spawn_task(task: Box<dyn FnOnce() + Send + 'static>) {
+        // If we are in an tokio async context, use `spawn_blocking()`, if not just execute the
+        // task.
+        // Note:
+        //  - If we use spawn_blocking, then tokio looks after waiting for the task to
+        //    terminate
+        //  - We could spawn a thread to execute the task, but if the process terminated that would
+        //    cause the thread to terminate which isn't ideal. Let's just run it in the current
+        //    thread. This won't affect router performance since that will always be within the
+        //    context of tokio.
+        match Handle::try_current() {
+            Ok(hdl) => {
+                hdl.spawn_blocking(move || {
+                    task();
+                });
+                // We don't join here since we can't await or block_on()
+            }
+            Err(_err) => {
+                task();
+            }
+        }
     }
 }
 
