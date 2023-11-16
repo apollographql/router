@@ -422,9 +422,9 @@ The `@policy` directive includes a `policies` argument that defines an array of 
 
 At the [`RouterService` level](../customizations/overview#the-request-lifecycle), the Apollo Router extracts the list of policies relevant to a request from the schema and then stores them in the request's context in `apollo_authorization::policies::required` as a map `policy -> null|true|false`.
 
-At the `SupergraphService` level, you need to provide a Rhai script or a coprocessor that evaluates the map. If the policy is validated, set its value to `true`, otherwise set it to `false`. Afterwards, the router filters the requests' types and fields to only those where the policy is `true`.
+At the `SupergraphService` level, you must provide a Rhai script or coprocessor to evaluate the map. If the policy is validated, the script or coprocessor should set its value to `true` or otherwise set it to `false`. Afterward, the router filters the requests' types and fields to only those where the policy is `true`.
 
-If no field of a subgraph query passes its authorization policies, the router stops further processing of the query and precludes unauthorized subgraph requests. This efficiency gain is a key benefit of the `@policy` directive and other authorization directives.
+If no field of a subgraph query passes its authorization policies, the router stops further processing of the query and precludes unauthorized subgraph requests. This efficiency gain is a key benefit of the `@policy` and other authorization directives.
 
 #### Usage
 
@@ -441,7 +441,7 @@ The `@policy` directive is defined as follows:
 
 ```graphql
 scalar federation__Policy
-directive @policy(scopes: [[federation__Policy!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+directive @policy(policies: [[federation__Policy!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 ```
 
 Using the `@policy` directive requires a [Supergraph plugin](../customizations/overview) to evaluate the authorization policies. You can do this with a [Rhai script](../customizations/rhai/) or [coprocessor](../customizations/coprocessor). Refer to the following [Rhai script](#usage-with-a-rhai-script) and [coprocessor](#usage-with-a-coprocessor) examples for more information. (Although a [native plugin](../customizations/native) can also evaluate authorization policies, we don't recommend using it.)
@@ -451,13 +451,13 @@ Using the `@policy` directive requires a [Supergraph plugin](../customizations/o
 Authorization validation uses **AND** logic between the elements in the inner-level `policies` array, where a request must include _all_ elements in the inner-level `policies` array to resolve the associated field or type. For the following example, a request would need `policy1` **AND** `policy2` **AND** `policy3` to be authorized:
 
 ```graphql
-@requiresScopes(policies: [["policy1", "policy2", "policy3"]])
+@policy(policies: [["policy1", "policy2", "policy3"]])
 ```
 
 Alternatively, to introduce **OR** logic you can use nested arrays. For the following example, a request would need `policy1` **OR** `policy2` **OR** `policy3` to be authorized:
 
 ```graphql
-@requiresScopes(policies: [["policy1"], ["policy2"], ["policy3"]])
+@policy(policies: [["policy1"], ["policy2"], ["policy3"]])
 ```
 
 You can nest arrays and elements as needed to achieve your desired logic. For the following example, its syntax requires requests to have either (`policy1` **AND** `policy2`) **OR** just `policy3` to be authorized:
@@ -814,7 +814,7 @@ The behavior of the authorization plugin can be modified with various options.
 
 ### reject_unauthorized
 
-The `reject_unauthorized` option configures whether to reject an entire query if any authorization directive failed, where any part of it is filtered by authorization directives. When enabled, a response contains the list of paths that are affected.
+The `reject_unauthorized` option configures whether to reject an entire query if any authorization directive failed, or any part of the query was filtered by authorization directives. When enabled, a response contains the list of paths that are affected.
 
 ```yaml title="router.yaml"
 authorization:
@@ -846,7 +846,7 @@ The `log` option should be disabled if filtering parts of queries according to t
 
 #### response
 
-You can configure `response` to set where to place filtered paths in a GraphQL response:
+You can configure `response` to define what part of the GraphQL response should include filtered paths:
 
 - `errors` (default) : place filtered paths in GraphQL errors
 - `extensions`: place filtered paths in extensions. Useful to suppress exceptions on the client side while still giving information that parts of the query were filtered
