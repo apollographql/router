@@ -3,7 +3,8 @@
 //! Implementation of the `@requiresScopes` directive:
 //!
 //! ```graphql
-//! directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+//! scalar federation__Scope
+//! directive @requiresScopes(scopes: [[federation__Scope!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
 //! ```
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -18,6 +19,7 @@ use crate::json_ext::PathElement;
 use crate::spec::query::transform;
 use crate::spec::query::traverse;
 use crate::spec::Schema;
+use crate::spec::TYPENAME;
 
 pub(crate) struct ScopeExtractionVisitor<'a> {
     schema: &'a schema::Schema,
@@ -164,8 +166,12 @@ pub(crate) struct ScopeFilteringVisitor<'a> {
     request_scopes: HashSet<String>,
     pub(crate) query_requires_scopes: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
+    // store the error paths from fragments so we can  add them at
+    // the point of application
+    fragments_unauthorized_paths: HashMap<&'a ast::Name, Vec<Path>>,
     current_path: Path,
     requires_scopes_directive_name: String,
+    dry_run: bool,
 }
 
 impl<'a> ScopeFilteringVisitor<'a> {
@@ -174,14 +180,17 @@ impl<'a> ScopeFilteringVisitor<'a> {
         executable: &'a ast::Document,
         implementers_map: &'a HashMap<Name, HashSet<Name>>,
         scopes: HashSet<String>,
+        dry_run: bool,
     ) -> Option<Self> {
         Some(Self {
             schema,
             fragments: transform::collect_fragments(executable),
             implementers_map,
             request_scopes: scopes,
+            dry_run,
             query_requires_scopes: false,
             unauthorized_paths: vec![],
+            fragments_unauthorized_paths: HashMap::new(),
             current_path: Path::default(),
             requires_scopes_directive_name: Schema::directive_name(
                 schema,
@@ -240,13 +249,22 @@ impl<'a> ScopeFilteringVisitor<'a> {
         field_def: &ast::FieldDefinition,
         node: &ast::Field,
     ) -> bool {
-        // if all selections under the interface field are fragments with type conditions
+        println!(
+            "implementors with different requirements for {:?}, node name={}",
+            field_def.name,
+            node.name.as_str()
+        );
+        // we can request __typename outside of fragments even if the types have different
+        // authorization requirements
+        if node.name.as_str() == TYPENAME {
+            return false;
+        }
+
+        // if all selections under the interface field are __typename or fragments with type conditions
         // then we don't need to check that they have the same authorization requirements
-        if node.selection_set.iter().all(|sel| {
-            matches!(
-                sel,
-                ast::Selection::FragmentSpread(_) | ast::Selection::InlineFragment(_)
-            )
+        if node.selection_set.iter().all(|sel| match sel {
+            ast::Selection::Field(f) => f.name == TYPENAME,
+            ast::Selection::FragmentSpread(_) | ast::Selection::InlineFragment(_) => true,
         }) {
             return false;
         }
@@ -389,7 +407,12 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
         } else {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_scopes = true;
-            Ok(None)
+
+            if self.dry_run {
+                transform::operation(self, root_type, node)
+            } else {
+                Ok(None)
+            }
         }
     }
 
@@ -425,7 +448,12 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
         } else {
             self.unauthorized_paths.push(self.current_path.clone());
             self.query_requires_scopes = true;
-            Ok(None)
+
+            if self.dry_run {
+                transform::field(self, field_def, node)
+            } else {
+                Ok(None)
+            }
         };
 
         if is_field_list {
@@ -446,27 +474,51 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
             .get(&node.type_condition)
             .is_some_and(|ty| self.is_type_authorized(ty));
 
-        // FIXME: if a field was removed inside a fragment definition, then we should add an unauthorized path
-        // starting at the fragment spread, instead of starting at the definition.
-        // If we modified the transform visitor implementation to modify the fragment definitions before the
-        // operations, we would be able to store the list of unauthorized paths per fragment, and at the point
-        // of application, generate unauthorized paths starting at the operation root
-        if !fragment_is_authorized {
-            Ok(None)
-        } else {
+        let current_unauthorized_paths_index = self.unauthorized_paths.len();
+
+        let res = if fragment_is_authorized || self.dry_run {
             transform::fragment_definition(self, node)
+        } else {
+            self.unauthorized_paths.push(self.current_path.clone());
+            Ok(None)
+        };
+
+        if self.unauthorized_paths.len() > current_unauthorized_paths_index {
+            if let Some((name, _)) = self.fragments.get_key_value(&node.name) {
+                self.fragments_unauthorized_paths.insert(
+                    name,
+                    self.unauthorized_paths
+                        .split_off(current_unauthorized_paths_index),
+                );
+            }
         }
+
+        if let Ok(None) = res {
+            self.fragments.remove(&node.name);
+        }
+
+        res
     }
 
     fn fragment_spread(
         &mut self,
         node: &ast::FragmentSpread,
     ) -> Result<Option<ast::FragmentSpread>, BoxError> {
-        let condition = &self
-            .fragments
-            .get(&node.fragment_name)
-            .ok_or("MissingFragment")?
-            .type_condition;
+        // record the fragment errors at the point of application
+        if let Some(paths) = self.fragments_unauthorized_paths.get(&node.fragment_name) {
+            for path in paths {
+                let path = self.current_path.join(path);
+                self.unauthorized_paths.push(path);
+            }
+        }
+
+        let fragment = match self.fragments.get(&node.fragment_name) {
+            Some(fragment) => fragment,
+            None => return Ok(None),
+        };
+
+        let condition = &fragment.type_condition;
+
         self.current_path
             .push(PathElement::Fragment(condition.as_str().into()));
 
@@ -480,7 +532,11 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
             self.query_requires_scopes = true;
             self.unauthorized_paths.push(self.current_path.clone());
 
-            Ok(None)
+            if self.dry_run {
+                transform::fragment_spread(self, node)
+            } else {
+                Ok(None)
+            }
         } else {
             transform::fragment_spread(self, node)
         };
@@ -514,7 +570,12 @@ impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
                 let res = if !fragment_is_authorized {
                     self.query_requires_scopes = true;
                     self.unauthorized_paths.push(self.current_path.clone());
-                    Ok(None)
+
+                    if self.dry_run {
+                        transform::inline_fragment(self, parent_type, node)
+                    } else {
+                        Ok(None)
+                    }
                 } else {
                     transform::inline_fragment(self, parent_type, node)
                 };
@@ -646,7 +707,7 @@ mod tests {
         doc.to_executable(&schema).validate(&schema).unwrap();
 
         let map = schema.implementers_map();
-        let mut visitor = ScopeFilteringVisitor::new(&schema, &doc, &map, scopes).unwrap();
+        let mut visitor = ScopeFilteringVisitor::new(&schema, &doc, &map, scopes, false).unwrap();
         (
             transform::document(&mut visitor, &doc).unwrap(),
             visitor.unauthorized_paths,
@@ -1025,6 +1086,35 @@ mod tests {
             scopes: ["read:user".to_string(), "read:username".to_string()]
                 .into_iter()
                 .collect(),
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
+    fn fragment_fields() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+                ...F
+            }
+        }
+
+        fragment F on Product {
+            reviews {
+                body
+            }
+        }
+        "#;
+
+        let extracted_scopes = extract(BASIC_SCHEMA, QUERY);
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_scopes: &extracted_scopes,
+            scopes: Vec::new(),
             result: doc,
             paths
         });
@@ -1412,6 +1502,111 @@ mod tests {
 
         insta::assert_display_snapshot!(TestResult {
             query: QUERY,
+            extracted_scopes: &extracted_scopes,
+            scopes: Vec::new(),
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
+    fn interface_typename() {
+        static SCHEMA: &str = r#"
+        schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+    @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
+    {
+      query: Query
+    }
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+    directive @requiresScopes(scopes: [[String!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+    scalar link__Import
+      enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
+        type Query {
+            post(id: ID!): Post
+          }
+          
+          interface Post {
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+          }
+          
+          type Stats {
+            views: Int
+          }
+          
+          type PublicBlog implements Post {
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+            stats: Stats @requiresScopes(scopes: [["a"]])
+          }
+          
+          type PrivateBlog implements Post @requiresScopes(scopes: [["b"]]) {
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+            publishAt: String
+          }
+        "#;
+
+        static QUERY: &str = r#"
+        query Anonymous {
+            post(id: "1") {
+              ... on PublicBlog {
+                __typename
+                title
+              }
+            }
+          }
+        "#;
+
+        let extracted_scopes: BTreeSet<String> = extract(SCHEMA, QUERY);
+
+        let (doc, paths) = filter(SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_scopes: &extracted_scopes,
+            scopes: Vec::new(),
+            result: doc,
+            paths
+        });
+
+        static QUERY2: &str = r#"
+        query Anonymous {
+            post(id: "1") {
+              __typename
+              ... on PublicBlog {
+                __typename
+                title
+              }
+            }
+          }
+        "#;
+
+        let extracted_scopes: BTreeSet<String> = extract(SCHEMA, QUERY2);
+
+        let (doc, paths) = filter(SCHEMA, QUERY2, HashSet::new());
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY2,
             extracted_scopes: &extracted_scopes,
             scopes: Vec::new(),
             result: doc,

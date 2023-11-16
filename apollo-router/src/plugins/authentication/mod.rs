@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use displaydoc::Display;
 use http::StatusCode;
@@ -23,6 +25,7 @@ use once_cell::sync::Lazy;
 use reqwest::Client;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json::Value;
 use thiserror::Error;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -707,6 +710,41 @@ fn decode_jwt(
                 ))
             }
         }
+    }
+}
+
+pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
+    let claims = context
+        .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .map_err(|err| tracing::error!("could not read JWT claims: {err}"))
+        .ok()
+        .flatten();
+    let ts_opt = claims.as_ref().and_then(|x: &Value| {
+        if !x.is_object() {
+            tracing::error!("JWT claims should be an object");
+            return None;
+        }
+        let claims = x.as_object().expect("claims should be an object");
+        let exp = claims.get("exp")?;
+        if !exp.is_number() {
+            tracing::error!("JWT 'exp' (expiry) claim should be a number");
+            return None;
+        }
+        exp.as_i64()
+    });
+    match ts_opt {
+        Some(ts) => {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("we should not run before EPOCH")
+                .as_secs() as i64;
+            if now < ts {
+                Duration::from_secs((ts - now) as u64)
+            } else {
+                Duration::ZERO
+            }
+        }
+        None => Duration::MAX,
     }
 }
 

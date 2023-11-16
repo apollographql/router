@@ -55,7 +55,11 @@ docker run -p 4000:4000 \
   ghcr.io/apollographql/router:<router-image-version>
 ```
 
-> **Note:** Both local and container paths must be specified as absolute paths.
+<Note>
+
+Both local and container paths must be specified as absolute paths.
+
+</Note>
 
 In this example we are mounting a file from the host system (`/home/user/router.yaml`) in place of the default configuration provided in the image at `/dist/config/router.yaml`.
 
@@ -125,7 +129,11 @@ In this example, we have to mount the local definition of the supergraph into ou
 
 ## Building your own container
 
-> **Note:** This section is aimed at developers familiar with tooling such as `docker` and `git` who wish to make their own DIY container images. The script documented here is not a part of the router product, but an illustrative example of what's involved in making your own images.
+<Note>
+
+This section is aimed at developers familiar with tooling such as `docker` and `git` who wish to make their own DIY container images. The script documented here is not a part of the router product, but an illustrative example of what's involved in making your own images.
+
+</Note>
 
 In the `dockerfiles/diy` directory, we now provide a script, `build_docker_image.sh` which illustrates how to build your own docker images from either our released tarballs or from a git commit hash or tag. Here's how to use it:
 
