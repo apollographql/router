@@ -107,7 +107,7 @@ Service name discovery is handled in the following order:
 3. `router.yaml` `service_name`
 4. `router.yaml` `resources` (attributes)
 
-If none of the above are found then the service name will be set to `unknown_service:apollo_router` or `unknown_service` if the executable name cannot be determined.
+If none of the above are found then the service name will be set to `unknown_service:router` or `unknown_service` if the executable name cannot be determined.
 
 Users who have not explicitly configured their service name should do so with either the YAML config file or the `OTEL_SERVICE_NAME` environment variable.
 
