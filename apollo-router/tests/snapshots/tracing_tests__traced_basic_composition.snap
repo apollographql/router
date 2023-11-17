@@ -138,15 +138,15 @@ expression: get_spans()
             }
           },
           "children": {
-            "apollo_router::services::router_service::receive_body": {
-              "name": "apollo_router::services::router_service::receive_body",
+            "apollo_router::services::router::service::receive_body": {
+              "name": "apollo_router::services::router::service::receive_body",
               "record": {
                 "entries": [],
                 "metadata": {
                   "name": "receive_body",
-                  "target": "apollo_router::services::router_service",
+                  "target": "apollo_router::services::router::service",
                   "level": "DEBUG",
-                  "module_path": "apollo_router::services::router_service",
+                  "module_path": "apollo_router::services::router::service",
                   "fields": {
                     "names": []
                   }
@@ -220,8 +220,8 @@ expression: get_spans()
                 }
               },
               "children": {
-                "apollo_router::services::supergraph_service::query_planning": {
-                  "name": "apollo_router::services::supergraph_service::query_planning",
+                "apollo_router::services::supergraph::service::query_planning": {
+                  "name": "apollo_router::services::supergraph::service::query_planning",
                   "record": {
                     "entries": [
                       [
@@ -271,9 +271,9 @@ expression: get_spans()
                     ],
                     "metadata": {
                       "name": "query_planning",
-                      "target": "apollo_router::services::supergraph_service",
+                      "target": "apollo_router::services::supergraph::service",
                       "level": "INFO",
-                      "module_path": "apollo_router::services::supergraph_service",
+                      "module_path": "apollo_router::services::supergraph::service",
                       "fields": {
                         "names": [
                           "otel.kind"
@@ -700,15 +700,15 @@ expression: get_spans()
                         }
                       }
                     },
-                    "apollo_router::services::execution_service::format_response": {
-                      "name": "apollo_router::services::execution_service::format_response",
+                    "apollo_router::services::execution::service::format_response": {
+                      "name": "apollo_router::services::execution::service::format_response",
                       "record": {
                         "entries": [],
                         "metadata": {
                           "name": "format_response",
-                          "target": "apollo_router::services::execution_service",
+                          "target": "apollo_router::services::execution::service",
                           "level": "DEBUG",
-                          "module_path": "apollo_router::services::execution_service",
+                          "module_path": "apollo_router::services::execution::service",
                           "fields": {
                             "names": []
                           }

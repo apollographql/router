@@ -10,6 +10,8 @@ use tower::BoxError;
 use crate::graphql;
 use crate::Context;
 
+pub(crate) mod service;
+
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;

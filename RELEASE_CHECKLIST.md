@@ -56,7 +56,11 @@ The examples below will use [the GitHub CLI (`gh`)](https://cli.github.com/) to 
 
 A release can be cut from any branch, but we assume you'll be doing it from `dev`.  If you're just doing a release candidate, you can skip merging it back into `main`.
 
-1. Make sure you have `cargo` installed on your machine and in your `PATH`.
+1. Make sure you have `cargo` installed on your machine and in your `PATH`. You also need:
+  - `helm-docs`: see <https://github.com/norwoodj/helm-docs#installation>
+  - `cargo-about`: `cargo install --locked cargo-about`
+  - `cargo-deny`: `cargo install --locked cargo-deny`
+  - `set-version` from `cargo-edit`: `cargo install --locked cargo-edit`
 2. Pick the version number you are going to release.  This project uses [Semantic Versioning 2.0.0](https://semver.org/), so analyze the existing changes in the `.changesets/` directory to pick the right next version.  (e.g., If there are `feat_` changes, it must be a minor version bump.  If there are `breaking_` changes, it must be a _major_ version bump).  **Do not release a major version without explicit agreement from core team members**.
 3. Checkout the branch you want to cut from.  Typically, this is `dev`, but you could do this from another branch as well.
 
