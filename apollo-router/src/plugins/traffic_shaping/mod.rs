@@ -35,7 +35,6 @@ pub(crate) use self::rate::RateLimited;
 pub(crate) use self::retry::RetryPolicy;
 pub(crate) use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
-use crate::configuration::RedisCache;
 use crate::error::ConfigurationError;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -155,8 +154,6 @@ impl Merge for RetryConfig {
 struct SubgraphShaping {
     #[serde(flatten)]
     shaping: Shaping,
-    /// Enable entity caching
-    experimental_entity_caching: Option<SubgraphEntityCaching>,
 }
 
 impl Merge for SubgraphShaping {
@@ -165,30 +162,7 @@ impl Merge for SubgraphShaping {
             None => self.clone(),
             Some(fallback) => SubgraphShaping {
                 shaping: self.shaping.merge(Some(&fallback.shaping)),
-                experimental_entity_caching: self
-                    .experimental_entity_caching
-                    .as_ref()
-                    .or(fallback.experimental_entity_caching.as_ref())
-                    .cloned(),
             },
-        }
-    }
-}
-
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct SubgraphEntityCaching {
-    /// expiration for all keys
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
-    #[schemars(with = "String")]
-    pub(crate) ttl: Duration,
-}
-
-impl Merge for SubgraphEntityCaching {
-    fn merge(&self, fallback: Option<&Self>) -> Self {
-        match fallback {
-            None => self.clone(),
-            Some(fallback) => fallback.clone(),
         }
     }
 }
@@ -218,8 +192,6 @@ pub(crate) struct Config {
     subgraphs: HashMap<String, SubgraphShaping>,
     /// DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
     deduplicate_variables: Option<bool>,
-    /// Experimental URLs of Redis cache used for subgraph response caching
-    pub(crate) experimental_cache: Option<RedisCache>,
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
