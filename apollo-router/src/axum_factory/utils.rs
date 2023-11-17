@@ -1,5 +1,7 @@
 //! Utilities used for [`super::AxumHttpServerFactory`]
 
+use std::net::SocketAddr;
+
 use async_compression::tokio::write::BrotliDecoder;
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::ZlibDecoder;
@@ -14,6 +16,7 @@ use opentelemetry::global;
 use opentelemetry::trace::TraceContextExt;
 use tokio::io::AsyncWriteExt;
 use tower_http::trace::MakeSpan;
+use tower_service::Service;
 use tracing::Span;
 
 use crate::plugins::telemetry::SpanMode;
@@ -145,5 +148,48 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         }
 
         span
+    }
+}
+
+pub(crate) struct InjectConnectionInfo<S> {
+    inner: S,
+    connection_info: ConnectionInfo,
+}
+
+#[derive(Clone)]
+pub(crate) struct ConnectionInfo {
+    pub(crate) peer_address: Option<SocketAddr>,
+    pub(crate) server_address: Option<SocketAddr>,
+}
+
+impl<S> InjectConnectionInfo<S> {
+    pub(crate) fn new(service: S, connection_info: ConnectionInfo) -> Self {
+        InjectConnectionInfo {
+            inner: service,
+            connection_info,
+        }
+    }
+}
+
+impl<S, B> Service<http::Request<B>> for InjectConnectionInfo<S>
+where
+    S: Service<http::Request<B>>,
+{
+    type Response = <S as Service<http::Request<B>>>::Response;
+
+    type Error = <S as Service<http::Request<B>>>::Error;
+
+    type Future = <S as Service<http::Request<B>>>::Future;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::result::Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: http::Request<B>) -> Self::Future {
+        req.extensions_mut().insert(self.connection_info.clone());
+        self.inner.call(req)
     }
 }

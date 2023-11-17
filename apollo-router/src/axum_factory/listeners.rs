@@ -20,6 +20,8 @@ use tokio::sync::mpsc;
 use tokio::sync::Notify;
 use tower_service::Service;
 
+use crate::axum_factory::utils::ConnectionInfo;
+use crate::axum_factory::utils::InjectConnectionInfo;
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
@@ -233,6 +235,10 @@ pub(super) fn serve_router_on_listen_addr(
                                 match res {
                                     NetworkStream::Tcp(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
+                                        let app = InjectConnectionInfo::new(app, ConnectionInfo {
+                                            peer_address: stream.peer_addr().ok(),
+                                            server_address: stream.local_addr().ok(),
+                                        });
                                         let app = IdleConnectionChecker::new(received_first_request.clone(), app);
 
                                         stream

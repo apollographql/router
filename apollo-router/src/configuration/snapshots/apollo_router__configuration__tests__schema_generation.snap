@@ -5729,12 +5729,6 @@ expression: "&schema"
                           "type": "boolean",
                           "nullable": true
                         },
-                        "http.request.method.original": {
-                          "description": "Original HTTP method sent by the client in the request line. Examples: * GeT * ACL * foo Requirement level: Conditionally Required (If and only if it’s different than http.request.method)",
-                          "default": null,
-                          "type": "boolean",
-                          "nullable": true
-                        },
                         "http.response.body.size": {
                           "description": "The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size. Examples: * 3495 Requirement level: Recommended",
                           "default": null,
@@ -5748,7 +5742,31 @@ expression: "&schema"
                           "nullable": true
                         },
                         "http.route": {
-                          "description": "The matched route (path template in the format used by the respective server framework). Examples: * 65123 Requirement level: Conditionally Required: If and only if it’s available",
+                          "description": "The matched route (path template in the format used by the respective server framework). Examples: * /graphql Requirement level: Conditionally Required: If and only if it’s available",
+                          "default": null,
+                          "type": "boolean",
+                          "nullable": true
+                        },
+                        "network.local.address": {
+                          "description": "Local socket address. Useful in case of a multi-IP host. Examples: * 10.1.2.80 * /tmp/my.sock Requirement level: Opt-In",
+                          "default": null,
+                          "type": "boolean",
+                          "nullable": true
+                        },
+                        "network.local.port": {
+                          "description": "Local socket port. Useful in case of a multi-port host. Examples: * 65123 Requirement level: Opt-In",
+                          "default": null,
+                          "type": "boolean",
+                          "nullable": true
+                        },
+                        "network.peer.address": {
+                          "description": "Peer address of the network connection - IP address or Unix domain socket name. Examples: * 10.1.2.80 * /tmp/my.sock Requirement level: Recommended",
+                          "default": null,
+                          "type": "boolean",
+                          "nullable": true
+                        },
+                        "network.peer.port": {
+                          "description": "Peer port number of the network connection. Examples: * 65123 Requirement level: Recommended",
                           "default": null,
                           "type": "boolean",
                           "nullable": true

@@ -41,7 +41,20 @@ pub(crate) trait Selector {
 }
 
 pub(crate) trait DefaultForLevel {
-    fn defaults_for_level(&mut self, requirement_level: &DefaultAttributeRequirementLevel);
+    /// Don't call this directly, use `defaults_for_levels` instead.
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel);
+    fn defaults_for_levels(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+        match requirement_level {
+            DefaultAttributeRequirementLevel::None => Default::default(),
+            DefaultAttributeRequirementLevel::Required => {
+                self.defaults_for_level(requirement_level)
+            }
+            DefaultAttributeRequirementLevel::Recommended => {
+                self.defaults_for_level(DefaultAttributeRequirementLevel::Required);
+                self.defaults_for_level(DefaultAttributeRequirementLevel::Recommended);
+            }
+        }
+    }
 }
 
 pub(crate) trait DatadogId {

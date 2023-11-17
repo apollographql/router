@@ -39,11 +39,11 @@ impl Spans {
     /// Update the defaults for spans configuration regarding the `default_attribute_requirement_level`
     pub(crate) fn update_defaults(&mut self) {
         self.router
-            .defaults_for_level(&self.default_attribute_requirement_level);
+            .defaults_for_levels(self.default_attribute_requirement_level);
         self.supergraph
-            .defaults_for_level(&self.default_attribute_requirement_level);
+            .defaults_for_levels(self.default_attribute_requirement_level);
         self.subgraph
-            .defaults_for_level(&self.default_attribute_requirement_level);
+            .defaults_for_levels(self.default_attribute_requirement_level);
     }
 }
 
@@ -69,16 +69,20 @@ pub(crate) struct SubgraphSpans {
 }
 
 impl DefaultForLevel for RouterSpans {
-    fn defaults_for_level(&mut self, requirement_level: &DefaultAttributeRequirementLevel) {
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
         self.attributes
             .attributes
             .common
+            .defaults_for_level(requirement_level);
+        self.attributes
+            .attributes
+            .server
             .defaults_for_level(requirement_level);
     }
 }
 
 impl DefaultForLevel for SupergraphSpans {
-    fn defaults_for_level(&mut self, requirement_level: &DefaultAttributeRequirementLevel) {
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
         match requirement_level {
             DefaultAttributeRequirementLevel::Required => {}
             DefaultAttributeRequirementLevel::Recommended => {
@@ -98,26 +102,16 @@ impl DefaultForLevel for SupergraphSpans {
 }
 
 impl DefaultForLevel for SubgraphSpans {
-    fn defaults_for_level(&mut self, requirement_level: &DefaultAttributeRequirementLevel) {
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
         match requirement_level {
             DefaultAttributeRequirementLevel::Required => {
-                if self
-                    .attributes
-                    .attributes
-                    .graphql_federation_subgraph_name
-                    .is_none()
-                {
-                    self.attributes.attributes.graphql_federation_subgraph_name = Some(true);
+                if self.attributes.attributes.subgraph_name.is_none() {
+                    self.attributes.attributes.subgraph_name = Some(true);
                 }
             }
             DefaultAttributeRequirementLevel::Recommended => {
-                if self
-                    .attributes
-                    .attributes
-                    .graphql_federation_subgraph_name
-                    .is_none()
-                {
-                    self.attributes.attributes.graphql_federation_subgraph_name = Some(true);
+                if self.attributes.attributes.subgraph_name.is_none() {
+                    self.attributes.attributes.subgraph_name = Some(true);
                 }
                 if self.attributes.attributes.graphql_document.is_none() {
                     self.attributes.attributes.graphql_document = Some(true);
