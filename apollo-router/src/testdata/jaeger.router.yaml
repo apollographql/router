@@ -10,7 +10,7 @@ telemetry:
       header_name: apollo-custom-trace-id
     propagation:
       jaeger: true
-    trace_config:
+    common:
       service_name: router
     jaeger:
       enabled: true

@@ -3,15 +3,13 @@ title: HTTP callback protocol for GraphQL subscriptions
 description: For federated subgraphs communicating with the Apollo Router
 ---
 
-> This protocol is currently in [preview](/resources/product-launch-stages#preview). Breaking changes might be introduced during the preview period.
->
-> **You only need to read this reference if you're adding support for this protocol to a GraphQL server library or other system!**
+<PreviewFeature />
 
-This reference describes a protocol for GraphQL servers (or **subgraphs**) to send subscription data to a subscribing **graph router** (such as the Apollo Router) via HTTP callbacks.
+This reference describes a protocol for GraphQL servers (or **subgraphs**) to send subscription data to a subscribing **graph router** (such as the Apollo Router) via HTTP callbacks. Use this reference if you're adding support for this protocol to a GraphQL server library or other system.
 
 For routers with many simultaneous open subscriptions, this protocol scales better than WebSocket-based protocols, which require long-lasting open connections.
 
-The Apollo Router provides [preview support for this protocol](./subscription-support/#http-callback-setup-preview) as part of its support for federated subscriptions:
+The Apollo Router provides [support for this protocol](./subscription-support/#http-callback-setup-preview) as part of its support for federated subscriptions:
 
 ```mermaid
 sequenceDiagram

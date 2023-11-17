@@ -90,9 +90,11 @@ Where indicated, some of these options can also be provided via an environment v
 
 The absolute or relative path to the Apollo Router's [supergraph schema](/federation/federated-types/overview/#supergraph-schema).
 
+Setting this option disables polling from Apollo Uplink to fetch the latest supergraph schema.
+
 To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](/federation/quickstart/local-composition/).
 
-**Required** if you are _not_ using managed federation. If you _are_ using managed federation, do not provide this value.
+**Required** if you are _not_ using managed federation. If you _are_ using managed federation, you may need to set this option when following [advanced deployment workflows](/federation/managed-federation/deployment/#advanced-deployment-workflows).
 
 </td>
 </tr>
@@ -517,6 +519,10 @@ See [Apollo Router's _experimental_ support for query batching](../executing-ope
 
 See [GraphQL subscriptions in the Apollo Router](../executing-operations/subscription-support/#router-setup).
 
+### Authorization directives support
+
+See [Authorization in the Apollo Router](./authorization#authorization-directives).
+
 ### External coprocessing
 
 See [External coprocessing in the Apollo Router](../customizations/coprocessor/).
@@ -632,10 +638,6 @@ tls:
 ```
 
 ### Request limits
-
-> **Request limits are currently in [preview](/resources/product-launch-stages#preview).**
->
-> To set request limits, you must run v1.17 or later of the Apollo Router. [Download the latest version.](../quickstart#download-options)
 
 The Apollo Router supports enforcing three types of request limits for enhanced security:
 

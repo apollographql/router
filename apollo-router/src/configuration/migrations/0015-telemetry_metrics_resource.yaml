@@ -1,0 +1,5 @@
+description: telemetry.metrics.common.resources has been renamed to telemetry.metrics.common.resource
+actions:
+  - type: move
+    from: telemetry.metrics.common.resources
+    to: telemetry.metrics.common.resource

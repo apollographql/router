@@ -17,7 +17,7 @@ query:
         }
         
 filtered:
-query {
+{
   topProducts {
     type
     publicReviews {

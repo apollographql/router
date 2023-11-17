@@ -46,17 +46,17 @@ You can customize your router's trace sampling rate by setting the following opt
 telemetry:
   apollo:
     # In this example, the router will request traces for 50% of requests.
-    # This value can't exceed the value of tracing.trace_config.sampler.
+    # This value can't exceed the value of tracing.common.sampler.
     field_level_instrumentation_sampler: 0.5
 
   tracing:
-    trace_config:
+    common:
       # FTV1 uses the same trace sampling as other tracing options,
       # so this value is also required.
       sampler: 0.5
 ```
 
-> **Note:** Because field-level instrumentation is dependent on general-purpose [OpenTelemetry tracing](./tracing/), the value of `apollo.field_level_instrumentation_sampler` cannot exceed the value of `tracing.trace_config.sampler`.
+> **Note:** Because field-level instrumentation is dependent on general-purpose [OpenTelemetry tracing](./tracing/), the value of `apollo.field_level_instrumentation_sampler` cannot exceed the value of `tracing.common.sampler`.
 
 ### Disabling field-level traces
 
@@ -278,7 +278,7 @@ telemetry:
   apollo:
     # The percentage of requests will include HTTP request and response headers in traces sent to Apollo Studio.
     # This is expensive and should be left at a low value.
-    # This cannot be higher than tracing->trace_config->sampler
+    # This cannot be higher than tracing->common->sampler
     field_level_instrumentation_sampler: 0.01 # (default)
 
     # Include HTTP request and response headers in traces sent to Apollo Studio
@@ -291,7 +291,7 @@ telemetry:
       except: # Send all variable values except for variable named first
         - first
   tracing:
-    trace_config:
+    common:
       sampler: 0.5 # The percentage of requests that will generate traces (a rate or `always_on` or `always_off`)
 ```
 
