@@ -421,7 +421,7 @@ The `@policy` directive marks fields and types as restricted based on authorizat
 The `@policy` directive includes a `policies` argument that defines an array of the required policies. The following example shows a policy that requires all roles from the claims object to contain the string `"support"`:
 
 ```graphql
-@policy(policies: [[]"claims[`roles`].contains(`support`)"]])
+@policy(policies: [["claims[`roles`].contains(`support`)"]])
 ```
 
 At the [`RouterService` level](../customizations/overview#the-request-lifecycle), the Apollo Router extracts the list of policies relevant to a request from the schema and then stores them in the request's context in `apollo_authorization::policies::required` as a map `policy -> null|true|false`.
