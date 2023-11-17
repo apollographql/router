@@ -332,7 +332,7 @@ impl Query {
             has_unconditional_defer: false,
             conditional_defer_variable_names: IndexSet::new(),
         };
-        let fragments = Fragments::from_hir(document, schema, &mut defer_stats)?;
+        let fragments = Fragments::from_hir(document, &mut defer_stats)?;
         let operations = document
             .all_operations()
             .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats))
@@ -1093,7 +1093,7 @@ impl Operation {
             .selections
             .iter()
             .filter_map(|selection| {
-                Selection::from_hir(selection, &type_name, schema, 0, defer_stats).transpose()
+                Selection::from_hir(selection, &type_name, 0, defer_stats).transpose()
             })
             .collect::<Result<_, _>>()?;
         let variables = operation

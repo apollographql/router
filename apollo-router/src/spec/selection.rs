@@ -9,7 +9,6 @@ use crate::json_ext::PathElement;
 use crate::spec::query::subselections::DEFER_DIRECTIVE_NAME;
 use crate::spec::query::DeferStats;
 use crate::spec::FieldType;
-use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::spec::TYPENAME;
 
@@ -44,7 +43,6 @@ impl Selection {
     pub(crate) fn from_hir(
         selection: &executable::Selection,
         current_type: &str,
-        schema: &Schema,
         mut count: usize,
         defer_stats: &mut DeferStats,
     ) -> Result<Option<Self>, SpecError> {
@@ -80,7 +78,6 @@ impl Selection {
                                 Selection::from_hir(
                                     selection,
                                     field_type.0.inner_named_type(),
-                                    schema,
                                     count,
                                     defer_stats,
                                 )
@@ -113,41 +110,12 @@ impl Selection {
                     .unwrap_or(current_type)
                     .to_owned();
 
-                let fragment_type = &type_condition;
-
-                // this is the type we pass when extracting the fragment's selections
-                // If the type condition is a union or interface and the current type implements it, then we want
-                // to keep the current type when extracting the fragment's selections, as it is more precise
-                // than the interface.
-                // If it is not, then we use the type condition
-                let relevant_type = if schema.is_interface(type_condition.as_str()) {
-                    // Query validation should have already verified that current type implements that interface
-                    debug_assert!(
-                        schema.is_subtype(
-                            type_condition.as_str(),
-                            current_type
-                        ) || schema.is_implementation(
-                            type_condition.as_str(),
-                            current_type
-                        )
-                     ||
-                        // if the current type and the type condition are both the same interface, it is still valid
-                        type_condition.as_str()
-                            == current_type
-                    );
-                    let relevant_type = schema.most_precise(current_type, fragment_type);
-                    debug_assert!(relevant_type.is_some());
-                    relevant_type.unwrap_or(fragment_type)
-                } else {
-                    fragment_type
-                };
-
                 let selection_set = inline_fragment
                     .selection_set
                     .selections
                     .iter()
                     .filter_map(|selection| {
-                        Selection::from_hir(selection, relevant_type, schema, count, defer_stats)
+                        Selection::from_hir(selection, type_condition.as_str(), count, defer_stats)
                             .transpose()
                     })
                     .collect::<Result<_, _>>()?;

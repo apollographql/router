@@ -168,40 +168,6 @@ impl Schema {
         self.definitions.is_subtype(abstract_type, maybe_subtype)
     }
 
-    pub(crate) fn is_implementation(&self, interface: &str, implementor: &str) -> bool {
-        self.definitions
-            .get_interface(interface)
-            .map(|interface| {
-                // FIXME: this looks backwards
-                interface.implements_interfaces.contains(implementor)
-            })
-            .unwrap_or(false)
-    }
-
-    pub(crate) fn is_interface(&self, abstract_type: &str) -> bool {
-        self.definitions.get_interface(abstract_type).is_some()
-    }
-
-    // given two field, returns the one that implements the other, if applicable
-    pub(crate) fn most_precise<'f>(&self, a: &'f str, b: &'f str) -> Option<&'f str> {
-        let typename_a = a;
-        let typename_b = b;
-        if typename_a == typename_b {
-            return Some(a);
-        }
-        if self.is_subtype(typename_a, typename_b) || self.is_implementation(typename_a, typename_b)
-        {
-            Some(b)
-        } else if self.is_subtype(typename_b, typename_a)
-            || self.is_implementation(typename_b, typename_a)
-        {
-            Some(a)
-        } else {
-            // No relationship between a and b
-            None
-        }
-    }
-
     /// Return an iterator over subgraphs that yields the subgraph name and its URL.
     pub(crate) fn subgraphs(&self) -> impl Iterator<Item = (&String, &Uri)> {
         self.subgraphs.iter()

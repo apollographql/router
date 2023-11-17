@@ -5,7 +5,6 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::spec::query::DeferStats;
-use crate::spec::Schema;
 use crate::spec::Selection;
 use crate::spec::SpecError;
 
@@ -17,7 +16,6 @@ pub(crate) struct Fragments {
 impl Fragments {
     pub(crate) fn from_hir(
         doc: &ExecutableDocument,
-        schema: &Schema,
         defer_stats: &mut DeferStats,
     ) -> Result<Self, SpecError> {
         let map = doc
@@ -32,7 +30,7 @@ impl Fragments {
                         .selections
                         .iter()
                         .filter_map(|selection| {
-                            Selection::from_hir(selection, type_condition, schema, 0, defer_stats)
+                            Selection::from_hir(selection, type_condition, 0, defer_stats)
                                 .transpose()
                         })
                         .collect::<Result<Vec<_>, _>>()?,
