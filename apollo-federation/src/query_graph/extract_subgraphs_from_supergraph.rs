@@ -1393,29 +1393,14 @@ fn add_subgraph_input_field(
     Ok(())
 }
 
-// TODO: Ask apollo-rs for type-reference parsing function, similar to graphql-js
+/// Parse a string encoding a type reference.
 fn decode_type(type_: &str) -> Result<Type, FederationError> {
-    // Detect if type string is trying to end the field/type in the hack below.
-    if type_.chars().any(|c| c == '}' || c == ':') {
-        return Err(SingleFederationError::InvalidGraphQL {
+    Type::parse(type_, "").map_err(|_| {
+        SingleFederationError::InvalidGraphQL {
             message: format!("Cannot parse type \"{}\"", type_),
         }
-        .into());
-    }
-    let schema = Schema::parse(format!("type Query {{ field: {} }}", type_), "temp.graphql");
-    let Some(ExtendedType::Object(dummy_type)) = schema.types.get("Query") else {
-        return Err(SingleFederationError::InvalidGraphQL {
-            message: format!("Cannot parse type \"{}\"", type_),
-        }
-        .into());
-    };
-    let Some(dummy_field) = dummy_type.fields.get("field") else {
-        return Err(SingleFederationError::InvalidGraphQL {
-            message: format!("Cannot parse type \"{}\"", type_),
-        }
-        .into());
-    };
-    Ok(dummy_field.ty.clone())
+        .into()
+    })
 }
 
 fn get_subgraph<'subgraph>(

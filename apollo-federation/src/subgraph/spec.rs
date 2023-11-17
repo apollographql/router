@@ -7,7 +7,7 @@ use apollo_compiler::ast::{
 use apollo_compiler::schema::{
     Component, ComponentName, EnumType, ExtendedType, ObjectType, ScalarType, UnionType,
 };
-use apollo_compiler::{name, Node};
+use apollo_compiler::{name, ty, Node};
 use indexmap::{IndexMap, IndexSet};
 use lazy_static::lazy_static;
 use thiserror::Error;
@@ -312,7 +312,7 @@ impl FederationSpecDefinitions {
             arguments: vec![InputValueDefinition {
                 description: None,
                 name: name!("name"),
-                ty: Type::Named(name!("String")).non_null().into(),
+                ty: ty!(String!).into(),
                 default_value: None,
                 directives: Default::default(),
             }
@@ -335,7 +335,7 @@ impl FederationSpecDefinitions {
                 InputValueDefinition {
                     description: None,
                     name: name!("resolvable"),
-                    ty: Type::Named(name!("Boolean")).into(),
+                    ty: ty!(Boolean).into(),
                     default_value: Some(true.into()),
                     directives: Default::default(),
                 }
@@ -422,7 +422,7 @@ impl FederationSpecDefinitions {
             arguments: vec![InputValueDefinition {
                 description: None,
                 name: name!("from"),
-                ty: Type::Named(name!("String")).non_null().into(),
+                ty: ty!(String!).into(),
                 default_value: None,
                 directives: Default::default(),
             }
@@ -492,7 +492,7 @@ impl FederationSpecDefinitions {
             arguments: vec![InputValueDefinition {
                 description: None,
                 name: name!("name"),
-                ty: Type::Named(name!("String")).non_null().into(),
+                ty: ty!(String!).into(),
                 default_value: None,
                 directives: Default::default(),
             }
@@ -549,7 +549,7 @@ impl FederationSpecDefinitions {
                 description: None,
                 directives: Default::default(),
                 arguments: Vec::new(),
-                ty: Type::Named(name!("String")),
+                ty: ty!(String),
             }),
         );
         ExtendedType::Object(Node::new(service_type))
@@ -664,7 +664,7 @@ impl LinkSpecDefinitions {
                     description: None,
                     name: name!("url"),
                     // TODO: doc-comment disagrees with non-null here
-                    ty: Type::Named(name!("String")).non_null().into(),
+                    ty: ty!(String!).into(),
                     default_value: None,
                     directives: Default::default(),
                 }
@@ -672,7 +672,7 @@ impl LinkSpecDefinitions {
                 InputValueDefinition {
                     description: None,
                     name: name!("as"),
-                    ty: Type::Named(name!("String")).into(),
+                    ty: ty!(String).into(),
                     default_value: None,
                     directives: Default::default(),
                 }
