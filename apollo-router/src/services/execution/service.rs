@@ -29,9 +29,6 @@ use tracing::Instrument;
 use tracing::Span;
 use tracing_core::Level;
 
-use super::new_service::ServiceFactory;
-use super::Plugins;
-use super::SubgraphServiceFactory;
 use crate::graphql::Error;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
@@ -45,8 +42,11 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::services::execution;
+use crate::services::new_service::ServiceFactory;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
+use crate::services::Plugins;
+use crate::services::SubgraphServiceFactory;
 use crate::spec::query::subselections::BooleanValues;
 use crate::spec::Query;
 use crate::spec::Schema;
@@ -617,7 +617,7 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
         ServiceBuilder::new()
             .service(
                 self.plugins.iter().rev().fold(
-                    crate::services::execution_service::ExecutionService {
+                    crate::services::execution::service::ExecutionService {
                         schema: self.schema.clone(),
                         subgraph_service_factory: self.subgraph_service_factory.clone(),
                         subscription_config: subscription_plugin_conf,
