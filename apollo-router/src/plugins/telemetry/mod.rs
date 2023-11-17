@@ -124,11 +124,13 @@ use crate::ListenAddr;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
+mod config_new;
 mod endpoint;
 pub(crate) mod formatters;
 pub(crate) mod metrics;
 mod otlp;
 pub(crate) mod reload;
+mod resource;
 pub(crate) mod tracing;
 pub(crate) mod utils;
 
@@ -607,7 +609,7 @@ impl Telemetry {
         if propagation.datadog || tracing.datadog.enabled {
             propagators.push(Box::<opentelemetry_datadog::DatadogPropagator>::default());
         }
-        if propagation.awsxray {
+        if propagation.aws_xray {
             propagators.push(Box::<opentelemetry_aws::XrayPropagator>::default());
         }
         if let Some(from_request_header) = &propagation.request.header_name {
@@ -623,20 +625,20 @@ impl Telemetry {
         config: &config::Conf,
     ) -> Result<(SamplerOption, opentelemetry::sdk::trace::TracerProvider), BoxError> {
         let tracing_config = &config.tracing;
-        let mut trace_config = tracing_config.trace_config.clone();
-        let mut sampler = trace_config.sampler.clone();
+        let mut common = tracing_config.common.clone();
+        let mut sampler = common.sampler.clone();
         // set it to AlwaysOn: it is now done in the SamplingFilter, so whatever is sent to an exporter
         // should be accepted
-        trace_config.sampler = SamplerOption::Always(Sampler::AlwaysOn);
+        common.sampler = SamplerOption::Always(Sampler::AlwaysOn);
 
-        let mut builder = opentelemetry::sdk::trace::TracerProvider::builder()
-            .with_config((&trace_config).into());
+        let mut builder =
+            opentelemetry::sdk::trace::TracerProvider::builder().with_config((&common).into());
 
-        builder = setup_tracing(builder, &tracing_config.jaeger, &trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.zipkin, &trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.datadog, &trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.otlp, &trace_config)?;
-        builder = setup_tracing(builder, &config.apollo, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.jaeger, &common)?;
+        builder = setup_tracing(builder, &tracing_config.zipkin, &common)?;
+        builder = setup_tracing(builder, &tracing_config.datadog, &common)?;
+        builder = setup_tracing(builder, &tracing_config.otlp, &common)?;
+        builder = setup_tracing(builder, &config.apollo, &common)?;
 
         if !tracing_config.jaeger.enabled()
             && !tracing_config.zipkin.enabled()
