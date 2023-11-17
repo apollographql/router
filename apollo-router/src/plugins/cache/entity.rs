@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ops::ControlFlow;
+use std::sync::Arc;
 use std::time::Duration;
 
 use http::header;
@@ -39,7 +40,8 @@ register_plugin!("apollo", "experimental_entity_cache", EntityCache);
 
 struct EntityCache {
     storage: RedisCacheStorage,
-    subgraph_ttl: HashMap<String, Duration>,
+    subgraphs: Arc<HashMap<String, Subgraph>>,
+    enabled: Option<bool>,
 }
 
 /// Configuration for entity caching
@@ -47,6 +49,11 @@ struct EntityCache {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Config {
     redis: RedisCache,
+    /// activates caching for all subgraphs, unless overriden in subgraph specific configuration
+    #[serde(default)]
+    enabled: Option<bool>,
+    /// Per subgraph configuration
+    #[serde(default)]
     subgraphs: HashMap<String, Subgraph>,
 }
 
@@ -55,10 +62,21 @@ struct Config {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Subgraph {
     /// expiration for all keys
+    pub(crate) ttl: Option<Ttl>,
+
+    /// activates caching for this subgraph, overrides the global configuration
+    #[serde(default)]
+    enabled: Option<bool>,
+}
+
+/// Per subgraph configuration for entity caching
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+struct Ttl(
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
-    pub(crate) ttl: Duration,
-}
+    Duration,
+);
 
 #[async_trait::async_trait]
 impl Plugin for EntityCache {
@@ -69,16 +87,11 @@ impl Plugin for EntityCache {
         Self: Sized,
     {
         let storage = RedisCacheStorage::new(init.config.redis).await?;
-        let subgraph_ttl = init
-            .config
-            .subgraphs
-            .into_iter()
-            .map(|(name, config)| (name, config.ttl))
-            .collect();
 
         Ok(Self {
             storage,
-            subgraph_ttl,
+            enabled: init.config.enabled,
+            subgraphs: Arc::new(init.config.subgraphs),
         })
     }
 
@@ -103,14 +116,23 @@ impl Plugin for EntityCache {
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let cache = self.storage.clone();
         let cache2 = self.storage.clone();
-        let subgraph_ttl = self
-            .subgraph_ttl
-            .get(name)
-            .cloned()
-            .or_else(|| self.storage.ttl());
+
+        let (subgraph_ttl, subgraph_enabled) = if let Some(config) = self.subgraphs.get(name) {
+            (
+                config
+                    .ttl
+                    .clone()
+                    .map(|t| t.0)
+                    .or_else(|| self.storage.ttl()),
+                config.enabled.or(self.enabled).unwrap_or(false),
+            )
+        } else {
+            (self.storage.ttl(), self.enabled.unwrap_or(false))
+        };
         let name = name.to_string();
 
-        ServiceBuilder::new()
+        if subgraph_enabled {
+            ServiceBuilder::new()
             .oneshot_checkpoint_async(move |request: subgraph::Request| {
                 let name = name.clone();
                 let cache = cache.clone();
@@ -134,6 +156,9 @@ impl Plugin for EntityCache {
             })
             .service(service)
             .boxed()
+        } else {
+            service
+        }
     }
 }
 
