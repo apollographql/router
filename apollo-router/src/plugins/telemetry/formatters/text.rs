@@ -31,7 +31,6 @@ use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::formatters::to_map;
 use crate::plugins::telemetry::tracing::APOLLO_PRIVATE_PREFIX;
 
-#[derive(Default)]
 pub(crate) struct Text {
     #[allow(dead_code)]
     timer: SystemTime,
@@ -41,6 +40,17 @@ pub(crate) struct Text {
     resource: BTreeMap<String, Value>,
     config: TextFormat,
     excluded_attributes: HashSet<&'static str>,
+}
+
+impl Default for Text {
+    fn default() -> Self {
+        Self {
+            timer: Default::default(),
+            resource: Default::default(),
+            config: Default::default(),
+            excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
+        }
+    }
 }
 
 impl Text {
@@ -117,21 +127,21 @@ impl Text {
     #[inline]
     fn format_location(&self, event: &Event<'_>, writer: &mut Writer<'_>) -> fmt::Result {
         if let (Some(filename), Some(line)) = (event.metadata().file(), event.metadata().line()) {
+            let style = Style::new().dimmed();
             if self.config.ansi_escape_codes {
-                let style = Style::new().dimmed();
                 write!(writer, "{}", style.prefix())?;
-                if self.config.display_filename {
-                    write!(writer, "{filename}")?;
-                }
-                if self.config.display_filename && self.config.display_line_number {
-                    write!(writer, ":")?;
-                }
-                if self.config.display_line_number {
-                    write!(writer, "{line}")?;
-                }
+            }
+            if self.config.display_filename {
+                write!(writer, "{filename}")?;
+            }
+            if self.config.display_filename && self.config.display_line_number {
+                write!(writer, ":")?;
+            }
+            if self.config.display_line_number {
+                write!(writer, "{line}")?;
+            }
+            if self.config.ansi_escape_codes {
                 write!(writer, "{}", style.suffix())?;
-            } else {
-                write!(writer, "{filename}:{line}")?;
             }
             writer.write_char(' ')?;
         }
@@ -167,10 +177,14 @@ impl Text {
             .and_then(|id| ctx.span(id))
             .or_else(|| ctx.lookup_current());
         if let Some(mut span) = span {
-            self.write_span(writer, &span)?;
-            while let Some(parent) = span.parent() {
-                self.write_span(writer, &parent)?;
-                span = parent;
+            if self.config.display_current_span {
+                self.write_span(writer, &span)?;
+            }
+            if self.config.display_span_list {
+                while let Some(parent) = span.parent() {
+                    self.write_span(writer, &parent)?;
+                    span = parent;
+                }
             }
         }
 

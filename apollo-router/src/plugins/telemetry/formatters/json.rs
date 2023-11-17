@@ -27,7 +27,7 @@ use crate::plugins::telemetry::config_new::logging::JsonFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::formatters::to_map;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct Json {
     config: JsonFormat,
     #[cfg(not(test))]
@@ -45,6 +45,16 @@ impl Json {
             #[cfg(test)]
             resource: to_map(resource).into_iter().collect(),
             config,
+            excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
+        }
+    }
+}
+
+impl Default for Json {
+    fn default() -> Self {
+        Self {
+            config: Default::default(),
+            resource: Default::default(),
             excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
         }
     }

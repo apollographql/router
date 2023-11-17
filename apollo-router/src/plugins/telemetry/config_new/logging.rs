@@ -285,11 +285,11 @@ impl Default for Format {
 #[derive(Deserialize, JsonSchema, Clone, Debug, Eq, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct JsonFormat {
-    /// Include the timestamp with the log event.
+    /// Include the timestamp with the log event. (default: true)
     pub(crate) display_timestamp: bool,
-    /// Include the target with the log event.
+    /// Include the target with the log event. (default: true)
     pub(crate) display_target: bool,
-    /// Include the level with the log event.
+    /// Include the level with the log event. (default: true)
     pub(crate) display_level: bool,
     /// Include the thread_id with the log event.
     pub(crate) display_thread_id: bool,
@@ -301,9 +301,9 @@ pub(crate) struct JsonFormat {
     pub(crate) display_line_number: bool,
     /// Include the current span in this log event.
     pub(crate) display_current_span: bool,
-    /// Include all of the containing span information with the log event.
+    /// Include all of the containing span information with the log event. (default: true)
     pub(crate) display_span_list: bool,
-    /// Include the resource with the log event.
+    /// Include the resource with the log event. (default: true)
     pub(crate) display_resource: bool,
 }
 
@@ -330,11 +330,11 @@ impl Default for JsonFormat {
 pub(crate) struct TextFormat {
     /// Process ansi escapes (default: true)
     pub(crate) ansi_escape_codes: bool,
-    /// Include the timestamp with the log event.
+    /// Include the timestamp with the log event. (default: true)
     pub(crate) display_timestamp: bool,
     /// Include the target with the log event.
     pub(crate) display_target: bool,
-    /// Include the level with the log event.
+    /// Include the level with the log event. (default: true)
     pub(crate) display_level: bool,
     /// Include the thread_id with the log event.
     pub(crate) display_thread_id: bool,
@@ -350,6 +350,10 @@ pub(crate) struct TextFormat {
     pub(crate) display_service_name: bool,
     /// Include the resource with the log event.
     pub(crate) display_resource: bool,
+    /// Include the current span in this log event. (default: true)
+    pub(crate) display_current_span: bool,
+    /// Include all of the containing span information with the log event. (default: true)
+    pub(crate) display_span_list: bool,
 }
 
 impl Default for TextFormat {
@@ -366,6 +370,8 @@ impl Default for TextFormat {
             display_service_namespace: false,
             display_service_name: false,
             display_resource: false,
+            display_current_span: true,
+            display_span_list: true,
         }
     }
 }

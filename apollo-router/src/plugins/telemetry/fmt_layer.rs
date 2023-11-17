@@ -257,6 +257,8 @@ mod tests {
     use tracing_subscriber::layer::SubscriberExt;
 
     use super::*;
+    use crate::plugins::telemetry::config_new::logging::JsonFormat;
+    use crate::plugins::telemetry::config_new::logging::TextFormat;
     use crate::plugins::telemetry::dynamic_attribute::DynAttribute;
 
     #[derive(Default, Clone)]
@@ -288,6 +290,45 @@ mod tests {
         }
     }
 
+    fn generate_simple_span() {
+        let test_span = info_span!(
+            "test",
+            first = "one",
+            apollo_private.should_not_display = "this should be skipped"
+        );
+        test_span.set_dyn_attribute("another".into(), 2.into());
+        test_span.set_dyn_attribute("custom_dyn".into(), "test".into());
+        let _enter = test_span.enter();
+        info!(event_attr = "foo", "Hello from test");
+    }
+
+    fn generate_nested_spans() {
+        let test_span = info_span!(
+            "test",
+            first = "one",
+            apollo_private.should_not_display = "this should be skipped"
+        );
+        test_span.set_dyn_attribute("another".into(), 2.into());
+        test_span.set_dyn_attribute("custom_dyn".into(), "test".into());
+        let _enter = test_span.enter();
+        {
+            let nested_test_span = info_span!(
+                "nested_test",
+                two = "two",
+                apollo_private.is_private = "this should be skipped"
+            );
+            let _enter = nested_test_span.enter();
+
+            nested_test_span.set_dyn_attributes([
+                ("inner".into(), (-42).into()),
+                ("graphql.operation.kind".into(), "Subscription".into()),
+            ]);
+
+            error!(http.method = "GET", "Hello from nested test");
+        }
+        info!(event_attr = "foo", "Hello from test");
+    }
+
     #[tokio::test]
     async fn test_text_logging_attributes() {
         let buff = LogBuffer::default();
@@ -298,17 +339,10 @@ mod tests {
         )
         .boxed();
 
-        ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), || {
-            let test_span = info_span!(
-                "test",
-                first = "one",
-                apollo_private.should_not_display = "this should be skipped"
-            );
-            test_span.set_dyn_attribute("another".into(), 2.into());
-            test_span.set_dyn_attribute("custom_dyn".into(), "test".into());
-            let _enter = test_span.enter();
-            info!(event_attr = "foo", "Hello from test");
-        });
+        ::tracing::subscriber::with_default(
+            fmt::Subscriber::new().with(fmt_layer),
+            generate_simple_span,
+        );
         insta::assert_display_snapshot!(buff);
     }
 
@@ -322,32 +356,10 @@ mod tests {
         )
         .boxed();
 
-        ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), || {
-            let test_span = info_span!(
-                "test",
-                first = "one",
-                apollo_private.should_not_display = "this should be skipped"
-            );
-            test_span.set_dyn_attribute("another".into(), 2.into());
-            test_span.set_dyn_attribute("custom_dyn".into(), "test".into());
-            let _enter = test_span.enter();
-            {
-                let nested_test_span = info_span!(
-                    "nested_test",
-                    two = "two",
-                    apollo_private.is_private = "this should be skipped"
-                );
-                let _enter = nested_test_span.enter();
-
-                nested_test_span.set_dyn_attributes([
-                    ("inner".into(), (-42).into()),
-                    ("graphql.operation.kind".into(), "Subscription".into()),
-                ]);
-
-                error!(http.method = "GET", "Hello from nested test");
-            }
-            info!(event_attr = "foo", "Hello from test");
-        });
+        ::tracing::subscriber::with_default(
+            fmt::Subscriber::new().with(fmt_layer),
+            generate_nested_spans,
+        );
 
         insta::assert_display_snapshot!(buff.to_string());
     }
@@ -362,17 +374,10 @@ mod tests {
         )
         .boxed();
 
-        ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), || {
-            let test_span = info_span!(
-                "test",
-                first = "one",
-                apollo_private.should_not_display = "this should be skipped"
-            );
-            test_span.set_dyn_attribute("another".into(), 2.into());
-            test_span.set_dyn_attribute("custom_dyn".into(), "test".into());
-            let _enter = test_span.enter();
-            info!(event_attr = "foo", "Hello from test");
-        });
+        ::tracing::subscriber::with_default(
+            fmt::Subscriber::new().with(fmt_layer),
+            generate_simple_span,
+        );
         insta::assert_display_snapshot!(buff);
     }
 
@@ -386,32 +391,59 @@ mod tests {
         )
         .boxed();
 
-        ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), || {
-            let test_span = info_span!(
-                "test",
-                first = "one",
-                apollo_private.should_not_display = "this should be skipped"
-            );
-            test_span.set_dyn_attribute("another".into(), 2.into());
-            test_span.set_dyn_attribute("custom_dyn".into(), "test".into());
-            let _enter = test_span.enter();
-            {
-                let nested_test_span = info_span!(
-                    "nested_test",
-                    two = "two",
-                    apollo_private.is_private = "this should be skipped"
-                );
-                let _enter = nested_test_span.enter();
+        ::tracing::subscriber::with_default(
+            fmt::Subscriber::new().with(fmt_layer),
+            generate_nested_spans,
+        );
 
-                nested_test_span.set_dyn_attributes([
-                    ("inner".into(), (-42).into()),
-                    ("graphql.operation.kind".into(), "Subscription".into()),
-                ]);
+        insta::assert_display_snapshot!(buff.to_string());
+    }
 
-                error!(http.method = "GET", "Hello from nested test");
-            }
-            info!(event_attr = "foo", "Hello from test");
-        });
+    #[tokio::test]
+    async fn test_json_logging_without_span_list() {
+        let buff = LogBuffer::default();
+        let json_format = JsonFormat {
+            display_span_list: false,
+            display_current_span: false,
+            display_resource: false,
+            ..Default::default()
+        };
+        let format = Json::new(Default::default(), json_format);
+        let fmt_layer = FmtLayer::new(
+            FilteringFormatter::new(format, filter_metric_events),
+            buff.clone(),
+        )
+        .boxed();
+
+        ::tracing::subscriber::with_default(
+            fmt::Subscriber::new().with(fmt_layer),
+            generate_nested_spans,
+        );
+
+        insta::assert_display_snapshot!(buff.to_string());
+    }
+
+    #[tokio::test]
+    async fn test_text_logging_without_span_list() {
+        let buff = LogBuffer::default();
+        let text_format = TextFormat {
+            display_span_list: false,
+            display_current_span: false,
+            display_resource: false,
+            ansi_escape_codes: false,
+            ..Default::default()
+        };
+        let format = Text::new(Default::default(), text_format);
+        let fmt_layer = FmtLayer::new(
+            FilteringFormatter::new(format, filter_metric_events),
+            buff.clone(),
+        )
+        .boxed();
+
+        ::tracing::subscriber::with_default(
+            fmt::Subscriber::new().with(fmt_layer),
+            generate_nested_spans,
+        );
 
         insta::assert_display_snapshot!(buff.to_string());
     }
