@@ -3,8 +3,6 @@ title: Operation request format
 description: How to send requests to the Apollo Router over HTTP
 ---
 
-> Also check out this post from the Apollo blog: [Making GraphQL Requests using HTTP Methods](https://www.apollographql.com/blog/graphql/basics/making-graphql-requests-using-http-methods/)
-
 By default, almost every GraphQL IDE and client library takes care of sending operations in a format that the Apollo Router supports. This article describes that format, which is also described on [graphql.org](https://graphql.org/learn/serving-over-http/) and in [this preliminary spec](https://github.com/graphql/graphql-over-http).
 
 The Apollo Router accepts queries and mutations sent as POST requests. It also accepts queries sent as GET requests.
@@ -58,3 +56,7 @@ Here's the same query from [POST requests](#post-requests) formatted for a `curl
 curl --request GET \
   https://rover.apollo.dev/quickstart/products/graphql?query=query%20GetBestSellers%28%24category%3AProductCategory%29%7BbestSellers%28category%3A%20%24category%29%7Btitle%7D%7D&operationName=GetBestSellers&variables=%7B%22category%22%3A%22BOOKS%22%7D
 ```
+
+## Related topics
+
+* From the Apollo blog: [Making GraphQL Requests using HTTP Methods](https://www.apollographql.com/blog/graphql/basics/making-graphql-requests-using-http-methods/)

@@ -23,6 +23,9 @@ use thiserror::Error;
 use crate::graphql::ErrorExtension;
 use crate::json_ext::Object;
 
+pub(crate) const LINK_DIRECTIVE_NAME: &str = "link";
+pub(crate) const LINK_URL_ARGUMENT: &str = "url";
+
 /// GraphQL parsing errors.
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
