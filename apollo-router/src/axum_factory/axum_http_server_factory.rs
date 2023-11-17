@@ -103,13 +103,14 @@ where
 
     if configuration.health_check.enabled {
         tracing::info!(
-            "Health check endpoint exposed at {}/health",
-            configuration.health_check.listen
+            "Health check exposed at {}/{}",
+            configuration.health_check.listen,
+            configuration.health_check.path
         );
         endpoints.insert(
             configuration.health_check.listen.clone(),
             Endpoint::from_router_service(
-                "/health".to_string(),
+                configuration.health_check.path.clone(),
                 service_fn(move |req: router::Request| {
                     let mut status_code = StatusCode::OK;
                     let health = if let Some(query) = req.router_request.uri().query() {

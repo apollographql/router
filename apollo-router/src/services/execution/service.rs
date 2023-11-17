@@ -5,18 +5,21 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
-use futures::channel::mpsc;
-use futures::channel::mpsc::Receiver;
-use futures::channel::mpsc::SendError;
-use futures::channel::mpsc::Sender;
 use futures::future::BoxFuture;
 use futures::stream::once;
-use futures::SinkExt;
 use futures::Stream;
 use futures::StreamExt;
 use serde_json_bytes::Value;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::error::TryRecvError;
+use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::Sender;
+use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -26,9 +29,6 @@ use tracing::Instrument;
 use tracing::Span;
 use tracing_core::Level;
 
-use super::new_service::ServiceFactory;
-use super::Plugins;
-use super::SubgraphServiceFactory;
 use crate::graphql::Error;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
@@ -36,13 +36,17 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::services::execution;
+use crate::services::new_service::ServiceFactory;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
+use crate::services::Plugins;
+use crate::services::SubgraphServiceFactory;
 use crate::spec::query::subselections::BooleanValues;
 use crate::spec::Query;
 use crate::spec::Schema;
@@ -58,7 +62,7 @@ pub(crate) struct ExecutionService {
 
 type CloseSignal = broadcast::Sender<()>;
 // Used to detect when the stream is dropped and then when the client closed the connection
-pub(crate) struct StreamWrapper(pub(crate) Receiver<Response>, Option<CloseSignal>);
+pub(crate) struct StreamWrapper(pub(crate) ReceiverStream<Response>, Option<CloseSignal>);
 
 impl Stream for StreamWrapper {
     type Item = Response;
@@ -117,6 +121,10 @@ impl ExecutionService {
             .query_plan
             .is_deferred(operation_name.as_deref(), &variables);
         let is_subscription = req.query_plan.is_subscription(operation_name.as_deref());
+        let mut claims = None;
+        if is_deferred {
+            claims = context.get(APOLLO_AUTHENTICATION_JWT_CLAIMS)?
+        }
         let (tx_close_signal, subscription_handle) = if is_subscription {
             let (tx_close_signal, rx_close_signal) = broadcast::channel(1);
             (
@@ -159,7 +167,9 @@ impl ExecutionService {
             // If it's a subscription event
             once(ready(first)).boxed()
         } else {
-            once(ready(first)).chain(receiver).boxed()
+            once(ready(first))
+                .chain(ReceiverStream::new(receiver))
+                .boxed()
         };
 
         if has_initial_data {
@@ -175,6 +185,45 @@ impl ExecutionService {
         let execution_span = Span::current();
 
         let stream = stream
+            .map(move |mut response: Response| {
+                // Enforce JWT expiry for deferred responses
+                if is_deferred {
+                    let ts_opt = claims.as_ref().and_then(|x: &Value| {
+                        if !x.is_object() {
+                            tracing::error!("JWT claims should be an object");
+                            return None;
+                        }
+                        let claims = x.as_object().expect("claims should be an object");
+                        let exp = claims.get("exp")?;
+                        if !exp.is_number() {
+                            tracing::error!("JWT 'exp' (expiry) claim should be a number");
+                            return None;
+                        }
+                        exp.as_i64()
+                    });
+                    if let Some(ts) = ts_opt {
+                        let now = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .expect("we should not run before EPOCH")
+                            .as_secs() as i64;
+                        if ts < now {
+                            tracing::debug!("token has expired, shut down the subscription");
+                            response = Response::builder()
+                                .has_next(false)
+                                .error(
+                                    Error::builder()
+                                        .message(
+                                            "deferred response closed because the JWT has expired",
+                                        )
+                                        .extension_code("DEFERRED_RESPONSE_JWT_EXPIRED")
+                                        .build(),
+                                )
+                                .build()
+                        }
+                    }
+                }
+                response
+            })
             .filter_map(move |response: Response| {
                 ready(execution_span.in_scope(|| {
                     Self::process_graphql_response(
@@ -478,14 +527,14 @@ fn filter_stream(
     first: Response,
     mut stream: Receiver<Response>,
     stream_mode: StreamMode,
-) -> Receiver<Response> {
+) -> ReceiverStream<Response> {
     let (mut sender, receiver) = mpsc::channel(10);
 
     tokio::task::spawn(async move {
         let mut seen_last_message =
             consume_responses(first, &mut stream, &mut sender, stream_mode).await?;
 
-        while let Some(current_response) = stream.next().await {
+        while let Some(current_response) = stream.recv().await {
             seen_last_message =
                 consume_responses(current_response, &mut stream, &mut sender, stream_mode).await?;
         }
@@ -500,10 +549,10 @@ fn filter_stream(
             sender.send(res).await?;
         }
 
-        Ok::<_, SendError>(())
+        Ok::<_, SendError<Response>>(())
     });
 
-    receiver
+    receiver.into()
 }
 
 // returns Ok(true) when we saw the last message
@@ -512,33 +561,36 @@ async fn consume_responses(
     stream: &mut Receiver<Response>,
     sender: &mut Sender<Response>,
     stream_mode: StreamMode,
-) -> Result<bool, SendError> {
+) -> Result<bool, SendError<Response>> {
     loop {
-        match stream.try_next() {
-            // no messages available, but the channel is not closed
-            // this means more deferred responses can come
-            Err(_) => {
-                sender.send(current_response).await?;
-                return Ok(false);
-            }
+        match stream.try_recv() {
+            Err(err) => {
+                match err {
+                    // no messages available, but the channel is not closed
+                    // this means more deferred responses can come
+                    TryRecvError::Empty => {
+                        sender.send(current_response).await?;
+                        return Ok(false);
+                    }
+                    // the channel is closed
+                    // there will be no other deferred responses after that,
+                    // so we set `has_next` to `false`
+                    TryRecvError::Disconnected => {
+                        match stream_mode {
+                            StreamMode::Defer => current_response.has_next = Some(false),
+                            StreamMode::Subscription => current_response.subscribed = Some(false),
+                        }
 
+                        sender.send(current_response).await?;
+                        return Ok(true);
+                    }
+                }
+            }
             // there might be other deferred responses after this one,
             // so we should call `try_next` again
-            Ok(Some(response)) => {
+            Ok(response) => {
                 sender.send(current_response).await?;
                 current_response = response;
-            }
-            // the channel is closed
-            // there will be no other deferred responses after that,
-            // so we set `has_next` to `false`
-            Ok(None) => {
-                match stream_mode {
-                    StreamMode::Defer => current_response.has_next = Some(false),
-                    StreamMode::Subscription => current_response.subscribed = Some(false),
-                }
-
-                sender.send(current_response).await?;
-                return Ok(true);
             }
         }
     }
@@ -565,7 +617,7 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
         ServiceBuilder::new()
             .service(
                 self.plugins.iter().rev().fold(
-                    crate::services::execution_service::ExecutionService {
+                    crate::services::execution::service::ExecutionService {
                         schema: self.schema.clone(),
                         subgraph_service_factory: self.subgraph_service_factory.clone(),
                         subscription_config: subscription_plugin_conf,
