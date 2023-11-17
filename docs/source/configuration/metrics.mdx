@@ -17,7 +17,7 @@ In [`router.yaml`](./overview#yaml-config-file), you configure router metrics wi
 Common settings for router metrics include:
 
 * [Service name](#service-name)
-* [Resource attributes](#resource)
+* [Resource attributes](#resource-attribute)
 * [Custom historgram buckets](#custom-histogram-buckets)
 
 ### Service name
@@ -125,12 +125,12 @@ The `apollo_router_http_requests` metric is deprecated and will be removed in a 
 
 </Caution>
 
-You can add custom attributes (OpenTelemetry) and labels (Prometheus) to the `apollo_router_http_requests` metric. Attributes can be static or obtained from requests or responses that are:
+You can add custom attributes (OpenTelemetry) and labels (Prometheus) to the `apollo_router_http_requests` metric. Attributes can be:
 
-* static values (prefer using a resource)
-* headers from the request or response.
-* a value from context.
-* a value from the request or response body ([JSON path](https://goessner.net/articles/JsonPath/)).
+* static values (preferably using a [resource](#resource-attribute))
+* headers from the request or response
+* a value from a context
+* a value from the request or response body ([JSON path](https://goessner.net/articles/JsonPath/))
 
 An example of configuring these attributes is shown below:
 

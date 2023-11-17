@@ -32,10 +32,12 @@ telemetry:
 
 The available basic conditions:
 
-- [`eq`](#eq)
-- [`not`](#not)
-- [`all`](#all)
-- [`any`](#any)
+| Condition | Description                                             |
+|----------|----------------------------------------------------------|
+| `eq`     | An equality test between selectors or values             |
+| `not`    | A negated equality test between selectors or values      |
+| `all`    | A list of conditions that must all be true               |
+| `any`    | A list of conditions of which at least one must be true  |
 
 You can create complex conditions by using these basic conditions as building blocks.
 
@@ -105,13 +107,3 @@ any:
       - "val2"
       - request_header: x-req-header2
 ```
-
-### Configuration reference
-
-| Selector | Description                                              |
-|----------|----------------------------------------------------------|
-| `all`    | A list of conditions that must all be true.              |
-| `any`    | A list of conditions of which at least one must be true. |
-| `eq`     | An equality test between selectors or values.            |
-| `not`    | A negated equality test between selectors or values.                   |
-

@@ -274,60 +274,6 @@ Instead, when `enable_span_mapping` is set to `true` the following trace will be
                                                       | subgraph_request MyQuery__my-subgraph-name__0    |
 ```
 
-### Jaeger (native)
-
-<Caution>
-
-[Jaeger (native) tracing is deprecated](https://opentelemetry.io/blog/2022/jaeger-native-otlp/) and will be removed in a future release of the Apollo Router. [Jaeger via OTLP](#jaeger) should be used instead.
-
-</Caution>
-
-The Apollo Router can be configured to export tracing data to Jaeger either via an agent or HTTP collector.
-
-Unless explicitly configured to use a collector, Jaeger will use an agent by default.
-
-#### Configure Jaeger agent
-
-```yaml title="router.yaml"
-telemetry:
-  tracing:
-    jaeger:
-      enabled: true
-      # Optional agent configuration,
-      agent:
-        # Optional endpoint, either 'default' or a socket address (Defaults to 127.0.0.1:6832)
-        endpoint: "${env.JAEGER_HOST}:6832"  
-```
-
-#### Configure Jaeger collector
-
-```yaml title="router.yaml"
-telemetry:
-  tracing:
-    jaeger:
-      enabled: true
-      # Optional collector configuration,
-      collector:
-        # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:14268/api/traces)
-        endpoint: "http://${env.JAEGER_HOST}:14268/api/traces"
-        username: "${env.JAEGER_USERNAME}"
-        password: "${env.JAEGER_PASSWORD}"
-```
-
-### Zipkin
-
-The Apollo Router can be configured to export tracing data for Zipkin to either the default collector address or a URL:
-
-```yaml title="router.yaml"
-telemetry:
-  tracing:
-    zipkin:
-      enabled: true
-
-      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:9411/api/v2/spans)
-      endpoint: "http://${env.ZIPKIN_HOST}:9411/api/v2/spans}"   
-```
-
 ### OTLP
 
 OTLP (OpenTelemetry Protocol) is the native protocol for open telemetry. It can be used to export traces to a variety of backends including:
@@ -422,4 +368,58 @@ telemetry:
 
       # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
       endpoint: "http://${env.JAEGER_HOST}:4317"
+```
+
+### Zipkin
+
+The Apollo Router can be configured to export tracing data for Zipkin to either the default collector address or a URL:
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    zipkin:
+      enabled: true
+
+      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:9411/api/v2/spans)
+      endpoint: "http://${env.ZIPKIN_HOST}:9411/api/v2/spans}"   
+```
+
+### Jaeger (native)
+
+<Caution>
+
+[Jaeger (native) tracing is deprecated](https://opentelemetry.io/blog/2022/jaeger-native-otlp/) and will be removed in a future release of the Apollo Router. [Jaeger via OTLP](#jaeger) should be used instead.
+
+</Caution>
+
+The Apollo Router can be configured to export tracing data to Jaeger either via an agent or HTTP collector.
+
+Unless explicitly configured to use a collector, Jaeger will use an agent by default.
+
+#### Configure Jaeger agent
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    jaeger:
+      enabled: true
+      # Optional agent configuration,
+      agent:
+        # Optional endpoint, either 'default' or a socket address (Defaults to 127.0.0.1:6832)
+        endpoint: "${env.JAEGER_HOST}:6832"  
+```
+
+#### Configure Jaeger collector
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    jaeger:
+      enabled: true
+      # Optional collector configuration,
+      collector:
+        # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:14268/api/traces)
+        endpoint: "http://${env.JAEGER_HOST}:14268/api/traces"
+        username: "${env.JAEGER_USERNAME}"
+        password: "${env.JAEGER_PASSWORD}"
 ```
