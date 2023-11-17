@@ -412,3 +412,7 @@ fn render_invisible(s: &str, newlines_matter: bool) -> Cow<'_, str> {
         Cow::Borrowed(s)
     }
 }
+
+#[cfg(test)]
+#[path = "replay_tests.rs"]
+mod tests;

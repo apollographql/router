@@ -1,12 +1,9 @@
-use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures::stream::once;
 use futures::StreamExt;
-use http::HeaderMap;
-use http::HeaderValue;
 use serde_json::json;
 use tokio::fs;
 use tower::BoxError;
@@ -22,6 +19,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::execution;
+use crate::services::external::externalize_header_map;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -341,16 +339,4 @@ fn recording_enabled(context: &Context) -> bool {
 fn is_introspection(query: String, schema: Arc<Schema>) -> bool {
     let query = Query::parse(query, &schema, &Configuration::default()).expect("query must valid");
     query.contains_introspection()
-}
-
-fn externalize_header_map(
-    input: &HeaderMap<HeaderValue>,
-) -> Result<HashMap<String, Vec<String>>, BoxError> {
-    let mut output = HashMap::new();
-    for (k, v) in input {
-        let k = k.as_str().to_owned();
-        let v = String::from_utf8(v.as_bytes().to_vec()).map_err(|e| e.to_string())?;
-        output.entry(k).or_insert_with(Vec::new).push(v)
-    }
-    Ok(output)
 }
