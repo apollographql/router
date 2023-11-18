@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-use apollo_compiler::ast::Name;
+use apollo_compiler::ast::{InvalidNameError, Name};
 use apollo_compiler::schema::{ComponentName, ExtendedType, ObjectType};
 use apollo_compiler::{name, Node, Schema};
 use indexmap::map::Entry;
@@ -53,12 +53,12 @@ impl From<FederationSpecError> for SubgraphError {
     }
 }
 
-// TODO: Once InvalidNameError includes the invalid name in the error, we can replace this with an
-// implementation for From<InvalidNameError>.
-pub(crate) fn graphql_name_or_subgraph_error(name: &str) -> Result<Name, SubgraphError> {
-    Name::new(name).map_err(|_| SubgraphError {
-        msg: format!("Invalid GraphQL name \"{}\"", name),
-    })
+impl From<InvalidNameError> for SubgraphError {
+    fn from(err: InvalidNameError) -> Self {
+        SubgraphError {
+            msg: format!("Invalid GraphQL name \"{}\"", err.0),
+        }
+    }
 }
 
 pub struct Subgraph {
@@ -181,8 +181,7 @@ impl Subgraph {
         schema: &mut Schema,
         link_spec_definitions: LinkSpecDefinitions,
     ) -> Result<(), SubgraphError> {
-        let purpose_enum_name =
-            graphql_name_or_subgraph_error(&link_spec_definitions.purpose_enum_name)?;
+        let purpose_enum_name = Name::new(&link_spec_definitions.purpose_enum_name)?;
         schema
             .types
             .entry(purpose_enum_name.clone())
@@ -191,8 +190,7 @@ impl Subgraph {
                     .link_purpose_enum_definition(purpose_enum_name)
                     .into()
             });
-        let import_scalar_name =
-            graphql_name_or_subgraph_error(&link_spec_definitions.import_scalar_name)?;
+        let import_scalar_name = Name::new(&link_spec_definitions.import_scalar_name)?;
         schema
             .types
             .entry(import_scalar_name.clone())
@@ -211,8 +209,7 @@ impl Subgraph {
         schema: &mut Schema,
         fed_definitions: &FederationSpecDefinitions,
     ) -> Result<(), SubgraphError> {
-        let fieldset_scalar_name =
-            graphql_name_or_subgraph_error(&fed_definitions.fieldset_scalar_name)?;
+        let fieldset_scalar_name = Name::new(&fed_definitions.fieldset_scalar_name)?;
         schema
             .types
             .entry(fieldset_scalar_name.clone())
@@ -223,9 +220,8 @@ impl Subgraph {
             });
 
         for directive_name in &FEDERATION_V2_DIRECTIVE_NAMES {
-            let namespaced_directive_name = graphql_name_or_subgraph_error(
-                &fed_definitions.namespaced_type_name(directive_name, true),
-            )?;
+            let namespaced_directive_name =
+                Name::new(&fed_definitions.namespaced_type_name(directive_name, true))?;
             if let Entry::Vacant(entry) = schema
                 .directive_definitions
                 .entry(namespaced_directive_name.clone())

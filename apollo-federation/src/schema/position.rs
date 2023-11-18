@@ -1,4 +1,4 @@
-use crate::error::{graphql_name, FederationError, SingleFederationError};
+use crate::error::{FederationError, SingleFederationError};
 use crate::link::database::links_metadata;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::referencer::{
@@ -559,7 +559,7 @@ impl SchemaDefinitionPosition {
                 let link_name_in_schema = link_spec_definition
                     .directive_name_in_schema(
                         schema,
-                        &graphql_name(&link_spec_definition.identity().name)?,
+                        &Name::new(&link_spec_definition.identity().name)?,
                     )?
                     .ok_or_else(|| SingleFederationError::Internal {
                         message: "Unexpectedly could not find core/link spec usage".to_owned(),

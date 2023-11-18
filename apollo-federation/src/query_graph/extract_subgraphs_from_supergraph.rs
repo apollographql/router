@@ -1,4 +1,4 @@
-use crate::error::{graphql_name, FederationError, SingleFederationError};
+use crate::error::{FederationError, SingleFederationError};
 use crate::link::federation_spec_definition::{FederationSpecDefinition, FEDERATION_VERSIONS};
 use crate::link::join_spec_definition::{
     FieldDirectiveArguments, JoinSpecDefinition, TypeDirectiveArguments, JOIN_VERSIONS,
@@ -727,7 +727,7 @@ fn extract_object_type_content(
             )?;
             pos.insert_implements_interface(
                 &mut subgraph.schema,
-                ComponentName::from(graphql_name(&implements_directive_application.interface)?),
+                ComponentName::from(Name::new(implements_directive_application.interface)?),
             )?;
         }
 
@@ -916,7 +916,7 @@ fn extract_interface_type_content(
                 ObjectOrInterfaceTypeDefinitionPosition::Object(pos) => {
                     pos.insert_implements_interface(
                         &mut subgraph.schema,
-                        ComponentName::from(graphql_name(
+                        ComponentName::from(Name::new(
                             &implements_directive_application.interface,
                         )?),
                     )?;
@@ -924,7 +924,7 @@ fn extract_interface_type_content(
                 ObjectOrInterfaceTypeDefinitionPosition::Interface(pos) => {
                     pos.insert_implements_interface(
                         &mut subgraph.schema,
-                        ComponentName::from(graphql_name(
+                        ComponentName::from(Name::new(
                             &implements_directive_application.interface,
                         )?),
                     )?;
@@ -1099,7 +1099,7 @@ fn extract_union_type_content(
                 // broken @join__unionMember).
                 pos.insert_member(
                     &mut subgraph.schema,
-                    ComponentName::from(graphql_name(&union_member_directive_application.member)?),
+                    ComponentName::from(Name::new(&union_member_directive_application.member)?),
                 )?;
             }
         }

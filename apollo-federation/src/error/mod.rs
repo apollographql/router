@@ -1,4 +1,4 @@
-use apollo_compiler::schema::Name;
+use apollo_compiler::ast::InvalidNameError;
 use lazy_static::lazy_static;
 use std::fmt::{Display, Formatter, Write};
 
@@ -352,15 +352,18 @@ impl SingleFederationError {
     }
 }
 
-// TODO: Once InvalidNameError includes the invalid name in the error, we can replace this with an
-// implementation for From<InvalidNameError>.
-pub(crate) fn graphql_name(name: &str) -> Result<Name, FederationError> {
-    Name::new(name).map_err(|_| {
+impl From<InvalidNameError> for SingleFederationError {
+    fn from(err: InvalidNameError) -> Self {
         SingleFederationError::InvalidGraphQL {
-            message: format!("Invalid GraphQL name \"{}\"", name,),
+            message: format!("Invalid GraphQL name \"{}\"", err.0),
         }
-        .into()
-    })
+    }
+}
+
+impl From<InvalidNameError> for FederationError {
+    fn from(err: InvalidNameError) -> Self {
+        SingleFederationError::from(err).into()
+    }
 }
 
 #[derive(Debug, Clone, thiserror::Error)]

@@ -1,4 +1,4 @@
-use crate::error::{graphql_name, FederationError, SingleFederationError};
+use crate::error::{FederationError, SingleFederationError};
 use crate::link::spec::{Identity, Url, Version};
 use crate::link::Link;
 use crate::schema::FederationSchema;
@@ -62,7 +62,9 @@ pub(crate) trait SpecDefinition {
         let Some(link) = self.link_in_schema(schema)? else {
             return Ok(None);
         };
-        graphql_name(&link.directive_name_in_schema(name_in_spec)).map(Some)
+        Ok(Some(
+            link.directive_name_in_schema(name_in_spec).try_into()?,
+        ))
     }
 
     fn type_name_in_schema(
@@ -73,7 +75,7 @@ pub(crate) trait SpecDefinition {
         let Some(link) = self.link_in_schema(schema)? else {
             return Ok(None);
         };
-        graphql_name(&link.type_name_in_schema(name_in_spec)).map(Some)
+        Ok(Some(link.type_name_in_schema(name_in_spec).try_into()?))
     }
 
     fn directive_definition<'schema>(

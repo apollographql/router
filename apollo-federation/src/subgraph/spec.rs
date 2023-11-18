@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::{
     Argument, Directive, DirectiveDefinition, DirectiveLocation, EnumValueDefinition,
-    FieldDefinition, InputValueDefinition, Name, Type, Value,
+    FieldDefinition, InputValueDefinition, InvalidNameError, Name, Type, Value,
 };
 use apollo_compiler::schema::{
     Component, ComponentName, EnumType, ExtendedType, ObjectType, ScalarType, UnionType,
@@ -122,14 +122,10 @@ pub enum FederationSpecError {
     InvalidGraphQLName(String),
 }
 
-// TODO: Once InvalidNameError includes the invalid name in the error, we can replace this with an
-// implementation for From<InvalidNameError>.
-pub(crate) fn graphql_name_or_federation_spec_error(
-    name: &str,
-) -> Result<Name, FederationSpecError> {
-    Name::new(name).map_err(|_| {
-        FederationSpecError::InvalidGraphQLName(format!("Invalid GraphQL name \"{}\"", name))
-    })
+impl From<InvalidNameError> for FederationSpecError {
+    fn from(err: InvalidNameError) -> Self {
+        FederationSpecError::InvalidGraphQLName(format!("Invalid GraphQL name \"{}\"", err.0))
+    }
 }
 
 #[derive(Debug)]
@@ -294,8 +290,8 @@ impl FederationSpecDefinitions {
         Ok(InputValueDefinition {
             description: None,
             name: name!("fields"),
-            ty: Type::Named(graphql_name_or_federation_spec_error(
-                &self.namespaced_type_name(&FIELDSET_SCALAR_NAME, false),
+            ty: Type::Named(Name::new(
+                self.namespaced_type_name(&FIELDSET_SCALAR_NAME, false),
             )?)
             .non_null()
             .into(),
@@ -680,11 +676,9 @@ impl LinkSpecDefinitions {
                 InputValueDefinition {
                     description: None,
                     name: name!("import"),
-                    ty: Type::Named(graphql_name_or_federation_spec_error(
-                        &self.import_scalar_name,
-                    )?)
-                    .list()
-                    .into(),
+                    ty: Type::Named(Name::new(&self.import_scalar_name)?)
+                        .list()
+                        .into(),
                     default_value: None,
                     directives: Default::default(),
                 }
@@ -692,10 +686,7 @@ impl LinkSpecDefinitions {
                 InputValueDefinition {
                     description: None,
                     name: name!("for"),
-                    ty: Type::Named(graphql_name_or_federation_spec_error(
-                        &self.purpose_enum_name,
-                    )?)
-                    .into(),
+                    ty: Type::Named(Name::new(&self.purpose_enum_name)?).into(),
                     default_value: None,
                     directives: Default::default(),
                 }
