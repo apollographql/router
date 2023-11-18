@@ -1,6 +1,9 @@
 experimental_batching:
   enabled: true
   mode: batch_http_link
+rhai:
+  scripts: tests/fixtures
+  main: test_callbacks.rhai
 include_subgraph_errors:
   all: true
 telemetry:

@@ -1,5 +1,8 @@
 include_subgraph_errors:
   all: true
+rhai:
+  scripts: tests/fixtures
+  main: test_callbacks.rhai
 telemetry:
   tracing:
     experimental_response_trace_id:
