@@ -54,11 +54,22 @@ pub(crate) struct RouterSpans {
     pub(crate) attributes: Extendable<RouterAttributes, RouterSelector>,
 }
 
+impl DefaultForLevel for RouterSpans {
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+        self.attributes.defaults_for_level(requirement_level);
+    }
+}
+
 #[derive(Deserialize, JsonSchema, Clone, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SupergraphSpans {
     /// Custom attributes that are attached to the supergraph span.
     pub(crate) attributes: Extendable<SupergraphAttributes, SupergraphSelector>,
+}
+impl DefaultForLevel for SupergraphSpans {
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+        self.attributes.defaults_for_level(requirement_level);
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
@@ -68,62 +79,183 @@ pub(crate) struct SubgraphSpans {
     pub(crate) attributes: Extendable<SubgraphAttributes, SubgraphSelector>,
 }
 
-impl DefaultForLevel for RouterSpans {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
-        self.attributes
-            .attributes
-            .common
-            .defaults_for_level(requirement_level);
-        self.attributes
-            .attributes
-            .server
-            .defaults_for_level(requirement_level);
-    }
-}
-
-impl DefaultForLevel for SupergraphSpans {
-    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
-        match requirement_level {
-            DefaultAttributeRequirementLevel::Required => {}
-            DefaultAttributeRequirementLevel::Recommended => {
-                if self.attributes.attributes.graphql_document.is_none() {
-                    self.attributes.attributes.graphql_document = Some(true);
-                }
-                if self.attributes.attributes.graphql_operation_name.is_none() {
-                    self.attributes.attributes.graphql_operation_name = Some(true);
-                }
-                if self.attributes.attributes.graphql_operation_type.is_none() {
-                    self.attributes.attributes.graphql_operation_type = Some(true);
-                }
-            }
-            DefaultAttributeRequirementLevel::None => {}
-        }
-    }
-}
-
 impl DefaultForLevel for SubgraphSpans {
     fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
-        match requirement_level {
-            DefaultAttributeRequirementLevel::Required => {
-                if self.attributes.attributes.subgraph_name.is_none() {
-                    self.attributes.attributes.subgraph_name = Some(true);
-                }
-            }
-            DefaultAttributeRequirementLevel::Recommended => {
-                if self.attributes.attributes.subgraph_name.is_none() {
-                    self.attributes.attributes.subgraph_name = Some(true);
-                }
-                if self.attributes.attributes.graphql_document.is_none() {
-                    self.attributes.attributes.graphql_document = Some(true);
-                }
-                if self.attributes.attributes.graphql_operation_name.is_none() {
-                    self.attributes.attributes.graphql_operation_name = Some(true);
-                }
-                if self.attributes.attributes.graphql_operation_type.is_none() {
-                    self.attributes.attributes.graphql_operation_type = Some(true);
-                }
-            }
-            DefaultAttributeRequirementLevel::None => {}
-        }
+        self.attributes.defaults_for_level(requirement_level);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use http::header::USER_AGENT;
+    use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
+    use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
+    use opentelemetry_semantic_conventions::trace::NETWORK_PROTOCOL_VERSION;
+    use opentelemetry_semantic_conventions::trace::URL_PATH;
+    use opentelemetry_semantic_conventions::trace::USER_AGENT_ORIGINAL;
+
+    use crate::graphql;
+    use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+    use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_DOCUMENT;
+    use crate::plugins::telemetry::config_new::spans::RouterSpans;
+    use crate::plugins::telemetry::config_new::spans::SubgraphSpans;
+    use crate::plugins::telemetry::config_new::spans::SupergraphSpans;
+    use crate::plugins::telemetry::config_new::DefaultForLevel;
+    use crate::plugins::telemetry::config_new::Selectors;
+    use crate::services::router;
+    use crate::services::subgraph;
+    use crate::services::supergraph;
+
+    #[test]
+    fn test_router_spans_level_none() {
+        let mut spans = RouterSpans::default();
+        spans.defaults_for_levels(DefaultAttributeRequirementLevel::None);
+        let values = spans.attributes.on_request(
+            &router::Request::fake_builder()
+                .method(http::Method::POST)
+                .header(USER_AGENT, "test")
+                .build()
+                .unwrap(),
+        );
+        assert!(values.get(&HTTP_REQUEST_METHOD).is_none());
+        assert!(values.get(&NETWORK_PROTOCOL_VERSION).is_none());
+        assert!(values.get(&URL_PATH).is_none());
+        assert!(values.get(&USER_AGENT_ORIGINAL).is_none());
+    }
+
+    #[test]
+    fn test_router_spans_level_required() {
+        let mut spans = RouterSpans::default();
+        spans.defaults_for_levels(DefaultAttributeRequirementLevel::Required);
+        let values = spans.attributes.on_request(
+            &router::Request::fake_builder()
+                .method(http::Method::POST)
+                .header(USER_AGENT, "test")
+                .build()
+                .unwrap(),
+        );
+        assert!(values.get(&HTTP_REQUEST_METHOD).is_some());
+        assert!(values.get(&NETWORK_PROTOCOL_VERSION).is_none());
+        assert!(values.get(&URL_PATH).is_some());
+        assert!(values.get(&USER_AGENT_ORIGINAL).is_none());
+    }
+
+    #[test]
+    fn test_router_spans_level_recommended() {
+        let mut spans = RouterSpans::default();
+        spans.defaults_for_levels(DefaultAttributeRequirementLevel::Recommended);
+        let values = spans.attributes.on_request(
+            &router::Request::fake_builder()
+                .method(http::Method::POST)
+                .header(USER_AGENT, "test")
+                .build()
+                .unwrap(),
+        );
+        assert!(values.get(&HTTP_REQUEST_METHOD).is_some());
+        assert!(values.get(&NETWORK_PROTOCOL_VERSION).is_some());
+        assert!(values.get(&URL_PATH).is_some());
+        assert!(values.get(&USER_AGENT_ORIGINAL).is_some());
+    }
+
+    #[test]
+    fn test_supergraph_spans_level_none() {
+        let mut spans = SupergraphSpans::default();
+        spans.defaults_for_levels(DefaultAttributeRequirementLevel::None);
+        let values = spans.attributes.on_request(
+            &supergraph::Request::fake_builder()
+                .query("query { __typename }")
+                .build()
+                .unwrap(),
+        );
+        assert!(values.get(&GRAPHQL_DOCUMENT).is_none());
+    }
+
+    #[test]
+    fn test_supergraph_spans_level_required() {
+        let mut spans = SupergraphSpans::default();
+        spans.defaults_for_levels(DefaultAttributeRequirementLevel::Required);
+        let values = spans.attributes.on_request(
+            &supergraph::Request::fake_builder()
+                .query("query { __typename }")
+                .build()
+                .unwrap(),
+        );
+        assert!(values.get(&GRAPHQL_DOCUMENT).is_none());
+    }
+
+    #[test]
+    fn test_supergraph_spans_level_recommended() {
+        let mut spans = SupergraphSpans::default();
+        spans.defaults_for_levels(DefaultAttributeRequirementLevel::Recommended);
+        let values = spans.attributes.on_request(
+            &supergraph::Request::fake_builder()
+                .query("query { __typename }")
+                .build()
+                .unwrap(),
+        );
+        assert!(values.get(&GRAPHQL_DOCUMENT).is_some());
+    }
+
+    #[test]
+    fn test_subgraph_spans_level_none() {
+        let mut spans = SubgraphSpans::default();
+        spans.defaults_for_levels(DefaultAttributeRequirementLevel::None);
+        let values = spans.attributes.on_request(
+            &subgraph::Request::fake_builder()
+                .subgraph_request(
+                    ::http::Request::builder()
+                        .uri("http://localhost/graphql")
+                        .body(
+                            graphql::Request::fake_builder()
+                                .query("query { __typename }")
+                                .build(),
+                        )
+                        .unwrap(),
+                )
+                .build(),
+        );
+        assert!(values.get(&GRAPHQL_DOCUMENT).is_none());
+    }
+
+    #[test]
+    fn test_subgraph_spans_level_required() {
+        let mut spans = SubgraphSpans::default();
+        spans.defaults_for_levels(DefaultAttributeRequirementLevel::Required);
+        let values = spans.attributes.on_request(
+            &subgraph::Request::fake_builder()
+                .subgraph_request(
+                    ::http::Request::builder()
+                        .uri("http://localhost/graphql")
+                        .body(
+                            graphql::Request::fake_builder()
+                                .query("query { __typename }")
+                                .build(),
+                        )
+                        .unwrap(),
+                )
+                .build(),
+        );
+        assert!(values.get(&GRAPHQL_DOCUMENT).is_none());
+    }
+
+    #[test]
+    fn test_subgraph_spans_level_recommended() {
+        let mut spans = SubgraphSpans::default();
+        spans.defaults_for_levels(DefaultAttributeRequirementLevel::Recommended);
+        let values = spans.attributes.on_request(
+            &subgraph::Request::fake_builder()
+                .subgraph_request(
+                    ::http::Request::builder()
+                        .uri("http://localhost/graphql")
+                        .body(
+                            graphql::Request::fake_builder()
+                                .query("query { __typename }")
+                                .build(),
+                        )
+                        .unwrap(),
+                )
+                .build(),
+        );
+        assert!(values.get(&SUBGRAPH_GRAPHQL_DOCUMENT).is_some());
     }
 }
