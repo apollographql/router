@@ -17,6 +17,8 @@ use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
 
+use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Selectors;
 
@@ -29,6 +31,15 @@ where
 {
     pub(crate) attributes: Att,
     pub(crate) custom: HashMap<String, Ext>,
+}
+
+impl<Att, Ext> DefaultForLevel for Extendable<Att, Ext>
+where
+    Att: DefaultForLevel + Default,
+{
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+        self.attributes.defaults_for_level(requirement_level);
+    }
 }
 
 impl Extendable<(), ()> {

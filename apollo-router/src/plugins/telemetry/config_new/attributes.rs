@@ -47,11 +47,11 @@ use crate::services::router::Request;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
-const SUBGRAPH_NAME: Key = Key::from_static_str("subgraph.name");
-const SUBGRAPH_GRAPHQL_DOCUMENT: Key = Key::from_static_str("subgraph.graphql.document");
-const SUBGRAPH_GRAPHQL_OPERATION_NAME: Key =
+pub(crate) const SUBGRAPH_NAME: Key = Key::from_static_str("subgraph.name");
+pub(crate) const SUBGRAPH_GRAPHQL_DOCUMENT: Key = Key::from_static_str("subgraph.graphql.document");
+pub(crate) const SUBGRAPH_GRAPHQL_OPERATION_NAME: Key =
     Key::from_static_str("subgraph.graphql.operation.name");
-const SUBGRAPH_GRAPHQL_OPERATION_TYPE: Key =
+pub(crate) const SUBGRAPH_GRAPHQL_OPERATION_TYPE: Key =
     Key::from_static_str("subgraph.graphql.operation.type");
 
 const ERROR_TYPE: Key = Key::from_static_str("error.type");
@@ -80,19 +80,26 @@ pub(crate) struct RouterAttributes {
     /// The datadog trace ID.
     /// This can be output in logs and used to correlate traces in Datadog.
     #[serde(rename = "dd.trace_id")]
-    pub(crate) datadog_trace_id: Option<bool>,
+    datadog_trace_id: Option<bool>,
 
     /// The OpenTelemetry trace ID.
     /// This can be output in logs.
     #[serde(rename = "trace_id")]
-    pub(crate) trace_id: Option<bool>,
+    trace_id: Option<bool>,
 
     /// Http attributes from Open Telemetry semantic conventions.
     #[serde(flatten)]
-    pub(crate) common: HttpCommonAttributes,
+    common: HttpCommonAttributes,
     /// Http server attributes from Open Telemetry semantic conventions.
     #[serde(flatten)]
-    pub(crate) server: HttpServerAttributes,
+    server: HttpServerAttributes,
+}
+
+impl DefaultForLevel for RouterAttributes {
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+        self.common.defaults_for_level(requirement_level);
+        self.server.defaults_for_level(requirement_level);
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
@@ -104,13 +111,13 @@ pub(crate) struct SupergraphAttributes {
     /// * query findBookById { bookById(id: ?) { name } }
     /// Requirement level: Recommended
     #[serde(rename = "graphql.document")]
-    pub(crate) graphql_document: Option<bool>,
+    graphql_document: Option<bool>,
     /// The name of the operation being executed.
     /// Examples:
     /// * findBookById
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.name")]
-    pub(crate) graphql_operation_name: Option<bool>,
+    graphql_operation_name: Option<bool>,
     /// The type of the operation being executed.
     /// Examples:
     /// * query
@@ -118,7 +125,27 @@ pub(crate) struct SupergraphAttributes {
     /// * mutation
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.type")]
-    pub(crate) graphql_operation_type: Option<bool>,
+    graphql_operation_type: Option<bool>,
+}
+
+impl DefaultForLevel for SupergraphAttributes {
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+        match requirement_level {
+            DefaultAttributeRequirementLevel::Required => {}
+            DefaultAttributeRequirementLevel::Recommended => {
+                if self.graphql_document.is_none() {
+                    self.graphql_document = Some(true);
+                }
+                if self.graphql_operation_name.is_none() {
+                    self.graphql_operation_name = Some(true);
+                }
+                if self.graphql_operation_type.is_none() {
+                    self.graphql_operation_type = Some(true);
+                }
+            }
+            DefaultAttributeRequirementLevel::None => {}
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
@@ -129,19 +156,19 @@ pub(crate) struct SubgraphAttributes {
     /// * products
     /// Requirement level: Required
     #[serde(rename = "subgraph.name")]
-    pub(crate) subgraph_name: Option<bool>,
+    subgraph_name: Option<bool>,
     /// The GraphQL document being executed.
     /// Examples:
     /// * query findBookById { bookById(id: ?) { name } }
     /// Requirement level: Recommended
     #[serde(rename = "subgraph.graphql.document")]
-    pub(crate) graphql_document: Option<bool>,
+    graphql_document: Option<bool>,
     /// The name of the operation being executed.
     /// Examples:
     /// * findBookById
     /// Requirement level: Recommended
     #[serde(rename = "subgraph.graphql.operation.name")]
-    pub(crate) graphql_operation_name: Option<bool>,
+    graphql_operation_name: Option<bool>,
     /// The type of the operation being executed.
     /// Examples:
     /// * query
@@ -149,7 +176,34 @@ pub(crate) struct SubgraphAttributes {
     /// * mutation
     /// Requirement level: Recommended
     #[serde(rename = "subgraph.graphql.operation.type")]
-    pub(crate) graphql_operation_type: Option<bool>,
+    graphql_operation_type: Option<bool>,
+}
+
+impl DefaultForLevel for SubgraphAttributes {
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+        match requirement_level {
+            DefaultAttributeRequirementLevel::Required => {
+                if self.subgraph_name.is_none() {
+                    self.subgraph_name = Some(true);
+                }
+            }
+            DefaultAttributeRequirementLevel::Recommended => {
+                if self.subgraph_name.is_none() {
+                    self.subgraph_name = Some(true);
+                }
+                if self.graphql_document.is_none() {
+                    self.graphql_document = Some(true);
+                }
+                if self.graphql_operation_name.is_none() {
+                    self.graphql_operation_name = Some(true);
+                }
+                if self.graphql_operation_type.is_none() {
+                    self.graphql_operation_type = Some(true);
+                }
+            }
+            DefaultAttributeRequirementLevel::None => {}
+        }
+    }
 }
 
 /// Common attributes for http server and client.
@@ -164,14 +218,14 @@ pub(crate) struct HttpCommonAttributes {
     /// * 500
     /// Requirement level: Conditionally Required: If request has ended with an error.
     #[serde(rename = "error.type")]
-    pub(crate) error_type: Option<bool>,
+    error_type: Option<bool>,
 
     /// The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size.
     /// Examples:
     /// * 3495
     /// Requirement level: Recommended
     #[serde(rename = "http.request.body.size")]
-    pub(crate) http_request_body_size: Option<bool>,
+    http_request_body_size: Option<bool>,
 
     /// HTTP request method.
     /// Examples:
@@ -180,7 +234,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * HEAD
     /// Requirement level: Required
     #[serde(rename = "http.request.method")]
-    pub(crate) http_request_method: Option<bool>,
+    http_request_method: Option<bool>,
 
     /// Original HTTP method sent by the client in the request line.
     /// Examples:
@@ -189,21 +243,21 @@ pub(crate) struct HttpCommonAttributes {
     /// * foo
     /// Requirement level: Conditionally Required (If and only if it’s different than http.request.method)
     #[serde(rename = "http.request.method.original", skip)]
-    pub(crate) http_request_method_original: Option<bool>,
+    http_request_method_original: Option<bool>,
 
     /// The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size.
     /// Examples:
     /// * 3495
     /// Requirement level: Recommended
     #[serde(rename = "http.response.body.size")]
-    pub(crate) http_response_body_size: Option<bool>,
+    http_response_body_size: Option<bool>,
 
     /// HTTP response status code.
     /// Examples:
     /// * 200
     /// Requirement level: Conditionally Required: If and only if one was received/sent.
     #[serde(rename = "http.response.status_code")]
-    pub(crate) http_response_status_code: Option<bool>,
+    http_response_status_code: Option<bool>,
 
     /// OSI application layer or non-OSI equivalent.
     /// Examples:
@@ -211,7 +265,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * spdy
     /// Requirement level: Recommended: if not default (http).
     #[serde(rename = "network.protocol.name")]
-    pub(crate) network_protocol_name: Option<bool>,
+    network_protocol_name: Option<bool>,
 
     /// Version of the protocol specified in network.protocol.name.
     /// Examples:
@@ -221,7 +275,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * 3
     /// Requirement level: Recommended
     #[serde(rename = "network.protocol.version")]
-    pub(crate) network_protocol_version: Option<bool>,
+    network_protocol_version: Option<bool>,
 
     /// OSI transport layer.
     /// Examples:
@@ -229,7 +283,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * udp
     /// Requirement level: Conditionally Required
     #[serde(rename = "network.transport")]
-    pub(crate) network_transport: Option<bool>,
+    network_transport: Option<bool>,
 
     /// OSI network layer or non-OSI equivalent.
     /// Examples:
@@ -237,7 +291,7 @@ pub(crate) struct HttpCommonAttributes {
     /// * ipv6
     /// Requirement level: Recommended
     #[serde(rename = "network.type")]
-    pub(crate) network_type: Option<bool>,
+    network_type: Option<bool>,
 }
 
 impl DefaultForLevel for HttpCommonAttributes {
@@ -389,13 +443,13 @@ impl DefaultForLevel for HttpServerAttributes {
             }
             DefaultAttributeRequirementLevel::Recommended => {
                 if self.client_address.is_none() {
-                    self.http_route = Some(true);
+                    self.client_address = Some(true);
                 }
                 if self.server_address.is_none() {
-                    self.http_route = Some(true);
+                    self.server_address = Some(true);
                 }
                 if self.server_port.is_none() && self.server_address.is_some() {
-                    self.http_route = Some(true);
+                    self.server_port = Some(true);
                 }
                 if self.user_agent_original.is_none() {
                     self.user_agent_original = Some(true);

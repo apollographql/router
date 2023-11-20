@@ -45,9 +45,9 @@ pub(crate) trait DefaultForLevel {
     fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel);
     fn defaults_for_levels(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
         match requirement_level {
-            DefaultAttributeRequirementLevel::None => Default::default(),
+            DefaultAttributeRequirementLevel::None => {}
             DefaultAttributeRequirementLevel::Required => {
-                self.defaults_for_level(requirement_level)
+                self.defaults_for_level(DefaultAttributeRequirementLevel::Required)
             }
             DefaultAttributeRequirementLevel::Recommended => {
                 self.defaults_for_level(DefaultAttributeRequirementLevel::Required);
