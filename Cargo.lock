@@ -283,7 +283,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.33.2"
+version = "1.34.0"
 dependencies = [
  "access-json",
  "anyhow",
@@ -431,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.33.2"
+version = "1.34.0"
 dependencies = [
  "apollo-parser 0.6.3",
  "apollo-router",
@@ -447,7 +447,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.33.2"
+version = "1.34.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
