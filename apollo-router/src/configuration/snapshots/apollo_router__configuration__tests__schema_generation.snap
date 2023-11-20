@@ -211,6 +211,14 @@ expression: "&schema"
                         "type": "string",
                         "nullable": true
                       },
+                      "poll_interval": {
+                        "description": "Polling interval for each JWKS endpoint in human-readable format; defaults to 60s",
+                        "default": {
+                          "secs": 60,
+                          "nanos": 0
+                        },
+                        "type": "string"
+                      },
                       "url": {
                         "description": "Retrieve the JWK Set",
                         "type": "string"
