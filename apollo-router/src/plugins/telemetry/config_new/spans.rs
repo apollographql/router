@@ -97,6 +97,9 @@ mod test {
     use crate::graphql;
     use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
     use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_DOCUMENT;
+    use crate::plugins::telemetry::config_new::selectors::RouterSelector;
+    use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
+    use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
     use crate::plugins::telemetry::config_new::spans::RouterSpans;
     use crate::plugins::telemetry::config_new::spans::SubgraphSpans;
     use crate::plugins::telemetry::config_new::spans::SupergraphSpans;
@@ -257,5 +260,148 @@ mod test {
                 .build(),
         );
         assert!(values.get(&SUBGRAPH_GRAPHQL_DOCUMENT).is_some());
+    }
+
+    #[test]
+    fn test_router_request_custom_attribute() {
+        let mut spans = RouterSpans::default();
+        spans.attributes.custom.insert(
+            "test".to_string(),
+            RouterSelector::RequestHeader {
+                request_header: "my-header".to_string(),
+                redact: None,
+                default: None,
+            },
+        );
+        let values = spans.attributes.on_request(
+            &router::Request::fake_builder()
+                .method(http::Method::POST)
+                .header("my-header", "test_val")
+                .build()
+                .unwrap(),
+        );
+        assert!(values
+            .get(&opentelemetry::Key::from_static_str("test"))
+            .is_some());
+    }
+
+    #[test]
+    fn test_router_response_custom_attribute() {
+        let mut spans = RouterSpans::default();
+        spans.attributes.custom.insert(
+            "test".to_string(),
+            RouterSelector::ResponseHeader {
+                response_header: "my-header".to_string(),
+                redact: None,
+                default: None,
+            },
+        );
+        let values = spans.attributes.on_response(
+            &router::Response::fake_builder()
+                .header("my-header", "test_val")
+                .build()
+                .unwrap(),
+        );
+        assert!(values
+            .get(&opentelemetry::Key::from_static_str("test"))
+            .is_some());
+    }
+
+    #[test]
+    fn test_supergraph_request_custom_attribute() {
+        let mut spans = SupergraphSpans::default();
+        spans.attributes.custom.insert(
+            "test".to_string(),
+            SupergraphSelector::RequestHeader {
+                request_header: "my-header".to_string(),
+                redact: None,
+                default: None,
+            },
+        );
+        let values = spans.attributes.on_request(
+            &supergraph::Request::fake_builder()
+                .method(http::Method::POST)
+                .header("my-header", "test_val")
+                .build()
+                .unwrap(),
+        );
+        assert!(values
+            .get(&opentelemetry::Key::from_static_str("test"))
+            .is_some());
+    }
+
+    #[test]
+    fn test_supergraph_response_custom_attribute() {
+        let mut spans = SupergraphSpans::default();
+        spans.attributes.custom.insert(
+            "test".to_string(),
+            SupergraphSelector::ResponseHeader {
+                response_header: "my-header".to_string(),
+                redact: None,
+                default: None,
+            },
+        );
+        let values = spans.attributes.on_response(
+            &supergraph::Response::fake_builder()
+                .header("my-header", "test_val")
+                .build()
+                .unwrap(),
+        );
+        assert!(values
+            .get(&opentelemetry::Key::from_static_str("test"))
+            .is_some());
+    }
+
+    #[test]
+    fn test_subgraph_request_custom_attribute() {
+        let mut spans = SubgraphSpans::default();
+        spans.attributes.custom.insert(
+            "test".to_string(),
+            SubgraphSelector::SubgraphRequestHeader {
+                subgraph_request_header: "my-header".to_string(),
+                redact: None,
+                default: None,
+            },
+        );
+        let values = spans.attributes.on_request(
+            &subgraph::Request::fake_builder()
+                .subgraph_request(
+                    ::http::Request::builder()
+                        .uri("http://localhost/graphql")
+                        .header("my-header", "test_val")
+                        .body(
+                            graphql::Request::fake_builder()
+                                .query("query { __typename }")
+                                .build(),
+                        )
+                        .unwrap(),
+                )
+                .build(),
+        );
+        assert!(values
+            .get(&opentelemetry::Key::from_static_str("test"))
+            .is_some());
+    }
+
+    #[test]
+    fn test_subgraph_response_custom_attribute() {
+        let mut spans = SubgraphSpans::default();
+        spans.attributes.custom.insert(
+            "test".to_string(),
+            SubgraphSelector::SubgraphResponseHeader {
+                subgraph_response_header: "my-header".to_string(),
+                redact: None,
+                default: None,
+            },
+        );
+        let values = spans.attributes.on_response(
+            &subgraph::Response::fake2_builder()
+                .header("my-header", "test_val")
+                .build()
+                .unwrap(),
+        );
+        assert!(values
+            .get(&opentelemetry::Key::from_static_str("test"))
+            .is_some());
     }
 }
