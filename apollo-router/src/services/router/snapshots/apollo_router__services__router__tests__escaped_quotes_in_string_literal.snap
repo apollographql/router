@@ -1,6 +1,6 @@
 ---
-source: apollo-router/src/services/router_service.rs
-expression: "(graphql_response, subgraph_query_log)"
+source: apollo-router/src/services/router/tests.rs
+expression: "(graphql_response, &subgraph_query_log)"
 ---
 (
     Response {

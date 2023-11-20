@@ -89,6 +89,12 @@ expression: "&schema"
                       "type": "string",
                       "nullable": true
                     },
+                    "ttl": {
+                      "description": "TTL for entries",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
                     "urls": {
                       "description": "List of URLs to the Redis cluster",
                       "type": "array",
@@ -204,6 +210,14 @@ expression: "&schema"
                         "description": "Expected issuer for tokens verified by that JWKS",
                         "type": "string",
                         "nullable": true
+                      },
+                      "poll_interval": {
+                        "description": "Polling interval for each JWKS endpoint in human-readable format; defaults to 60s",
+                        "default": {
+                          "secs": 60,
+                          "nanos": 0
+                        },
+                        "type": "string"
                       },
                       "url": {
                         "description": "Retrieve the JWK Set",
@@ -1557,12 +1571,13 @@ expression: "&schema"
       "description": "Health check configuration",
       "default": {
         "listen": "127.0.0.1:8088",
-        "enabled": true
+        "enabled": true,
+        "path": "/health"
       },
       "type": "object",
       "properties": {
         "enabled": {
-          "description": "Set to false to disable the health check endpoint",
+          "description": "Set to false to disable the health check",
           "default": true,
           "type": "boolean"
         },
@@ -1579,6 +1594,11 @@ expression: "&schema"
               "type": "string"
             }
           ]
+        },
+        "path": {
+          "description": "Optionally set a custom healthcheck path Defaults to /health",
+          "default": "/health",
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -1633,7 +1653,7 @@ expression: "&schema"
         "max_root_fields": null,
         "max_aliases": null,
         "warn_only": false,
-        "parser_max_recursion": 4096,
+        "parser_max_recursion": 500,
         "parser_max_tokens": 15000,
         "experimental_http_max_request_bytes": 2000000
       },
@@ -1679,8 +1699,8 @@ expression: "&schema"
           "nullable": true
         },
         "parser_max_recursion": {
-          "description": "Limit recursion in the GraphQL parser to protect against stack overflow. default: 4096",
-          "default": 4096,
+          "description": "Limit recursion in the GraphQL parser to protect against stack overflow. default: 500",
+          "default": 500,
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
@@ -2109,6 +2129,12 @@ expression: "&schema"
                   "properties": {
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "ttl": {
+                      "description": "TTL for entries",
                       "default": null,
                       "type": "string",
                       "nullable": true
@@ -7732,6 +7758,12 @@ expression: "&schema"
           "properties": {
             "timeout": {
               "description": "Redis request timeout (default: 2ms)",
+              "default": null,
+              "type": "string",
+              "nullable": true
+            },
+            "ttl": {
+              "description": "TTL for entries",
               "default": null,
               "type": "string",
               "nullable": true

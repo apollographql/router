@@ -21,8 +21,8 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
-      - image: cimg/redis:7.2.0
-      - image: jaegertracing/all-in-one:1.48.0
+      - image: cimg/redis:7.2.3
+      - image: jaegertracing/all-in-one:1.49.0
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -395,13 +395,35 @@ commands:
             curl -L https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz -C "${KUBECONFORM_INSTALL}"
 
             # Create list of kube versions
-            CURRENT_KUBE_VERSIONS=$(curl -L https://raw.githubusercontent.com/kubernetes/website/main/data/releases/schedule.yaml \
+            CURRENT_KUBE_VERSIONS=$(curl -s -L https://raw.githubusercontent.com/kubernetes/website/main/data/releases/schedule.yaml \
               | yq -o json '.' \
-              | jq --raw-output '.schedules[] | select((now | strftime("%Y-%m-%dT00:00:00Z")) as $date | .releaseDate < $date and .endOfLifeDate > $date) | .previousPatches[0].release')
+              | jq --raw-output '.schedules[] | select((now | strftime("%Y-%m-%dT00:00:00Z")) as $date | .releaseDate < $date and .endOfLifeDate > $date) | .previousPatches[].release')
 
-            # Use helm to template our chart against all kube versions
             TEMPLATE_DIR=$(mktemp -d)
+            MINOR_VERSION="${kube_version%.*}"
+            SUCCEEDED=false
+
+            # For each k8s minor version (e.g.: 1.28) we will try to validate against the most recent patch release (e.g. 1.28.3)
+            # We use curl --head to check if support is available. If it isn't we then try the next most recent release.
+            # As soon as we find an available release we try to use it. If we don't find an available release for a minor version, then we will ignore that silently
             for kube_version in ${CURRENT_KUBE_VERSIONS}; do
+              if [[ "${kube_version%.*}" == "${MINOR_VERSION}" ]]; then
+                if [[ ${SUCCEEDED} == true ]]; then
+                  continue
+                fi
+              else
+                MINOR_VERSION="${kube_version%.*}"
+                SUCCEEDED=false
+              fi
+
+              # Sometimes the database has not been updated with schema details. If that happens, just skip the kubeconform checks until the database is updated"
+              if ! curl --head --silent --output /dev/null  --fail "https://github.com/yannh/kubernetes-json-schema/tree/master/v${kube_version}"; then
+                echo "Skipping validation for kubernetes version: ${kube_version} until the schema database is updated."
+                continue
+              fi
+
+              echo "Validating against schema version: ${kube_version}"
+
               # Use helm to template our chart against kube_version
               helm template --kube-version "${kube_version}" router helm/chart/router --set autoscaling.enabled=true > "${TEMPLATE_DIR}/router-${kube_version}.yaml"
 
@@ -412,6 +434,7 @@ commands:
                 --schema-location default \
                 --verbose \
                 "${TEMPLATE_DIR}/router-${kube_version}.yaml"
+              SUCCEEDED=true
             done
 
   xtask_check_compliance:

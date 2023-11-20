@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io::Cursor;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -97,6 +98,23 @@ const LABEL: Key = Key::from_static_str("graphql.label");
 const CONDITION: Key = Key::from_static_str("graphql.condition");
 const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
 const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
+const INCLUDE_SPANS: [&str; 15] = [
+    PARALLEL_SPAN_NAME,
+    SEQUENCE_SPAN_NAME,
+    FETCH_SPAN_NAME,
+    FLATTEN_SPAN_NAME,
+    SUBGRAPH_SPAN_NAME,
+    SUPERGRAPH_SPAN_NAME,
+    ROUTER_SPAN_NAME,
+    DEFER_SPAN_NAME,
+    DEFER_PRIMARY_SPAN_NAME,
+    DEFER_DEFERRED_SPAN_NAME,
+    CONDITION_SPAN_NAME,
+    CONDITION_IF_SPAN_NAME,
+    CONDITION_ELSE_SPAN_NAME,
+    EXECUTION_SPAN_NAME,
+    SUBSCRIPTION_EVENT_SPAN_NAME,
+];
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
@@ -150,6 +168,7 @@ pub(crate) struct Exporter {
     field_execution_weight: f64,
     errors_configuration: ErrorsConfiguration,
     use_legacy_request_span: bool,
+    include_span_names: HashSet<&'static str>,
 }
 
 #[derive(Debug)]
@@ -208,6 +227,7 @@ impl Exporter {
             },
             errors_configuration: errors_configuration.clone(),
             use_legacy_request_span: use_legacy_request_span.unwrap_or_default(),
+            include_span_names: INCLUDE_SPANS.into(),
         })
     }
 
@@ -305,14 +325,28 @@ impl Exporter {
         let (mut child_nodes, errors) = match self.spans_by_parent_id.pop_entry(&span.span_id) {
             Some((_, spans)) => spans
                 .into_iter()
-                .map(|(_, span)| self.extract_data_from_spans(&span))
-                .fold((Vec::new(), Vec::new()), |(mut oks, mut errors), next| {
-                    match next {
-                        Ok(mut children) => oks.append(&mut children),
-                        Err(err) => errors.push(err),
-                    }
-                    (oks, errors)
-                }),
+                .map(|(_, span)| {
+                    // If it's an unknown span or a span we don't care here it's better to know it here because as this algo is recursive if we encounter unknown spans it changes the order of spans and break the logics
+                    let unknown = self.include_span_names.contains(span.name.as_ref());
+                    (self.extract_data_from_spans(&span), unknown)
+                })
+                .fold(
+                    (Vec::new(), Vec::new()),
+                    |(mut oks, mut errors), (next, unknown_span)| {
+                        match next {
+                            Ok(mut children) => {
+                                if unknown_span {
+                                    oks.append(&mut children)
+                                } else {
+                                    children.append(&mut oks);
+                                    oks = children;
+                                }
+                            }
+                            Err(err) => errors.push(err),
+                        }
+                        (oks, errors)
+                    },
+                ),
             None => (Vec::new(), Vec::new()),
         };
         if !errors.is_empty() {
