@@ -324,6 +324,7 @@ impl Exporter {
             Some((_, spans)) => spans
                 .into_iter()
                 .map(|(_, span)| {
+                    // If it's an unknown span or a span we don't care here it's better to know it here because as this algo is recursive if we encounter unknown spans it changes the order of spans and break the logics
                     let unknown = self.include_span_names.contains(span.name.as_ref());
                     (self.extract_data_from_spans(&span), unknown)
                 })
