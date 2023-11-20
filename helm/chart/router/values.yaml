@@ -94,7 +94,7 @@ extraContainers: []
 #     command: ["sh"]
 initContainers: []
 
-# -- A map of extra labels to apply to the router deploment and containers
+# -- A map of extra labels to apply to the resources created by this chart
 # Example:
 # extraLabels:
 #   label_one_name: "label_one_value"
@@ -232,3 +232,6 @@ probes:
   # -- Configure liveness probe
   liveness:
     initialDelaySeconds: 0
+
+# -- Sets the [topology spread constraints](https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/) for Deployment pods
+topologySpreadConstraints: []

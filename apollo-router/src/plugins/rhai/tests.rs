@@ -21,16 +21,16 @@ use super::process_error;
 use super::subgraph;
 use super::PathBuf;
 use super::Rhai;
-use super::RhaiExecutionDeferredResponse;
-use super::RhaiExecutionResponse;
-use super::RhaiSupergraphDeferredResponse;
-use super::RhaiSupergraphResponse;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::http_ext;
 use crate::plugin::test::MockExecutionService;
 use crate::plugin::test::MockSupergraphService;
 use crate::plugin::DynPlugin;
+use crate::plugins::rhai::engine::RhaiExecutionDeferredResponse;
+use crate::plugins::rhai::engine::RhaiExecutionResponse;
+use crate::plugins::rhai::engine::RhaiSupergraphDeferredResponse;
+use crate::plugins::rhai::engine::RhaiSupergraphResponse;
 use crate::services::ExecutionRequest;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
@@ -531,6 +531,32 @@ fn it_can_base64decode_string() {
         .eval(r#"base64::decode("VGhpcyBoYXMgYW4gw7xtbGF1dCBpbiBpdC4=")"#)
         .expect("can decode string");
     assert_eq!(decoded, "This has an ümlaut in it.");
+}
+
+#[test]
+fn it_can_base64encode_string_with_alphabet() {
+    let engine = new_rhai_test_engine();
+    let encoded: String = engine
+        .eval(r#"base64::encode("<<???>>", base64::STANDARD)"#)
+        .expect("can encode string");
+    assert_eq!(encoded, "PDw/Pz8+Pg==");
+    let encoded: String = engine
+        .eval(r#"base64::encode("<<???>>", base64::URL_SAFE)"#)
+        .expect("can encode string");
+    assert_eq!(encoded, "PDw_Pz8-Pg==");
+}
+
+#[test]
+fn it_can_base64decode_string_with_alphabet() {
+    let engine = new_rhai_test_engine();
+    let decoded: String = engine
+        .eval(r#"base64::decode("PDw/Pz8+Pg==", base64::STANDARD)"#)
+        .expect("can decode string");
+    assert_eq!(decoded, "<<???>>");
+    let decoded: String = engine
+        .eval(r#"base64::decode("PDw_Pz8-Pg==", base64::URL_SAFE)"#)
+        .expect("can decode string");
+    assert_eq!(decoded, "<<???>>");
 }
 
 #[test]

@@ -22,14 +22,14 @@ impl<S: PreSampledTracer> PreSampledTracer for ReloadTracer<S> {
             .sampled_context(data)
     }
 
-    fn new_trace_id(&self) -> opentelemetry::trace::TraceId {
+    fn new_trace_id(&self) -> opentelemetry_api::trace::TraceId {
         self.parent
             .read()
             .expect("parent tracer must be available")
             .new_trace_id()
     }
 
-    fn new_span_id(&self) -> opentelemetry::trace::SpanId {
+    fn new_span_id(&self) -> opentelemetry_api::trace::SpanId {
         self.parent
             .read()
             .expect("parent tracer must be available")

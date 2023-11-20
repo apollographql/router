@@ -7,6 +7,8 @@ use bytes::Buf;
 use futures::future::BoxFuture;
 use hmac::Hmac;
 use hmac::Mac;
+use http::HeaderName;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use multimap::MultiMap;
@@ -46,6 +48,8 @@ pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN_NAME: &str = "subscription";
 pub(crate) static SUBSCRIPTION_CALLBACK_HMAC_KEY: OnceCell<String> = OnceCell::new();
 pub(crate) const SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS: &str =
     "apollo.subscription.custom_connection_params";
+const CALLBACK_SUBSCRIPTION_HEADER_NAME: &str = "subscription-protocol";
+const CALLBACK_SUBSCRIPTION_HEADER_VALUE: &str = "callback/1.0";
 
 #[derive(Debug, Clone)]
 pub(crate) struct Subscription {
@@ -56,22 +60,18 @@ pub(crate) struct Subscription {
 
 /// Subscriptions configuration
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct SubscriptionConfig {
     /// Enable subscription
     pub(crate) enabled: bool,
     /// Select a subscription mode (callback or passthrough)
-    #[serde(default)]
     pub(crate) mode: SubscriptionModeConfig,
     /// Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode)
     /// (default: true)
-    #[serde(default)]
     pub(crate) enable_deduplication: bool,
     /// This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.
-    #[serde(default)]
     pub(crate) max_opened_subscriptions: Option<usize>,
     /// It represent the capacity of the in memory queue to know how many events we can keep in a buffer
-    #[serde(default)]
     pub(crate) queue_capacity: Option<usize>,
 }
 
@@ -468,6 +468,7 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NO_CONTENT)
+                                            .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
                                             .body::<hyper::Body>("".into())
                                             .map_err(BoxError::from)?,
                                         context: req.context,
@@ -476,6 +477,7 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NOT_FOUND)
+                                            .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
                                             .body("suscription doesn't exist".into())
                                             .map_err(BoxError::from)?,
                                         context: req.context,
@@ -698,6 +700,12 @@ mod tests {
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
+        assert_eq!(
+            resp.headers()
+                .get(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME))
+                .unwrap(),
+            HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE)
+        );
 
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
@@ -916,6 +924,12 @@ mod tests {
         .unwrap();
         let resp = web_endpoint.clone().oneshot(http_req).await.unwrap();
         assert_eq!(resp.status(), http::StatusCode::NO_CONTENT);
+        assert_eq!(
+            resp.headers()
+                .get(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME))
+                .unwrap(),
+            HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE)
+        );
 
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
@@ -1268,6 +1282,22 @@ mod tests {
 
         let subgraph_cfg = config_without_mode.mode.get_subgraph_config("test");
         assert_eq!(subgraph_cfg, None);
+
+        let sub_config: SubscriptionConfig = serde_json::from_value(serde_json::json!({
+            "mode": {
+                "preview_callback": {
+                    "public_url": "http://localhost:4000",
+                    "path": "/subscription/callback",
+                    "subgraphs": ["test"]
+                }
+            }
+        }))
+        .unwrap();
+
+        assert!(sub_config.enabled);
+        assert!(sub_config.enable_deduplication);
+        assert!(sub_config.max_opened_subscriptions.is_none());
+        assert!(sub_config.queue_capacity.is_none());
     }
 }
 

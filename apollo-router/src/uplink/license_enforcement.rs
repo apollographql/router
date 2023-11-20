@@ -3,6 +3,7 @@
 // Read more: https://github.com/hyperium/tonic/issues/1056
 #![allow(clippy::derive_partial_eq_without_eq)]
 
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::str::FromStr;
@@ -25,6 +26,8 @@ use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::spec::LINK_DIRECTIVE_NAME;
+use crate::spec::LINK_URL_ARGUMENT;
 use crate::Configuration;
 
 pub(crate) const LICENSE_EXPIRED_URL: &str = "https://go.apollo.dev/o/elp";
@@ -75,19 +78,24 @@ where
 #[derive(Debug)]
 pub(crate) struct LicenseEnforcementReport {
     restricted_config_in_use: Vec<ConfigurationRestriction>,
+    restricted_schema_in_use: Vec<SchemaRestriction>,
 }
 
 impl LicenseEnforcementReport {
     pub(crate) fn uses_restricted_features(&self) -> bool {
-        !self.restricted_config_in_use.is_empty()
+        !self.restricted_config_in_use.is_empty() || !self.restricted_schema_in_use.is_empty()
     }
 
-    pub(crate) fn build(configuration: &Configuration) -> LicenseEnforcementReport {
+    pub(crate) fn build(
+        configuration: &Configuration,
+        schema: &apollo_compiler::schema::Schema,
+    ) -> LicenseEnforcementReport {
         LicenseEnforcementReport {
             restricted_config_in_use: Self::validate_configuration(
                 configuration,
                 &Self::configuration_restrictions(),
             ),
+            restricted_schema_in_use: Self::validate_schema(schema, &Self::schema_restrictions()),
         }
     }
 
@@ -117,6 +125,32 @@ impl LicenseEnforcementReport {
             }
         }
         configuration_violations
+    }
+
+    fn validate_schema(
+        schema: &apollo_compiler::schema::Schema,
+        schema_restrictions: &Vec<SchemaRestriction>,
+    ) -> Vec<SchemaRestriction> {
+        let feature_urls = schema
+            .schema_definition
+            .directives
+            .iter()
+            .filter(|dir| dir.name.as_str() == LINK_DIRECTIVE_NAME)
+            .filter_map(|link| {
+                link.argument_by_name(LINK_URL_ARGUMENT)
+                    .and_then(|value| value.as_str().map(|s| s.to_string()))
+            })
+            .collect::<HashSet<_>>();
+
+        let mut schema_violations = Vec::new();
+
+        for restriction in schema_restrictions {
+            if feature_urls.contains(&restriction.url) {
+                schema_violations.push(restriction.clone());
+            }
+        }
+
+        schema_violations
     }
 
     fn configuration_restrictions() -> Vec<ConfigurationRestriction> {
@@ -178,8 +212,21 @@ impl LicenseEnforcementReport {
                 .name("Operation aliases limiting")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.preview_persisted_queries")
+                .path("$.persisted_queries")
                 .name("Persisted queries")
+                .build(),
+        ]
+    }
+
+    fn schema_restrictions() -> Vec<SchemaRestriction> {
+        vec![
+            SchemaRestriction::builder()
+                .name("@authenticated")
+                .url("https://specs.apollo.dev/authenticated/v0.1")
+                .build(),
+            SchemaRestriction::builder()
+                .name("@requiresScopes")
+                .url("https://specs.apollo.dev/requiresScopes/v0.1")
                 .build(),
         ]
     }
@@ -187,13 +234,30 @@ impl LicenseEnforcementReport {
 
 impl Display for LicenseEnforcementReport {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let restricted_config = self
-            .restricted_config_in_use
-            .iter()
-            .map(|v| format!("* {}\n  {}", v.name, v.path.replace("$.", ".")))
-            .join("\n\n");
+        if !self.restricted_config_in_use.is_empty() {
+            let restricted_config = self
+                .restricted_config_in_use
+                .iter()
+                .map(|v| format!("* {}\n  {}", v.name, v.path.replace("$.", ".")))
+                .join("\n\n");
+            write!(f, "Configuration yaml:\n{restricted_config}")?;
 
-        write!(f, "Configuration yaml:\n{restricted_config}")
+            if !self.restricted_schema_in_use.is_empty() {
+                writeln!(f)?;
+            }
+        }
+
+        if !self.restricted_schema_in_use.is_empty() {
+            let restricted_schema = self
+                .restricted_schema_in_use
+                .iter()
+                .map(|v| format!("* {}\n  {}", v.name, v.url))
+                .join("\n\n");
+
+            write!(f, "Schema features:\n{restricted_schema}")?
+        }
+
+        Ok(())
     }
 }
 
@@ -277,6 +341,13 @@ pub(crate) struct ConfigurationRestriction {
     value: Option<Value>,
 }
 
+/// An individual check for the supergraph schema
+#[derive(Builder, Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct SchemaRestriction {
+    name: String,
+    url: String,
+}
+
 impl License {
     pub(crate) fn jwks() -> &'static JwkSet {
         JWKS.get_or_init(|| {
@@ -297,6 +368,7 @@ mod test {
     use insta::assert_snapshot;
     use serde_json::json;
 
+    use crate::spec::Schema;
     use crate::uplink::license_enforcement::Audience;
     use crate::uplink::license_enforcement::Claims;
     use crate::uplink::license_enforcement::License;
@@ -304,15 +376,19 @@ mod test {
     use crate::uplink::license_enforcement::OneOrMany;
     use crate::Configuration;
 
-    fn check(router_yaml: &str) -> LicenseEnforcementReport {
+    fn check(router_yaml: &str, supergraph_schema: &str) -> LicenseEnforcementReport {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
-
-        LicenseEnforcementReport::build(&config)
+        let schema =
+            Schema::make_compiler(supergraph_schema).expect("supergraph schema must be valid");
+        LicenseEnforcementReport::build(&config, &schema)
     }
 
     #[test]
     fn test_oss() {
-        let report = check(include_str!("testdata/oss.router.yaml"));
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/oss.graphql"),
+        );
 
         assert!(
             report.restricted_config_in_use.is_empty(),
@@ -322,10 +398,27 @@ mod test {
 
     #[test]
     fn test_restricted_features_via_config() {
-        let report = check(include_str!("testdata/restricted.router.yaml"));
+        let report = check(
+            include_str!("testdata/restricted.router.yaml"),
+            include_str!("testdata/oss.graphql"),
+        );
 
         assert!(
             !report.restricted_config_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn test_restricted_authorization_directives_via_schema() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/authorization.graphql"),
+        );
+
+        assert!(
+            !report.restricted_schema_in_use.is_empty(),
             "should have found restricted features"
         );
         assert_snapshot!(report.to_string());

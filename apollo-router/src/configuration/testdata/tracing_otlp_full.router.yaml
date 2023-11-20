@@ -3,6 +3,7 @@ supergraph:
 telemetry:
   tracing:
     otlp:
+      enabled: true
       endpoint: default
       grpc:
         ca: ""

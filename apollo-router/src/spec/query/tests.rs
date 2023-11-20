@@ -18,6 +18,26 @@ macro_rules! assert_eq_and_ordered {
     };
 }
 
+macro_rules! assert_eq_and_ordered_json {
+    ($a:expr, $b:expr $(,)?) => {
+        assert_eq!(
+            $a,
+            $b,
+            "assertion failed: objects are not the same:\
+            \n  left: `{}`\n right: `{}`",
+            serde_json::to_string(&$a).unwrap(),
+            serde_json::to_string(&$b).unwrap()
+        );
+        assert!(
+            $a.eq_and_ordered(&$b),
+            "assertion failed: objects are not ordered the same:\
+            \n  left: `{}`\n right: `{}`",
+            serde_json::to_string(&$a).unwrap(),
+            serde_json::to_string(&$b).unwrap(),
+        );
+    };
+}
+
 #[derive(Default)]
 struct FormatTest {
     schema: Option<&'static str>,
@@ -122,15 +142,21 @@ impl FormatTest {
         );
 
         if let Some(e) = self.expected {
-            assert_eq_and_ordered!(response.data.as_ref().unwrap(), &e);
+            assert_eq_and_ordered_json!(
+                serde_json_bytes::to_value(response.data.as_ref()).unwrap(),
+                e
+            );
         }
 
         if let Some(e) = self.expected_errors {
-            assert_eq_and_ordered!(serde_json_bytes::to_value(&response.errors).unwrap(), e);
+            assert_eq_and_ordered_json!(serde_json_bytes::to_value(&response.errors).unwrap(), e);
         }
 
         if let Some(e) = self.expected_extensions {
-            assert_eq_and_ordered!(serde_json_bytes::to_value(&response.extensions).unwrap(), e);
+            assert_eq_and_ordered_json!(
+                serde_json_bytes::to_value(&response.extensions).unwrap(),
+                e
+            );
         }
     }
 }
@@ -496,9 +522,88 @@ fn reformat_response_data_best_effort() {
                         "baz": "2",
                     },
                     "array": [
-                        {},
+                        {"bar": null, "baz": "3"},
                         null,
-                        {},
+                        {"bar": "5", "baz": null}
+                    ],
+                    "other": null,
+                },
+            }
+        })
+        .test();
+}
+
+#[test]
+// just like the test above, except the query is one the planner would generate.
+fn reformat_response_data_best_effort_relevant_query() {
+    FormatTest::builder()
+        .schema(
+            "type Query {
+        get: Thing
+    }
+    type Thing {
+        foo: String
+        stuff: Baz
+        array: [Element]
+        other: Bar
+    }
+
+    type Baz {
+        bar: String
+        baz: String
+    }
+
+    type Bar {
+        bar: String
+    }
+
+    union Element = Baz | Bar
+    ",
+        )
+        .query("{get{foo stuff{bar baz}array{...on Baz{bar baz}}other{bar}}}")
+        // the planner generates this:
+        // {get{foo stuff{bar baz}array{__typename ...on Baz{bar baz}}other{bar}}}
+        .response(json! {
+            {
+                "get": {
+                    "foo": "1",
+                    "stuff": {"baz": "2"},
+                    "array": [
+                        {
+                            "__typename": "Baz",
+                            "baz": "3"
+                        },
+                        "4",
+                        {
+                            "__typename": "Baz",
+                            "baz": "5"
+                        },
+                    ],
+                    "other": "6",
+                },
+                "should_be_removed": {
+                    "aaa": 2
+                },
+            }
+        })
+        .expected(json! {
+            {
+                "get": {
+                    "foo": "1",
+                    "stuff": {
+                        "bar": null,
+                        "baz": "2",
+                    },
+                    "array": [
+                        {
+                            "bar":null,
+                            "baz":"3"
+                        },
+                        null,
+                        {
+                            "bar": null,
+                            "baz":"5"
+                        }
                     ],
                     "other": null,
                 },
@@ -2992,13 +3097,14 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query)
         .response(json! {{
+            "__typename": "Query",
             "get": {
                 "name": "a",
                 "other": "b"
             }
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name": "a",
             }
@@ -3010,10 +3116,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name": null, "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name": null,
             }
@@ -3026,10 +3133,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query2)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name2": "a", "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name2": "a",
             }
@@ -3041,10 +3149,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query2)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name2": null, "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": null
         }})
         .test();
@@ -3055,10 +3164,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query3)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name": "a", "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name": "a",
             }
@@ -3070,10 +3180,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query3)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name": null, "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name": null,
             }
@@ -3086,10 +3197,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query4)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name2": "a", "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": {
                 "name2": "a",
             }
@@ -3101,10 +3213,11 @@ fn filter_errors_top_level_fragment() {
         .schema(schema)
         .query(query4)
         .response(json! {{
+            "__typename": "Query",
             "get": {"name2": null, "other": "b"}
         }})
         .expected(json! {{
-            "__typename": null,
+            "__typename": "Query",
             "get": null,
         }})
         .test();
@@ -3217,12 +3330,15 @@ fn it_parses_default_floats() {
     );
 
     let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
-    let value = schema.type_system.definitions.input_objects["WithAllKindsOfFloats"]
-        .field("a_float_that_doesnt_fit_an_int")
+    let value = schema
+        .definitions
+        .get_input_object("WithAllKindsOfFloats")
         .unwrap()
-        .default_value()
+        .fields["a_float_that_doesnt_fit_an_int"]
+        .default_value
+        .as_ref()
         .unwrap();
-    assert_eq!(f64::try_from(value).unwrap() as i64, 9876543210);
+    assert_eq!(value.to_f64().unwrap() as i64, 9876543210);
 }
 
 #[test]
@@ -5470,7 +5586,7 @@ fn test_query_not_named_query() {
         matches!(
             selection,
             Selection::Field {
-                field_type: FieldType(hir::Type::Named { name, .. }),
+                field_type: FieldType(apollo_compiler::executable::Type::Named(name)),
                 ..
             }
             if name == "Boolean"
@@ -5525,10 +5641,9 @@ fn filtered_defer_fragment() {
         }
       }";
 
-    let mut compiler = ApolloCompiler::new();
-    compiler.add_executable(query, "query.graphql");
+    let doc = ExecutableDocument::parse(&schema.definitions, query, "query.graphql");
     let (fragments, operations, defer_stats) =
-        Query::extract_query_information(&compiler, &schema).unwrap();
+        Query::extract_query_information(&schema, &doc).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5545,14 +5660,17 @@ fn filtered_defer_fragment() {
         subselections,
         defer_stats,
         is_original: true,
-        unauthorized_paths: vec![],
+        unauthorized: UnauthorizedPaths::default(),
         validation_error: None,
     };
 
-    let mut compiler = ApolloCompiler::new();
-    compiler.add_executable(filtered_query, "filtered_query.graphql");
+    let doc = ExecutableDocument::parse(
+        &schema.definitions,
+        filtered_query,
+        "filtered_query.graphql",
+    );
     let (fragments, operations, defer_stats) =
-        Query::extract_query_information(&compiler, &schema).unwrap();
+        Query::extract_query_information(&schema, &doc).unwrap();
 
     let subselections = crate::spec::query::subselections::collect_subselections(
         &config,
@@ -5570,7 +5688,7 @@ fn filtered_defer_fragment() {
         subselections,
         defer_stats,
         is_original: false,
-        unauthorized_paths: vec![],
+        unauthorized: UnauthorizedPaths::default(),
         validation_error: None,
     };
 

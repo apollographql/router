@@ -2,7 +2,7 @@
 
 [router](https://github.com/apollographql/router) Rust Graph Routing runtime for Apollo Federation
 
-![Version: 1.28.1](https://img.shields.io/badge/Version-1.28.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.28.1](https://img.shields.io/badge/AppVersion-v1.28.1-informational?style=flat-square)
+![Version: 1.33.2](https://img.shields.io/badge/Version-1.33.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.33.2](https://img.shields.io/badge/AppVersion-v1.33.2-informational?style=flat-square)
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@
 ## Get Repo Info
 
 ```console
-helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.28.1
+helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.33.2
 ```
 
 ## Install Chart
@@ -19,7 +19,7 @@ helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.28.1
 **Important:** only helm3 is supported
 
 ```console
-helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.28.1 --values my-values.yaml
+helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.33.2 --values my-values.yaml
 ```
 
 _See [configuration](#configuration) below._
@@ -48,7 +48,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | extraEnvVars | list | `[]` |  |
 | extraEnvVarsCM | string | `""` |  |
 | extraEnvVarsSecret | string | `""` |  |
-| extraLabels | object | `{}` | A map of extra labels to apply to the router deploment and containers Example: extraLabels:   label_one_name: "label_one_value"   label_two_name: "label_two_value" |
+| extraLabels | object | `{}` | A map of extra labels to apply to the resources created by this chart Example: extraLabels:   label_one_name: "label_one_value"   label_two_name: "label_two_value" |
 | extraVolumeMounts | list | `[]` |  |
 | extraVolumes | list | `[]` |  |
 | fullnameOverride | string | `""` |  |
@@ -91,6 +91,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | supergraphFile | string | `nil` |  |
 | terminationGracePeriodSeconds | int | `30` | Sets the [termination grace period](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#hook-handler-execution) for Deployment pods |
 | tolerations | list | `[]` |  |
+| topologySpreadConstraints | list | `[]` | Sets the [topology spread constraints](https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/) for Deployment pods |
 | virtualservice.enabled | bool | `false` |  |
 
 ----------------------------------------------
