@@ -17,10 +17,11 @@ use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
-use super::router_service::MULTIPART_DEFER_HEADER_VALUE;
-use super::router_service::MULTIPART_SUBSCRIPTION_HEADER_VALUE;
+use self::service::MULTIPART_DEFER_HEADER_VALUE;
+use self::service::MULTIPART_SUBSCRIPTION_HEADER_VALUE;
 use super::supergraph;
 use crate::graphql;
+use crate::http_ext::header_map;
 use crate::json_ext::Path;
 use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
@@ -31,6 +32,10 @@ pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxEr
 pub type ServiceResult = Result<Response, BoxError>;
 pub type Body = hyper::Body;
 pub type Error = hyper::Error;
+
+pub(crate) mod service;
+#[cfg(test)]
+mod tests;
 
 assert_impl_all!(Request: Send);
 /// Represents the router processing step of the processing pipeline.
@@ -51,6 +56,41 @@ impl From<http::Request<Body>> for Request {
             router_request,
             context: Context::new(),
         }
+    }
+}
+
+impl From<(http::Request<Body>, Context)> for Request {
+    fn from((router_request, context): (http::Request<Body>, Context)) -> Self {
+        Self {
+            router_request,
+            context,
+        }
+    }
+}
+
+#[buildstructor::buildstructor]
+impl Request {
+    /// This is the constructor (or builder) to use when constructing a real Request.
+    ///
+    /// Required parameters are required in non-testing code to create a Request.
+    #[allow(clippy::too_many_arguments)]
+    #[builder(visibility = "pub")]
+    fn new(
+        context: Context,
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
+        uri: http::Uri,
+        method: Method,
+        body: Body,
+    ) -> Result<Request, BoxError> {
+        let mut router_request = http::Request::builder()
+            .uri(uri)
+            .method(method)
+            .body(body)?;
+        *router_request.headers_mut() = header_map(headers)?;
+        Ok(Self {
+            router_request,
+            context,
+        })
     }
 }
 

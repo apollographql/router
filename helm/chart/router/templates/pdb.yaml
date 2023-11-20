@@ -7,7 +7,7 @@ metadata:
   labels:
     {{- include "router.labels" . | nindent 4 }}
     {{- if .Values.extraLabels }}
-    {{- include "common.templatizeExtraLabels" . | trim | nindent 4 }}
+    {{- include "apollographql.templatizeExtraLabels" . | trim | nindent 4 }}
     {{- end }}
 spec:
 {{- if .Values.podDisruptionBudget.minAvailable }}

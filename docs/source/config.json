@@ -59,8 +59,7 @@
         "Safelisting with persisted queries": [
           "/configuration/persisted-queries",
           [
-            "enterprise",
-            "preview"
+            "enterprise"
           ]
         ],
         "Privacy and data collection": "/privacy"
@@ -70,6 +69,12 @@
       "Build and run queries": "/executing-operations/build-run-queries",
       "@defer support": "/executing-operations/defer-support",
       "Request format": "/executing-operations/requests",
+      "Query batching": [
+          "/executing-operations/query-batching",
+          [
+            "experimental"
+          ]
+      ],
       "GraphQL Subscriptions": {
         "Subscriptions setup": [
           "/executing-operations/subscription-support",
@@ -101,8 +106,8 @@
     },
     "Containerization": {
       "Overview": "/containerization/overview",
-      "Docker": "/containerization/docker",
-      "Kubernetes": "/containerization/kubernetes"
+      "Deploy on Kubernetes": "/containerization/kubernetes",
+      "Run with Docker": "/containerization/docker"
     },
     "Managed Federation": {
       "Overview": "https://www.apollographql.com/docs/federation/managed-federation/overview",
