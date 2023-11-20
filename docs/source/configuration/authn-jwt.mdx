@@ -46,7 +46,7 @@ Otherwise, if you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne
           jwks: # This key is required.
             - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
               issuer: <optional name of issuer>
-
+              poll_interval: <optional poll interval>
           # These keys are optional. Default values are shown.
           header_name: Authorization
           header_value_prefix: Bearer
@@ -98,6 +98,7 @@ The following configuration options are supported:
   - **If you use your own custom IdP,** you need to make its JWKS available at a router-accessible URL if you haven't already. For more information, see [Creating your own JWKS](#creating-your-own-jwks-advanced).
 - `issuer`: **optional** name of the issuer, that will be compared to the `iss` claim in the JWT if present. If it does not match, the request will be rejected.
 - `algorithms`: **optional** list of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
+- `poll_interval`: **optional** interval in human-readable format (e.g. `60s` or `1hour 30s`) at which the JWKS will be polled for changes. If not specified, the JWKS endpoint will be polled every 60 seconds.
 
 </td>
 </tr>
