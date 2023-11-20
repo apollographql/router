@@ -1,3 +1,6 @@
+#[cfg(test)]
+use std::collections::BTreeMap;
+#[cfg(not(test))]
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
@@ -14,6 +17,7 @@ use tracing_subscriber::field;
 use tracing_subscriber::field::Visit;
 use tracing_subscriber::fmt::format::DefaultVisitor;
 use tracing_subscriber::fmt::format::Writer;
+#[cfg(not(test))]
 use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::fmt::time::SystemTime;
 use tracing_subscriber::layer::Context;
@@ -27,12 +31,26 @@ use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::formatters::to_map;
 use crate::plugins::telemetry::tracing::APOLLO_PRIVATE_PREFIX;
 
-#[derive(Default)]
 pub(crate) struct Text {
+    #[allow(dead_code)]
     timer: SystemTime,
+    #[cfg(not(test))]
     resource: HashMap<String, Value>,
+    #[cfg(test)]
+    resource: BTreeMap<String, Value>,
     config: TextFormat,
     excluded_attributes: HashSet<&'static str>,
+}
+
+impl Default for Text {
+    fn default() -> Self {
+        Self {
+            timer: Default::default(),
+            resource: Default::default(),
+            config: Default::default(),
+            excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
+        }
+    }
 }
 
 impl Text {
@@ -46,7 +64,10 @@ impl Text {
         Self {
             timer: Default::default(),
             config,
+            #[cfg(not(test))]
             resource: to_map(resource),
+            #[cfg(test)]
+            resource: to_map(resource).into_iter().collect(),
             excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
         }
     }
@@ -81,17 +102,24 @@ impl Text {
 
             // If getting the timestamp failed, don't bail --- only bail on
             // formatting errors.
+            #[cfg(not(test))]
             if self.timer.format_time(writer).is_err() {
                 writer.write_str("<unknown time>")?;
             }
+            #[cfg(test)]
+            writer.write_str("[timestamp]")?;
 
             write!(writer, "{}", style.suffix())?;
         } else {
             // If getting the timestamp failed, don't bail --- only bail on
             // formatting errors.
+            #[cfg(not(test))]
             if self.timer.format_time(writer).is_err() {
                 writer.write_str("<unknown time>")?;
             }
+
+            #[cfg(test)]
+            writer.write_str("[timestamp]")?;
         }
         writer.write_char(' ')
     }
@@ -99,21 +127,21 @@ impl Text {
     #[inline]
     fn format_location(&self, event: &Event<'_>, writer: &mut Writer<'_>) -> fmt::Result {
         if let (Some(filename), Some(line)) = (event.metadata().file(), event.metadata().line()) {
+            let style = Style::new().dimmed();
             if self.config.ansi_escape_codes {
-                let style = Style::new().dimmed();
                 write!(writer, "{}", style.prefix())?;
-                if self.config.display_filename {
-                    write!(writer, "{filename}")?;
-                }
-                if self.config.display_filename && self.config.display_line_number {
-                    write!(writer, ":")?;
-                }
-                if self.config.display_line_number {
-                    write!(writer, "{line}")?;
-                }
+            }
+            if self.config.display_filename {
+                write!(writer, "{filename}")?;
+            }
+            if self.config.display_filename && self.config.display_line_number {
+                write!(writer, ":")?;
+            }
+            if self.config.display_line_number {
+                write!(writer, "{line}")?;
+            }
+            if self.config.ansi_escape_codes {
                 write!(writer, "{}", style.suffix())?;
-            } else {
-                write!(writer, "{filename}:{line}")?;
             }
             writer.write_char(' ')?;
         }
@@ -149,10 +177,14 @@ impl Text {
             .and_then(|id| ctx.span(id))
             .or_else(|| ctx.lookup_current());
         if let Some(mut span) = span {
-            self.write_span(writer, &span)?;
-            while let Some(parent) = span.parent() {
-                self.write_span(writer, &parent)?;
-                span = parent;
+            if self.config.display_current_span {
+                self.write_span(writer, &span)?;
+            }
+            if self.config.display_span_list {
+                while let Some(parent) = span.parent() {
+                    self.write_span(writer, &parent)?;
+                    span = parent;
+                }
             }
         }
 
@@ -185,6 +217,8 @@ impl Text {
                 wrote_something = true;
                 write!(writer, "{}{{", span.name())?;
             }
+            #[cfg(test)]
+            let attrs: BTreeMap<&opentelemetry::Key, &opentelemetry::Value> = attrs.collect();
             for (key, value) in attrs {
                 write!(writer, "{key}={value},")?;
             }
@@ -206,7 +240,8 @@ impl Text {
                 wrote_something = true;
                 write!(writer, "{}{{", span.name())?;
             }
-
+            #[cfg(test)]
+            let attrs: BTreeMap<&opentelemetry::Key, &opentelemetry::Value> = attrs.collect();
             for (key, value) in attrs {
                 write!(writer, "{key}={value},")?;
             }
@@ -227,7 +262,8 @@ impl Text {
     pub(crate) fn format_resource(
         &self,
         writer: &mut Writer,
-        resource: &HashMap<String, Value>,
+        #[cfg(test)] resource: &BTreeMap<String, Value>,
+        #[cfg(not(test))] resource: &HashMap<String, Value>,
     ) -> fmt::Result {
         if !resource.is_empty() {
             let style = Style::new().dimmed();

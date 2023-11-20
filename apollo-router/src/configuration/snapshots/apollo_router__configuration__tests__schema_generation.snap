@@ -2598,7 +2598,7 @@ expression: "&schema"
                                   "type": "boolean"
                                 },
                                 "display_level": {
-                                  "description": "Include the level with the log event.",
+                                  "description": "Include the level with the log event. (default: true)",
                                   "default": true,
                                   "type": "boolean"
                                 },
@@ -2608,17 +2608,17 @@ expression: "&schema"
                                   "type": "boolean"
                                 },
                                 "display_resource": {
-                                  "description": "Include the resource with the log event.",
+                                  "description": "Include the resource with the log event. (default: true)",
                                   "default": true,
                                   "type": "boolean"
                                 },
                                 "display_span_list": {
-                                  "description": "Include all of the containing span information with the log event.",
+                                  "description": "Include all of the containing span information with the log event. (default: true)",
                                   "default": true,
                                   "type": "boolean"
                                 },
                                 "display_target": {
-                                  "description": "Include the target with the log event.",
+                                  "description": "Include the target with the log event. (default: true)",
                                   "default": true,
                                   "type": "boolean"
                                 },
@@ -2633,7 +2633,7 @@ expression: "&schema"
                                   "type": "boolean"
                                 },
                                 "display_timestamp": {
-                                  "description": "Include the timestamp with the log event.",
+                                  "description": "Include the timestamp with the log event. (default: true)",
                                   "default": true,
                                   "type": "boolean"
                                 }
@@ -2665,13 +2665,18 @@ expression: "&schema"
                                   "default": true,
                                   "type": "boolean"
                                 },
+                                "display_current_span": {
+                                  "description": "Include the current span in this log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
                                 "display_filename": {
                                   "description": "Include the filename with the log event.",
                                   "default": false,
                                   "type": "boolean"
                                 },
                                 "display_level": {
-                                  "description": "Include the level with the log event.",
+                                  "description": "Include the level with the log event. (default: true)",
                                   "default": true,
                                   "type": "boolean"
                                 },
@@ -2695,6 +2700,11 @@ expression: "&schema"
                                   "default": false,
                                   "type": "boolean"
                                 },
+                                "display_span_list": {
+                                  "description": "Include all of the containing span information with the log event. (default: true)",
+                                  "default": true,
+                                  "type": "boolean"
+                                },
                                 "display_target": {
                                   "description": "Include the target with the log event.",
                                   "default": false,
@@ -2711,7 +2721,7 @@ expression: "&schema"
                                   "type": "boolean"
                                 },
                                 "display_timestamp": {
-                                  "description": "Include the timestamp with the log event.",
+                                  "description": "Include the timestamp with the log event. (default: true)",
                                   "default": true,
                                   "type": "boolean"
                                 }
