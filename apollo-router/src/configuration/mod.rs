@@ -758,7 +758,7 @@ pub(crate) struct Limits {
     pub(crate) warn_only: bool,
 
     /// Limit recursion in the GraphQL parser to protect against stack overflow.
-    /// default: 4096
+    /// default: 500
     pub(crate) parser_max_recursion: usize,
 
     /// Limit the number of tokens the GraphQL parser processes before aborting.
@@ -783,8 +783,8 @@ impl Default for Limits {
 
             // This is `apollo-parser`’s default, which protects against stack overflow
             // but is still very high for "reasonable" queries.
-            // https://docs.rs/apollo-parser/0.2.8/src/apollo_parser/parser/mod.rs.html#368
-            parser_max_recursion: 4096,
+            // https://github.com/apollographql/apollo-rs/blob/apollo-parser%400.7.3/crates/apollo-parser/src/parser/mod.rs#L93-L104
+            parser_max_recursion: 500,
         }
     }
 }

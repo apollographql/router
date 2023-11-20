@@ -1653,7 +1653,7 @@ expression: "&schema"
         "max_root_fields": null,
         "max_aliases": null,
         "warn_only": false,
-        "parser_max_recursion": 4096,
+        "parser_max_recursion": 500,
         "parser_max_tokens": 15000,
         "experimental_http_max_request_bytes": 2000000
       },
@@ -1699,8 +1699,8 @@ expression: "&schema"
           "nullable": true
         },
         "parser_max_recursion": {
-          "description": "Limit recursion in the GraphQL parser to protect against stack overflow. default: 4096",
-          "default": 4096,
+          "description": "Limit recursion in the GraphQL parser to protect against stack overflow. default: 500",
+          "default": 500,
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
