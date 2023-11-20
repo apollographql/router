@@ -49,7 +49,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 > 
 > If your organization doesn't currently have an Enterprise plan, you can test out this functionality by signing up for a free Enterprise trial.
 
-> The `@policy` directive requires using federation version `2.6` or later. This version is not yet available at the time of router release `1.34.0`.
+> The `@policy` directive requires using a federation version not yet available at the time of router release `1.34.0`.
 
 We introduce a new GraphOS authorization directive called `@policy` that is designed to offload authorization policy execution to a coprocessor or Rhai script. 
 
