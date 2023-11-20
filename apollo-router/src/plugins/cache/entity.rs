@@ -34,7 +34,7 @@ use crate::Context;
 
 const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
-pub(crate) const CONTEXT_CACHE_KEY: &str = "entity_cache_key";
+pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
 
 register_plugin!("apollo", "experimental_entity_cache", EntityCache);
 
