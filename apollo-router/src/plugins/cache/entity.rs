@@ -235,7 +235,7 @@ async fn cache_store_from_response(
         (opt_root_cache_key, opt_entities_results)
     };
 
-    let cache_control = CacheControl::new(response.response.headers())?;
+    let cache_control = CacheControl::new(response.response.headers(), cache.ttl)?;
     update_cache_control(&response.context, &cache_control);
 
     if let Some(cache_key) = opt_root_cache_key {

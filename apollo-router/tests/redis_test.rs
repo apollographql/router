@@ -1,14 +1,17 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64", test))]
 mod test {
+    use apollo_router::plugin::test::MockSubgraph;
     use apollo_router::services::execution::QueryPlan;
     use apollo_router::services::router;
     use apollo_router::services::supergraph;
+    use apollo_router::MockedSubgraphs;
     use fred::prelude::*;
     use futures::StreamExt;
     use http::Method;
     use serde::Deserialize;
     use serde::Serialize;
     use serde_json::json;
+    use serde_json::Value;
     use tower::BoxError;
     use tower::ServiceExt;
 
@@ -195,6 +198,129 @@ mod test {
             .unwrap()?;
         assert!(res.data.is_some());
         assert!(res.errors.is_empty());
+
+        client.quit().await?;
+        // calling quit ends the connection and event listener tasks
+        let _ = connection_task.await;
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn entity_cache() -> Result<(), BoxError> {
+        let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
+        let client = RedisClient::new(config, None, None);
+        let connection_task = client.connect();
+        client.wait_for_connect().await?;
+
+        let mut subgraphs = MockedSubgraphs::default();
+        subgraphs.insert(
+            "products",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{"query":"{topProducts{__typename upc name}}"}},
+                    serde_json::json! {{"data": {
+                            "topProducts": [{
+                                "__typename": "Product",
+                                "upc": "1",
+                                "name": "chair"
+                            },
+                            {
+                                "__typename": "Product",
+                                "upc": "2",
+                                "name": "table"
+                            }]
+                    }}},
+                )
+                .build(),
+        );
+        subgraphs.insert("reviews", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                "variables": {
+                    "representations": [
+                        { "upc": "1", "__typename": "Product" },
+                        { "upc": "2", "__typename": "Product" }
+                    ],
+                }
+            }},
+            serde_json::json! {{
+                "data": {
+                    "_entities":[
+                        {
+                            "reviews": [{
+                                "body": "I can sit on it"
+                            }]
+                        },
+                        {
+                            "reviews": [{
+                                "body": "I can sit on it"
+                            },
+                            {
+                                "body": "I can eat on it"
+                            }]
+                        }
+                    ]
+                }
+            }},
+        ).build());
+
+        let supergraph = apollo_router::TestHarness::builder()
+            .with_subgraph_network_requests()
+            .configuration_json(json!({
+                "experimental_entity_cache": {
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"]
+                    },
+                    /*
+                    Uncomment when the configuration PR is merged
+                    "enabled": false,
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "accounts": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
+                    }*/
+                },
+                "include_subgraph_errors": {
+                    "all": true
+                }
+            }))?
+            .extra_plugin(subgraphs)
+            .schema(include_str!("fixtures/supergraph.graphql"))
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(r#"{ topProducts { name reviews { body } } }"#)
+            .method(Method::POST)
+            .build()?;
+
+        let response = supergraph
+            .oneshot(request)
+            .await?
+            .next_response()
+            .await
+            .unwrap();
+        insta::assert_json_snapshot!(response);
+
+        let s:String = client
+          .get("subgraph.products|dd9d6384692afb6cfe37246c44208055c55b0b497736a3021e4561e05c577848|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .await
+          .unwrap();
+        let v: Value = serde_json::from_str(&s).unwrap();
+        insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
+
+        let s:String = client
+        .get("subgraph.reviews|Product|4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66|e7f00d16bc83326839fe1a0374b63a79a3d164501eda57f931301125972474f1|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .await
+        .unwrap();
+        let v: Value = serde_json::from_str(&s).unwrap();
+        insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
         client.quit().await?;
         // calling quit ends the connection and event listener tasks
