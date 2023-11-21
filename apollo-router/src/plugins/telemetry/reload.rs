@@ -133,6 +133,10 @@ pub(super) fn reload_fmt(layer: Box<dyn Layer<LayeredTracer> + Send + Sync>) {
     }
 }
 
+pub(crate) fn apollo_opentelemetry_initialized() -> bool {
+    OPENTELEMETRY_TRACER_HANDLE.get().is_some()
+}
+
 pub(crate) struct SamplingFilter;
 
 #[allow(dead_code)]

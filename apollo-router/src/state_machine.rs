@@ -31,6 +31,7 @@ use crate::configuration::metrics::Metrics;
 use crate::configuration::Configuration;
 use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
+use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
 use crate::router::Event::UpdateLicense;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
@@ -59,7 +60,7 @@ enum State<FA: RouterSuperServiceFactory> {
     },
     Running {
         configuration: Arc<Configuration>,
-        _metrics: Metrics,
+        _metrics: Option<Metrics>,
         schema: Arc<String>,
         license: LicenseState,
         server_handle: Option<HttpServerHandle>,
@@ -414,7 +415,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             discussed.log_preview_used(yaml);
         }
 
-        let metrics = Metrics::new(&configuration, &license);
+        let metrics =
+            apollo_opentelemetry_initialized().then(|| Metrics::new(&configuration, &license));
 
         Ok(Running {
             configuration,
