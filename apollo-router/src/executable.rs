@@ -428,7 +428,14 @@ impl Executable {
         }
 
         copy_args_to_env();
-        init_telemetry(&opt.log_level)?;
+
+        let apollo_subscriber_set = if it_s_okay_if_there_s_already_a_subscriber() {
+            init_telemetry(&opt.log_level).is_ok()
+        } else {
+            init_telemetry(&opt.log_level)?;
+            true
+        };
+
         setup_panic_handler();
 
         if opt.schema {
@@ -470,11 +477,13 @@ impl Executable {
         };
 
         // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
-        tokio::task::spawn_blocking(move || {
-            opentelemetry::global::shutdown_tracer_provider();
-            meter_provider().shutdown();
-        })
-        .await?;
+        if apollo_subscriber_set {
+            tokio::task::spawn_blocking(move || {
+                opentelemetry::global::shutdown_tracer_provider();
+                meter_provider().shutdown();
+            })
+            .await?;
+        }
         result
     }
 
@@ -646,6 +655,15 @@ impl Executable {
         }
         Ok(())
     }
+}
+
+#[cfg(feature = "apollo_unsupported")]
+fn it_s_okay_if_there_s_already_a_subscriber() -> bool {
+    std::env::var("APOLLO_KEY").is_err() && std::env::var("APOLLO_GRAPH_REF").is_err()
+}
+#[cfg(not(feature = "apollo_unsupported"))]
+fn it_s_okay_if_there_s_already_a_subscriber() -> bool {
+    false
 }
 
 fn setup_panic_handler() {

@@ -9,6 +9,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::OwnedSemaphorePermit;
 
+use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
 use crate::Configuration;
 
 pub(crate) struct MetricsHandle {
@@ -90,6 +91,9 @@ impl Metrics {
 
 impl Metrics {
     pub(crate) fn log_usage_metrics(&mut self) {
+        if !apollo_opentelemetry_initialized() {
+            return;
+        }
         // We have to have a macro here because tracing requires it. However, we also need to cache the metrics as json path is slow.
         // This macro will query the config json for a primary metric and optionally metric attributes.
         // The results will be cached for the next iteration.
