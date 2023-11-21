@@ -293,9 +293,9 @@ impl Metrics {
 
         log_usage_metrics!(
             value.apollo.router.config.entities,
-            "$[?(@.traffic_shaping..experimental_entity_caching)]",
+            "$[?(@.experimental_entity_cache)]",
             opt.cache,
-            "$[?(@.traffic_shaping..experimental_entity_caching)]"
+            "$[?(@.experimental_entity_cache)]"
         );
         log_usage_metrics!(
             value.apollo.router.config.telemetry,

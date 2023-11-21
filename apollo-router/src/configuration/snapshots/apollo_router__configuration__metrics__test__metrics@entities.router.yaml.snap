@@ -2,5 +2,7 @@
 source: apollo-router/src/configuration/metrics.rs
 expression: "&metrics.metrics"
 ---
-{}
+value.apollo.router.config.entities:
+  - 1
+  - opt__cache__: true
 
