@@ -269,7 +269,8 @@ mod test {
             .configuration_json(json!({
                 "experimental_entity_cache": {
                     "redis": {
-                        "urls": ["redis://127.0.0.1:6379"]
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "ttl": "2s"
                     },
                     /*
                     Uncomment when the configuration PR is merged
@@ -317,6 +318,105 @@ mod test {
 
         let s:String = client
         .get("subgraph.reviews|Product|4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66|e7f00d16bc83326839fe1a0374b63a79a3d164501eda57f931301125972474f1|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .await
+        .unwrap();
+        let v: Value = serde_json::from_str(&s).unwrap();
+        insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
+
+        // we abuse the query shape to return a response with a different but overlapping set of entities
+        let mut subgraphs = MockedSubgraphs::default();
+        subgraphs.insert(
+            "products",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{"query":"{topProducts(first:2){__typename upc name}}"}},
+                    serde_json::json! {{"data": {
+                            "topProducts": [{
+                                "__typename": "Product",
+                                "upc": "1",
+                                "name": "chair"
+                            },
+                            {
+                                "__typename": "Product",
+                                "upc": "3",
+                                "name": "plate"
+                            }]
+                    }}},
+                )
+                .build(),
+        );
+
+        // even though the root operation returned 2 entities, we only need to get one entity from the subgraph here because
+        // we already have it in cache
+        subgraphs.insert("reviews", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                "variables": {
+                    "representations": [
+                        { "upc": "3", "__typename": "Product" }
+                    ],
+                }
+            }},
+            serde_json::json! {{
+                "data": {
+                    "_entities":[
+                        {
+                            "reviews": [{
+                                "body": "I can eat in it"
+                            }]
+                        }
+                    ]
+                }
+            }},
+        ).build());
+
+        let supergraph = apollo_router::TestHarness::builder()
+            .with_subgraph_network_requests()
+            .configuration_json(json!({
+                "experimental_entity_cache": {
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "ttl": "2s"
+                    },
+                    /*
+                    Uncomment when the configuration PR is merged
+                    "enabled": false,
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "accounts": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
+                    }*/
+                },
+                "include_subgraph_errors": {
+                    "all": true
+                }
+            }))?
+            .extra_plugin(subgraphs)
+            .schema(include_str!("fixtures/supergraph.graphql"))
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(r#"{ topProducts(first: 2) { name reviews { body } } }"#)
+            .method(Method::POST)
+            .build()?;
+
+        let response = supergraph
+            .oneshot(request)
+            .await?
+            .next_response()
+            .await
+            .unwrap();
+        insta::assert_json_snapshot!(response);
+
+        let s:String = client
+        .get("subgraph.reviews|Product|d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d|e7f00d16bc83326839fe1a0374b63a79a3d164501eda57f931301125972474f1|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();

@@ -494,7 +494,7 @@ fn filter_representations(
         let typename = opt_type.as_str().unwrap_or("-").to_string();
 
         // do not use that cache entry if it is stale
-        if let Some(false) = cache_entry.as_ref().map(|c| !c.control.can_use()) {
+        if let Some(false) = cache_entry.as_ref().map(|c| c.control.can_use()) {
             cache_entry = None;
         }
 
