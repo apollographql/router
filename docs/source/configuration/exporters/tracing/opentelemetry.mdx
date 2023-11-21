@@ -1,0 +1,44 @@
+---
+title: Export traces to OpenTelemetry Protocol (OTLP)
+description: Collect and export tracing information from the Apollo Router
+---
+
+[OTLP (OpenTelemetry Protocol)](https://github.com/open-telemetry/opentelemetry-proto/blob/main/docs/specification.md) is the native protocol for open telemetry. It can be used to export traces over HTTP or gRPC to a variety of backends including:
+
+* OpenTelemetry Collector
+* Datadog
+* Jaeger
+* Honeycomb
+* Lightstep
+
+For general tracing configuration, refer to [Router Tracing Configuration](./overview).
+
+## Sample configuration
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       otlp:
+         enabled: true
+         
+         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317 for gRPC and http://127.0.0.1:4318 for HTTP)
+         endpoint: default
+   
+         # Optional protocol (Defaults to grpc)
+         protocol: grpc
+   
+         # Optional Grpc configuration
+         grpc:
+           domain_name: "my.domain"
+           key: ""
+           ca: ""
+           cert: ""
+           metadata:
+             foo: bar
+   
+         # Optional Http configuration
+         http:
+           headers:
+             foo: bar
+```

@@ -1,0 +1,22 @@
+---
+title: Export traces to Zipkin
+description: Collect and export tracing information from the Apollo Router
+---
+
+Enable and configure the [Zipkin](https://zipkin.io/) exporter endpoint in the Apollo Router.
+For general tracing configuration, refer to [Router Tracing Configuration](./overview).
+
+## Configuration
+
+The Apollo Router can be configured to export tracing data for Zipkin to either the default collector address or a URL:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+     tracing:
+       zipkin:
+         enabled: true
+   
+         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:9411/api/v2/spans)
+         endpoint: "http://${env.ZIPKIN_HOST}:9411/api/v2/spans}"   
+```

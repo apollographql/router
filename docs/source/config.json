@@ -98,16 +98,23 @@
       }
     },
     "Telemetry and Monitoring": {
-      "Exporters": {
-        "Metrics": {
-          "Configuration": "/configuration/metrics",
-          "Prometheus": "/configuration/exporters/prometheus",
-          "OpenTelemetry": "/configuration/exporters/opentelemetry",
-          "Datadog (OTLP)": "/configuration/exporters/datadog-otlp"
+        "Metrics exporters": {
+          "Configuration": "/configuration/exporters/metrics/overview",
+          "Prometheus": "/configuration/exporters/metrics/prometheus",
+          "OpenTelemetry": "/configuration/exporters/metrics/opentelemetry",
+          "Datadog (OTLP)": "/configuration/exporters/metrics/datadog-otlp"
         },
-        "Tracing": "/configuration/tracing",
-        "Logging": "/configuration/logging"
-      },
+        "Trace exporters": {
+          "Configuration": "/configuration/exporters/tracing/overview",
+          "Jaeger": "/configuration/exporters/tracing/jaeger",
+          "Zipkin": "/configuration/exporters/tracing/zipkin",
+          "Datadog": "/configuration/exporters/tracing/datadog",
+          "OpenTelemetry": "/configuration/exporters/tracing/opentelemetry"
+        },
+        "Log exporters": {
+          "Configuration": "/configuration/exporters/logging/overview",
+          "Stdout": "/configuration/exporters/logging/stdout"
+        },
       "Instrumentation": {
         "Instruments" : "/configuration/instruments",
         "Events" : "/configuration/events",
