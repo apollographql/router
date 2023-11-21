@@ -55,6 +55,8 @@ We introduce a new GraphOS authorization directive called `@policy` that is desi
 
 When executing an operation, the relevant policy will be determined based on `@policy` directives in the schema. The coprocessor or Rhai script then indicates which of those policies requirements are not met.  Finally, the router filters out fields which are unauthorized in the same way it does when using `@authenticated` or `@requiresScopes` before executing the operation.
 
+For more information, see the [documentation](https://www.apollographql.com/docs/router/configuration/authorization#authorization-directives).
+
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3751
 
 ### Authorization directives are enabled by default ([Issue #3842](https://github.com/apollographql/router/issues/3842))
