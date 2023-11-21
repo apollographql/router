@@ -11,13 +11,14 @@ To export metrics to Prometheus, enable the Prometheus endpoint and set its addr
 
 ```yaml title="router.yaml"
 telemetry:
-  metrics:
-    prometheus:
-      # By setting this endpoint you enable the Prometheus exporter
-      # All our endpoints exposed by plugins are namespaced by the name of the plugin
-      enabled: true
-      listen: 127.0.0.1:9090
-      path: /metrics
+  exporters:
+     metrics:
+       prometheus:
+         # By setting this endpoint you enable the Prometheus exporter
+         # All our endpoints exposed by plugins are namespaced by the name of the plugin
+         enabled: true
+         listen: 127.0.0.1:9090
+         path: /metrics
 ```
 
 ## Visualize with Grafana
@@ -34,12 +35,13 @@ You can enable other containers to access it by setting the endpoint to listen t
 
 ```yaml title="router.yaml"
 telemetry:
-  metrics:
-    prometheus:
-      # By setting this endpoint you enable other containers and pods to access the Prometheus endpoint
-      enabled: true
-      listen: 0.0.0.0:9090 #highlight-line
-      path: /metrics
+  exporters:
+     metrics:
+       prometheus:
+         # By setting this endpoint you enable other containers and pods to access the Prometheus endpoint
+         enabled: true
+         listen: 0.0.0.0:9090 #highlight-line
+         path: /metrics
 ```
 
 You can validate your setting locally:

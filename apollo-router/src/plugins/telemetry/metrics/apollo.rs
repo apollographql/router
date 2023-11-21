@@ -186,6 +186,7 @@ mod test {
     use super::super::super::config;
     use super::studio::SingleStatsReport;
     use super::*;
+    use crate::context::OPERATION_KIND;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::plugins::subscription;
@@ -194,7 +195,6 @@ mod test {
     use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::plugins::telemetry::Telemetry;
-    use crate::plugins::telemetry::OPERATION_KIND;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
     use crate::query_planner::OperationKind;
     use crate::services::SupergraphRequest;

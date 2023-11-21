@@ -266,6 +266,7 @@ impl FetchNode {
                     .build()
                     .expect("it won't fail because the url is correct and already checked; qed"),
             )
+            .subgraph_name(self.service_name.clone())
             .operation_kind(*operation_kind)
             .context(parameters.context.clone())
             .build();

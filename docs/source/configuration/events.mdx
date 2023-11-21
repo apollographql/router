@@ -18,15 +18,16 @@ You can configure events for each service in `router.yaml`. Events can be standa
 
 The `router`, `supergraph` and `subgraph` sections are used to define custom event configuration for each service:
 
-```yaml title="router.yaml"
+```yaml title="future.router.yaml"
 telemetry:
-  events:
-    router: # highlight-line
-      # ...     
-    supergraph: # highlight-line
-      # ...
-    subgraph: # highlight-line
-      # ...
+  instrumentation:
+    events:
+      router: # highlight-line
+        # ...     
+      supergraph: # highlight-line
+        # ...
+      subgraph: # highlight-line
+        # ...
 ```
 
 ### Standard events
@@ -47,14 +48,15 @@ To configure these events, set the level to `trace`, `info`, `warn`, `error` or 
 
 For example:
 
-```yaml title="router.yaml"
+```yaml title="future.router.yaml"
 telemetry:
-  events:
-    router:
-      request: off
-      response: off
-      error: error
-      # ...
+  instrumentation:
+    events:
+      router:
+        request: off
+        response: off
+        error: error
+        # ...
 ```
 
 ### Custom events
@@ -63,39 +65,42 @@ telemetry:
 
 For each service you can also configure custom events.
 
-```yaml title="router.yaml"
+```yaml title="future.router.yaml"
 telemetry:
-  events:
-    router:
-      # Custom events
-      my.event: # This key will automatically be added as a 'type' attribute of the event
-        # Custom event configuration
+  instrumentation:
+    events:
+      router:
+        # Custom events
+        my.event: # This key will automatically be added as a 'type' attribute of the event
+          # Custom event configuration
 ```
 
 ### `message`
 
 Each custom event must have a message. This is a fixed value, and custom attributes should be used to add additional information.
 
-```yaml title="router.yaml"
+```yaml title="future.router.yaml"
 telemetry:
-  events:
-    router:
-      acme.event:
-        message: "my event message"
-        # ...
+  instrumentation:
+    events:
+      router:
+        acme.event:
+          message: "my event message"
+          # ...
 ```
 
 ### `on`
 
-Each custom event event must indicate when it should be triggered. This can be `request`, `response` or `error`.
+Each custom event must indicate when it should be triggered. This can be `request`, `response` or `error`.
 
-```yaml title="router.yaml"
+```yaml title="future.router.yaml"
 telemetry:
-  events:
-    router:
-      acme.event:
-        on: request # request, response, error
-        # ...
+  instrumentation:
+    events:
+      router:
+        acme.event:
+          on: request # request, response, error
+          # ...
 ```
 
 ### `level`
@@ -103,7 +108,7 @@ telemetry:
 Custom events have a level, `trace`, `info`, `warn` or `error`. The level determines the severity of the event.
 
 To set the level:
-```yaml title="router.yaml"
+```yaml title="future.router.yaml"
 telemetry:
   events:
     router:
@@ -118,7 +123,7 @@ Custom events can be configured to emit under specific conditions, for example i
 
 In `router.yaml`, set a `condition` with an equality (`eq`) check:
 
-```yaml title="router.yaml"
+```yaml title="future.router.yaml"
 telemetry:
   events:
     router:
@@ -139,7 +144,7 @@ Custom events may have attributes attached to them from the Router pipeline. The
 Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors).
 The attributes available depend on the service of the pipeline.
 
-```yaml title="router.yaml"
+```yaml title="future.router.yaml"
 telemetry:
   events:
     router:
@@ -157,7 +162,7 @@ telemetry:
 
 For example, the router service can be configured with standard events (`request`, `response`, `error`), and a custom event (`my.event`) with a condition:
 
-```yaml title="router.yaml"
+```yaml title="future.router.yaml"
 telemetry:
   events:
     router:

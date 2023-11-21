@@ -25,13 +25,14 @@ To configure the router, [enable OTLP metrics](./opentelemetry/#enable-opentelem
 
 ```yaml title="router.yaml"
 telemetry:
-  metrics:
-    otlp:
-      enabled: true
-      # Temporality MUST be set to delta. Failure to do this will result in incorrect metrics.
-      temporality: delta
-      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
-      endpoint: "${env.DATADOG_AGENT_HOST}:4317"
+  exporters:
+    metrics:
+      otlp:
+        enabled: true
+        # Temporality MUST be set to delta. Failure to do this will result in incorrect metrics.
+        temporality: delta
+        # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
+        endpoint: "${env.DATADOG_AGENT_HOST}:4317"
 ```
 
 <Note>

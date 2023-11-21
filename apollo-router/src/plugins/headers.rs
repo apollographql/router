@@ -373,9 +373,15 @@ where
                     default,
                 }) => {
                     let headers = req.subgraph_request.headers_mut();
-                    let value = req.supergraph_request.headers().get(named);
-                    if let Some(value) = value.or(default.as_ref()) {
-                        headers.insert(rename.as_ref().unwrap_or(named), value.clone());
+                    let values = req.supergraph_request.headers().get_all(named);
+                    if values.iter().count() == 0 {
+                        if let Some(default) = default {
+                            headers.append(rename.as_ref().unwrap_or(named), default.clone());
+                        }
+                    } else {
+                        for value in values {
+                            headers.append(rename.as_ref().unwrap_or(named), value.clone());
+                        }
                     }
                 }
                 Operation::Propagate(Propagate::Matching { matching }) => {
@@ -387,7 +393,7 @@ where
                             !RESERVED_HEADERS.contains(name) && matching.is_match(name.as_str())
                         })
                         .for_each(|(name, value)| {
-                            headers.insert(name, value.clone());
+                            headers.append(name, value.clone());
                         });
                 }
             }
@@ -650,6 +656,7 @@ mod test {
                     ("ac", "vac"),
                     ("da", "vda"),
                     ("db", "vdb"),
+                    ("db", "vdb2"),
                 ])
             })
             .returning(example_response);
@@ -762,6 +769,7 @@ mod test {
                     .header("da", "vda")
                     .header("db", "vdb")
                     .header("db", "vdb")
+                    .header("db", "vdb2")
                     .header(HOST, "host")
                     .header(CONTENT_LENGTH, "2")
                     .header(CONTENT_TYPE, "graphql")
@@ -784,6 +792,7 @@ mod test {
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,
             context: ctx,
+            subgraph_name: String::from("test").into(),
             subscription_stream: None,
             connection_closed_signal: None,
         }

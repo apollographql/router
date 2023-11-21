@@ -11,7 +11,8 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::GenericWith;
-use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::spans::Spans;
 use crate::plugins::telemetry::endpoint::SocketEndpoint;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
@@ -86,7 +87,12 @@ impl TracingConfigurator for Config {
         )
     }
 
-    fn apply(&self, builder: Builder, common: &Trace) -> Result<Builder, BoxError> {
+    fn apply(
+        &self,
+        builder: Builder,
+        common: &TracingCommon,
+        _spans_config: &Spans,
+    ) -> Result<Builder, BoxError> {
         match &self {
             Config::Agent {
                 enabled,

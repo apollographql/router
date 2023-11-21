@@ -18,7 +18,7 @@ The **Apollo Router** is a configurable, high-performance **graph router** for a
 
 ## Development
 
-You will need a recent version of rust (`1.65` works well as of writing). 
+You will need a recent version of rust (`1.72` works well as of writing). 
 Installing rust [using rustup](https://www.rust-lang.org/tools/install) is
 the recommended way to do it as it will install rustup, rustfmt and other 
 goodies that are not always included by default in other rust distribution channels:
@@ -27,7 +27,7 @@ goodies that are not always included by default in other rust distribution chann
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-In addition, you will need to [install protoc](https://grpc.io/docs/protoc-installation/).
+In addition, you will need to [install protoc](https://grpc.io/docs/protoc-installation/) and [cmake](https://cmake.org/).
 
 Set up your git hooks:
 
@@ -75,6 +75,9 @@ Use `cargo xtask all` to run all of the checks the CI will run.
 The CI checks require `cargo-deny` and `cargo-about` which can both be installed by running:
 - `cargo install cargo-deny`
 - `cargo install cargo-about`
+
+Updating the snapshots used during testing requires installing `cargo-insta`:
+- `cargo install cargo-insta`
 
 They also need you to have the federation-demo project up and running,
 as explained in the Getting started section above.

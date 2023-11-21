@@ -14,11 +14,12 @@ For example, set the standard attribute `http.response.status_code` on the route
 
 ```yaml title="router.yaml"
 telemetry:
-  spans:
-    router:
-      attributes:
-        # Standard attributes
-        http.response.status_code: true
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          # Standard attributes
+          http.response.status_code: true
 ```
 
 ### Configuration reference 
@@ -64,11 +65,12 @@ The `http.request.header.<key>` and `http.response.header.<key>` attributes are 
 For example, to configure an attribute for `x-my-header` on `router` spans:
 ```yaml title="router.yaml"
 telemetry:
-  spans:
-    router:
-      attributes:
-        "http.request.header.x-my-header":
-          request_header: "x-my-header"
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          "http.request.header.x-my-header":
+            request_header: "x-my-header"
 ```
 
 </Note>

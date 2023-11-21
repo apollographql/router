@@ -898,6 +898,36 @@ If you return a successful response, make sure the structure of the `data` prope
 
 </Note>
 
+<Tip>
+
+The `body` in the `RouterRequest` and `RouterResponse` stages is always a string, but you can still `break` with a GraphQL response if it's encoded as JSON.
+
+</Tip>
+
+<ExpansionPanel title="Examples of coprocessor responses for Router stages">
+
+```json
+{
+  "control": { "break": 500 },
+  "body": "{ \"errors\": [ { \"message\": \"Something went wrong\", \"extensions\": { \"code\": \"INTERNAL_SERVER_ERRROR\" } } ] }"
+}
+```
+
+```json
+{
+  "control": { "break": 200 },
+  "body": "{ \"data\": { \"currentUser\": { \"name\": \"Ada Lovelace\" } }"
+}
+```
+
+</ExpansionPanel>
+
+<Note>
+
+If you return a successful response, make sure the structure of the `data` property matches the structure expected by the client query.
+
+</Note>
+
 ### Failed responses
 
 Your router considers all of the following scenarios to be a **failed response** from your coprocessor:
@@ -959,7 +989,7 @@ The first response chunk includes `headers` and `statusCode` fields:
   "body": "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":{\"id\":\"1\"}},\"hasNext\":true}\r\n--graphql\r\n",
   "context": {
     "entries": {
-      "apollo_telemetry::operation_kind": "query",
+      "operation_kind": "query",
       "apollo_telemetry::client_version": "",
       "apollo_telemetry::client_name": "manual"
     }
@@ -981,7 +1011,7 @@ Subsequent response chunks omit the `headers` and `statusCode` fields:
   "body": "content-type: application/json\r\n\r\n{\"hasNext\":false,\"incremental\":[{\"data\":{\"name\":\"Ada Lovelace\"},\"path\":[\"me\"]}]}\r\n--graphql--\r\n",
   "context": {
     "entries": {
-      "apollo_telemetry::operation_kind": "query",
+      "operation_kind": "query",
       "apollo_telemetry::client_version": "",
       "apollo_telemetry::client_name": "manual"
     }

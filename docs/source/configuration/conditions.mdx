@@ -10,22 +10,23 @@ You can set conditions for when an [instrument](./instruments) should be mutated
 
 Here is an example of a condition on a custom instrument:
 
-```yaml title="router.yaml"
+```yaml title="future.router.yaml"
 telemetry:
-  instruments:
-    router:
-      my.instrument:
-        # ...
-        # This instrument will only be mutated if the condition evaluates to true
-        condition:
-          all:
-            - any:
-                - eq:
-                    - "val"
-                    - request_header: x-req-header
-            - eq:
-                - "foo"
-                - response_header: x-resp-header
+  instrumentation:
+    instruments:
+      router:
+        my.instrument:
+          # ...
+          # This instrument will only be mutated if the condition evaluates to true
+          condition:
+            all:
+              - any:
+                  - eq:
+                      - "val"
+                      - request_header: x-req-header
+              - eq:
+                  - "foo"
+                  - response_header: x-resp-header
 ```
 
 ### Condition configuration

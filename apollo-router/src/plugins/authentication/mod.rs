@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use displaydoc::Display;
 use http::StatusCode;
@@ -23,6 +25,7 @@ use once_cell::sync::Lazy;
 use reqwest::Client;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json::Value;
 use thiserror::Error;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -128,6 +131,13 @@ struct JWTConf {
 struct JwksConf {
     /// Retrieve the JWK Set
     url: String,
+    /// Polling interval for each JWKS endpoint in human-readable format; defaults to 60s
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_poll_interval"
+    )]
+    #[schemars(with = "String", default = "default_poll_interval")]
+    poll_interval: Duration,
     /// Expected issuer for tokens verified by that JWKS
     issuer: Option<String>,
     /// List of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
@@ -161,6 +171,10 @@ fn default_header_name() -> String {
 
 fn default_header_value_prefix() -> String {
     "Bearer".to_string()
+}
+
+fn default_poll_interval() -> Duration {
+    DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL
 }
 
 #[derive(Debug, Default)]
@@ -381,6 +395,7 @@ impl Plugin for AuthenticationPlugin {
                         .algorithms
                         .as_ref()
                         .map(|algs| algs.iter().cloned().collect()),
+                    poll_interval: jwks_conf.poll_interval,
                 });
             }
 
@@ -695,6 +710,41 @@ fn decode_jwt(
                 ))
             }
         }
+    }
+}
+
+pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
+    let claims = context
+        .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .map_err(|err| tracing::error!("could not read JWT claims: {err}"))
+        .ok()
+        .flatten();
+    let ts_opt = claims.as_ref().and_then(|x: &Value| {
+        if !x.is_object() {
+            tracing::error!("JWT claims should be an object");
+            return None;
+        }
+        let claims = x.as_object().expect("claims should be an object");
+        let exp = claims.get("exp")?;
+        if !exp.is_number() {
+            tracing::error!("JWT 'exp' (expiry) claim should be a number");
+            return None;
+        }
+        exp.as_i64()
+    });
+    match ts_opt {
+        Some(ts) => {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("we should not run before EPOCH")
+                .as_secs() as i64;
+            if now < ts {
+                Duration::from_secs((ts - now) as u64)
+            } else {
+                Duration::ZERO
+            }
+        }
+        None => Duration::MAX,
     }
 }
 
