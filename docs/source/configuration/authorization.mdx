@@ -1,7 +1,6 @@
 ---
 title: Authorization in the Apollo Router
 description: Strengthen service security with a centralized governance layer
-minVersion: 1.29.1
 ---
 
 <GraphOSEnterpriseRequired />
@@ -120,7 +119,11 @@ authorization:
     enabled: true
 ```
 
+<MinVersion version="1.29.1">
+
 ### `@requiresScopes`
+
+</MinVersion>
 
 The `@requiresScopes` directive marks fields and types as restricted based on required scopes.
 The directive includes a `scopes` argument with an array of the required scopes to declare which scopes are required:
@@ -276,7 +279,11 @@ query {
 The response would include an error at the `/users/@/email` path since that field requires the `read:emails` scope.
 The router can execute the entire query successfully if the request includes the `read:others read:emails` scope set.
 
+<MinVersion version="1.29.1">
+
 ### `@authenticated`
+
+</MinVersion>
 
 The `@authenticated` directive marks specific fields and types as requiring authentication.
 It works by checking for the `apollo_authentication::JWT::claims` key in a request's context, that is added either by the JWT authentication plugin, when the request contains a valid JWT, or by an authentication coprocessor.
@@ -409,7 +416,11 @@ The response retains the initial request's shape but returns `null` for unauthor
 
 If _every_ requested field requires authentication and a request is unauthenticated, the router generates an error indicating that the query is unauthorized.
 
+<MinVersion version="1.34.0">
+
 ### `@policy`
+
+</MinVersion>
 
 The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in a [Rhai script](../customizations/rhai/) or [coprocessor](../customizations/coprocessor). This enables custom authorization validation beyond authentication and scopes.
 
