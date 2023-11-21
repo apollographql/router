@@ -1898,6 +1898,7 @@ mod tests {
                     ))
                     .operation_kind(OperationKind::Subscription)
                     .subscription_stream(tx)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -1935,6 +1936,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -1968,6 +1970,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2001,6 +2004,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2039,6 +2043,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2081,6 +2086,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2129,6 +2135,7 @@ mod tests {
                     ))
                     .operation_kind(OperationKind::Subscription)
                     .subscription_stream(tx)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2180,6 +2187,7 @@ mod tests {
                     ))
                     .operation_kind(OperationKind::Subscription)
                     .subscription_stream(tx)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2216,6 +2224,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2257,6 +2266,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2299,6 +2309,7 @@ mod tests {
                     .expect("expecting valid request"),
                 operation_kind: OperationKind::Query,
                 context: Context::new(),
+                subgraph_name: String::from("test").into(),
                 subscription_stream: None,
                 connection_closed_signal: None,
             })
@@ -2338,6 +2349,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2377,6 +2389,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2422,6 +2435,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2463,6 +2477,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2503,6 +2518,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2543,6 +2559,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2583,6 +2600,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2670,6 +2688,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2715,6 +2734,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2813,6 +2833,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )
@@ -2872,6 +2893,7 @@ mod tests {
                     .supergraph_request(supergraph_request("query"))
                     .subgraph_request(subgraph_http_request(url, "query"))
                     .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
                     .context(Context::new())
                     .build(),
             )

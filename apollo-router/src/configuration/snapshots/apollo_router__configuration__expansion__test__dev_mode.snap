@@ -14,7 +14,8 @@ sandbox:
 supergraph:
   introspection: true
 telemetry:
-  tracing:
-    experimental_response_trace_id:
-      enabled: true
+  exporters:
+    tracing:
+      experimental_response_trace_id:
+        enabled: true
 

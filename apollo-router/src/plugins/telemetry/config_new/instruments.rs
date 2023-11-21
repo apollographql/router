@@ -4,14 +4,14 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::attributes::Extendable;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
-use crate::plugins::telemetry::config_new::attributes::RouterCustomAttribute;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
-use crate::plugins::telemetry::config_new::attributes::SubgraphCustomAttribute;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
-use crate::plugins::telemetry::config_new::attributes::SupergraphCustomAttribute;
 use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::extendable::Extendable;
+use crate::plugins::telemetry::config_new::selectors::RouterSelector;
+use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
+use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 
 #[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
@@ -21,15 +21,12 @@ pub(crate) struct Instruments {
     default_attribute_requirement_level: DefaultAttributeRequirementLevel,
 
     /// Router service instruments. For more information see documentation on Router lifecycle.
-    router: Extendable<RouterInstruments, Instrument<RouterAttributes, RouterCustomAttribute>>,
+    router: Extendable<RouterInstruments, Instrument<RouterAttributes, RouterSelector>>,
     /// Supergraph service instruments. For more information see documentation on Router lifecycle.
-    supergraph: Extendable<
-        SupergraphInstruments,
-        Instrument<SupergraphAttributes, SupergraphCustomAttribute>,
-    >,
+    supergraph:
+        Extendable<SupergraphInstruments, Instrument<SupergraphAttributes, SupergraphSelector>>,
     /// Subgraph service instruments. For more information see documentation on Router lifecycle.
-    subgraph:
-        Extendable<SubgraphInstruments, Instrument<SubgraphAttributes, SubgraphCustomAttribute>>,
+    subgraph: Extendable<SubgraphInstruments, Instrument<SubgraphAttributes, SubgraphSelector>>,
 }
 
 #[allow(dead_code)]
@@ -39,22 +36,22 @@ struct RouterInstruments {
     /// Histogram of server request duration
     #[serde(rename = "http.server.request.duration")]
     http_server_request_duration:
-        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterCustomAttribute>>,
+        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterSelector>>,
 
     /// Gauge of active requests
     #[serde(rename = "http.server.active_requests")]
     http_server_active_requests:
-        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterCustomAttribute>>,
+        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterSelector>>,
 
     /// Histogram of server request body size
     #[serde(rename = "http.server.request.body.size")]
     http_server_request_body_size:
-        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterCustomAttribute>>,
+        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterSelector>>,
 
     /// Histogram of server response body size
     #[serde(rename = "http.server.response.body.size")]
     http_server_response_body_size:
-        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterCustomAttribute>>,
+        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterSelector>>,
 }
 
 #[allow(dead_code)]
