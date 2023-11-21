@@ -1970,6 +1970,18 @@ expression: "&schema"
                 "public_url"
               ],
               "properties": {
+                "heartbeat_interval": {
+                  "description": "Heartbeat interval for callback mode (default: 5secs)",
+                  "default": "5s",
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
                 "listen": {
                   "description": "Listen address on which the callback must listen (default: 127.0.0.1:4000)",
                   "writeOnly": true,

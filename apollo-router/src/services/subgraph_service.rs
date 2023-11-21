@@ -63,6 +63,7 @@ use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
+use crate::plugins::subscription::HeartbeatInterval;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::subscription::WebSocketConfiguration;
@@ -137,6 +138,7 @@ struct SubscriptionExtension {
     subscription_id: String,
     callback_url: url::Url,
     verifier: String,
+    heartbeat_interval_ms: u128,
 }
 
 /// Client for interacting with subgraphs.
@@ -349,7 +351,10 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         .await;
                     }
                     Some(SubscriptionMode::Callback(CallbackMode {
-                        public_url, path, ..
+                        public_url,
+                        path,
+                        heartbeat_interval,
+                        ..
                     })) => {
                         // Hash the subgraph_request
                         let subscription_id = hashed_request;
@@ -404,6 +409,10 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             subscription_id,
                             callback_url,
                             verifier,
+                            heartbeat_interval_ms: match heartbeat_interval {
+                                HeartbeatInterval::Disabled => 0,
+                                HeartbeatInterval::Duration(duration) => duration.as_millis(),
+                            },
                         };
                         body.extensions.insert(
                             "subscription",
@@ -1828,6 +1837,7 @@ mod tests {
                     listen: None,
                     path: Some("/testcallback".to_string()),
                     subgraphs: vec![String::from("testbis")].into_iter().collect(),
+                    heartbeat_interval: Default::default(),
                 }),
                 passthrough: Some(SubgraphPassthroughMode {
                     all: None,
