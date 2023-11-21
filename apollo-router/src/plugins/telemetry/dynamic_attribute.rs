@@ -81,7 +81,6 @@ impl DynAttribute for ::tracing::Span {
                                     if otel_data.builder.attributes.is_none() {
                                         otel_data.builder.attributes =
                                             Some(vec![KeyValue::new(key, value)]);
-                                        // Some([(key, value)].into_iter().collect());
                                     } else {
                                         otel_data
                                             .builder
@@ -89,7 +88,6 @@ impl DynAttribute for ::tracing::Span {
                                             .as_mut()
                                             .unwrap()
                                             .push(KeyValue::new(key, value));
-                                        // .insert(key, value);
                                     }
                                 }
                                 None => {
