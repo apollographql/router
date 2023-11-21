@@ -2,5 +2,5 @@
 source: apollo-router/src/uplink/mod.rs
 expression: "results.into_iter().map(to_friendly).collect::<Vec<_>>()"
 ---
-- Err: fetch failed from all endpoints
+- Err: fetch failed from all 3 uplink endpoints
 
