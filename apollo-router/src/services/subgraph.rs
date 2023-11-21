@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
-use futures::channel::mpsc;
 use http::StatusCode;
 use http::Version;
+use multimap::MultiMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
@@ -12,10 +12,14 @@ use sha2::Digest;
 use sha2::Sha256;
 use static_assertions::assert_impl_all;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tower::BoxError;
 
 use crate::error::Error;
 use crate::graphql;
+use crate::http_ext::header_map;
+use crate::http_ext::TryIntoHeaderName;
+use crate::http_ext::TryIntoHeaderValue;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::notification::HandleStream;
@@ -39,6 +43,8 @@ pub struct Request {
 
     pub context: Context,
 
+    /// Name of the subgraph, it's an Option to not introduce breaking change
+    pub(crate) subgraph_name: Option<String>,
     /// Channel to send the subscription stream to listen on events coming from subgraph in a task
     pub(crate) subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
     /// Channel triggered when the client connection has been dropped
@@ -56,6 +62,7 @@ impl Request {
         subgraph_request: http::Request<graphql::Request>,
         operation_kind: OperationKind,
         context: Context,
+        subgraph_name: Option<String>,
         subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
     ) -> Request {
@@ -64,6 +71,7 @@ impl Request {
             subgraph_request,
             operation_kind,
             context,
+            subgraph_name,
             subscription_stream,
             connection_closed_signal,
         }
@@ -80,6 +88,7 @@ impl Request {
         subgraph_request: Option<http::Request<graphql::Request>>,
         operation_kind: Option<OperationKind>,
         context: Option<Context>,
+        subgraph_name: Option<String>,
         subscription_stream: Option<mpsc::Sender<HandleStream<String, graphql::Response>>>,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
     ) -> Request {
@@ -88,6 +97,7 @@ impl Request {
             subgraph_request.unwrap_or_default(),
             operation_kind.unwrap_or(OperationKind::Query),
             context.unwrap_or_default(),
+            subgraph_name,
             subscription_stream,
             connection_closed_signal,
         )
@@ -119,6 +129,7 @@ impl Clone for Request {
             subgraph_request,
             operation_kind: self.operation_kind,
             context: self.context.clone(),
+            subgraph_name: self.subgraph_name.clone(),
             subscription_stream: self.subscription_stream.clone(),
             connection_closed_signal: self
                 .connection_closed_signal
@@ -188,8 +199,8 @@ impl Response {
     /// This is the constructor (or builder) to use when constructing a "fake" Response.
     ///
     /// This does not enforce the provision of the data that is required for a fully functional
-    /// Response. It's usually enough for testing, when a fully consructed Response is
-    /// difficult to construct and not required for the pusposes of the test.
+    /// Response. It's usually enough for testing, when a fully constructed Response is
+    /// difficult to construct and not required for the purposes of the test.
     #[builder(visibility = "pub")]
     fn fake_new(
         label: Option<String>,
@@ -212,6 +223,36 @@ impl Response {
             context.unwrap_or_default(),
             headers,
         )
+    }
+
+    /// This is the constructor (or builder) to use when constructing a "fake" Response.
+    /// It differs from the existing fake_new because it allows easier passing of headers. However we can't change the original without breaking the public APIs.
+    ///
+    /// This does not enforce the provision of the data that is required for a fully functional
+    /// Response. It's usually enough for testing, when a fully constructed Response is
+    /// difficult to construct and not required for the purposes of the test.
+    #[builder(visibility = "pub")]
+    fn fake2_new(
+        label: Option<String>,
+        data: Option<Value>,
+        path: Option<Path>,
+        errors: Vec<Error>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        extensions: JsonMap<ByteString, Value>,
+        status_code: Option<StatusCode>,
+        context: Option<Context>,
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
+    ) -> Result<Response, BoxError> {
+        Ok(Response::new(
+            label,
+            data,
+            path,
+            errors,
+            extensions,
+            status_code,
+            context.unwrap_or_default(),
+            Some(header_map(headers)?),
+        ))
     }
 
     /// This is the constructor (or builder) to use when constructing a Response that represents a global error.

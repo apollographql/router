@@ -602,6 +602,7 @@ async fn build_jwks_search_components() -> JwksManager {
             url,
             issuer: None,
             algorithms: None,
+            poll_interval: Duration::from_secs(60),
         });
     }
 
@@ -711,6 +712,7 @@ fn make_manager(jwk: &Jwk, issuer: Option<String>) -> JwksManager {
         url: url.clone(),
         issuer,
         algorithms: None,
+        poll_interval: Duration::from_secs(60),
     }];
     let map = HashMap::from([(url, jwks); 1]);
 
@@ -907,6 +909,7 @@ async fn it_rejects_key_with_restricted_algorithm() {
             url,
             issuer: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
+            poll_interval: Duration::from_secs(60),
         });
     }
 
@@ -937,6 +940,7 @@ async fn it_rejects_and_accepts_keys_with_restricted_algorithms_and_unknown_jwks
             url,
             issuer: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
+            poll_interval: Duration::from_secs(60),
         });
     }
 

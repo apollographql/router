@@ -1,0 +1,13 @@
+---
+source: apollo-router/src/query_planner/tests.rs
+expression: "serde_json::to_value(&response).unwrap()"
+---
+{
+  "data": {
+    "testQuery": {
+      "foo": {
+        "field": "aaa"
+      }
+    }
+  }
+}

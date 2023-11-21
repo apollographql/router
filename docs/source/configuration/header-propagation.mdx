@@ -251,7 +251,11 @@ fn subgraph_service(service, subgraph) {
 }
 ```
 
-> If you require a configuration-based solution for response header propagation, [please leave a comment on our issue tracker](https://github.com/apollographql/router/issues/1284).
+<Note>
+
+If you require a configuration-based solution for response header propagation, [please leave a comment on our issue tracker](https://github.com/apollographql/router/issues/1284).
+
+</Note>
 
 ## Propagation between subgraphs
 
@@ -299,5 +303,3 @@ fn subgraph_service(service, subgraph) {
     service.map_response(response_callback);
 }
 ```
-
-> If you require a configuration-based solution for response header propagation, [please leave a comment on our issue tracker](https://github.com/apollographql/router/issues/2444).

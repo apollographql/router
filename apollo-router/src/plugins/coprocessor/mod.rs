@@ -44,7 +44,8 @@ use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::router;
 use crate::services::subgraph;
-use crate::tracer::TraceId;
+use crate::services::trust_dns_connector::new_async_http_connector;
+use crate::services::trust_dns_connector::AsyncHyperResolver;
 
 #[cfg(test)]
 mod test;
@@ -56,14 +57,15 @@ const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5)
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
-type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
+type HTTPClientService =
+    tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>;
 
 #[async_trait::async_trait]
 impl Plugin for CoprocessorPlugin<HTTPClientService> {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let mut http_connector = HttpConnector::new();
+        let mut http_connector = new_async_http_connector()?;
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
@@ -254,7 +256,7 @@ pub(super) struct SubgraphResponseConf {
 }
 
 /// Configures the externalization plugin
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Conf {
     /// The url you'd like to offload processing to
@@ -576,7 +578,7 @@ where
     let payload = Externalizable::router_builder()
         .stage(PipelineStep::RouterRequest)
         .control(Control::default())
-        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .id(request.context.id.clone())
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)
@@ -740,7 +742,7 @@ where
 
     let payload = Externalizable::router_builder()
         .stage(PipelineStep::RouterResponse)
-        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .id(response.context.id.clone())
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)
@@ -808,6 +810,7 @@ where
             let generator_coprocessor_url = coprocessor_url.clone();
             let generator_map_context = map_context.clone();
             let generator_sdl_to_send = sdl_to_send.clone();
+            let generator_id = map_context.id.clone();
 
             async move {
                 let bytes = deferred_response.to_vec();
@@ -824,7 +827,7 @@ where
                 // providing them will be a source of confusion.
                 let payload = Externalizable::router_builder()
                     .stage(PipelineStep::RouterResponse)
-                    .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+                    .id(generator_id)
                     .and_body(body_to_send)
                     .and_context(context_to_send)
                     .and_sdl(generator_sdl_to_send)
@@ -911,7 +914,7 @@ where
     let payload = Externalizable::subgraph_builder()
         .stage(PipelineStep::SubgraphRequest)
         .control(Control::default())
-        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .id(request.context.id.clone())
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)
@@ -1057,7 +1060,7 @@ where
 
     let payload = Externalizable::subgraph_builder()
         .stage(PipelineStep::SubgraphResponse)
-        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .id(response.context.id.clone())
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)

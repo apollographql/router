@@ -4,6 +4,6 @@ limits:
   warn_only: true
   max_root_fields: 1
   parser_max_tokens: 15000
-  parser_max_recursion: 4096
+  parser_max_recursion: 500
   max_height: 2
   max_aliases: 2

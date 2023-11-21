@@ -1,20 +1,21 @@
 ---
-title: Moving to the Apollo Router from @apollo/gateway
+title: Gateway migration guide
+description: Migrating to the Apollo Router from @apollo/gateway
 ---
 
-If you have a federated supergraph that currently uses the Node.js `@apollo/gateway` library, this article describes how to move that supergraph to the Rust-based Apollo Router. We recommend the Apollo Router over `@apollo/gateway` for all supergraphs, because it provides significant performance improvements.
-
-> Moving to the Apollo Router from `@apollo/gateway` requires zero changes to your subgraphs! 
+Learn how to migrate a federated supergraph using the `@apollo/gateway` library to the Apollo Router and gain significant performance improvements while making zero changes to your subgraphs.
 
 ## What's different?
 
-Unlike `@apollo/gateway`, the Apollo Router is packaged as a _static, standalone binary_. To customize its behavior, you pass it a [YAML configuration file](./configuration/overview/#yaml-config-file) at startup. If you start the router with the `--hot-reload` flag (or set the `APOLLO_ROUTER_HOT_RELOAD` environment variable to `true`), you can even modify that configuration without a restart.
+Whereas `@apollo/gateway` is an npm package, the Apollo Router is packaged as a _static, standalone binary_. 
 
-You _can_ download the Apollo Router source and use it as a library in a larger project. However, our goal is to remove the need to write custom code in your graph router (which is always necessary with `@apollo/gateway`). Instead, the Apollo Router exposes the most common critical features via declarative configuration.
+The Apollo Router exposes the most common critical features via declarative configuration. You customize the router with a [YAML configuration file](./configuration/overview/#yaml-config-file) that takes effect at startup. Configurations can be modified and take effect without restart if you either start the router with the `--hot-reload` flag or set the `APOLLO_ROUTER_HOT_RELOAD` environment variable to `true`.
+
+Although you _can_ download the Apollo Router source and use it as a library in a larger project, you may not need to because the features that were implemented by custom code with `@apollo/gateway` may be standard, supported features of the router.
 
 ## Take inventory of your gateway configuration
 
-The `@apollo/gateway` library is an extension to the [Apollo Server](/apollo-server/) library, and you need to consider your existing configuration of _both_ libraries when moving to the Apollo Router. For example, you might be customizing which HTTP headers your subgraphs receive from client requests, or passing specific headers _back_ to the client from specific subgraphs.
+The `@apollo/gateway` library is an extension to the [Apollo Server](/apollo-server/) library, and you need to consider your existing configuration of _both_ gateway and server libraries when moving to the Apollo Router. For example, you might need to consider your customizations for the HTTP headers your subgraphs receive from client requests, or for passing specific headers _back_ to the client from specific subgraphs.
 
 Because the Apollo Router uses an entirely different configuration mechanism, you should make a checklist of your gateway's custom behaviors to make sure those behaviors all remain when your migration is complete.
 
@@ -96,7 +97,7 @@ The `ApolloServer` constructor supports a large variety of options, but for the 
 - `context`
 - `plugins`
 
-> For the full list of options, see [`ApolloServer` options](/apollo-server/api/apollo-server#options). If you're using other options, additional steps might be necessary to replicate the same behavior. Please open a discussion on our [GitHub repository](https://github.com/apollographql/router) so we can understand your needs and help you with a solution.
+For the full list of options, see [`ApolloServer` options](/apollo-server/api/apollo-server#options). If you're using other options, additional steps might be necessary to replicate the same behavior. Please open a discussion on our [GitHub repository](https://github.com/apollographql/router) so we can understand your needs and help you with a solution.
 
 ### `context`
 
@@ -113,9 +114,9 @@ This constructor option is an array of built-in or custom `plugins` that extend 
 
 Before you attempt to replicate a plugin's functionality via an Apollo Router [customization](#supported-customizations), check whether any router [configuration options](./configuration/overview/) provide that same functionality. For example, the router supports options for propagating HTTP headers to subgraphs and enabling OpenTelemetry instrumentation.
 
-> If one of your `@apollo/gateway` plugins _does_ require a corresponding router customization, we encourage you to describe your use case in the Router repo's [GitHub discussions](https://github.com/apollographql/router/discussions/). It might represent core functionality that the Apollo Router _should_ provide out of the box, and we can help discuss the design.
->
-> For less common use cases, we also want to help build an ecosystem of shared customizations for the Apollo Router, enabling teams to more quickly add the functionality they need before native support is available.
+If one of your `@apollo/gateway` plugins _does_ require a corresponding router customization, we encourage you to describe your use case in the Router repo's [GitHub discussions](https://github.com/apollographql/router/discussions/). It might represent core functionality that the Apollo Router _should_ provide out of the box, and we can help discuss the design.
+
+For less common use cases, we also want to help build an ecosystem of shared customizations for the Apollo Router, enabling teams to more quickly add the functionality they need before native support is available.
 
 #### Supported customizations
 
@@ -126,6 +127,10 @@ The Apollo Router currently supports two types of customizations that hook into 
 * [External coprocessing](./customizations/coprocessor/)
 
 Examples for each are provided in their respective documentation, and in the [Router repo](https://github.com/apollographql/router/tree/main/examples).
+
+## Kubernetes deployment
+
+For migrating to the Apollo Router deployed on Kubernetes, see some tips for [configuring your router deployment](./containerization/kubernetes/#configure-for-migration-from-gateway).
 
 ## Reporting migration issues
 

@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::RwLock;
+use std::time::Duration;
 
 use futures::future::join_all;
 use futures::future::select;
@@ -23,7 +24,6 @@ use url::Url;
 
 use super::CLIENT;
 use super::DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT;
-use crate::plugins::authentication::DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL;
 
 #[derive(Clone)]
 pub(super) struct JwksManager {
@@ -37,6 +37,7 @@ pub(super) struct JwksConfig {
     pub(super) url: Url,
     pub(super) issuer: Option<String>,
     pub(super) algorithms: Option<HashSet<Algorithm>>,
+    pub(super) poll_interval: Duration,
 }
 
 #[derive(Clone)]
@@ -102,7 +103,7 @@ async fn poll(
         let jwks_map = jwks_map.clone();
         Box::pin(
             repeat((config, jwks_map)).then(|(config, jwks_map)| async move {
-                tokio::time::sleep(DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL).await;
+                tokio::time::sleep(config.poll_interval).await;
 
                 if let Some(jwks) = get_jwks(config.url.clone()).await {
                     if let Ok(mut map) = jwks_map.write() {
