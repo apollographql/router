@@ -5,7 +5,6 @@ use axum::headers::HeaderName;
 use opentelemetry::Array;
 use opentelemetry::Value;
 use opentelemetry_sdk::trace::SpanLimits;
-use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;

@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::marker::PhantomData;
 
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
 use tracing::field;
 use tracing_core::span::Id;
 use tracing_core::span::Record;
@@ -109,10 +111,9 @@ where
         if extensions.get_mut::<LogAttributes>().is_none() {
             let mut fields = LogAttributes::default();
             fields.extend(
-                visitor
-                    .values
-                    .into_iter()
-                    .filter_map(|(k, v)| Some((k.into(), v.maybe_to_otel_value()?))),
+                visitor.values.into_iter().filter_map(|(k, v)| {
+                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
+                }),
             );
 
             extensions.insert(fields);
@@ -121,10 +122,9 @@ where
                 .get_mut::<LogAttributes>()
                 .expect("LogAttributes exists, we checked just before");
             log_attrs.extend(
-                visitor
-                    .values
-                    .into_iter()
-                    .filter_map(|(k, v)| Some((k.into(), v.maybe_to_otel_value()?))),
+                visitor.values.into_iter().filter_map(|(k, v)| {
+                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
+                }),
             );
         }
     }
@@ -136,10 +136,9 @@ where
             let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
             values.record(&mut visitor);
             fields.extend(
-                visitor
-                    .values
-                    .into_iter()
-                    .filter_map(|(k, v)| Some((k.into(), v.maybe_to_otel_value()?))),
+                visitor.values.into_iter().filter_map(|(k, v)| {
+                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
+                }),
             );
         } else {
             eprintln!("cannot access to LogAttributes, this is a bug");

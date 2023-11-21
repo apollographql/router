@@ -284,7 +284,7 @@ memchr = { version = "2.6.4", default-features = false }
 mockall = "0.11.4"
 num-traits = "0.2.17"
 once_cell = "1.18.0"
-opentelemetry_sdk = { features = ["testing"] }
+opentelemetry_sdk = { version = "0.21.0", features = ["testing"] }
 opentelemetry-stdout = { version = "0.2.0", features = ["trace"] }
 p256 = "0.12.0"
 rand_core = "0.6.4"

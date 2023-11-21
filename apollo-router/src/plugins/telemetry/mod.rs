@@ -33,11 +33,11 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use opentelemetry_api::Key;
-use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use opentelemetry_sdk::propagation::TextMapCompositePropagator;
 use opentelemetry_sdk::trace::Builder;
+use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
@@ -364,11 +364,7 @@ impl Plugin for Telemetry {
 
                     custom_attributes
                 },
-                move |custom_attributes: HashMap<
-                    opentelemetry_api::Key,
-                    opentelemetry_api::Value,
-                >,
-                      fut| {
+                move |custom_attributes: HashMap<opentelemetry::Key, opentelemetry::Value>, fut| {
                     let start = Instant::now();
                     let config = config_later.clone();
 
@@ -734,7 +730,7 @@ impl Telemetry {
     fn create_tracer_provider(
         config: &config::Conf,
     ) -> Result<(SamplerOption, opentelemetry_sdk::trace::TracerProvider), BoxError> {
-        let tracing_config = &config.tracing;
+        let tracing_config = &config.exporters.tracing;
         let spans_config = &config.instrumentation.spans;
         let mut common = tracing_config.common.clone();
         let mut sampler = common.sampler.clone();
