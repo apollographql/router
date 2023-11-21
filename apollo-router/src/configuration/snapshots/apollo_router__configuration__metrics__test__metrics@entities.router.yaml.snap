@@ -2,7 +2,9 @@
 source: apollo-router/src/configuration/metrics.rs
 expression: "&metrics.metrics"
 ---
-value.apollo.router.config.entities:
+value.apollo.router.config.entity_cache:
   - 1
-  - opt__cache__: true
+  - opt__enabled__: true
+    opt__subgraph__enabled__: true
+    opt__subgraph__ttl__: true
 
