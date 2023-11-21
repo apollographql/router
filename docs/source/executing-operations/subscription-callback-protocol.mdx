@@ -273,7 +273,7 @@ The following are common error states that can occur with this protcol:
 - **Emitter** receives an error HTTP status code from **Router**'s callback endpoint. 
   - If the error code is 404, **Emitter** should consider the associated subscription terminated by **Router**.
   - In other error cases, **Emitter** should consider the subscription terminated due to an unexpected error.
-- **Emitter** fails to send **Router** a [`heartbeat`](#heartbeat) or [`check`](#check) message for an active subscription every five seconds, causing **Router** to terminate that subscription.
+- **Emitter** fails to send **Router** a [`check`](#check) message for an active subscription every five seconds, causing **Router** to terminate that subscription.
 
 ## Examples
 
