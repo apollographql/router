@@ -99,10 +99,10 @@
     },
     "Telemetry and Monitoring": {
       "Metrics exporters": {
-        "Configuration": "/configuration/exporters/metrics/overview",
-        "Prometheus": "/configuration/exporters/metrics/prometheus",
-        "OpenTelemetry": "/configuration/exporters/metrics/opentelemetry",
-        "Datadog (OTLP)": "/configuration/exporters/metrics/datadog-otlp"
+        "Configuration": "/configuration/telemetry/exporters/metrics/overview",
+        "Prometheus": "/configuration/telemetry/exporters/metrics/prometheus",
+        "OpenTelemetry": "/configuration/telemetry/exporters/metrics/opentelemetry",
+        "Datadog (OTLP)": "/configuration/telemetry/exporters/metrics/datadog-otlp"
       },
       "Trace exporters": {
         "Configuration": "/configuration/telemetry/exporters/tracing/overview",
