@@ -93,7 +93,7 @@ For OpenTelemetry conventions for resources, see [Resource Semantic Conventions]
 
 ### Sampling
 
-You can configure the sampling rate of traces to match the rate of your application performance monitors (APM). To enable sampling configuration, in [`router.yaml`](./configuration/overview#yaml-config-file) set `telemetry.tracing.common.sampler` and `telemetry.tracing.common.parent_based_sampler`:
+You can configure the sampling rate of traces to match the rate of your application performance monitors (APM). To enable sampling configuration, in [`router.yaml`](./configuration/overview#yaml-config-file) set `telemetry.exporters.tracing.common.sampler` and `telemetry.exporters.tracing.common.parent_based_sampler`:
 
 ```yaml title="router.yaml"
 telemetry:
