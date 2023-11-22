@@ -138,7 +138,7 @@ struct SubscriptionExtension {
     subscription_id: String,
     callback_url: url::Url,
     verifier: String,
-    heartbeat_interval_ms: u128,
+    heartbeat_interval_ms: u64,
 }
 
 /// Client for interacting with subgraphs.
@@ -411,16 +411,18 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             verifier,
                             heartbeat_interval_ms: match heartbeat_interval {
                                 HeartbeatInterval::Disabled => 0,
-                                HeartbeatInterval::Duration(duration) => duration.as_millis(),
+                                HeartbeatInterval::Duration(duration) => {
+                                    duration.as_millis() as u64
+                                }
                             },
                         };
                         body.extensions.insert(
                             "subscription",
-                            serde_json_bytes::to_value(subscription_extension).map_err(|_err| {
+                            serde_json_bytes::to_value(subscription_extension).map_err(|err| {
                                 FetchError::SubrequestHttpError {
                                     service: service_name.clone(),
-                                    reason: String::from(
-                                        "cannot serialize the subscription extension",
+                                    reason: format!(
+                                        "cannot serialize the subscription extension: {err:?}",
                                     ),
                                     status_code: None,
                                 }

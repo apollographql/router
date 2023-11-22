@@ -53,7 +53,7 @@ All actions described in these steps are performed by one of **Router**, **Subgr
     - `callback_url`: The URL that **Emitter** will send subscription data to
     - `subscription_id`: The generated unique ID for the subscription operation
     - `verifier`: A string that **Emitter** will include in all HTTP callback requests to verify its identity
-    - `heartbeat_interval_ms`: The number of milliseconds a heartbeat has to be sent to the callback endpoint for the subscription operation
+    - `heartbeat_interval_ms`: The number of milliseconds a heartbeat has to be sent to the callback endpoint for the subscription operation, if `0` it means the heartbeat is disabled
 
 3. _Before **Subgraph** responds to **Router**'s request,_ it sends a [`check` message](#check) with callback protocol version header
 (`subscription-protocol: callback/1.0`) to the provided `callback_url` for confirmation from **Router**:
