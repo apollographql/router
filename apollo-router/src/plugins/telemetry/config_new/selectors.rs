@@ -796,15 +796,15 @@ mod test {
     use std::sync::Arc;
 
     use http::StatusCode;
-    use opentelemetry_api::baggage::BaggageExt;
-    use opentelemetry_api::trace::SpanContext;
-    use opentelemetry_api::trace::SpanId;
-    use opentelemetry_api::trace::TraceContextExt;
-    use opentelemetry_api::trace::TraceFlags;
-    use opentelemetry_api::trace::TraceId;
-    use opentelemetry_api::trace::TraceState;
-    use opentelemetry_api::Context;
-    use opentelemetry_api::KeyValue;
+    use opentelemetry::baggage::BaggageExt;
+    use opentelemetry::trace::SpanContext;
+    use opentelemetry::trace::SpanId;
+    use opentelemetry::trace::TraceContextExt;
+    use opentelemetry::trace::TraceFlags;
+    use opentelemetry::trace::TraceId;
+    use opentelemetry::trace::TraceState;
+    use opentelemetry::Context;
+    use opentelemetry::KeyValue;
     use serde_json::json;
     use tracing::span;
     use tracing::subscriber;

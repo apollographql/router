@@ -2,7 +2,7 @@ use std::any::type_name;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use opentelemetry_api::Key;
+use opentelemetry::Key;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::Schema;
 use schemars::JsonSchema;

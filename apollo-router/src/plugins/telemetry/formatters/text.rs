@@ -7,7 +7,7 @@ use std::fmt;
 
 use nu_ansi_term::Color;
 use nu_ansi_term::Style;
-use opentelemetry::sdk::Resource;
+use opentelemetry_sdk::Resource;
 use serde_json::Value;
 use tracing_core::Event;
 use tracing_core::Level;
@@ -207,8 +207,8 @@ impl Text {
             let mut attrs = dyn_attributes
                 .attributes()
                 .iter()
-                .filter(|(k, _v)| {
-                    let key_name = k.as_str();
+                .filter(|kv| {
+                    let key_name = kv.key.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
                         && !self.excluded_attributes.contains(&key_name)
                 })
@@ -218,8 +218,14 @@ impl Text {
                 write!(writer, "{}{{", span.name())?;
             }
             #[cfg(test)]
-            let attrs: BTreeMap<&opentelemetry::Key, &opentelemetry::Value> = attrs.collect();
-            for (key, value) in attrs {
+            let attrs: Vec<&opentelemetry::KeyValue> = {
+                let mut my_attrs: Vec<&opentelemetry::KeyValue> = attrs.collect();
+                my_attrs.sort_by_key(|kv| &kv.key);
+                my_attrs
+            };
+            for kv in attrs {
+                let key = &kv.key;
+                let value = &kv.value;
                 write!(writer, "{key}={value},")?;
             }
         }
@@ -230,8 +236,8 @@ impl Text {
         {
             let mut attrs = otel_attributes
                 .iter()
-                .filter(|(k, _v)| {
-                    let key_name = k.as_str();
+                .filter(|kv| {
+                    let key_name = kv.key.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
                         && !self.excluded_attributes.contains(&key_name)
                 })
@@ -241,8 +247,14 @@ impl Text {
                 write!(writer, "{}{{", span.name())?;
             }
             #[cfg(test)]
-            let attrs: BTreeMap<&opentelemetry::Key, &opentelemetry::Value> = attrs.collect();
-            for (key, value) in attrs {
+            let attrs: Vec<&opentelemetry::KeyValue> = {
+                let mut my_attrs: Vec<&opentelemetry::KeyValue> = attrs.collect();
+                my_attrs.sort_by_key(|kv| &kv.key);
+                my_attrs
+            };
+            for kv in attrs {
+                let key = &kv.key;
+                let value = &kv.value;
                 write!(writer, "{key}={value},")?;
             }
         }
