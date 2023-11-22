@@ -17,6 +17,7 @@ use apollo_router::services::supergraph;
 use apollo_router::test_harness::mocks::persisted_queries::*;
 use apollo_router::Configuration;
 use apollo_router::Context;
+use apollo_router::_private::create_test_service_factory_from_yaml;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
@@ -1514,4 +1515,23 @@ Make sure it is accessible, and the configuration is working with the router."#,
         );
 
     insta::assert_snapshot!(include_str!("../../examples/graphql/supergraph.graphql"));
+}
+
+// This test must use the multi_thread tokio executor or the opentelemetry hang bug will
+// be encountered. (See https://github.com/open-telemetry/opentelemetry-rust/issues/536)
+#[tokio::test(flavor = "multi_thread")]
+#[tracing_test::traced_test]
+async fn test_telemetry_doesnt_hang_with_invalid_schema() {
+    create_test_service_factory_from_yaml(
+        include_str!("../src/testdata/invalid_supergraph.graphql"),
+        r#"
+    telemetry:
+      tracing:
+        common:
+          service_name: router
+        otlp:
+          endpoint: default
+"#,
+    )
+    .await;
 }
