@@ -1,4 +1,4 @@
-use opentelemetry_api::Value;
+use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -83,7 +83,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use opentelemetry_api::Value;
+    use opentelemetry::Value;
 
     use crate::plugins::telemetry::config_new::conditions::Condition;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;

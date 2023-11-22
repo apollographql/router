@@ -1,6 +1,5 @@
-use std::collections::HashMap;
-
-use opentelemetry_api::Key;
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
 use tracing_opentelemetry::OtelData;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
@@ -12,28 +11,28 @@ use super::tracing::APOLLO_PRIVATE_PREFIX;
 
 #[derive(Debug)]
 pub(crate) struct LogAttributes {
-    attributes: HashMap<Key, opentelemetry::Value>,
+    attributes: Vec<KeyValue>,
 }
 
 impl Default for LogAttributes {
     fn default() -> Self {
         Self {
-            attributes: HashMap::with_capacity(0),
+            attributes: Vec::with_capacity(0),
         }
     }
 }
 
 impl LogAttributes {
-    pub(crate) fn attributes(&self) -> &HashMap<Key, opentelemetry::Value> {
+    pub(crate) fn attributes(&self) -> &Vec<KeyValue> {
         &self.attributes
     }
 
-    fn insert(&mut self, key: Key, value: opentelemetry::Value) {
-        self.attributes.insert(key, value);
+    fn insert(&mut self, kv: KeyValue) {
+        self.attributes.push(kv);
     }
 
-    pub(crate) fn extend(&mut self, val: impl IntoIterator<Item = (Key, opentelemetry::Value)>) {
-        self.attributes.extend(val);
+    pub(crate) fn extend(&mut self, other: impl IntoIterator<Item = KeyValue>) {
+        self.attributes.extend(other);
     }
 }
 
@@ -81,14 +80,14 @@ impl DynAttribute for ::tracing::Span {
                                 Some(otel_data) => {
                                     if otel_data.builder.attributes.is_none() {
                                         otel_data.builder.attributes =
-                                            Some([(key, value)].into_iter().collect());
+                                            Some(vec![KeyValue::new(key, value)]);
                                     } else {
                                         otel_data
                                             .builder
                                             .attributes
                                             .as_mut()
                                             .unwrap()
-                                            .insert(key, value);
+                                            .push(KeyValue::new(key, value));
                                     }
                                 }
                                 None => {
@@ -103,7 +102,7 @@ impl DynAttribute for ::tracing::Span {
                             let mut extensions = s.extensions_mut();
                             match extensions.get_mut::<LogAttributes>() {
                                 Some(attributes) => {
-                                    attributes.insert(key, value);
+                                    attributes.insert(KeyValue::new(key, value));
                                 }
                                 None => {
                                     // Can't use ::tracing::error! because it could create deadlock on extensions
@@ -123,6 +122,7 @@ impl DynAttribute for ::tracing::Span {
         &self,
         attributes: impl IntoIterator<Item = (Key, opentelemetry::Value)>,
     ) {
+        let kv_attributes = attributes.into_iter().map(|(k, v)| KeyValue::new(k, v));
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
@@ -134,14 +134,14 @@ impl DynAttribute for ::tracing::Span {
                                 Some(otel_data) => {
                                     if otel_data.builder.attributes.is_none() {
                                         otel_data.builder.attributes =
-                                            Some(attributes.into_iter().collect());
+                                            Some(kv_attributes.into_iter().collect());
                                     } else {
                                         otel_data
                                             .builder
                                             .attributes
                                             .as_mut()
                                             .unwrap()
-                                            .extend(attributes);
+                                            .extend(kv_attributes);
                                     }
                                 }
                                 None => {
@@ -153,10 +153,8 @@ impl DynAttribute for ::tracing::Span {
                             let mut extensions = s.extensions_mut();
                             match extensions.get_mut::<LogAttributes>() {
                                 Some(registered_attributes) => {
-                                    registered_attributes.extend(attributes.into_iter().filter(
-                                        |(name, _)| {
-                                            !name.as_str().starts_with(APOLLO_PRIVATE_PREFIX)
-                                        },
+                                    registered_attributes.extend(kv_attributes.into_iter().filter(
+                                        |kv| !kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX),
                                     ));
                                 }
                                 None => {

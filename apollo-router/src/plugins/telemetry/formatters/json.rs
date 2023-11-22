@@ -6,9 +6,9 @@ use std::collections::HashSet;
 use std::fmt;
 use std::io;
 
-use opentelemetry::sdk::Resource;
-use opentelemetry_api::Array;
-use opentelemetry_api::Value;
+use opentelemetry::Array;
+use opentelemetry::Value;
+use opentelemetry_sdk::Resource;
 use serde::ser::SerializeMap;
 use serde::ser::Serializer as _;
 use serde_json::Serializer;
@@ -111,11 +111,11 @@ where
                 .get::<OtelData>()
                 .and_then(|otel_data| otel_data.builder.attributes.as_ref());
             if let Some(otel_attributes) = otel_attributes {
-                for (key, value) in otel_attributes.iter().filter(|(k, _)| {
-                    let key_name = k.as_str();
+                for kv in otel_attributes.iter().filter(|kv| {
+                    let key_name = kv.key.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX) && !self.1.contains(&key_name)
                 }) {
-                    serializer.serialize_entry(key.as_str(), &value.as_str())?;
+                    serializer.serialize_entry(kv.key.as_str(), &kv.value.as_str())?;
                 }
             }
         }
@@ -124,39 +124,41 @@ where
             let custom_attributes = ext.get::<LogAttributes>().map(|attrs| attrs.attributes());
             if let Some(custom_attributes) = custom_attributes {
                 #[cfg(test)]
-                let custom_attributes: BTreeMap<
-                    &opentelemetry::Key,
-                    &opentelemetry::Value,
-                > = custom_attributes.iter().collect();
-                for (key, value) in custom_attributes.iter().filter(|(k, _)| {
-                    let key_name = k.as_str();
+                let custom_attributes: Vec<&opentelemetry::KeyValue> = {
+                    let mut my_custom_attributes: Vec<&opentelemetry::KeyValue> =
+                        custom_attributes.iter().collect();
+                    my_custom_attributes.sort_by_key(|kv| &kv.key);
+                    my_custom_attributes
+                };
+                for kv in custom_attributes.iter().filter(|kv| {
+                    let key_name = kv.key.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX) && !self.1.contains(&key_name)
                 }) {
-                    match value {
+                    match &kv.value {
                         Value::Bool(value) => {
-                            serializer.serialize_entry(key.as_str(), value)?;
+                            serializer.serialize_entry(kv.key.as_str(), value)?;
                         }
                         Value::I64(value) => {
-                            serializer.serialize_entry(key.as_str(), value)?;
+                            serializer.serialize_entry(kv.key.as_str(), value)?;
                         }
                         Value::F64(value) => {
-                            serializer.serialize_entry(key.as_str(), value)?;
+                            serializer.serialize_entry(kv.key.as_str(), value)?;
                         }
                         Value::String(value) => {
-                            serializer.serialize_entry(key.as_str(), value.as_str())?;
+                            serializer.serialize_entry(kv.key.as_str(), value.as_str())?;
                         }
                         Value::Array(Array::Bool(array)) => {
-                            serializer.serialize_entry(key.as_str(), array)?;
+                            serializer.serialize_entry(kv.key.as_str(), array)?;
                         }
                         Value::Array(Array::I64(array)) => {
-                            serializer.serialize_entry(key.as_str(), array)?;
+                            serializer.serialize_entry(kv.key.as_str(), array)?;
                         }
                         Value::Array(Array::F64(array)) => {
-                            serializer.serialize_entry(key.as_str(), array)?;
+                            serializer.serialize_entry(kv.key.as_str(), array)?;
                         }
                         Value::Array(Array::String(array)) => {
                             let array = array.iter().map(|a| a.as_str()).collect::<Vec<_>>();
-                            serializer.serialize_entry(key.as_str(), &array)?;
+                            serializer.serialize_entry(kv.key.as_str(), &array)?;
                         }
                     }
                 }
