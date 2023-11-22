@@ -1,7 +1,3 @@
-#[cfg(test)]
-use std::collections::BTreeMap;
-#[cfg(not(test))]
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 
@@ -28,16 +24,13 @@ use super::EventFormatter;
 use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config_new::logging::TextFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
-use crate::plugins::telemetry::formatters::to_map;
+use crate::plugins::telemetry::formatters::to_vec;
 use crate::plugins::telemetry::tracing::APOLLO_PRIVATE_PREFIX;
 
 pub(crate) struct Text {
     #[allow(dead_code)]
     timer: SystemTime,
-    #[cfg(not(test))]
-    resource: HashMap<String, Value>,
-    #[cfg(test)]
-    resource: BTreeMap<String, Value>,
+    resource: Vec<(String, Value)>,
     config: TextFormat,
     excluded_attributes: HashSet<&'static str>,
 }
@@ -64,10 +57,7 @@ impl Text {
         Self {
             timer: Default::default(),
             config,
-            #[cfg(not(test))]
-            resource: to_map(resource),
-            #[cfg(test)]
-            resource: to_map(resource).into_iter().collect(),
+            resource: to_vec(resource),
             excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
         }
     }
@@ -274,8 +264,7 @@ impl Text {
     pub(crate) fn format_resource(
         &self,
         writer: &mut Writer,
-        #[cfg(test)] resource: &BTreeMap<String, Value>,
-        #[cfg(not(test))] resource: &HashMap<String, Value>,
+        resource: &[(String, Value)],
     ) -> fmt::Result {
         if !resource.is_empty() {
             let style = Style::new().dimmed();

@@ -1,9 +1,7 @@
-use std::collections::HashMap;
-
 use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
-use opentelemetry::Key;
+use opentelemetry::KeyValue;
 use paste::paste;
 use tower::BoxError;
 use tracing::Span;
@@ -27,9 +25,9 @@ pub(crate) mod spans;
 pub(crate) trait Selectors {
     type Request;
     type Response;
-    fn on_request(&self, request: &Self::Request) -> HashMap<Key, opentelemetry::Value>;
-    fn on_response(&self, response: &Self::Response) -> HashMap<Key, opentelemetry::Value>;
-    fn on_error(&self, error: &BoxError) -> HashMap<Key, opentelemetry::Value>;
+    fn on_request(&self, request: &Self::Request) -> Vec<KeyValue>;
+    fn on_response(&self, response: &Self::Response) -> Vec<KeyValue>;
+    fn on_error(&self, error: &BoxError) -> Vec<KeyValue>;
 }
 
 pub(crate) trait Selector {

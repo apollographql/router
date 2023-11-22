@@ -2,7 +2,6 @@
 pub(crate) mod json;
 pub(crate) mod text;
 
-use std::collections::HashMap;
 use std::fmt;
 
 use opentelemetry_sdk::Resource;
@@ -109,7 +108,7 @@ pub(crate) fn filter_metric_events(event: &tracing::Event<'_>) -> bool {
     })
 }
 
-pub(crate) fn to_map(resource: Resource) -> HashMap<String, serde_json::Value> {
+pub(crate) fn to_vec(resource: Resource) -> Vec<(String, serde_json::Value)> {
     resource
         .into_iter()
         .map(|(k, v)| {
@@ -156,6 +155,54 @@ pub(crate) fn to_map(resource: Resource) -> HashMap<String, serde_json::Value> {
         })
         .collect()
 }
+
+// pub(crate) fn to_vec(resource: Resource) -> Vec<(String, serde_json::Value)> {
+//     resource
+//         .into_iter()
+//         .map(|(k, v)| {
+//             (
+//                 k.into(),
+//                 match v {
+//                     opentelemetry::Value::Bool(value) => serde_json::Value::Bool(value),
+//                     opentelemetry::Value::I64(value) => {
+//                         serde_json::Value::Number(Number::from(value))
+//                     }
+//                     opentelemetry::Value::F64(value) => serde_json::Value::Number(
+//                         Number::from_f64(value).unwrap_or(Number::from(0)),
+//                     ),
+//                     opentelemetry::Value::String(value) => serde_json::Value::String(value.into()),
+//                     opentelemetry::Value::Array(value) => match value {
+//                         opentelemetry::Array::Bool(array) => serde_json::Value::Array(
+//                             array.into_iter().map(serde_json::Value::Bool).collect(),
+//                         ),
+//                         opentelemetry::Array::I64(array) => serde_json::Value::Array(
+//                             array
+//                                 .into_iter()
+//                                 .map(|value| serde_json::Value::Number(Number::from(value)))
+//                                 .collect(),
+//                         ),
+//                         opentelemetry::Array::F64(array) => serde_json::Value::Array(
+//                             array
+//                                 .into_iter()
+//                                 .map(|value| {
+//                                     serde_json::Value::Number(
+//                                         Number::from_f64(value).unwrap_or(Number::from(0)),
+//                                     )
+//                                 })
+//                                 .collect(),
+//                         ),
+//                         opentelemetry::Array::String(array) => serde_json::Value::Array(
+//                             array
+//                                 .into_iter()
+//                                 .map(|s| serde_json::Value::String(s.to_string()))
+//                                 .collect(),
+//                         ),
+//                     },
+//                 },
+//             )
+//         })
+//         .collect()
+// }
 
 pub(crate) trait EventFormatter<S> {
     fn format_event<W>(

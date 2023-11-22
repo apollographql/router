@@ -1,7 +1,3 @@
-#[cfg(test)]
-use std::collections::BTreeMap;
-#[cfg(not(test))]
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::io;
@@ -25,25 +21,19 @@ use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config_new::logging::JsonFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
-use crate::plugins::telemetry::formatters::to_map;
+use crate::plugins::telemetry::formatters::to_vec;
 
 #[derive(Debug)]
 pub(crate) struct Json {
     config: JsonFormat,
-    #[cfg(not(test))]
-    resource: HashMap<String, serde_json::Value>,
-    #[cfg(test)]
-    resource: BTreeMap<String, serde_json::Value>,
+    resource: Vec<(String, serde_json::Value)>,
     excluded_attributes: HashSet<&'static str>,
 }
 
 impl Json {
     pub(crate) fn new(resource: Resource, config: JsonFormat) -> Self {
         Self {
-            #[cfg(not(test))]
-            resource: to_map(resource),
-            #[cfg(test)]
-            resource: to_map(resource).into_iter().collect(),
+            resource: to_vec(resource),
             config,
             excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
         }
