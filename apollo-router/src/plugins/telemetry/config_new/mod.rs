@@ -1,3 +1,5 @@
+use std::collections::LinkedList;
+
 use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
@@ -25,9 +27,9 @@ pub(crate) mod spans;
 pub(crate) trait Selectors {
     type Request;
     type Response;
-    fn on_request(&self, request: &Self::Request) -> Vec<KeyValue>;
-    fn on_response(&self, response: &Self::Response) -> Vec<KeyValue>;
-    fn on_error(&self, error: &BoxError) -> Vec<KeyValue>;
+    fn on_request(&self, request: &Self::Request) -> LinkedList<KeyValue>;
+    fn on_response(&self, response: &Self::Response) -> LinkedList<KeyValue>;
+    fn on_error(&self, error: &BoxError) -> LinkedList<KeyValue>;
 }
 
 pub(crate) trait Selector {

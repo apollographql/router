@@ -1,6 +1,7 @@
 //! Telemetry plugin.
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::LinkedList;
 use std::fmt;
 use std::sync::Arc;
 use std::thread;
@@ -363,7 +364,7 @@ impl Plugin for Telemetry {
 
                     custom_attributes
                 },
-                move |custom_attributes: Vec<KeyValue>, fut| {
+                move |custom_attributes: LinkedList<KeyValue>, fut| {
                     let start = Instant::now();
                     let config = config_later.clone();
 
@@ -487,7 +488,7 @@ impl Plugin for Telemetry {
                     Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
                     (req.context.clone(), custom_attributes)
                 },
-                move |(ctx, custom_attributes): (Context, Vec<KeyValue>), fut| {
+                move |(ctx, custom_attributes): (Context, LinkedList<KeyValue>), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -591,7 +592,7 @@ impl Plugin for Telemetry {
                 move |(context, cache_attributes, custom_attributes): (
                     Context,
                     Option<CacheAttributes>,
-                    Vec<KeyValue>,
+                    LinkedList<KeyValue>,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let subgraph_attribute = subgraph_attribute.clone();

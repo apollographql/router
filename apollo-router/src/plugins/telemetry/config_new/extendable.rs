@@ -1,5 +1,6 @@
 use std::any::type_name;
 use std::collections::HashMap;
+use std::collections::LinkedList;
 use std::fmt::Debug;
 
 use opentelemetry::KeyValue;
@@ -153,7 +154,7 @@ where
     type Request = Request;
     type Response = Response;
 
-    fn on_request(&self, request: &Self::Request) -> Vec<KeyValue> {
+    fn on_request(&self, request: &Self::Request) -> LinkedList<KeyValue> {
         let mut attrs = self.attributes.on_request(request);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
@@ -165,7 +166,7 @@ where
         attrs
     }
 
-    fn on_response(&self, response: &Self::Response) -> Vec<KeyValue> {
+    fn on_response(&self, response: &Self::Response) -> LinkedList<KeyValue> {
         let mut attrs = self.attributes.on_response(response);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
@@ -177,7 +178,7 @@ where
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<KeyValue> {
+    fn on_error(&self, error: &BoxError) -> LinkedList<KeyValue> {
         self.attributes.on_error(error)
     }
 }

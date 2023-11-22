@@ -1,3 +1,4 @@
+use std::collections::LinkedList;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 
@@ -525,12 +526,12 @@ impl Selectors for RouterAttributes {
     type Request = router::Request;
     type Response = router::Response;
 
-    fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
+    fn on_request(&self, request: &router::Request) -> LinkedList<KeyValue> {
         let mut attrs = self.common.on_request(request);
         attrs.extend(self.server.on_request(request));
         if let Some(true) = &self.trace_id {
             if let Some(trace_id) = trace_id() {
-                attrs.push(KeyValue::new(
+                attrs.push_back(KeyValue::new(
                     Key::from_static_str("trace_id"),
                     trace_id.to_string(),
                 ));
@@ -538,7 +539,7 @@ impl Selectors for RouterAttributes {
         }
         if let Some(true) = &self.datadog_trace_id {
             if let Some(trace_id) = trace_id() {
-                attrs.push(KeyValue::new(
+                attrs.push_back(KeyValue::new(
                     Key::from_static_str("dd.trace_id"),
                     trace_id.to_datadog(),
                 ));
@@ -548,13 +549,13 @@ impl Selectors for RouterAttributes {
         attrs
     }
 
-    fn on_response(&self, response: &router::Response) -> Vec<KeyValue> {
+    fn on_response(&self, response: &router::Response) -> LinkedList<KeyValue> {
         let mut attrs = self.common.on_response(response);
         attrs.extend(self.server.on_response(response));
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<KeyValue> {
+    fn on_error(&self, error: &BoxError) -> LinkedList<KeyValue> {
         let mut attrs = self.common.on_error(error);
         attrs.extend(self.server.on_error(error));
         attrs
@@ -565,10 +566,10 @@ impl Selectors for HttpCommonAttributes {
     type Request = router::Request;
     type Response = router::Response;
 
-    fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
-        let mut attrs = Vec::new();
+    fn on_request(&self, request: &router::Request) -> LinkedList<KeyValue> {
+        let mut attrs = LinkedList::new();
         if let Some(true) = &self.http_request_method {
-            attrs.push(KeyValue::new(
+            attrs.push_back(KeyValue::new(
                 HTTP_REQUEST_METHOD,
                 request.router_request.method().as_str().to_string(),
             ));
@@ -581,7 +582,7 @@ impl Selectors for HttpCommonAttributes {
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.push(KeyValue::new(
+                attrs.push_back(KeyValue::new(
                     HTTP_REQUEST_BODY_SIZE,
                     content_length.to_string(),
                 ));
@@ -589,17 +590,17 @@ impl Selectors for HttpCommonAttributes {
         }
         if let Some(true) = &self.network_protocol_name {
             if let Some(scheme) = request.router_request.uri().scheme() {
-                attrs.push(KeyValue::new(NETWORK_PROTOCOL_NAME, scheme.to_string()));
+                attrs.push_back(KeyValue::new(NETWORK_PROTOCOL_NAME, scheme.to_string()));
             }
         }
         if let Some(true) = &self.network_protocol_version {
-            attrs.push(KeyValue::new(
+            attrs.push_back(KeyValue::new(
                 NETWORK_PROTOCOL_VERSION,
                 format!("{:?}", request.router_request.version()),
             ));
         }
         if let Some(true) = &self.network_transport {
-            attrs.push(KeyValue::new(NETWORK_TRANSPORT, "tcp".to_string()));
+            attrs.push_back(KeyValue::new(NETWORK_TRANSPORT, "tcp".to_string()));
         }
         if let Some(true) = &self.network_type {
             if let Some(connection_info) =
@@ -607,9 +608,9 @@ impl Selectors for HttpCommonAttributes {
             {
                 if let Some(socket) = connection_info.server_address {
                     if socket.is_ipv4() {
-                        attrs.push(KeyValue::new(NETWORK_TYPE, "ipv4".to_string()));
+                        attrs.push_back(KeyValue::new(NETWORK_TYPE, "ipv4".to_string()));
                     } else if socket.is_ipv6() {
-                        attrs.push(KeyValue::new(NETWORK_TYPE, "ipv6".to_string()));
+                        attrs.push_back(KeyValue::new(NETWORK_TYPE, "ipv6".to_string()));
                     }
                 }
             }
@@ -618,8 +619,8 @@ impl Selectors for HttpCommonAttributes {
         attrs
     }
 
-    fn on_response(&self, response: &router::Response) -> Vec<KeyValue> {
-        let mut attrs = Vec::new();
+    fn on_response(&self, response: &router::Response) -> LinkedList<KeyValue> {
+        let mut attrs = LinkedList::new();
         if let Some(true) = &self.http_response_body_size {
             if let Some(content_length) = response
                 .response
@@ -627,14 +628,14 @@ impl Selectors for HttpCommonAttributes {
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.push(KeyValue::new(
+                attrs.push_back(KeyValue::new(
                     HTTP_RESPONSE_BODY_SIZE,
                     content_length.to_string(),
                 ));
             }
         }
         if let Some(true) = &self.http_response_status_code {
-            attrs.push(KeyValue::new(
+            attrs.push_back(KeyValue::new(
                 HTTP_RESPONSE_STATUS_CODE,
                 response.response.status().as_u16() as i64,
             ));
@@ -642,7 +643,7 @@ impl Selectors for HttpCommonAttributes {
 
         if let Some(true) = &self.error_type {
             if !response.response.status().is_success() {
-                attrs.push(KeyValue::new(
+                attrs.push_back(KeyValue::new(
                     ERROR_TYPE,
                     response
                         .response
@@ -656,10 +657,10 @@ impl Selectors for HttpCommonAttributes {
         attrs
     }
 
-    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
-        let mut attrs = Vec::new();
+    fn on_error(&self, _error: &BoxError) -> LinkedList<KeyValue> {
+        let mut attrs = LinkedList::new();
         if let Some(true) = &self.error_type {
-            attrs.push(KeyValue::new(
+            attrs.push_back(KeyValue::new(
                 ERROR_TYPE,
                 StatusCode::INTERNAL_SERVER_ERROR
                     .canonical_reason()
@@ -667,7 +668,7 @@ impl Selectors for HttpCommonAttributes {
             ));
         }
         if let Some(true) = &self.http_response_status_code {
-            attrs.push(KeyValue::new(
+            attrs.push_back(KeyValue::new(
                 HTTP_RESPONSE_STATUS_CODE,
                 StatusCode::INTERNAL_SERVER_ERROR.as_u16() as i64,
             ));
@@ -681,33 +682,33 @@ impl Selectors for HttpServerAttributes {
     type Request = router::Request;
     type Response = router::Response;
 
-    fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
-        let mut attrs = Vec::new();
+    fn on_request(&self, request: &router::Request) -> LinkedList<KeyValue> {
+        let mut attrs = LinkedList::new();
         if let Some(true) = &self.http_route {
-            attrs.push(KeyValue::new(
+            attrs.push_back(KeyValue::new(
                 HTTP_ROUTE,
                 request.router_request.uri().path().to_string(),
             ));
         }
         if let Some(true) = &self.client_address {
             if let Some(forwarded) = Self::forwarded_for(request) {
-                attrs.push(KeyValue::new(CLIENT_ADDRESS, forwarded.ip().to_string()));
+                attrs.push_back(KeyValue::new(CLIENT_ADDRESS, forwarded.ip().to_string()));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.peer_address {
-                    attrs.push(KeyValue::new(CLIENT_ADDRESS, socket.ip().to_string()));
+                    attrs.push_back(KeyValue::new(CLIENT_ADDRESS, socket.ip().to_string()));
                 }
             }
         }
         if let Some(true) = &self.client_port {
             if let Some(forwarded) = Self::forwarded_for(request) {
-                attrs.push(KeyValue::new(CLIENT_PORT, forwarded.port() as i64));
+                attrs.push_back(KeyValue::new(CLIENT_PORT, forwarded.port() as i64));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.peer_address {
-                    attrs.push(KeyValue::new(CLIENT_PORT, socket.port() as i64));
+                    attrs.push_back(KeyValue::new(CLIENT_PORT, socket.port() as i64));
                 }
             }
         }
@@ -716,23 +717,23 @@ impl Selectors for HttpServerAttributes {
             if let Some(forwarded) =
                 Self::forwarded_host(request).and_then(|h| h.host().map(|h| h.to_string()))
             {
-                attrs.push(KeyValue::new(SERVER_ADDRESS, forwarded));
+                attrs.push_back(KeyValue::new(SERVER_ADDRESS, forwarded));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.server_address {
-                    attrs.push(KeyValue::new(SERVER_ADDRESS, socket.ip().to_string()));
+                    attrs.push_back(KeyValue::new(SERVER_ADDRESS, socket.ip().to_string()));
                 }
             }
         }
         if let Some(true) = &self.server_port {
             if let Some(forwarded) = Self::forwarded_host(request).and_then(|h| h.port_u16()) {
-                attrs.push(KeyValue::new(SERVER_PORT, forwarded as i64));
+                attrs.push_back(KeyValue::new(SERVER_PORT, forwarded as i64));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.server_address {
-                    attrs.push(KeyValue::new(SERVER_PORT, socket.port() as i64));
+                    attrs.push_back(KeyValue::new(SERVER_PORT, socket.port() as i64));
                 }
             }
         }
@@ -742,7 +743,7 @@ impl Selectors for HttpServerAttributes {
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.server_address {
-                    attrs.push(KeyValue::new(
+                    attrs.push_back(KeyValue::new(
                         NETWORK_LOCAL_ADDRESS,
                         socket.ip().to_string(),
                     ));
@@ -754,7 +755,7 @@ impl Selectors for HttpServerAttributes {
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.server_address {
-                    attrs.push(KeyValue::new(NETWORK_LOCAL_PORT, socket.port() as i64));
+                    attrs.push_back(KeyValue::new(NETWORK_LOCAL_PORT, socket.port() as i64));
                 }
             }
         }
@@ -764,7 +765,7 @@ impl Selectors for HttpServerAttributes {
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.peer_address {
-                    attrs.push(KeyValue::new(NETWORK_PEER_ADDRESS, socket.ip().to_string()));
+                    attrs.push_back(KeyValue::new(NETWORK_PEER_ADDRESS, socket.ip().to_string()));
                 }
             }
         }
@@ -773,23 +774,23 @@ impl Selectors for HttpServerAttributes {
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.peer_address {
-                    attrs.push(KeyValue::new(NETWORK_PEER_PORT, socket.port() as i64));
+                    attrs.push_back(KeyValue::new(NETWORK_PEER_PORT, socket.port() as i64));
                 }
             }
         }
 
         let router_uri = request.router_request.uri();
         if let Some(true) = &self.url_path {
-            attrs.push(KeyValue::new(URL_PATH, router_uri.path().to_string()));
+            attrs.push_back(KeyValue::new(URL_PATH, router_uri.path().to_string()));
         }
         if let Some(true) = &self.url_query {
             if let Some(query) = router_uri.query() {
-                attrs.push(KeyValue::new(URL_QUERY, query.to_string()));
+                attrs.push_back(KeyValue::new(URL_QUERY, query.to_string()));
             }
         }
         if let Some(true) = &self.url_scheme {
             if let Some(scheme) = router_uri.scheme_str() {
-                attrs.push(KeyValue::new(URL_SCHEME, scheme.to_string()));
+                attrs.push_back(KeyValue::new(URL_SCHEME, scheme.to_string()));
             }
         }
         if let Some(true) = &self.user_agent_original {
@@ -799,19 +800,19 @@ impl Selectors for HttpServerAttributes {
                 .get(&USER_AGENT)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.push(KeyValue::new(USER_AGENT_ORIGINAL, user_agent.to_string()));
+                attrs.push_back(KeyValue::new(USER_AGENT_ORIGINAL, user_agent.to_string()));
             }
         }
 
         attrs
     }
 
-    fn on_response(&self, _response: &router::Response) -> Vec<KeyValue> {
-        Vec::with_capacity(0)
+    fn on_response(&self, _response: &router::Response) -> LinkedList<KeyValue> {
+        LinkedList::default()
     }
 
-    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
-        Vec::with_capacity(0)
+    fn on_error(&self, _error: &BoxError) -> LinkedList<KeyValue> {
+        LinkedList::default()
     }
 }
 
@@ -857,11 +858,11 @@ impl Selectors for SupergraphAttributes {
     type Request = supergraph::Request;
     type Response = supergraph::Response;
 
-    fn on_request(&self, request: &supergraph::Request) -> Vec<KeyValue> {
-        let mut attrs = Vec::new();
+    fn on_request(&self, request: &supergraph::Request) -> LinkedList<KeyValue> {
+        let mut attrs = LinkedList::new();
         if let Some(true) = &self.graphql_document {
             if let Some(query) = &request.supergraph_request.body().query {
-                attrs.push(KeyValue::new(GRAPHQL_DOCUMENT, query.clone()));
+                attrs.push_back(KeyValue::new(GRAPHQL_DOCUMENT, query.clone()));
             }
         }
         if let Some(true) = &self.graphql_operation_name {
@@ -870,7 +871,7 @@ impl Selectors for SupergraphAttributes {
                 .get::<_, String>(OPERATION_NAME)
                 .unwrap_or_default()
             {
-                attrs.push(KeyValue::new(
+                attrs.push_back(KeyValue::new(
                     GRAPHQL_OPERATION_NAME,
                     operation_name.clone(),
                 ));
@@ -882,7 +883,7 @@ impl Selectors for SupergraphAttributes {
                 .get::<_, String>(OPERATION_KIND)
                 .unwrap_or_default()
             {
-                attrs.push(KeyValue::new(
+                attrs.push_back(KeyValue::new(
                     GRAPHQL_OPERATION_TYPE,
                     operation_type.clone(),
                 ));
@@ -892,12 +893,12 @@ impl Selectors for SupergraphAttributes {
         attrs
     }
 
-    fn on_response(&self, _response: &supergraph::Response) -> Vec<KeyValue> {
-        Vec::with_capacity(0)
+    fn on_response(&self, _response: &supergraph::Response) -> LinkedList<KeyValue> {
+        LinkedList::default()
     }
 
-    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
-        Vec::with_capacity(0)
+    fn on_error(&self, _error: &BoxError) -> LinkedList<KeyValue> {
+        LinkedList::default()
     }
 }
 
@@ -905,16 +906,16 @@ impl Selectors for SubgraphAttributes {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
 
-    fn on_request(&self, request: &subgraph::Request) -> Vec<KeyValue> {
-        let mut attrs = Vec::new();
+    fn on_request(&self, request: &subgraph::Request) -> LinkedList<KeyValue> {
+        let mut attrs = LinkedList::new();
         if let Some(true) = &self.graphql_document {
             if let Some(query) = &request.subgraph_request.body().query {
-                attrs.push(KeyValue::new(SUBGRAPH_GRAPHQL_DOCUMENT, query.clone()));
+                attrs.push_back(KeyValue::new(SUBGRAPH_GRAPHQL_DOCUMENT, query.clone()));
             }
         }
         if let Some(true) = &self.graphql_operation_name {
             if let Some(op_name) = &request.subgraph_request.body().operation_name {
-                attrs.push(KeyValue::new(
+                attrs.push_back(KeyValue::new(
                     SUBGRAPH_GRAPHQL_OPERATION_NAME,
                     op_name.clone(),
                 ));
@@ -927,7 +928,7 @@ impl Selectors for SubgraphAttributes {
                 .get::<_, String>(OPERATION_KIND)
                 .unwrap_or_default()
             {
-                attrs.push(KeyValue::new(
+                attrs.push_back(KeyValue::new(
                     SUBGRAPH_GRAPHQL_OPERATION_TYPE,
                     operation_type.clone(),
                 ));
@@ -935,19 +936,19 @@ impl Selectors for SubgraphAttributes {
         }
         if let Some(true) = &self.subgraph_name {
             if let Some(subgraph_name) = &request.subgraph_name {
-                attrs.push(KeyValue::new(SUBGRAPH_NAME, subgraph_name.clone()));
+                attrs.push_back(KeyValue::new(SUBGRAPH_NAME, subgraph_name.clone()));
             }
         }
 
         attrs
     }
 
-    fn on_response(&self, _response: &subgraph::Response) -> Vec<KeyValue> {
-        Vec::with_capacity(0)
+    fn on_response(&self, _response: &subgraph::Response) -> LinkedList<KeyValue> {
+        LinkedList::default()
     }
 
-    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
-        Vec::with_capacity(0)
+    fn on_error(&self, _error: &BoxError) -> LinkedList<KeyValue> {
+        LinkedList::default()
     }
 }
 
