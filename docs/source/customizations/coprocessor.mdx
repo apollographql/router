@@ -989,7 +989,7 @@ The first response chunk includes `headers` and `statusCode` fields:
   "body": "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":{\"id\":\"1\"}},\"hasNext\":true}\r\n--graphql\r\n",
   "context": {
     "entries": {
-      "apollo_telemetry::operation_kind": "query",
+      "operation_kind": "query",
       "apollo_telemetry::client_version": "",
       "apollo_telemetry::client_name": "manual"
     }
@@ -1011,7 +1011,7 @@ Subsequent response chunks omit the `headers` and `statusCode` fields:
   "body": "content-type: application/json\r\n\r\n{\"hasNext\":false,\"incremental\":[{\"data\":{\"name\":\"Ada Lovelace\"},\"path\":[\"me\"]}]}\r\n--graphql--\r\n",
   "context": {
     "entries": {
-      "apollo_telemetry::operation_kind": "query",
+      "operation_kind": "query",
       "apollo_telemetry::client_version": "",
       "apollo_telemetry::client_name": "manual"
     }

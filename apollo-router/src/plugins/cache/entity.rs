@@ -35,6 +35,7 @@ use crate::Context;
 
 const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
+pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
 
 register_plugin!("apollo", "experimental_entity_cache", EntityCache);
 
@@ -432,6 +433,19 @@ pub(crate) fn hash_additional_data(body: &mut graphql::Request, context: &Contex
         .cloned()
         .unwrap_or_default();
     digest.update(&serde_json::to_vec(&cache_key).unwrap());
+
+    if let Ok(Some(cache_data)) = context.get::<&str, Object>(CONTEXT_CACHE_KEY) {
+        if let Some(v) = cache_data.get("all") {
+            digest.update(&serde_json::to_vec(v).unwrap())
+        }
+        if let Some(v) = body
+            .operation_name
+            .as_ref()
+            .and_then(|op| cache_data.get(op.as_str()))
+        {
+            digest.update(&serde_json::to_vec(v).unwrap())
+        }
+    }
 
     hex::encode(digest.finalize().as_slice())
 }

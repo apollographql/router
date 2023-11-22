@@ -1,5 +1,5 @@
 ---
-source: apollo-router/src/plugins/telemetry/config_new/attributes.rs
+source: apollo-router/src/plugins/telemetry/config_new/extendable.rs
 expression: o
 ---
 attributes:
@@ -9,10 +9,8 @@ attributes:
 custom:
   custom_1:
     operation_name: string
-    redact: ~
     default: ~
   custom_2:
     operation_name: string
-    redact: ~
     default: ~
 

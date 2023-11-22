@@ -131,6 +131,13 @@ struct JWTConf {
 struct JwksConf {
     /// Retrieve the JWK Set
     url: String,
+    /// Polling interval for each JWKS endpoint in human-readable format; defaults to 60s
+    #[serde(
+        deserialize_with = "humantime_serde::deserialize",
+        default = "default_poll_interval"
+    )]
+    #[schemars(with = "String", default = "default_poll_interval")]
+    poll_interval: Duration,
     /// Expected issuer for tokens verified by that JWKS
     issuer: Option<String>,
     /// List of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
@@ -164,6 +171,10 @@ fn default_header_name() -> String {
 
 fn default_header_value_prefix() -> String {
     "Bearer".to_string()
+}
+
+fn default_poll_interval() -> Duration {
+    DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL
 }
 
 #[derive(Debug, Default)]
@@ -384,6 +395,7 @@ impl Plugin for AuthenticationPlugin {
                         .algorithms
                         .as_ref()
                         .map(|algs| algs.iter().cloned().collect()),
+                    poll_interval: jwks_conf.poll_interval,
                 });
             }
 

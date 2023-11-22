@@ -1,15 +1,19 @@
 experimental_batching:
   enabled: true
   mode: batch_http_link
+rhai:
+  scripts: tests/fixtures
+  main: test_callbacks.rhai
 include_subgraph_errors:
   all: true
 telemetry:
-  tracing:
-    experimental_response_trace_id:
-      enabled: true
-      header_name: "my_trace_id"
-    common:
-      sampler: always_on
+  exporters:
+    tracing:
+      experimental_response_trace_id:
+        enabled: true
+        header_name: "my_trace_id"
+      common:
+        sampler: always_on
 
   apollo:
     client_name_header: apollographql-client-name

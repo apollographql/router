@@ -2,12 +2,16 @@
 pub(crate) mod json;
 pub(crate) mod text;
 
+use std::collections::HashMap;
 use std::fmt;
 
+use opentelemetry_sdk::Resource;
+use serde_json::Number;
 use tracing::Subscriber;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::FormatEvent;
 use tracing_subscriber::fmt::FormatFields;
+use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 
 use crate::metrics::layer::METRIC_PREFIX_COUNTER;
@@ -15,7 +19,15 @@ use crate::metrics::layer::METRIC_PREFIX_HISTOGRAM;
 use crate::metrics::layer::METRIC_PREFIX_MONOTONIC_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_VALUE;
 
-pub(crate) const TRACE_ID_FIELD_NAME: &str = "trace_id";
+pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
+// This list comes from Otel https://opentelemetry.io/docs/specs/semconv/attributes-registry/code/ and
+pub(crate) const EXCLUDED_ATTRIBUTES: [&str; 5] = [
+    "code.filepath",
+    "code.namespace",
+    "code.lineno",
+    "thread.id",
+    "thread.name",
+];
 
 /// `FilteringFormatter` is useful if you want to not filter the entire event but only want to not display it
 /// ```ignore
@@ -64,6 +76,29 @@ where
     }
 }
 
+impl<T, F, S> EventFormatter<S> for FilteringFormatter<T, F>
+where
+    T: EventFormatter<S>,
+    F: Fn(&tracing::Event<'_>) -> bool,
+    S: Subscriber + for<'a> LookupSpan<'a>,
+{
+    fn format_event<W>(
+        &self,
+        ctx: &Context<'_, S>,
+        writer: &mut W,
+        event: &tracing::Event<'_>,
+    ) -> fmt::Result
+    where
+        W: std::fmt::Write,
+    {
+        if (self.filter_fn)(event) {
+            self.inner.format_event(ctx, writer, event)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 // Function to filter metric event for the filter formatter
 pub(crate) fn filter_metric_events(event: &tracing::Event<'_>) -> bool {
     !event.metadata().fields().iter().any(|f| {
@@ -72,4 +107,63 @@ pub(crate) fn filter_metric_events(event: &tracing::Event<'_>) -> bool {
             || f.name().starts_with(METRIC_PREFIX_MONOTONIC_COUNTER)
             || f.name().starts_with(METRIC_PREFIX_VALUE)
     })
+}
+
+pub(crate) fn to_map(resource: Resource) -> HashMap<String, serde_json::Value> {
+    resource
+        .into_iter()
+        .map(|(k, v)| {
+            (
+                k.into(),
+                match v {
+                    opentelemetry::Value::Bool(value) => serde_json::Value::Bool(value),
+                    opentelemetry::Value::I64(value) => {
+                        serde_json::Value::Number(Number::from(value))
+                    }
+                    opentelemetry::Value::F64(value) => serde_json::Value::Number(
+                        Number::from_f64(value).unwrap_or(Number::from(0)),
+                    ),
+                    opentelemetry::Value::String(value) => serde_json::Value::String(value.into()),
+                    opentelemetry::Value::Array(value) => match value {
+                        opentelemetry::Array::Bool(array) => serde_json::Value::Array(
+                            array.into_iter().map(serde_json::Value::Bool).collect(),
+                        ),
+                        opentelemetry::Array::I64(array) => serde_json::Value::Array(
+                            array
+                                .into_iter()
+                                .map(|value| serde_json::Value::Number(Number::from(value)))
+                                .collect(),
+                        ),
+                        opentelemetry::Array::F64(array) => serde_json::Value::Array(
+                            array
+                                .into_iter()
+                                .map(|value| {
+                                    serde_json::Value::Number(
+                                        Number::from_f64(value).unwrap_or(Number::from(0)),
+                                    )
+                                })
+                                .collect(),
+                        ),
+                        opentelemetry::Array::String(array) => serde_json::Value::Array(
+                            array
+                                .into_iter()
+                                .map(|s| serde_json::Value::String(s.to_string()))
+                                .collect(),
+                        ),
+                    },
+                },
+            )
+        })
+        .collect()
+}
+
+pub(crate) trait EventFormatter<S> {
+    fn format_event<W>(
+        &self,
+        ctx: &Context<'_, S>,
+        writer: &mut W,
+        event: &tracing::Event<'_>,
+    ) -> fmt::Result
+    where
+        W: std::fmt::Write;
 }

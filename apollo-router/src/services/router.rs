@@ -92,6 +92,29 @@ impl Request {
             context,
         })
     }
+
+    /// This is the constructor (or builder) to use when constructing a fake Request.
+    ///
+    /// Required parameters are required in non-testing code to create a Request.
+    #[allow(clippy::too_many_arguments)]
+    #[builder(visibility = "pub")]
+    fn fake_new(
+        context: Option<Context>,
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
+        uri: Option<http::Uri>,
+        method: Option<Method>,
+        body: Option<Body>,
+    ) -> Result<Request, BoxError> {
+        let mut router_request = http::Request::builder()
+            .uri(uri.unwrap_or_else(|| http::Uri::from_static("http://example.com/")))
+            .method(method.unwrap_or(Method::GET))
+            .body(body.unwrap_or_else(Body::empty))?;
+        *router_request.headers_mut() = header_map(headers)?;
+        Ok(Self {
+            router_request,
+            context: context.unwrap_or_default(),
+        })
+    }
 }
 
 use displaydoc::Display;
@@ -286,6 +309,35 @@ impl Response {
                         .map(|bytes| serde_json::from_slice::<crate::graphql::Response>(&bytes)),
                 )
             },
+        )
+    }
+
+    /// This is the constructor (or builder) to use when constructing a fake Response..
+    ///
+    /// Required parameters are required in non-testing code to create a Response..
+    #[allow(clippy::too_many_arguments)]
+    #[builder(visibility = "pub")]
+    fn fake_new(
+        label: Option<String>,
+        data: Option<Value>,
+        path: Option<Path>,
+        errors: Vec<graphql::Error>,
+        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+        extensions: JsonMap<ByteString, Value>,
+        status_code: Option<StatusCode>,
+        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
+        context: Option<Context>,
+    ) -> Result<Self, BoxError> {
+        // Build a response
+        Self::new(
+            label,
+            data,
+            path,
+            errors,
+            extensions,
+            status_code,
+            headers,
+            context.unwrap_or_default(),
         )
     }
 }
