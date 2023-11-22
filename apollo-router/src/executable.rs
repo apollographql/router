@@ -268,7 +268,17 @@ fn add_log_filter(raw: &str) -> Result<String, String> {
 }
 
 impl Opt {
-    pub(crate) fn uplink_config(&self) -> Result<UplinkConfig, anyhow::Error> {
+    pub(crate) fn uplink_config(&self, log_warnings: bool) -> Result<UplinkConfig, anyhow::Error> {
+        let endpoints = self
+            .apollo_uplink_endpoints
+            .as_ref()
+            .map(|endpoints| Self::parse_endpoints(endpoints))
+            .transpose()?;
+
+        if log_warnings && endpoints.unwrap_or_default().url_count() == 1 {
+            tracing::warn!("Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists.");
+        }
+
         Ok(UplinkConfig {
             apollo_key: self
                 .apollo_key
@@ -550,7 +560,7 @@ impl Executable {
             (_, None, Some(_apollo_key)) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
-                SchemaSource::Registry(opt.uplink_config()?)
+                SchemaSource::Registry(opt.uplink_config(false)?)
             }
             _ => {
                 return Err(anyhow!(
@@ -614,7 +624,7 @@ impl Executable {
                 }
                 (Some(_license), _, _, _) => LicenseSource::Env,
                 (_, _, Some(_apollo_key), Some(_apollo_graph_ref)) => {
-                    LicenseSource::Registry(opt.uplink_config()?)
+                    LicenseSource::Registry(opt.uplink_config(false)?)
                 }
 
                 _ => LicenseSource::default(),
@@ -634,7 +644,7 @@ impl Executable {
 
         let router = RouterHttpServer::builder()
             .configuration(configuration)
-            .and_uplink(opt.uplink_config().ok())
+            .and_uplink(opt.uplink_config(true).ok())
             .schema(schema_source)
             .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
