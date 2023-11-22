@@ -1,11 +1,10 @@
 //! This file is to load test subscriptions and should be launched manually, not in our CI
+use common::IntegrationTest;
+use common::Telemetry;
 use futures::StreamExt;
 use http::HeaderValue;
 use serde_json::json;
 use tower::BoxError;
-
-use common::IntegrationTest;
-use common::Telemetry;
 
 #[path = "../common.rs"]
 mod common;
