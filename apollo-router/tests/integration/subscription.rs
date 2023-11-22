@@ -4,12 +4,13 @@ use http::HeaderValue;
 use serde_json::json;
 use tower::BoxError;
 
-use crate::common::IntegrationTest;
-use crate::common::Telemetry;
+use common::IntegrationTest;
+use common::Telemetry;
 
+#[path = "../common.rs"]
 mod common;
 
-const SUBSCRIPTION_CONFIG: &str = include_str!("fixtures/subscription.router.yaml");
+const SUBSCRIPTION_CONFIG: &str = include_str!("../fixtures/subscription.router.yaml");
 const SUB_QUERY: &str =
     r#"subscription {  userWasCreated(intervalMs: 5, nbEvents: 10) {    name reviews { body } }}"#;
 const UNFEDERATED_SUB_QUERY: &str = r#"subscription {  userWasCreated { name username }}"#;

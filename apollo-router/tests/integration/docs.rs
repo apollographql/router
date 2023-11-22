@@ -7,7 +7,7 @@ fn check_config_json() {
     use serde_json::Value;
 
     // Sanity check consistency and that files exist
-    let config = serde_json::from_str(include_str!("../../docs/source/config.json"))
+    let config = serde_json::from_str(include_str!("../../../docs/source/config.json"))
         .expect("docs json must be valid");
     let result = jsonpath_lib::select(&config, "$.sidebar.*.*").expect("values must be selectable");
     let re = Regex::new(r"^[a-z/-]+$").expect("regex must be valid");
