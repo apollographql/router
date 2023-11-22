@@ -23,7 +23,7 @@ executors:
       - image: cimg/base:stable
       - image: cimg/redis:7.2.3
       - image: jaegertracing/all-in-one:1.49.0
-    resource_class: xlarge
+    resource_class: medium
     environment:
       CARGO_BUILD_JOBS: 4
       RUST_TEST_THREADS: 6
@@ -37,7 +37,7 @@ executors:
   arm_linux_test: &arm_linux_test_executor
     machine:
       image: ubuntu-2004:2022.04.1
-    resource_class: arm.xlarge
+    resource_class: arm.large
     environment:
       CARGO_BUILD_JOBS: 8
       RUST_TEST_THREADS: 8
@@ -47,13 +47,13 @@ executors:
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
       xcode: 13.4
+      resource_class: macos.x86.medium.gen2
   macos_test: &macos_test_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
       xcode: 13.4
-    resource_class: macos.x86.medium.gen2
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:stable"
