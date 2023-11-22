@@ -1813,6 +1813,7 @@ mod tests {
                     subscription_extension.subscription_id
                 )
             );
+            assert_eq!(subscription_extension.heartbeat_interval_ms, 0);
 
             Ok(http::Response::builder()
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
