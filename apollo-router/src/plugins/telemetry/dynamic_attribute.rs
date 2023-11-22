@@ -85,7 +85,7 @@ impl DynAttribute for ::tracing::Span {
                                         otel_data
                                             .builder
                                             .attributes
-                                            .as_mut() 
+                                            .as_mut()
                                             .expect("we checked the attributes value in the condition above")
                                             .push(KeyValue::new(key, value));
                                     }
