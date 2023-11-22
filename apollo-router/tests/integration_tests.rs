@@ -34,6 +34,8 @@ use tower::ServiceExt;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
+mod integration;
+
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
         let request = supergraph::Request::fake_builder()
