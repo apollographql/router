@@ -11,17 +11,9 @@ use tracing_subscriber::Registry;
 use super::reload::IsSampled;
 use super::tracing::APOLLO_PRIVATE_PREFIX;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct LogAttributes {
     attributes: LinkedList<KeyValue>,
-}
-
-impl Default for LogAttributes {
-    fn default() -> Self {
-        Self {
-            attributes: LinkedList::new(),
-        }
-    }
 }
 
 impl LogAttributes {
