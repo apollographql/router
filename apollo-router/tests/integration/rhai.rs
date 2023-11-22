@@ -23,7 +23,7 @@ async fn all_rhai_callbacks_are_invoked() {
     let router = TestHarness::builder()
         .configuration_json(config)
         .unwrap()
-        .schema(include_str!("./fixtures/supergraph.graphql"))
+        .schema(include_str!("../fixtures/supergraph.graphql"))
         .build_router()
         .await
         .unwrap();
