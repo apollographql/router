@@ -4,12 +4,12 @@ use std::sync::atomic::Ordering;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use opentelemetry::runtime;
-use opentelemetry::sdk::metrics::PeriodicReader;
-use opentelemetry::sdk::Resource;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::metrics::PeriodicReader;
+use opentelemetry_sdk::runtime;
+use opentelemetry_sdk::Resource;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tower::BoxError;
@@ -118,7 +118,7 @@ impl Config {
         )
         .build_metrics_exporter(
             Box::new(CustomTemporalitySelector(
-                opentelemetry::sdk::metrics::data::Temporality::Delta,
+                opentelemetry_sdk::metrics::data::Temporality::Delta,
             )),
             Box::new(
                 CustomAggregationSelector::builder()
@@ -186,6 +186,7 @@ mod test {
     use super::super::super::config;
     use super::studio::SingleStatsReport;
     use super::*;
+    use crate::context::OPERATION_KIND;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::plugins::subscription;
@@ -194,7 +195,6 @@ mod test {
     use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::plugins::telemetry::Telemetry;
-    use crate::plugins::telemetry::OPERATION_KIND;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
     use crate::query_planner::OperationKind;
     use crate::services::SupergraphRequest;

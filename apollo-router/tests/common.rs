@@ -22,6 +22,7 @@ use opentelemetry::trace::Span;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry_otlp::WithExportConfig;
 use serde_json::json;
 use serde_json::Value;
 use tokio::io::AsyncBufReadExt;
@@ -265,6 +266,11 @@ impl IntegrationTest {
             Some(Telemetry::Otlp) => {
                 let tracer = opentelemetry_otlp::new_pipeline()
                     .tracing()
+                    .with_exporter(
+                        opentelemetry_otlp::new_exporter()
+                            .tonic()
+                            .with_endpoint("http://localhost:4317"),
+                    )
                     .install_simple()
                     .expect("otlp pipeline failed");
                 let telemetry = tracing_opentelemetry::layer()
@@ -277,7 +283,7 @@ impl IntegrationTest {
                 );
 
                 global::set_text_map_propagator(
-                    opentelemetry::sdk::propagation::TraceContextPropagator::new(),
+                    opentelemetry_sdk::propagation::TraceContextPropagator::new(),
                 );
                 Some(Dispatch::new(subscriber))
             }
@@ -394,6 +400,7 @@ impl IntegrationTest {
                     .header(CONTENT_ENCODING, content_encoding.unwrap_or("identity"))
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
+                    .header("x-my-header", "test")
                     .json(&query)
                     .build()
                     .unwrap();

@@ -1,497 +1,92 @@
-use std::any::type_name;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::net::SocketAddr;
 
-use schemars::gen::SchemaGenerator;
-use schemars::schema::Schema;
+use http::header::CONTENT_LENGTH;
+use http::header::FORWARDED;
+use http::header::USER_AGENT;
+use http::StatusCode;
+use http::Uri;
+use opentelemetry::Key;
+use opentelemetry::Value;
+use opentelemetry_semantic_conventions::trace::CLIENT_ADDRESS;
+use opentelemetry_semantic_conventions::trace::CLIENT_PORT;
+use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
+use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_NAME;
+use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_TYPE;
+use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE;
+use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
+use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_BODY_SIZE;
+use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE;
+use opentelemetry_semantic_conventions::trace::HTTP_ROUTE;
+use opentelemetry_semantic_conventions::trace::NETWORK_PROTOCOL_NAME;
+use opentelemetry_semantic_conventions::trace::NETWORK_PROTOCOL_VERSION;
+use opentelemetry_semantic_conventions::trace::NETWORK_TRANSPORT;
+use opentelemetry_semantic_conventions::trace::NETWORK_TYPE;
+use opentelemetry_semantic_conventions::trace::SERVER_ADDRESS;
+use opentelemetry_semantic_conventions::trace::SERVER_PORT;
+use opentelemetry_semantic_conventions::trace::URL_PATH;
+use opentelemetry_semantic_conventions::trace::URL_QUERY;
+use opentelemetry_semantic_conventions::trace::URL_SCHEME;
+use opentelemetry_semantic_conventions::trace::USER_AGENT_ORIGINAL;
 use schemars::JsonSchema;
-use serde::de::Error;
-use serde::de::MapAccess;
-use serde::de::Visitor;
 use serde::Deserialize;
-use serde::Deserializer;
 #[cfg(test)]
 use serde::Serialize;
-use serde_json::Map;
-use serde_json::Value;
+use tower::BoxError;
 
-use crate::plugins::telemetry::config::AttributeValue;
+use crate::axum_factory::utils::ConnectionInfo;
+use crate::context::OPERATION_KIND;
+use crate::context::OPERATION_NAME;
+use crate::plugins::telemetry::config_new::trace_id;
+use crate::plugins::telemetry::config_new::DatadogId;
+use crate::plugins::telemetry::config_new::DefaultForLevel;
+use crate::plugins::telemetry::config_new::Selectors;
+use crate::services::router;
+use crate::services::router::Request;
+use crate::services::subgraph;
+use crate::services::supergraph;
 
-/// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
-pub(crate) struct Extendable<Att, Ext>
-where
-    Att: Default,
-{
-    attributes: Att,
-    custom: HashMap<String, Ext>,
-}
+pub(crate) const SUBGRAPH_NAME: Key = Key::from_static_str("subgraph.name");
+pub(crate) const SUBGRAPH_GRAPHQL_DOCUMENT: Key = Key::from_static_str("subgraph.graphql.document");
+pub(crate) const SUBGRAPH_GRAPHQL_OPERATION_NAME: Key =
+    Key::from_static_str("subgraph.graphql.operation.name");
+pub(crate) const SUBGRAPH_GRAPHQL_OPERATION_TYPE: Key =
+    Key::from_static_str("subgraph.graphql.operation.type");
 
-impl Extendable<(), ()> {
-    pub(crate) fn empty<A, E>() -> Extendable<A, E>
-    where
-        A: Default,
-    {
-        Default::default()
-    }
-}
+const ERROR_TYPE: Key = Key::from_static_str("error.type");
 
-/// Custom Deserializer for attributes that will deserializse into a custom field if possible, but otherwise into one of the pre-defined attributes.
-impl<'de, Att, Ext> Deserialize<'de> for Extendable<Att, Ext>
-where
-    Att: Default + Deserialize<'de> + Debug + Sized,
-    Ext: Deserialize<'de> + Debug + Sized,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct ExtendableVisitor<Att, Ext> {
-            _phantom: std::marker::PhantomData<(Att, Ext)>,
-        }
-        impl<'de, Att, Ext> Visitor<'de> for ExtendableVisitor<Att, Ext>
-        where
-            Att: Default + Deserialize<'de> + Debug,
-            Ext: Deserialize<'de> + Debug,
-        {
-            type Value = Extendable<Att, Ext>;
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(formatter, "a map structure")
-            }
+const NETWORK_LOCAL_ADDRESS: Key = Key::from_static_str("network.local.address");
+const NETWORK_LOCAL_PORT: Key = Key::from_static_str("network.local.port");
 
-            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut attributes: Map<String, Value> = Map::new();
-                let mut custom: HashMap<String, Ext> = HashMap::new();
-                while let Some(key) = map.next_key()? {
-                    let value: Value = map.next_value()?;
-                    match Ext::deserialize(value.clone()) {
-                        Ok(value) => {
-                            custom.insert(key, value);
-                        }
-                        Err(_err) => {
-                            // We didn't manage to deserialize as a custom attribute, so stash the value and we'll try again later
-                            attributes.insert(key, value);
-                        }
-                    }
-                }
+const NETWORK_PEER_ADDRESS: Key = Key::from_static_str("network.peer.address");
+const NETWORK_PEER_PORT: Key = Key::from_static_str("network.peer.port");
 
-                let attributes =
-                    Att::deserialize(Value::Object(attributes)).map_err(A::Error::custom)?;
-
-                Ok(Extendable { attributes, custom })
-            }
-        }
-
-        deserializer.deserialize_map(ExtendableVisitor::<Att, Ext> {
-            _phantom: Default::default(),
-        })
-    }
-}
-
-impl<A, E> JsonSchema for Extendable<A, E>
-where
-    A: Default + JsonSchema,
-    E: JsonSchema,
-{
-    fn schema_name() -> String {
-        format!(
-            "extendable_attribute_{}_{}",
-            type_name::<A>(),
-            type_name::<E>()
-        )
-    }
-
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        let mut attributes = gen.subschema_for::<A>();
-        let custom = gen.subschema_for::<HashMap<String, E>>();
-        if let Schema::Object(schema) = &mut attributes {
-            if let Some(object) = &mut schema.object {
-                object.additional_properties =
-                    custom.into_object().object().additional_properties.clone();
-            }
-        }
-
-        attributes
-    }
-}
-
-impl<A, E> Default for Extendable<A, E>
-where
-    A: Default,
-{
-    fn default() -> Self {
-        Self {
-            attributes: Default::default(),
-            custom: HashMap::new(),
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum RouterEvent {
-    /// When a service request occurs.
-    Request,
-    /// When a service response occurs.
-    Response,
-    /// When a service error occurs.
-    Error,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug, Default)]
+#[derive(Deserialize, JsonSchema, Clone, Debug, Default, Copy)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum DefaultAttributeRequirementLevel {
-    /// Attributes that are marked as required or recommended in otel semantic conventions and apollo documentation will be included
-    Recommended,
-
+    /// No default attributes set on spans, you have to set it one by one in the configuration to enable some attributes
+    None,
     /// Attributes that are marked as required in otel semantic conventions and apollo documentation will be included (default)
     #[default]
     Required,
+    /// Attributes that are marked as required or recommended in otel semantic conventions and apollo documentation will be included
+    Recommended,
 }
 
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum TraceIdFormat {
-    /// Open Telemetry trace ID, a hex string.
-    OpenTelemetry,
-    /// Datadog trace ID, a u64.
-    Datadog,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, untagged)]
-pub(crate) enum RouterCustomAttribute {
-    /// A header from the request
-    RequestHeader {
-        /// The name of the request header.
-        request_header: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    /// A header from the response
-    ResponseHeader {
-        /// The name of the request header.
-        response_header: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    /// The trace ID of the request.
-    TraceId {
-        /// The format of the trace ID.
-        trace_id: TraceIdFormat,
-    },
-    /// A value from context.
-    ResponseContext {
-        /// The response context key.
-        response_context: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<AttributeValue>,
-    },
-    /// A value from baggage.
-    Baggage {
-        /// The name of the baggage item.
-        baggage: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    /// A value from an environment variable.
-    Env {
-        /// The name of the environment variable
-        env: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-}
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum OperationName {
-    /// The raw operation name.
-    String,
-    /// A hash of the operation name.
-    Hash,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum Query {
-    /// The raw query kind.
-    String,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum OperationKind {
-    /// The raw operation kind.
-    String,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(Serialize))]
-#[serde(deny_unknown_fields, untagged)]
-pub(crate) enum SupergraphCustomAttribute {
-    OperationName {
-        /// The operation name from the query.
-        operation_name: OperationName,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    OperationKind {
-        /// The operation kind from the query (query|mutation|subscription).
-        operation_kind: OperationKind,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    Query {
-        /// The graphql query.
-        query: Query,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    QueryVariable {
-        /// The name of a graphql query variable.
-        query_variable: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    ResponseBody {
-        /// Json Path into the response body
-        response_body: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    RequestHeader {
-        /// The name of the request header.
-        request_header: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    ResponseHeader {
-        /// The name of the response header.
-        response_header: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    RequestContext {
-        /// The request context key.
-        request_context: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<AttributeValue>,
-    },
-    ResponseContext {
-        /// The response context key.
-        response_context: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<AttributeValue>,
-    },
-    Baggage {
-        /// The name of the baggage item.
-        baggage: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    Env {
-        /// The name of the environment variable
-        env: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-pub(crate) enum SubgraphCustomAttribute {
-    SubgraphOperationName {
-        /// The operation name from the subgraph query.
-        subgraph_operation_name: OperationName,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    SubgraphOperationKind {
-        /// The kind of the subgraph operation (query|mutation|subscription).
-        subgraph_operation_kind: OperationKind,
-    },
-    SubgraphQuery {
-        /// The graphql query to the subgraph.
-        subgraph_query: Query,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    SubgraphQueryVariable {
-        /// The name of a subgraph query variable.
-        subgraph_query_variable: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    SubgraphResponseBody {
-        /// The subgraph response body json path.
-        subgraph_response_body: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    SubgraphRequestHeader {
-        /// The name of the subgraph request header.
-        subgraph_request_header: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    SubgraphResponseHeader {
-        /// The name of the subgraph response header.
-        subgraph_response_header: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-
-    SupergraphOperationName {
-        /// The supergraph query operation name.
-        supergraph_operation_name: OperationName,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    SupergraphOperationKind {
-        /// The supergraph query operation kind (query|mutation|subscription).
-        supergraph_operation_kind: OperationKind,
-    },
-    SupergraphQuery {
-        /// The supergraph query to the subgraph.
-        supergraph_query: Query,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    SupergraphQueryVariable {
-        /// The supergraph query variable name.
-        supergraph_query_variable: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    SupergraphResponseBody {
-        /// The supergraph response body json path.
-        supergraph_response_body: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    SupergraphRequestHeader {
-        /// The supergraph request header name.
-        supergraph_request_header: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    SupergraphResponseHeader {
-        /// The supergraph response header name.
-        supergraph_response_header: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    RequestContext {
-        /// The request context key.
-        request_context: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<AttributeValue>,
-    },
-    ResponseContext {
-        /// The response context key.
-        response_context: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<AttributeValue>,
-    },
-    Baggage {
-        /// The name of the baggage item.
-        baggage: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-    Env {
-        /// The name of the environment variable
-        env: String,
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<String>,
-    },
-}
-
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct RouterAttributes {
+    /// The datadog trace ID.
+    /// This can be output in logs and used to correlate traces in Datadog.
+    #[serde(rename = "dd.trace_id")]
+    datadog_trace_id: Option<bool>,
+
+    /// The OpenTelemetry trace ID.
+    /// This can be output in logs.
+    #[serde(rename = "trace_id")]
+    trace_id: Option<bool>,
+
     /// Http attributes from Open Telemetry semantic conventions.
     #[serde(flatten)]
     common: HttpCommonAttributes,
@@ -500,7 +95,13 @@ pub(crate) struct RouterAttributes {
     server: HttpServerAttributes,
 }
 
-#[allow(dead_code)]
+impl DefaultForLevel for RouterAttributes {
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+        self.common.defaults_for_level(requirement_level);
+        self.server.defaults_for_level(requirement_level);
+    }
+}
+
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[cfg_attr(test, derive(Serialize))]
 #[serde(deny_unknown_fields, default)]
@@ -527,7 +128,26 @@ pub(crate) struct SupergraphAttributes {
     graphql_operation_type: Option<bool>,
 }
 
-#[allow(dead_code)]
+impl DefaultForLevel for SupergraphAttributes {
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+        match requirement_level {
+            DefaultAttributeRequirementLevel::Required => {}
+            DefaultAttributeRequirementLevel::Recommended => {
+                if self.graphql_document.is_none() {
+                    self.graphql_document = Some(true);
+                }
+                if self.graphql_operation_name.is_none() {
+                    self.graphql_operation_name = Some(true);
+                }
+                if self.graphql_operation_type.is_none() {
+                    self.graphql_operation_type = Some(true);
+                }
+            }
+            DefaultAttributeRequirementLevel::None => {}
+        }
+    }
+}
+
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphAttributes {
@@ -542,13 +162,13 @@ pub(crate) struct SubgraphAttributes {
     /// * query findBookById { bookById(id: ?) { name } }
     /// Requirement level: Recommended
     #[serde(rename = "subgraph.graphql.document")]
-    subgraph_graphql_document: Option<bool>,
+    graphql_document: Option<bool>,
     /// The name of the operation being executed.
     /// Examples:
     /// * findBookById
     /// Requirement level: Recommended
     #[serde(rename = "subgraph.graphql.operation.name")]
-    subgraph_graphql_operation_name: Option<bool>,
+    graphql_operation_name: Option<bool>,
     /// The type of the operation being executed.
     /// Examples:
     /// * query
@@ -556,12 +176,38 @@ pub(crate) struct SubgraphAttributes {
     /// * mutation
     /// Requirement level: Recommended
     #[serde(rename = "subgraph.graphql.operation.type")]
-    subgraph_graphql_operation_type: Option<bool>,
+    graphql_operation_type: Option<bool>,
+}
+
+impl DefaultForLevel for SubgraphAttributes {
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+        match requirement_level {
+            DefaultAttributeRequirementLevel::Required => {
+                if self.subgraph_name.is_none() {
+                    self.subgraph_name = Some(true);
+                }
+            }
+            DefaultAttributeRequirementLevel::Recommended => {
+                if self.subgraph_name.is_none() {
+                    self.subgraph_name = Some(true);
+                }
+                if self.graphql_document.is_none() {
+                    self.graphql_document = Some(true);
+                }
+                if self.graphql_operation_name.is_none() {
+                    self.graphql_operation_name = Some(true);
+                }
+                if self.graphql_operation_type.is_none() {
+                    self.graphql_operation_type = Some(true);
+                }
+            }
+            DefaultAttributeRequirementLevel::None => {}
+        }
+    }
 }
 
 /// Common attributes for http server and client.
 /// See https://opentelemetry.io/docs/specs/semconv/http/http-spans/#common-attributes
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct HttpCommonAttributes {
@@ -595,8 +241,8 @@ pub(crate) struct HttpCommonAttributes {
     /// * GeT
     /// * ACL
     /// * foo
-    /// Requirement level: Conditionally Required
-    #[serde(rename = "http.request.method.original")]
+    /// Requirement level: Conditionally Required (If and only if it’s different than http.request.method)
+    #[serde(rename = "http.request.method.original", skip)]
     http_request_method_original: Option<bool>,
 
     /// The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the Content-Length header. For requests using transport encoding, this should be the compressed size.
@@ -646,19 +292,44 @@ pub(crate) struct HttpCommonAttributes {
     /// Requirement level: Recommended
     #[serde(rename = "network.type")]
     network_type: Option<bool>,
+}
 
-    /// Value of the HTTP User-Agent header sent by the client.
-    /// Examples:
-    /// * CERN-LineMode/2.15
-    /// * libwww/2.17b3
-    /// Requirement level: Recommended
-    #[serde(rename = "user_agent.original")]
-    user_agent_original: Option<bool>,
+impl DefaultForLevel for HttpCommonAttributes {
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+        match requirement_level {
+            DefaultAttributeRequirementLevel::Required => {
+                if self.error_type.is_none() {
+                    self.error_type = Some(true);
+                }
+                if self.http_request_method.is_none() {
+                    self.http_request_method = Some(true);
+                }
+                if self.http_response_status_code.is_none() {
+                    self.http_response_status_code = Some(true);
+                }
+            }
+            DefaultAttributeRequirementLevel::Recommended => {
+                // Recommended
+                if self.http_request_body_size.is_none() {
+                    self.http_request_body_size = Some(true);
+                }
+                if self.http_response_body_size.is_none() {
+                    self.http_response_body_size = Some(true);
+                }
+                if self.network_protocol_version.is_none() {
+                    self.network_protocol_version = Some(true);
+                }
+                if self.network_type.is_none() {
+                    self.network_type = Some(true);
+                }
+            }
+            DefaultAttributeRequirementLevel::None => {}
+        }
+    }
 }
 
 /// Attributes for Http servers
 /// See https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct HttpServerAttributes {
@@ -666,17 +337,17 @@ pub(crate) struct HttpServerAttributes {
     /// Examples:
     /// * 83.164.160.102
     /// Requirement level: Recommended
-    #[serde(rename = "client.address")]
+    #[serde(rename = "client.address", skip)]
     client_address: Option<bool>,
     /// The port of the original client behind all proxies, if known (e.g. from Forwarded or a similar header). Otherwise, the immediate client peer port.
     /// Examples:
-    /// * 83.164.160.102
+    /// * 65123
     /// Requirement level: Recommended
-    #[serde(rename = "client.port")]
+    #[serde(rename = "client.port", skip)]
     client_port: Option<bool>,
     /// The matched route (path template in the format used by the respective server framework).
     /// Examples:
-    /// * 65123
+    /// * /graphql
     /// Requirement level: Conditionally Required: If and only if it’s available
     #[serde(rename = "http.route")]
     http_route: Option<bool>,
@@ -742,11 +413,55 @@ pub(crate) struct HttpServerAttributes {
     /// Requirement level: Required
     #[serde(rename = "url.scheme")]
     url_scheme: Option<bool>,
+
+    /// Value of the HTTP User-Agent header sent by the client.
+    /// Examples:
+    /// * CERN-LineMode/2.15
+    /// * libwww/2.17b3
+    /// Requirement level: Recommended
+    #[serde(rename = "user_agent.original")]
+    user_agent_original: Option<bool>,
+}
+
+impl DefaultForLevel for HttpServerAttributes {
+    fn defaults_for_level(&mut self, requirement_level: DefaultAttributeRequirementLevel) {
+        match requirement_level {
+            DefaultAttributeRequirementLevel::Required => {
+                if self.url_scheme.is_none() {
+                    self.url_scheme = Some(true);
+                }
+                if self.url_path.is_none() {
+                    self.url_path = Some(true);
+                }
+                if self.url_query.is_none() {
+                    self.url_query = Some(true);
+                }
+
+                if self.http_route.is_none() {
+                    self.http_route = Some(true);
+                }
+            }
+            DefaultAttributeRequirementLevel::Recommended => {
+                if self.client_address.is_none() {
+                    self.client_address = Some(true);
+                }
+                if self.server_address.is_none() {
+                    self.server_address = Some(true);
+                }
+                if self.server_port.is_none() && self.server_address.is_some() {
+                    self.server_port = Some(true);
+                }
+                if self.user_agent_original.is_none() {
+                    self.user_agent_original = Some(true);
+                }
+            }
+            DefaultAttributeRequirementLevel::None => {}
+        }
+    }
 }
 
 /// Attributes for HTTP clients
 /// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client
-#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct HttpClientAttributes {
@@ -797,52 +512,1141 @@ pub(crate) struct HttpClientAttributes {
     /// Requirement level: Required
     #[serde(rename = "url.full")]
     url_full: Option<bool>,
+
+    /// Value of the HTTP User-Agent header sent by the client.
+    /// Examples:
+    /// * CERN-LineMode/2.15
+    /// * libwww/2.17b3
+    /// Requirement level: Opt-In
+    #[serde(rename = "user_agent.original")]
+    user_agent_original: Option<bool>,
+}
+
+impl Selectors for RouterAttributes {
+    type Request = router::Request;
+    type Response = router::Response;
+
+    fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
+        let mut attrs = self.common.on_request(request);
+        attrs.extend(self.server.on_request(request));
+        if let Some(true) = &self.trace_id {
+            if let Some(trace_id) = trace_id() {
+                attrs.insert(
+                    Key::from_static_str("trace_id"),
+                    trace_id.to_string().into(),
+                );
+            }
+        }
+        if let Some(true) = &self.datadog_trace_id {
+            if let Some(trace_id) = trace_id() {
+                attrs.insert(
+                    Key::from_static_str("dd.trace_id"),
+                    trace_id.to_datadog().into(),
+                );
+            }
+        }
+
+        attrs
+    }
+
+    fn on_response(&self, response: &router::Response) -> HashMap<Key, opentelemetry::Value> {
+        let mut attrs = self.common.on_response(response);
+        attrs.extend(self.server.on_response(response));
+        attrs
+    }
+
+    fn on_error(&self, error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
+        let mut attrs = self.common.on_error(error);
+        attrs.extend(self.server.on_error(error));
+        attrs
+    }
+}
+
+impl Selectors for HttpCommonAttributes {
+    type Request = router::Request;
+    type Response = router::Response;
+
+    fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
+        let mut attrs = HashMap::new();
+        if let Some(true) = &self.http_request_method {
+            attrs.insert(
+                HTTP_REQUEST_METHOD,
+                request.router_request.method().as_str().to_string().into(),
+            );
+        }
+
+        if let Some(true) = &self.http_request_body_size {
+            if let Some(content_length) = request
+                .router_request
+                .headers()
+                .get(&CONTENT_LENGTH)
+                .and_then(|h| h.to_str().ok())
+            {
+                attrs.insert(HTTP_REQUEST_BODY_SIZE, content_length.to_string().into());
+            }
+        }
+        if let Some(true) = &self.network_protocol_name {
+            if let Some(scheme) = request.router_request.uri().scheme() {
+                attrs.insert(NETWORK_PROTOCOL_NAME, scheme.to_string().into());
+            }
+        }
+        if let Some(true) = &self.network_protocol_version {
+            attrs.insert(
+                NETWORK_PROTOCOL_VERSION,
+                format!("{:?}", request.router_request.version()).into(),
+            );
+        }
+        if let Some(true) = &self.network_transport {
+            attrs.insert(NETWORK_TRANSPORT, "tcp".to_string().into());
+        }
+        if let Some(true) = &self.network_type {
+            if let Some(connection_info) =
+                request.router_request.extensions().get::<ConnectionInfo>()
+            {
+                if let Some(socket) = connection_info.server_address {
+                    if socket.is_ipv4() {
+                        attrs.insert(NETWORK_TYPE, "ipv4".to_string().into());
+                    } else if socket.is_ipv6() {
+                        attrs.insert(NETWORK_TYPE, "ipv6".to_string().into());
+                    }
+                }
+            }
+        }
+
+        attrs
+    }
+
+    fn on_response(&self, response: &router::Response) -> HashMap<Key, opentelemetry::Value> {
+        let mut attrs = HashMap::new();
+        if let Some(true) = &self.http_response_body_size {
+            if let Some(content_length) = response
+                .response
+                .headers()
+                .get(&CONTENT_LENGTH)
+                .and_then(|h| h.to_str().ok())
+            {
+                attrs.insert(HTTP_RESPONSE_BODY_SIZE, content_length.to_string().into());
+            }
+        }
+        if let Some(true) = &self.http_response_status_code {
+            attrs.insert(
+                HTTP_RESPONSE_STATUS_CODE,
+                (response.response.status().as_u16() as i64).into(),
+            );
+        }
+
+        if let Some(true) = &self.error_type {
+            if !response.response.status().is_success() {
+                attrs.insert(
+                    ERROR_TYPE,
+                    response
+                        .response
+                        .status()
+                        .canonical_reason()
+                        .unwrap_or("unknown")
+                        .into(),
+                );
+            }
+        }
+
+        attrs
+    }
+
+    fn on_error(&self, _error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
+        let mut attrs = HashMap::new();
+        if let Some(true) = &self.error_type {
+            attrs.insert(
+                ERROR_TYPE,
+                StatusCode::INTERNAL_SERVER_ERROR
+                    .canonical_reason()
+                    .unwrap_or("unknown")
+                    .into(),
+            );
+        }
+        if let Some(true) = &self.http_response_status_code {
+            attrs.insert(
+                HTTP_RESPONSE_STATUS_CODE,
+                (StatusCode::INTERNAL_SERVER_ERROR.as_u16() as i64).into(),
+            );
+        }
+
+        attrs
+    }
+}
+
+impl Selectors for HttpServerAttributes {
+    type Request = router::Request;
+    type Response = router::Response;
+
+    fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
+        let mut attrs: HashMap<Key, Value> = HashMap::new();
+        if let Some(true) = &self.http_route {
+            attrs.insert(
+                HTTP_ROUTE,
+                request.router_request.uri().path().to_string().into(),
+            );
+        }
+        if let Some(true) = &self.client_address {
+            if let Some(forwarded) = Self::forwarded_for(request) {
+                attrs.insert(CLIENT_ADDRESS, forwarded.ip().to_string().into());
+            } else if let Some(connection_info) =
+                request.router_request.extensions().get::<ConnectionInfo>()
+            {
+                if let Some(socket) = connection_info.peer_address {
+                    attrs.insert(CLIENT_ADDRESS, socket.ip().to_string().into());
+                }
+            }
+        }
+        if let Some(true) = &self.client_port {
+            if let Some(forwarded) = Self::forwarded_for(request) {
+                attrs.insert(CLIENT_PORT, (forwarded.port() as i64).into());
+            } else if let Some(connection_info) =
+                request.router_request.extensions().get::<ConnectionInfo>()
+            {
+                if let Some(socket) = connection_info.peer_address {
+                    attrs.insert(CLIENT_PORT, (socket.port() as i64).into());
+                }
+            }
+        }
+
+        if let Some(true) = &self.server_address {
+            if let Some(forwarded) =
+                Self::forwarded_host(request).and_then(|h| h.host().map(|h| h.to_string()))
+            {
+                attrs.insert(SERVER_ADDRESS, forwarded.into());
+            } else if let Some(connection_info) =
+                request.router_request.extensions().get::<ConnectionInfo>()
+            {
+                if let Some(socket) = connection_info.server_address {
+                    attrs.insert(SERVER_ADDRESS, socket.ip().to_string().into());
+                }
+            }
+        }
+        if let Some(true) = &self.server_port {
+            if let Some(forwarded) = Self::forwarded_host(request).and_then(|h| h.port_u16()) {
+                attrs.insert(SERVER_PORT, (forwarded as i64).into());
+            } else if let Some(connection_info) =
+                request.router_request.extensions().get::<ConnectionInfo>()
+            {
+                if let Some(socket) = connection_info.server_address {
+                    attrs.insert(SERVER_PORT, (socket.port() as i64).into());
+                }
+            }
+        }
+
+        if let Some(true) = &self.network_local_address {
+            if let Some(connection_info) =
+                request.router_request.extensions().get::<ConnectionInfo>()
+            {
+                if let Some(socket) = connection_info.server_address {
+                    attrs.insert(NETWORK_LOCAL_ADDRESS, socket.ip().to_string().into());
+                }
+            }
+        }
+        if let Some(true) = &self.network_local_port {
+            if let Some(connection_info) =
+                request.router_request.extensions().get::<ConnectionInfo>()
+            {
+                if let Some(socket) = connection_info.server_address {
+                    attrs.insert(NETWORK_LOCAL_PORT, (socket.port() as i64).into());
+                }
+            }
+        }
+
+        if let Some(true) = &self.network_peer_address {
+            if let Some(connection_info) =
+                request.router_request.extensions().get::<ConnectionInfo>()
+            {
+                if let Some(socket) = connection_info.peer_address {
+                    attrs.insert(NETWORK_PEER_ADDRESS, socket.ip().to_string().into());
+                }
+            }
+        }
+        if let Some(true) = &self.network_peer_port {
+            if let Some(connection_info) =
+                request.router_request.extensions().get::<ConnectionInfo>()
+            {
+                if let Some(socket) = connection_info.peer_address {
+                    attrs.insert(NETWORK_PEER_PORT, (socket.port() as i64).into());
+                }
+            }
+        }
+
+        let router_uri = request.router_request.uri();
+        if let Some(true) = &self.url_path {
+            attrs.insert(URL_PATH, router_uri.path().to_string().into());
+        }
+        if let Some(true) = &self.url_query {
+            if let Some(query) = router_uri.query() {
+                attrs.insert(URL_QUERY, query.to_string().into());
+            }
+        }
+        if let Some(true) = &self.url_scheme {
+            if let Some(scheme) = router_uri.scheme_str() {
+                attrs.insert(URL_SCHEME, scheme.to_string().into());
+            }
+        }
+        if let Some(true) = &self.user_agent_original {
+            if let Some(user_agent) = request
+                .router_request
+                .headers()
+                .get(&USER_AGENT)
+                .and_then(|h| h.to_str().ok())
+            {
+                attrs.insert(USER_AGENT_ORIGINAL, user_agent.to_string().into());
+            }
+        }
+
+        attrs
+    }
+
+    fn on_response(&self, _response: &router::Response) -> HashMap<Key, opentelemetry::Value> {
+        HashMap::with_capacity(0)
+    }
+
+    fn on_error(&self, _error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
+        HashMap::with_capacity(0)
+    }
+}
+
+impl HttpServerAttributes {
+    fn forwarded_for(request: &Request) -> Option<SocketAddr> {
+        request
+            .router_request
+            .headers()
+            .get_all(FORWARDED)
+            .iter()
+            .filter_map(|h| h.to_str().ok())
+            .filter_map(|h| {
+                if h.to_lowercase().starts_with("for=") {
+                    Some(&h[4..])
+                } else {
+                    None
+                }
+            })
+            .filter_map(|forwarded| forwarded.parse::<SocketAddr>().ok())
+            .next()
+    }
+
+    fn forwarded_host(request: &Request) -> Option<Uri> {
+        request
+            .router_request
+            .headers()
+            .get_all(FORWARDED)
+            .iter()
+            .filter_map(|h| h.to_str().ok())
+            .filter_map(|h| {
+                if h.to_lowercase().starts_with("host=") {
+                    Some(&h[5..])
+                } else {
+                    None
+                }
+            })
+            .filter_map(|forwarded| forwarded.parse::<Uri>().ok())
+            .next()
+    }
+}
+
+impl Selectors for SupergraphAttributes {
+    type Request = supergraph::Request;
+    type Response = supergraph::Response;
+
+    fn on_request(&self, request: &supergraph::Request) -> HashMap<Key, opentelemetry::Value> {
+        let mut attrs = HashMap::new();
+        if let Some(true) = &self.graphql_document {
+            if let Some(query) = &request.supergraph_request.body().query {
+                attrs.insert(GRAPHQL_DOCUMENT, query.clone().into());
+            }
+        }
+        if let Some(true) = &self.graphql_operation_name {
+            if let Some(operation_name) = &request
+                .context
+                .get::<_, String>(OPERATION_NAME)
+                .unwrap_or_default()
+            {
+                attrs.insert(GRAPHQL_OPERATION_NAME, operation_name.clone().into());
+            }
+        }
+        if let Some(true) = &self.graphql_operation_type {
+            if let Some(operation_type) = &request
+                .context
+                .get::<_, String>(OPERATION_KIND)
+                .unwrap_or_default()
+            {
+                attrs.insert(GRAPHQL_OPERATION_TYPE, operation_type.clone().into());
+            }
+        }
+
+        attrs
+    }
+
+    fn on_response(&self, _response: &supergraph::Response) -> HashMap<Key, opentelemetry::Value> {
+        HashMap::with_capacity(0)
+    }
+
+    fn on_error(&self, _error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
+        HashMap::with_capacity(0)
+    }
+}
+
+impl Selectors for SubgraphAttributes {
+    type Request = subgraph::Request;
+    type Response = subgraph::Response;
+
+    fn on_request(&self, request: &subgraph::Request) -> HashMap<Key, opentelemetry::Value> {
+        let mut attrs = HashMap::new();
+        if let Some(true) = &self.graphql_document {
+            if let Some(query) = &request.subgraph_request.body().query {
+                attrs.insert(SUBGRAPH_GRAPHQL_DOCUMENT, query.clone().into());
+            }
+        }
+        if let Some(true) = &self.graphql_operation_name {
+            if let Some(op_name) = &request.subgraph_request.body().operation_name {
+                attrs.insert(SUBGRAPH_GRAPHQL_OPERATION_NAME, op_name.clone().into());
+            }
+        }
+        if let Some(true) = &self.graphql_operation_type {
+            // Subgraph operation type wil always match the supergraph operation type
+            if let Some(operation_type) = &request
+                .context
+                .get::<_, String>(OPERATION_KIND)
+                .unwrap_or_default()
+            {
+                attrs.insert(
+                    SUBGRAPH_GRAPHQL_OPERATION_TYPE,
+                    operation_type.clone().into(),
+                );
+            }
+        }
+        if let Some(true) = &self.subgraph_name {
+            if let Some(subgraph_name) = &request.subgraph_name {
+                attrs.insert(SUBGRAPH_NAME, subgraph_name.clone().into());
+            }
+        }
+
+        attrs
+    }
+
+    fn on_response(&self, _response: &subgraph::Response) -> HashMap<Key, opentelemetry::Value> {
+        HashMap::with_capacity(0)
+    }
+
+    fn on_error(&self, _error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
+        HashMap::with_capacity(0)
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use insta::assert_yaml_snapshot;
+    use std::net::SocketAddr;
+    use std::str::FromStr;
 
-    use crate::plugins::telemetry::config_new::attributes::Extendable;
+    use anyhow::anyhow;
+    use http::header::FORWARDED;
+    use http::header::USER_AGENT;
+    use http::HeaderValue;
+    use http::StatusCode;
+    use http::Uri;
+    use opentelemetry::trace::SpanContext;
+    use opentelemetry::trace::SpanId;
+    use opentelemetry::trace::TraceContextExt;
+    use opentelemetry::trace::TraceFlags;
+    use opentelemetry::trace::TraceId;
+    use opentelemetry::trace::TraceState;
+    use opentelemetry::Context;
+    use opentelemetry_semantic_conventions::trace::CLIENT_ADDRESS;
+    use opentelemetry_semantic_conventions::trace::CLIENT_PORT;
+    use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
+    use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_NAME;
+    use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_TYPE;
+    use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE;
+    use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
+    use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_BODY_SIZE;
+    use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE;
+    use opentelemetry_semantic_conventions::trace::HTTP_ROUTE;
+    use opentelemetry_semantic_conventions::trace::NETWORK_PROTOCOL_NAME;
+    use opentelemetry_semantic_conventions::trace::NETWORK_PROTOCOL_VERSION;
+    use opentelemetry_semantic_conventions::trace::NETWORK_TRANSPORT;
+    use opentelemetry_semantic_conventions::trace::NETWORK_TYPE;
+    use opentelemetry_semantic_conventions::trace::SERVER_ADDRESS;
+    use opentelemetry_semantic_conventions::trace::SERVER_PORT;
+    use opentelemetry_semantic_conventions::trace::URL_PATH;
+    use opentelemetry_semantic_conventions::trace::URL_QUERY;
+    use opentelemetry_semantic_conventions::trace::URL_SCHEME;
+    use opentelemetry_semantic_conventions::trace::USER_AGENT_ORIGINAL;
+    use tracing::span;
+    use tracing::subscriber;
+    use tracing_subscriber::layer::SubscriberExt;
+
+    use crate::axum_factory::utils::ConnectionInfo;
+    use crate::context::OPERATION_KIND;
+    use crate::context::OPERATION_NAME;
+    use crate::graphql;
+    use crate::plugins::telemetry::config_new::attributes::HttpCommonAttributes;
+    use crate::plugins::telemetry::config_new::attributes::HttpServerAttributes;
+    use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
+    use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
     use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
-    use crate::plugins::telemetry::config_new::attributes::SupergraphCustomAttribute;
+    use crate::plugins::telemetry::config_new::attributes::ERROR_TYPE;
+    use crate::plugins::telemetry::config_new::attributes::NETWORK_LOCAL_ADDRESS;
+    use crate::plugins::telemetry::config_new::attributes::NETWORK_LOCAL_PORT;
+    use crate::plugins::telemetry::config_new::attributes::NETWORK_PEER_ADDRESS;
+    use crate::plugins::telemetry::config_new::attributes::NETWORK_PEER_PORT;
+    use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_DOCUMENT;
+    use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_OPERATION_NAME;
+    use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_OPERATION_TYPE;
+    use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_NAME;
+    use crate::plugins::telemetry::config_new::Selectors;
+    use crate::services::router;
+    use crate::services::subgraph;
+    use crate::services::supergraph;
 
     #[test]
-    fn test_extendable_serde() {
-        let mut settings = insta::Settings::clone_current();
-        settings.set_sort_maps(true);
-        settings.bind(|| {
-            let o = serde_json::from_value::<
-                Extendable<SupergraphAttributes, SupergraphCustomAttribute>,
-            >(serde_json::json!({
-                    "graphql.operation.name": true,
-                    "graphql.operation.type": true,
-                    "custom_1": {
-                        "operation_name": "string"
-                    },
-                    "custom_2": {
-                        "operation_name": "string"
-                    }
-            }))
-            .unwrap();
-            assert_yaml_snapshot!(o);
+    fn test_router_trace_attributes() {
+        let subscriber = tracing_subscriber::registry().with(tracing_opentelemetry::layer());
+        subscriber::with_default(subscriber, || {
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                TraceFlags::default(),
+                false,
+                TraceState::default(),
+            );
+            let _context = Context::current()
+                .with_remote_span_context(span_context)
+                .attach();
+            let span = span!(tracing::Level::INFO, "test");
+            let _guard = span.enter();
+
+            let attributes = RouterAttributes {
+                datadog_trace_id: Some(true),
+                trace_id: Some(true),
+                common: Default::default(),
+                server: Default::default(),
+            };
+            let attributes =
+                attributes.on_request(&router::Request::fake_builder().build().unwrap());
+            assert_eq!(
+                attributes.get(&opentelemetry::Key::from_static_str("trace_id")),
+                Some(&"0000000000000000000000000000002a".into())
+            );
+            assert_eq!(
+                attributes.get(&opentelemetry::Key::from_static_str("dd.trace_id")),
+                Some(&"42".into())
+            );
         });
     }
 
     #[test]
-    fn test_extendable_serde_fail() {
-        serde_json::from_value::<Extendable<SupergraphAttributes, SupergraphCustomAttribute>>(
-            serde_json::json!({
-                    "graphql.operation": true,
-                    "graphql.operation.type": true,
-                    "custom_1": {
-                        "operation_name": "string"
-                    },
-                    "custom_2": {
-                        "operation_name": "string"
-                    }
-            }),
-        )
-        .expect_err("Should have errored");
+    fn test_supergraph_graphql_document() {
+        let attributes = SupergraphAttributes {
+            graphql_document: Some(true),
+            ..Default::default()
+        };
+        let attributes = attributes.on_request(
+            &supergraph::Request::fake_builder()
+                .query("query { __typename }")
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(
+            attributes.get(&GRAPHQL_DOCUMENT),
+            Some(&"query { __typename }".into())
+        );
+    }
+
+    #[test]
+    fn test_supergraph_graphql_operation_name() {
+        let attributes = SupergraphAttributes {
+            graphql_operation_name: Some(true),
+            ..Default::default()
+        };
+        let context = crate::Context::new();
+        let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
+        let attributes = attributes.on_request(
+            &supergraph::Request::fake_builder()
+                .context(context)
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(
+            attributes.get(&GRAPHQL_OPERATION_NAME),
+            Some(&"topProducts".into())
+        );
+    }
+
+    #[test]
+    fn test_supergraph_graphql_operation_type() {
+        let attributes = SupergraphAttributes {
+            graphql_operation_type: Some(true),
+            ..Default::default()
+        };
+        let context = crate::Context::new();
+        let _ = context.insert(OPERATION_KIND, "query".to_string());
+        let attributes = attributes.on_request(
+            &supergraph::Request::fake_builder()
+                .context(context)
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(
+            attributes.get(&GRAPHQL_OPERATION_TYPE),
+            Some(&"query".into())
+        );
+    }
+
+    #[test]
+    fn test_subgraph_graphql_document() {
+        let attributes = SubgraphAttributes {
+            graphql_document: Some(true),
+            ..Default::default()
+        };
+        let attributes = attributes.on_request(
+            &subgraph::Request::fake_builder()
+                .subgraph_request(
+                    ::http::Request::builder()
+                        .uri("http://localhost/graphql")
+                        .body(
+                            graphql::Request::fake_builder()
+                                .query("query { __typename }")
+                                .build(),
+                        )
+                        .unwrap(),
+                )
+                .build(),
+        );
+        assert_eq!(
+            attributes.get(&SUBGRAPH_GRAPHQL_DOCUMENT),
+            Some(&"query { __typename }".into())
+        );
+    }
+
+    #[test]
+    fn test_subgraph_graphql_operation_name() {
+        let attributes = SubgraphAttributes {
+            graphql_operation_name: Some(true),
+            ..Default::default()
+        };
+
+        let attributes = attributes.on_request(
+            &subgraph::Request::fake_builder()
+                .subgraph_request(
+                    ::http::Request::builder()
+                        .uri("http://localhost/graphql")
+                        .body(
+                            graphql::Request::fake_builder()
+                                .operation_name("topProducts")
+                                .build(),
+                        )
+                        .unwrap(),
+                )
+                .build(),
+        );
+        assert_eq!(
+            attributes.get(&SUBGRAPH_GRAPHQL_OPERATION_NAME),
+            Some(&"topProducts".into())
+        );
+    }
+
+    #[test]
+    fn test_subgraph_graphql_operation_type() {
+        let attributes = SubgraphAttributes {
+            graphql_operation_type: Some(true),
+            ..Default::default()
+        };
+
+        let context = crate::Context::new();
+        let _ = context.insert(OPERATION_KIND, "query".to_string());
+        let attributes = attributes.on_request(
+            &subgraph::Request::fake_builder()
+                .context(context)
+                .subgraph_request(
+                    ::http::Request::builder()
+                        .uri("http://localhost/graphql")
+                        .body(graphql::Request::fake_builder().build())
+                        .unwrap(),
+                )
+                .build(),
+        );
+        assert_eq!(
+            attributes.get(&SUBGRAPH_GRAPHQL_OPERATION_TYPE),
+            Some(&"query".into())
+        );
+    }
+
+    #[test]
+    fn test_subgraph_name() {
+        let attributes = SubgraphAttributes {
+            subgraph_name: Some(true),
+            ..Default::default()
+        };
+
+        let attributes = attributes.on_request(
+            &subgraph::Request::fake_builder()
+                .subgraph_name("products")
+                .subgraph_request(
+                    ::http::Request::builder()
+                        .uri("http://localhost/graphql")
+                        .body(graphql::Request::fake_builder().build())
+                        .unwrap(),
+                )
+                .build(),
+        );
+        assert_eq!(attributes.get(&SUBGRAPH_NAME), Some(&"products".into()));
+    }
+
+    #[test]
+    fn test_http_common_error_type() {
+        let common = HttpCommonAttributes {
+            error_type: Some(true),
+            ..Default::default()
+        };
+
+        let attributes = common.on_response(
+            &router::Response::fake_builder()
+                .status_code(StatusCode::BAD_REQUEST)
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(
+            attributes.get(&ERROR_TYPE),
+            Some(
+                &StatusCode::BAD_REQUEST
+                    .canonical_reason()
+                    .unwrap_or_default()
+                    .into()
+            )
+        );
+
+        let attributes = common.on_error(&anyhow!("test error").into());
+        assert_eq!(
+            attributes.get(&ERROR_TYPE),
+            Some(
+                &StatusCode::INTERNAL_SERVER_ERROR
+                    .canonical_reason()
+                    .unwrap_or_default()
+                    .into()
+            )
+        );
+    }
+
+    #[test]
+    fn test_http_common_request_body_size() {
+        let common = HttpCommonAttributes {
+            http_request_body_size: Some(true),
+            ..Default::default()
+        };
+
+        let attributes = common.on_request(
+            &router::Request::fake_builder()
+                .header(
+                    http::header::CONTENT_LENGTH,
+                    HeaderValue::from_static("256"),
+                )
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(attributes.get(&HTTP_REQUEST_BODY_SIZE), Some(&"256".into()));
+    }
+
+    #[test]
+    fn test_http_common_response_body_size() {
+        let common = HttpCommonAttributes {
+            http_response_body_size: Some(true),
+            ..Default::default()
+        };
+
+        let attributes = common.on_response(
+            &router::Response::fake_builder()
+                .header(
+                    http::header::CONTENT_LENGTH,
+                    HeaderValue::from_static("256"),
+                )
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(
+            attributes.get(&HTTP_RESPONSE_BODY_SIZE),
+            Some(&"256".into())
+        );
+    }
+
+    #[test]
+    fn test_http_common_request_method() {
+        let common = HttpCommonAttributes {
+            http_request_method: Some(true),
+            ..Default::default()
+        };
+
+        let attributes = common.on_request(
+            &router::Request::fake_builder()
+                .method(http::Method::POST)
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(attributes.get(&HTTP_REQUEST_METHOD), Some(&"POST".into()));
+    }
+
+    #[test]
+    fn test_http_common_response_status_code() {
+        let common = HttpCommonAttributes {
+            http_response_status_code: Some(true),
+            ..Default::default()
+        };
+
+        let attributes = common.on_response(
+            &router::Response::fake_builder()
+                .status_code(StatusCode::BAD_REQUEST)
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(
+            attributes.get(&HTTP_RESPONSE_STATUS_CODE),
+            Some(&(StatusCode::BAD_REQUEST.as_u16() as i64).into())
+        );
+
+        let attributes = common.on_error(&anyhow!("test error").into());
+        assert_eq!(
+            attributes.get(&HTTP_RESPONSE_STATUS_CODE),
+            Some(&(StatusCode::INTERNAL_SERVER_ERROR.as_u16() as i64).into())
+        );
+    }
+
+    #[test]
+    fn test_http_common_network_protocol_name() {
+        let common = HttpCommonAttributes {
+            network_protocol_name: Some(true),
+            ..Default::default()
+        };
+
+        let attributes = common.on_request(
+            &router::Request::fake_builder()
+                .uri(Uri::from_static("https://localhost/graphql"))
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(
+            attributes.get(&NETWORK_PROTOCOL_NAME),
+            Some(&"https".into())
+        );
+    }
+
+    #[test]
+    fn test_http_common_network_protocol_version() {
+        let common = HttpCommonAttributes {
+            network_protocol_version: Some(true),
+            ..Default::default()
+        };
+
+        let attributes = common.on_request(
+            &router::Request::fake_builder()
+                .uri(Uri::from_static("https://localhost/graphql"))
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(
+            attributes.get(&NETWORK_PROTOCOL_VERSION),
+            Some(&"HTTP/1.1".into())
+        );
+    }
+
+    #[test]
+    fn test_http_common_network_transport() {
+        let common = HttpCommonAttributes {
+            network_transport: Some(true),
+            ..Default::default()
+        };
+
+        let attributes = common.on_request(&router::Request::fake_builder().build().unwrap());
+        assert_eq!(attributes.get(&NETWORK_TRANSPORT), Some(&"tcp".into()));
+    }
+
+    #[test]
+    fn test_http_common_network_type() {
+        let common = HttpCommonAttributes {
+            network_type: Some(true),
+            ..Default::default()
+        };
+
+        let mut req = router::Request::fake_builder().build().unwrap();
+        req.router_request.extensions_mut().insert(ConnectionInfo {
+            peer_address: Some(SocketAddr::from_str("192.168.0.8:6060").unwrap()),
+            server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
+        });
+        let attributes = common.on_request(&req);
+        assert_eq!(attributes.get(&NETWORK_TYPE), Some(&"ipv4".into()));
+    }
+
+    #[test]
+    fn test_http_server_client_address() {
+        let server = HttpServerAttributes {
+            client_address: Some(true),
+            ..Default::default()
+        };
+
+        let mut req = router::Request::fake_builder().build().unwrap();
+        req.router_request.extensions_mut().insert(ConnectionInfo {
+            peer_address: Some(SocketAddr::from_str("192.168.0.8:6060").unwrap()),
+            server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
+        });
+        let attributes = server.on_request(&req);
+        assert_eq!(attributes.get(&CLIENT_ADDRESS), Some(&"192.168.0.8".into()));
+
+        let mut req = router::Request::fake_builder()
+            .header(FORWARDED, "for=2.4.6.8:8000")
+            .build()
+            .unwrap();
+        req.router_request.extensions_mut().insert(ConnectionInfo {
+            peer_address: Some(SocketAddr::from_str("192.168.0.8:6060").unwrap()),
+            server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
+        });
+        let attributes = server.on_request(&req);
+        assert_eq!(attributes.get(&CLIENT_ADDRESS), Some(&"2.4.6.8".into()));
+    }
+
+    #[test]
+    fn test_http_server_client_port() {
+        let server = HttpServerAttributes {
+            client_port: Some(true),
+            ..Default::default()
+        };
+
+        let mut req = router::Request::fake_builder().build().unwrap();
+        req.router_request.extensions_mut().insert(ConnectionInfo {
+            peer_address: Some(SocketAddr::from_str("192.168.0.8:6060").unwrap()),
+            server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
+        });
+        let attributes = server.on_request(&req);
+        assert_eq!(attributes.get(&CLIENT_PORT), Some(&6060.into()));
+
+        let mut req = router::Request::fake_builder()
+            .header(FORWARDED, "for=2.4.6.8:8000")
+            .build()
+            .unwrap();
+        req.router_request.extensions_mut().insert(ConnectionInfo {
+            peer_address: Some(SocketAddr::from_str("192.168.0.8:6060").unwrap()),
+            server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
+        });
+        let attributes = server.on_request(&req);
+        assert_eq!(attributes.get(&CLIENT_PORT), Some(&8000.into()));
+    }
+
+    #[test]
+    fn test_http_server_http_route() {
+        let server = HttpServerAttributes {
+            http_route: Some(true),
+            ..Default::default()
+        };
+
+        let mut req = router::Request::fake_builder()
+            .uri(Uri::from_static("https://localhost/graphql"))
+            .build()
+            .unwrap();
+        req.router_request.extensions_mut().insert(ConnectionInfo {
+            peer_address: Some(SocketAddr::from_str("192.168.0.8:6060").unwrap()),
+            server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
+        });
+        let attributes = server.on_request(&req);
+        assert_eq!(attributes.get(&HTTP_ROUTE), Some(&"/graphql".into()));
+    }
+
+    #[test]
+    fn test_http_server_network_local_address() {
+        let server = HttpServerAttributes {
+            network_local_address: Some(true),
+            ..Default::default()
+        };
+
+        let mut req = router::Request::fake_builder()
+            .uri(Uri::from_static("https://localhost/graphql"))
+            .build()
+            .unwrap();
+        req.router_request.extensions_mut().insert(ConnectionInfo {
+            peer_address: Some(SocketAddr::from_str("192.168.0.8:6060").unwrap()),
+            server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
+        });
+        let attributes = server.on_request(&req);
+        assert_eq!(
+            attributes.get(&NETWORK_LOCAL_ADDRESS),
+            Some(&"192.168.0.1".into())
+        );
+    }
+
+    #[test]
+    fn test_http_server_network_local_port() {
+        let server = HttpServerAttributes {
+            network_local_port: Some(true),
+            ..Default::default()
+        };
+
+        let mut req = router::Request::fake_builder()
+            .uri(Uri::from_static("https://localhost/graphql"))
+            .build()
+            .unwrap();
+        req.router_request.extensions_mut().insert(ConnectionInfo {
+            peer_address: Some(SocketAddr::from_str("192.168.0.8:6060").unwrap()),
+            server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
+        });
+        let attributes = server.on_request(&req);
+        assert_eq!(attributes.get(&NETWORK_LOCAL_PORT), Some(&8080.into()));
+    }
+
+    #[test]
+    fn test_http_server_network_peer_address() {
+        let server = HttpServerAttributes {
+            network_peer_address: Some(true),
+            ..Default::default()
+        };
+
+        let mut req = router::Request::fake_builder()
+            .uri(Uri::from_static("https://localhost/graphql"))
+            .build()
+            .unwrap();
+        req.router_request.extensions_mut().insert(ConnectionInfo {
+            peer_address: Some(SocketAddr::from_str("192.168.0.8:6060").unwrap()),
+            server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
+        });
+        let attributes = server.on_request(&req);
+        assert_eq!(
+            attributes.get(&NETWORK_PEER_ADDRESS),
+            Some(&"192.168.0.8".into())
+        );
+    }
+
+    #[test]
+    fn test_http_server_network_peer_port() {
+        let server = HttpServerAttributes {
+            network_peer_port: Some(true),
+            ..Default::default()
+        };
+
+        let mut req = router::Request::fake_builder()
+            .uri(Uri::from_static("https://localhost/graphql"))
+            .build()
+            .unwrap();
+        req.router_request.extensions_mut().insert(ConnectionInfo {
+            peer_address: Some(SocketAddr::from_str("192.168.0.8:6060").unwrap()),
+            server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
+        });
+        let attributes = server.on_request(&req);
+        assert_eq!(attributes.get(&NETWORK_PEER_PORT), Some(&6060.into()));
+    }
+
+    #[test]
+    fn test_http_server_server_address() {
+        let server = HttpServerAttributes {
+            server_address: Some(true),
+            ..Default::default()
+        };
+
+        let mut req = router::Request::fake_builder().build().unwrap();
+        req.router_request.extensions_mut().insert(ConnectionInfo {
+            peer_address: Some(SocketAddr::from_str("192.168.0.8:6060").unwrap()),
+            server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
+        });
+        let attributes = server.on_request(&req);
+        assert_eq!(attributes.get(&SERVER_ADDRESS), Some(&"192.168.0.1".into()));
+
+        let mut req = router::Request::fake_builder()
+            .header(FORWARDED, "host=2.4.6.8:8000")
+            .build()
+            .unwrap();
+        req.router_request.extensions_mut().insert(ConnectionInfo {
+            peer_address: Some(SocketAddr::from_str("192.168.0.8:6060").unwrap()),
+            server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
+        });
+        let attributes = server.on_request(&req);
+        assert_eq!(attributes.get(&SERVER_ADDRESS), Some(&"2.4.6.8".into()));
+    }
+
+    #[test]
+    fn test_http_server_server_port() {
+        let server = HttpServerAttributes {
+            server_port: Some(true),
+            ..Default::default()
+        };
+
+        let mut req = router::Request::fake_builder().build().unwrap();
+        req.router_request.extensions_mut().insert(ConnectionInfo {
+            peer_address: Some(SocketAddr::from_str("192.168.0.8:6060").unwrap()),
+            server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
+        });
+        let attributes = server.on_request(&req);
+        assert_eq!(attributes.get(&SERVER_PORT), Some(&8080.into()));
+
+        let mut req = router::Request::fake_builder()
+            .header(FORWARDED, "host=2.4.6.8:8000")
+            .build()
+            .unwrap();
+        req.router_request.extensions_mut().insert(ConnectionInfo {
+            peer_address: Some(SocketAddr::from_str("192.168.0.8:6060").unwrap()),
+            server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
+        });
+        let attributes = server.on_request(&req);
+        assert_eq!(attributes.get(&SERVER_PORT), Some(&8000.into()));
+    }
+    #[test]
+    fn test_http_server_url_path() {
+        let server = HttpServerAttributes {
+            url_path: Some(true),
+            ..Default::default()
+        };
+
+        let attributes = server.on_request(
+            &router::Request::fake_builder()
+                .uri(Uri::from_static("https://localhost/graphql"))
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(attributes.get(&URL_PATH), Some(&"/graphql".into()));
+    }
+    #[test]
+    fn test_http_server_query() {
+        let server = HttpServerAttributes {
+            url_query: Some(true),
+            ..Default::default()
+        };
+
+        let attributes = server.on_request(
+            &router::Request::fake_builder()
+                .uri(Uri::from_static("https://localhost/graphql?hi=5"))
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(attributes.get(&URL_QUERY), Some(&"hi=5".into()));
+    }
+    #[test]
+    fn test_http_server_scheme() {
+        let server = HttpServerAttributes {
+            url_scheme: Some(true),
+            ..Default::default()
+        };
+
+        let attributes = server.on_request(
+            &router::Request::fake_builder()
+                .uri(Uri::from_static("https://localhost/graphql"))
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(attributes.get(&URL_SCHEME), Some(&"https".into()));
+    }
+
+    #[test]
+    fn test_http_server_user_agent_original() {
+        let server = HttpServerAttributes {
+            user_agent_original: Some(true),
+            ..Default::default()
+        };
+
+        let attributes = server.on_request(
+            &router::Request::fake_builder()
+                .header(USER_AGENT, HeaderValue::from_static("my-agent"))
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(
+            attributes.get(&USER_AGENT_ORIGINAL),
+            Some(&"my-agent".into())
+        );
     }
 }
