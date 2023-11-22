@@ -116,17 +116,12 @@
           "Stdout": "/configuration/exporters/logging/stdout"
         },
       "Instrumentation": {
-        "Instruments" : "/configuration/instruments",
-        "Events" : "/configuration/events",
-        "Conditions" : [
-          "/configuration/conditions",
-          [
-            "enterprise"
-          ]
-        ],
-        "Spans" : "/configuration/spans",
-        "Selectors" : "/configuration/selectors",
-        "Standard attributes": "/configuration/standard-attributes"
+        "Instruments" : "/configuration/instrumentation/instruments",
+        "Events" : "/configuration/instrumentation/events",
+        "Conditions" : "/configuration/conditions",
+        "Spans" : "/configuration/instrumentation/spans",
+        "Selectors" : "/configuration/instrumentation/selectors",
+        "Standard attributes": "/configuration/instrumentation/standard-attributes"
       },
       "GraphOS reporting": "/configuration/apollo-telemetry",
       "Client awareness": "/managed-federation/client-awareness",
