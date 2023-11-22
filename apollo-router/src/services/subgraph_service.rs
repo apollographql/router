@@ -1837,7 +1837,7 @@ mod tests {
                     listen: None,
                     path: Some("/testcallback".to_string()),
                     subgraphs: vec![String::from("testbis")].into_iter().collect(),
-                    heartbeat_interval: Default::default(),
+                    heartbeat_interval: HeartbeatInterval::Disabled,
                 }),
                 passthrough: Some(SubgraphPassthroughMode {
                     all: None,

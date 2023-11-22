@@ -612,7 +612,6 @@ async fn task<K, V>(
     loop {
         tokio::select! {
             _ = ttl_fut.next() => {
-                println!("test {:?}", std::time::Instant::now());
                 let heartbeat_error_message = heartbeat_error_message.clone();
                 pubsub.kill_dead_topics(heartbeat_error_message).await;
                 tracing::info!(

@@ -222,6 +222,7 @@ impl Plugin for Subscription {
                     .get_or_init(|| Uuid::new_v4().to_string())
                     .clone(),
             );
+            #[cfg(not(test))]
             match init
                 .config
                 .mode
