@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::collections::LinkedList;
 use std::fmt;
 
 use nu_ansi_term::Color;
@@ -30,7 +31,7 @@ use crate::plugins::telemetry::tracing::APOLLO_PRIVATE_PREFIX;
 pub(crate) struct Text {
     #[allow(dead_code)]
     timer: SystemTime,
-    resource: Vec<(String, Value)>,
+    resource: LinkedList<(String, Value)>,
     config: TextFormat,
     excluded_attributes: HashSet<&'static str>,
 }
@@ -264,7 +265,7 @@ impl Text {
     pub(crate) fn format_resource(
         &self,
         writer: &mut Writer,
-        resource: &[(String, Value)],
+        resource: &LinkedList<(String, Value)>,
     ) -> fmt::Result {
         if !resource.is_empty() {
             let style = Style::new().dimmed();

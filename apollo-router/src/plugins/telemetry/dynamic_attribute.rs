@@ -1,3 +1,5 @@
+use std::collections::LinkedList;
+
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use tracing_opentelemetry::OtelData;
@@ -11,24 +13,24 @@ use super::tracing::APOLLO_PRIVATE_PREFIX;
 
 #[derive(Debug)]
 pub(crate) struct LogAttributes {
-    attributes: Vec<KeyValue>,
+    attributes: LinkedList<KeyValue>,
 }
 
 impl Default for LogAttributes {
     fn default() -> Self {
         Self {
-            attributes: Vec::with_capacity(0),
+            attributes: LinkedList::new(),
         }
     }
 }
 
 impl LogAttributes {
-    pub(crate) fn attributes(&self) -> &Vec<KeyValue> {
+    pub(crate) fn attributes(&self) -> &LinkedList<KeyValue> {
         &self.attributes
     }
 
     fn insert(&mut self, kv: KeyValue) {
-        self.attributes.push(kv);
+        self.attributes.push_back(kv);
     }
 
     pub(crate) fn extend(&mut self, other: impl IntoIterator<Item = KeyValue>) {
