@@ -16,7 +16,7 @@ macro_rules! assert_trace_snapshot {
 async fn make_request(request: supergraph::Request) {
     let mut router = TestHarness::builder()
         .with_subgraph_network_requests()
-        .configuration_yaml(include_str!("../fixtures/deprecated_spans.router.yaml"))
+        .configuration_yaml(include_str!("fixtures/deprecated_spans.router.yaml"))
         .expect("configuration must be valid")
         .build_router()
         .await
