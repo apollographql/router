@@ -98,32 +98,32 @@
       }
     },
     "Telemetry and Monitoring": {
-        "Metrics exporters": {
-          "Configuration": "/configuration/exporters/metrics/overview",
-          "Prometheus": "/configuration/exporters/metrics/prometheus",
-          "OpenTelemetry": "/configuration/exporters/metrics/opentelemetry",
-          "Datadog (OTLP)": "/configuration/exporters/metrics/datadog-otlp"
-        },
-        "Trace exporters": {
-          "Configuration": "/configuration/exporters/tracing/overview",
-          "Jaeger": "/configuration/exporters/tracing/jaeger",
-          "Zipkin": "/configuration/exporters/tracing/zipkin",
-          "Datadog": "/configuration/exporters/tracing/datadog",
-          "OpenTelemetry": "/configuration/exporters/tracing/opentelemetry"
-        },
-        "Log exporters": {
-          "Configuration": "/configuration/exporters/logging/overview",
-          "Stdout": "/configuration/exporters/logging/stdout"
-        },
-      "Instrumentation": {
-        "Instruments" : "/configuration/instrumentation/instruments",
-        "Events" : "/configuration/instrumentation/events",
-        "Conditions" : "/configuration/conditions",
-        "Spans" : "/configuration/instrumentation/spans",
-        "Selectors" : "/configuration/instrumentation/selectors",
-        "Standard attributes": "/configuration/instrumentation/standard-attributes"
+      "Metrics exporters": {
+        "Configuration": "/configuration/exporters/metrics/overview",
+        "Prometheus": "/configuration/exporters/metrics/prometheus",
+        "OpenTelemetry": "/configuration/exporters/metrics/opentelemetry",
+        "Datadog (OTLP)": "/configuration/exporters/metrics/datadog-otlp"
       },
-      "GraphOS reporting": "/configuration/apollo-telemetry",
+      "Trace exporters": {
+        "Configuration": "/configuration/telemetry/exporters/tracing/overview",
+        "Jaeger": "/configuration/telemetry/exporters/tracing/jaeger",
+        "Zipkin": "/configuration/telemetry/exporters/tracing/zipkin",
+        "Datadog": "/configuration/telemetry/exporters/tracing/datadog",
+        "OpenTelemetry": "/configuration/telemetry/exporters/tracing/opentelemetry"
+      },
+      "Log exporters": {
+        "Configuration": "/configuration/telemetry/exporters/logging/overview",
+        "Stdout": "/configuration/telemetry/exporters/logging/stdout"
+      },
+      "Instrumentation": {
+        "Instruments" : "/configuration/telemetry/instrumentation/instruments",
+        "Events" : "/configuration/telemetry/instrumentation/events",
+        "Conditions" : "/configuration/telemetry/instrumentation/conditions",
+        "Spans" : "/configuration/telemetry/instrumentation/spans",
+        "Selectors" : "/configuration/telemetry/instrumentation/selectors",
+        "Standard attributes": "/configuration/telemetry/instrumentation/standard-attributes"
+      },
+      "GraphOS reporting": "/configuration/telemetry/apollo-telemetry",
       "Client awareness": "/managed-federation/client-awareness",
       "Health check": "/configuration/health-checks"
     },
