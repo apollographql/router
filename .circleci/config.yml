@@ -23,7 +23,7 @@ executors:
       - image: cimg/base:stable
       - image: cimg/redis:7.2.3
       - image: jaegertracing/all-in-one:1.49.0
-    resource_class: medium
+    resource_class: large
     environment:
       CARGO_BUILD_JOBS: 4
       RUST_TEST_THREADS: 6
@@ -37,7 +37,7 @@ executors:
   arm_linux_test: &arm_linux_test_executor
     machine:
       image: ubuntu-2004:2022.04.1
-    resource_class: arm.large
+    resource_class: arm.xlarge
     environment:
       CARGO_BUILD_JOBS: 8
       RUST_TEST_THREADS: 8
@@ -62,7 +62,7 @@ executors:
   windows_test: &windows_test_executor
     machine:
       image: "windows-server-2019-vs2019:stable"
-    resource_class: windows.xlarge
+    resource_class: windows.large
     shell: bash.exe --login -eo pipefail
 
 # We don't use {{ arch }} because on windows it is unstable https://discuss.circleci.com/t/value-of-arch-unstable-on-windows/40079
