@@ -315,7 +315,6 @@ async fn cache_store_from_response(
 struct CacheEntry {
     control: CacheControl,
     data: Value,
-    errors: Vec<Error>,
 }
 
 async fn cache_store_root_from_response(
@@ -331,19 +330,19 @@ async fn cache_store_root_from_response(
             .map(|secs| Duration::from_secs(secs as u64))
             .or(subgraph_ttl);
 
-        let errors = response.response.body().errors.clone();
-        if cache_control.should_store() {
-            cache
-                .insert(
-                    RedisKey(cache_key),
-                    RedisValue(CacheEntry {
-                        control: cache_control,
-                        data: data.clone(),
-                        errors,
-                    }),
-                    ttl,
-                )
-                .await;
+        if response.response.body().errors.is_empty() {
+            if cache_control.should_store() {
+                cache
+                    .insert(
+                        RedisKey(cache_key),
+                        RedisValue(CacheEntry {
+                            control: cache_control,
+                            data: data.clone(),
+                        }),
+                        ttl,
+                    )
+                    .await;
+            }
         }
     }
 
@@ -654,18 +653,6 @@ async fn insert_entities_in_result(
         match cache_entry {
             Some(v) => {
                 new_entities.push(v.data);
-                for mut error in v.errors {
-                    if let Some(path) = error.path.take() {
-                        error.path = Some(
-                            Path(vec![
-                                PathElement::Key("_entities".to_string()),
-                                PathElement::Index(new_entity_idx),
-                            ])
-                            .join(path),
-                        );
-                    }
-                    new_errors.push(error);
-                }
             }
             None => {
                 let (entity_idx, value) =
@@ -678,8 +665,7 @@ async fn insert_entities_in_result(
                 if cache_control.should_store() {
                     *inserted_types.entry(typename).or_default() += 1;
 
-                    let mut cached_errors = Vec::new();
-
+                    let mut has_errors = false;
                     for error in errors.iter().filter(|e| {
                         e.path
                             .as_ref()
@@ -698,24 +684,18 @@ async fn insert_entities_in_result(
                         }
 
                         new_errors.push(e);
-
-                        // remove the prefix before storing in cache
-                        let mut e = error.clone();
-                        if let Some(path) = e.path.as_mut() {
-                            path.0.remove(1);
-                            path.0.remove(0);
-                        }
-                        cached_errors.push(e);
+                        has_errors = true;
                     }
 
-                    to_insert.push((
-                        RedisKey(key),
-                        RedisValue(CacheEntry {
-                            control: cache_control.clone(),
-                            data: value.clone(),
-                            errors: cached_errors,
-                        }),
-                    ));
+                    if !has_errors {
+                        to_insert.push((
+                            RedisKey(key),
+                            RedisValue(CacheEntry {
+                                control: cache_control.clone(),
+                                data: value.clone(),
+                            }),
+                        ));
+                    }
                 }
 
                 new_entities.push(value);
