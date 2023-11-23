@@ -1,6 +1,7 @@
 //! Telemetry plugin.
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::LinkedList;
 use std::fmt;
 use std::sync::Arc;
 use std::thread;
@@ -27,16 +28,16 @@ use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::sdk::propagation::TextMapCompositePropagator;
-use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use opentelemetry_api::Key;
+use opentelemetry_sdk::propagation::TextMapCompositePropagator;
+use opentelemetry_sdk::trace::Builder;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use rand::Rng;
@@ -166,7 +167,7 @@ pub(crate) struct Telemetry {
     field_level_instrumentation_ratio: f64,
     sampling_filter_ratio: SamplerOption,
 
-    tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
+    tracer_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
     // We have to have separate meter providers for prometheus metrics so that they don't get zapped on router reload.
     public_meter_provider: Option<FilterMeterProvider>,
     public_prometheus_meter_provider: Option<FilterMeterProvider>,
@@ -350,25 +351,20 @@ impl Plugin for Telemetry {
                         .attributes
                         .on_request(request);
                     custom_attributes.extend([
-                        (CLIENT_NAME_KEY, client_name.to_string().into()),
-                        (CLIENT_VERSION_KEY, client_version.to_string().into()),
-                        (
+                        KeyValue::new(CLIENT_NAME_KEY, client_name.to_string()),
+                        KeyValue::new(CLIENT_VERSION_KEY, client_version.to_string()),
+                        KeyValue::new(
                             Key::from_static_str("apollo_private.http.request_headers"),
                             filter_headers(
                                 request.router_request.headers(),
                                 &config_request.apollo.send_headers,
-                            )
-                            .into(),
+                            ),
                         ),
                     ]);
 
                     custom_attributes
                 },
-                move |custom_attributes: HashMap<
-                    opentelemetry_api::Key,
-                    opentelemetry_api::Value,
-                >,
-                      fut| {
+                move |custom_attributes: LinkedList<KeyValue>, fut| {
                     let start = Instant::now();
                     let config = config_later.clone();
 
@@ -492,7 +488,7 @@ impl Plugin for Telemetry {
                     Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
                     (req.context.clone(), custom_attributes)
                 },
-                move |(ctx, custom_attributes): (Context, HashMap<Key, opentelemetry::Value>), fut| {
+                move |(ctx, custom_attributes): (Context, LinkedList<KeyValue>), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -596,7 +592,7 @@ impl Plugin for Telemetry {
                 move |(context, cache_attributes, custom_attributes): (
                     Context,
                     Option<CacheAttributes>,
-                    HashMap<Key, opentelemetry::Value>,
+                    LinkedList<KeyValue>,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let subgraph_attribute = subgraph_attribute.clone();
@@ -707,11 +703,11 @@ impl Telemetry {
             propagators.push(Box::<opentelemetry_jaeger::Propagator>::default());
         }
         if propagation.baggage {
-            propagators.push(Box::<opentelemetry::sdk::propagation::BaggagePropagator>::default());
+            propagators.push(Box::<opentelemetry_sdk::propagation::BaggagePropagator>::default());
         }
         if propagation.trace_context || tracing.otlp.enabled {
             propagators
-                .push(Box::<opentelemetry::sdk::propagation::TraceContextPropagator>::default());
+                .push(Box::<opentelemetry_sdk::propagation::TraceContextPropagator>::default());
         }
         if propagation.zipkin || tracing.zipkin.enabled {
             propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
@@ -733,7 +729,7 @@ impl Telemetry {
 
     fn create_tracer_provider(
         config: &config::Conf,
-    ) -> Result<(SamplerOption, opentelemetry::sdk::trace::TracerProvider), BoxError> {
+    ) -> Result<(SamplerOption, opentelemetry_sdk::trace::TracerProvider), BoxError> {
         let tracing_config = &config.exporters.tracing;
         let spans_config = &config.instrumentation.spans;
         let mut common = tracing_config.common.clone();
@@ -743,7 +739,7 @@ impl Telemetry {
         common.sampler = SamplerOption::Always(Sampler::AlwaysOn);
 
         let mut builder =
-            opentelemetry::sdk::trace::TracerProvider::builder().with_config((&common).into());
+            opentelemetry_sdk::trace::TracerProvider::builder().with_config((&common).into());
 
         builder = setup_tracing(builder, &tracing_config.jaeger, &common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.zipkin, &common, spans_config)?;

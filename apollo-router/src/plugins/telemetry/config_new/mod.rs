@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::collections::LinkedList;
 
 use opentelemetry::baggage::BaggageExt;
+use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
-use opentelemetry::Key;
-use opentelemetry_api::trace::TraceContextExt;
+use opentelemetry::KeyValue;
 use paste::paste;
 use tower::BoxError;
 use tracing::Span;
@@ -27,9 +27,9 @@ pub(crate) mod spans;
 pub(crate) trait Selectors {
     type Request;
     type Response;
-    fn on_request(&self, request: &Self::Request) -> HashMap<Key, opentelemetry::Value>;
-    fn on_response(&self, response: &Self::Response) -> HashMap<Key, opentelemetry::Value>;
-    fn on_error(&self, error: &BoxError) -> HashMap<Key, opentelemetry::Value>;
+    fn on_request(&self, request: &Self::Request) -> LinkedList<KeyValue>;
+    fn on_response(&self, response: &Self::Response) -> LinkedList<KeyValue>;
+    fn on_error(&self, error: &BoxError) -> LinkedList<KeyValue>;
 }
 
 pub(crate) trait Selector {
@@ -157,14 +157,14 @@ impl From<opentelemetry::Value> for AttributeValue {
 
 #[cfg(test)]
 mod test {
-    use opentelemetry_api::trace::SpanContext;
-    use opentelemetry_api::trace::SpanId;
-    use opentelemetry_api::trace::TraceContextExt;
-    use opentelemetry_api::trace::TraceFlags;
-    use opentelemetry_api::trace::TraceId;
-    use opentelemetry_api::trace::TraceState;
-    use opentelemetry_api::Context;
-    use opentelemetry_api::StringValue;
+    use opentelemetry::trace::SpanContext;
+    use opentelemetry::trace::SpanId;
+    use opentelemetry::trace::TraceContextExt;
+    use opentelemetry::trace::TraceFlags;
+    use opentelemetry::trace::TraceId;
+    use opentelemetry::trace::TraceState;
+    use opentelemetry::Context;
+    use opentelemetry::StringValue;
     use serde_json::json;
     use tracing::span;
     use tracing_subscriber::layer::SubscriberExt;

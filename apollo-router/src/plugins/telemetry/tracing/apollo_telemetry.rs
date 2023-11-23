@@ -16,14 +16,14 @@ use futures::FutureExt;
 use futures::TryFutureExt;
 use itertools::Itertools;
 use lru::LruCache;
-use opentelemetry::sdk::export::trace::ExportResult;
-use opentelemetry::sdk::export::trace::SpanData;
-use opentelemetry::sdk::export::trace::SpanExporter;
-use opentelemetry::sdk::trace::EvictedHashMap;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceError;
 use opentelemetry::Key;
 use opentelemetry::Value;
+use opentelemetry_sdk::export::trace::ExportResult;
+use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::trace::EvictedHashMap;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use prost::Message;
 use serde::de::DeserializeOwned;
@@ -145,12 +145,19 @@ struct LightSpanData {
 
 impl From<SpanData> for LightSpanData {
     fn from(value: SpanData) -> Self {
+        let attr_len = value.attributes.len();
         Self {
             span_id: value.span_context.span_id(),
             name: value.name,
             start_time: value.start_time,
             end_time: value.end_time,
-            attributes: value.attributes,
+            attributes: value.attributes.into_iter().fold(
+                EvictedHashMap::new(attr_len as u32, attr_len),
+                |mut acc, attr| {
+                    acc.insert(attr);
+                    acc
+                },
+            ),
         }
     }
 }
@@ -773,10 +780,11 @@ impl SpanExporter for Exporter {
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
         for span in batch {
-            if matches!(
-                span.attributes.get(&APOLLO_PRIVATE_REQUEST),
-                Some(&Value::Bool(true))
-            ) || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
+            if span
+                .attributes
+                .iter()
+                .any(|attr| attr.key == APOLLO_PRIVATE_REQUEST)
+                || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
             {
                 match self.extract_traces(span.into()) {
                     Ok(extracted_traces) => {
