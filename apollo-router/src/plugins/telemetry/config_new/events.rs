@@ -3,14 +3,14 @@ use std::fmt::Debug;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::plugins::telemetry::config_new::attributes::Extendable;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
-use crate::plugins::telemetry::config_new::attributes::RouterCustomAttribute;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
-use crate::plugins::telemetry::config_new::attributes::SubgraphCustomAttribute;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
-use crate::plugins::telemetry::config_new::attributes::SupergraphCustomAttribute;
 use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::extendable::Extendable;
+use crate::plugins::telemetry::config_new::selectors::RouterSelector;
+use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
+use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 
 /// Events are
 #[allow(dead_code)]
@@ -18,12 +18,11 @@ use crate::plugins::telemetry::config_new::conditions::Condition;
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Events {
     /// Router service events
-    router: Extendable<RouterEvents, Event<RouterAttributes, RouterCustomAttribute>>,
+    router: Extendable<RouterEvents, Event<RouterAttributes, RouterSelector>>,
     /// Subgraph service events
-    supergraph:
-        Extendable<SupergraphEvents, Event<SupergraphAttributes, SupergraphCustomAttribute>>,
+    supergraph: Extendable<SupergraphEvents, Event<SupergraphAttributes, SupergraphSelector>>,
     /// Supergraph service events
-    subgraph: Extendable<SubgraphEvents, Event<SubgraphAttributes, SubgraphCustomAttribute>>,
+    subgraph: Extendable<SubgraphEvents, Event<SubgraphAttributes, SubgraphSelector>>,
 }
 
 #[allow(dead_code)]

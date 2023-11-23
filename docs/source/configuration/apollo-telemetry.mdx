@@ -45,11 +45,12 @@ telemetry:
     # This value can't exceed the value of tracing.common.sampler.
     field_level_instrumentation_sampler: 0.5
 
-  tracing:
-    common:
-      # FTV1 uses the same trace sampling as other tracing options,
-      # so this value is also required.
-      sampler: 0.5
+  exporters:
+    tracing:
+      common:
+        # FTV1 uses the same trace sampling as other tracing options,
+        # so this value is also required.
+        sampler: 0.5
 ```
 
 <Note>
@@ -290,9 +291,10 @@ telemetry:
     send_variable_values: # other possible values are all, only (with an array), except (with an array), none (by default)
       except: # Send all variable values except for variable named first
         - first
-  tracing:
-    common:
-      sampler: 0.5 # The percentage of requests that will generate traces (a rate or `always_on` or `always_off`)
+  exporters:
+    tracing:
+      common:
+        sampler: 0.5 # The percentage of requests that will generate traces (a rate or `always_on` or `always_off`)
 ```
 
 ### `errors`

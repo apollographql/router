@@ -1,22 +1,46 @@
 telemetry:
-  metrics:
-    prometheus:
-      enabled: true
-    otlp:
-      enabled: true
-      endpoint: default
-  tracing:
-    otlp:
-      enabled: true
-      endpoint: default
-    zipkin:
-      enabled: true
-      endpoint: default
-    datadog:
-      enabled: true
-      endpoint: default
-    jaeger:
-      enabled: true
-      agent:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+      otlp:
+        enabled: true
         endpoint: default
-
+    tracing:
+      otlp:
+        enabled: true
+        endpoint: default
+      zipkin:
+        enabled: true
+        endpoint: default
+      datadog:
+        enabled: true
+        endpoint: default
+      jaeger:
+        enabled: true
+        agent:
+          endpoint: default
+    logging:
+      experimental_when_header:
+        - name: apollo-router-log-request
+          value: test
+          headers: true # default: false
+          body: true # default: false
+        # log request for all requests coming from Iphones
+        - name: custom-header
+          match: ^foo.*
+          headers: true
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      default_attribute_requirement_level: recommended
+      router:
+        attributes:
+          "custom_one":
+            request_header: host
+      supergraph:
+        attributes:
+          graphql.document: true
+      subgraph:
+        attributes:
+          subgraph.graphql.document: true

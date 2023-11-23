@@ -1,4 +1,5 @@
 use std::fmt::Write;
+use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -76,8 +77,14 @@ impl Default for CacheControl {
 }
 
 impl CacheControl {
-    pub(crate) fn new(headers: &HeaderMap) -> Result<Self, BoxError> {
+    pub(crate) fn new(
+        headers: &HeaderMap,
+        default_ttl: Option<Duration>,
+    ) -> Result<Self, BoxError> {
         let mut result = CacheControl::default();
+        if let Some(duration) = default_ttl {
+            result.max_age = Some(duration.as_secs() as u32);
+        }
 
         for header_value in headers.get_all(CACHE_CONTROL) {
             for value in header_value.to_str()?.split(',') {

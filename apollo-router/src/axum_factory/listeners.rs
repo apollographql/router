@@ -20,6 +20,8 @@ use tokio::sync::mpsc;
 use tokio::sync::Notify;
 use tower_service::Service;
 
+use crate::axum_factory::utils::ConnectionInfo;
+use crate::axum_factory::utils::InjectConnectionInfo;
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
@@ -233,6 +235,10 @@ pub(super) fn serve_router_on_listen_addr(
                                 match res {
                                     NetworkStream::Tcp(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
+                                        let app = InjectConnectionInfo::new(app, ConnectionInfo {
+                                            peer_address: stream.peer_addr().ok(),
+                                            server_address: stream.local_addr().ok(),
+                                        });
                                         let app = IdleConnectionChecker::new(received_first_request.clone(), app);
 
                                         stream
@@ -481,14 +487,13 @@ mod tests {
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
     use crate::services::router;
-    use crate::services::router_service;
 
     #[tokio::test]
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
         let configuration = Configuration::fake_builder().build().unwrap();
 
         init_with_config(
-            router_service::empty().await,
+            router::service::empty().await,
             Arc::new(configuration),
             MultiMap::new(),
         )
@@ -525,7 +530,7 @@ mod tests {
         );
 
         let error = init_with_config(
-            router_service::empty().await,
+            router::service::empty().await,
             Arc::new(configuration),
             web_endpoints,
         )
@@ -563,7 +568,7 @@ mod tests {
             Endpoint::from_router_service("/".to_string(), endpoint),
         );
 
-        let error = init_with_config(router_service::empty().await, Arc::new(configuration), mm)
+        let error = init_with_config(router::service::empty().await, Arc::new(configuration), mm)
             .await
             .unwrap_err();
 
