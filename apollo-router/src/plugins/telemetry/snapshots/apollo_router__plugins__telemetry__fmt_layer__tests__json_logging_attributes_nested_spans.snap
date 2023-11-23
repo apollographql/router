@@ -1,0 +1,7 @@
+---
+source: apollo-router/src/plugins/telemetry/fmt_layer.rs
+expression: buff.to_string()
+---
+{"timestamp":"[timestamp]","level":"ERROR","message":"Hello from nested test","http.method":"GET","target":"apollo_router::plugins::telemetry::fmt_layer::tests","spans":[{"another":2,"custom_dyn":"test","first":"one","name":"test"},{"graphql.operation.kind":"Subscription","inner":-42,"two":"two","name":"nested_test"}],"resource":{}}
+{"timestamp":"[timestamp]","level":"INFO","message":"Hello from test","event_attr":"foo","target":"apollo_router::plugins::telemetry::fmt_layer::tests","spans":[{"another":2,"custom_dyn":"test","first":"one","name":"test"}],"resource":{}}
+

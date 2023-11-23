@@ -32,7 +32,7 @@ where
 #[derive(Clone)]
 pub(crate) struct RedisCacheStorage {
     inner: Arc<RedisClient>,
-    ttl: Option<Duration>,
+    pub(crate) ttl: Option<Duration>,
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -160,6 +160,10 @@ impl RedisCacheStorage {
             inner: Arc::new(client),
             ttl: config.ttl,
         })
+    }
+
+    pub(crate) fn ttl(&self) -> Option<Duration> {
+        self.ttl
     }
 
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {

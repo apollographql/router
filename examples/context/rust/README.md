@@ -25,14 +25,14 @@ sequenceDiagram
 
     Client->>SupergraphService: request
     SupergraphService->>QueryPlannerService: plan
-    QueryPlannerService-->>SupergraphService:
+    QueryPlannerService-->>SupergraphService: 
     SupergraphService->>ExecutionService: execute
     ExecutionService-)SubgraphService(s): sub-request
-    SubgraphService(s)--)ExecutionService:
+    SubgraphService(s)--)ExecutionService: 
     ExecutionService-)SubgraphService(s): sub-request
-    SubgraphService(s)--)ExecutionService:
+    SubgraphService(s)--)ExecutionService: 
     ExecutionService-)SubgraphService(s): sub-request
-    SubgraphService(s)--)ExecutionService:
+    SubgraphService(s)--)ExecutionService: 
     ExecutionService-->>SupergraphService: response
     SupergraphService-->>Client: response
 ```

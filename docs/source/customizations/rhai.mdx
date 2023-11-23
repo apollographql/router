@@ -375,6 +375,31 @@ fn process_response(response) {
 }
 ```
 
+<Caution>
+
+**Accessing a non-existent header throws an exception**. 
+
+To safely check for the existence of a header before reading it, use `request.headers.contains("header-name")`. 
+
+When using `contains` within `subgraph_service`, you must assign your headers to a temporary local variable. Otherwise, `contains` throws an exception that it "cannot mutate" the original request.
+
+For example, the following `subgraph_service` function checks whether the `x-custom-header` exists before processing it.
+
+```rhai
+// Ensure existence of header before processing
+fn subgraph_service(service, subgraph){
+    service.map_request(|request|{
+        // Reassign to local variable, as contains cannot modify request
+        let headers = request.headers; 
+        if headers.contains("x-custom-header") {
+            // Process existing header
+        }
+    });
+}
+```
+
+</Caution>
+
 ### Converting cookies to headers
 
 This example converts cookies into headers for transmission to subgraphs. There is a complete working example (with tests) of this in the [examples/cookies-to-headers directory](https://github.com/apollographql/router/tree/main/examples/cookies-to-headers).

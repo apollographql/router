@@ -121,7 +121,6 @@ register_plugin!("experimental", "expose_query_plan", ExposeQueryPlan);
 
 #[cfg(test)]
 mod tests {
-    use once_cell::sync::Lazy;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use tower::Service;
@@ -131,19 +130,6 @@ mod tests {
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::MockedSubgraphs;
-
-    static EXPECTED_RESPONSE_WITH_QUERY_PLAN: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(include_str!(
-            "../../tests/fixtures/expected_response_with_queryplan.json"
-        ))
-        .unwrap()
-    });
-    static EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(include_str!(
-            "../../tests/fixtures/expected_response_without_queryplan.json"
-        ))
-        .unwrap()
-    });
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
@@ -204,9 +190,8 @@ mod tests {
 
     async fn execute_supergraph_test(
         query: &str,
-        expected: &Response,
         mut supergraph_service: supergraph::BoxCloneService,
-    ) {
+    ) -> Response {
         let request = supergraph::Request::fake_builder()
             .query(query.to_string())
             .variable("first", 2usize)
@@ -214,7 +199,7 @@ mod tests {
             .build()
             .expect("expecting valid request");
 
-        let response = supergraph_service
+        supergraph_service
             .ready()
             .await
             .unwrap()
@@ -223,25 +208,13 @@ mod tests {
             .unwrap()
             .next_response()
             .await
-            .unwrap();
-
-        let response = serde_json::to_string_pretty(&response).unwrap();
-        let expected = serde_json::to_string_pretty(expected).unwrap();
-        for diff in diff::lines(&response, &expected) {
-            match diff {
-                diff::Result::Left(l) => println!("-{}", l),
-                diff::Result::Both(l, _) => println!(" {}", l),
-                diff::Result::Right(r) => println!("+{}", r),
-            }
-        }
-        assert_eq!(response, expected);
+            .unwrap()
     }
 
     #[tokio::test]
     async fn it_expose_query_plan() {
-        execute_supergraph_test(
+        let response = execute_supergraph_test(
             VALID_QUERY,
-            &EXPECTED_RESPONSE_WITH_QUERY_PLAN,
             build_mock_supergraph(serde_json::json! {{
                 "plugins": {
                     "experimental.expose_query_plan": true
@@ -250,10 +223,11 @@ mod tests {
             .await,
         )
         .await;
+        insta::assert_json_snapshot!(serde_json::to_value(response).unwrap());
+
         // let's try that again
-        execute_supergraph_test(
+        let response = execute_supergraph_test(
             VALID_QUERY,
-            &EXPECTED_RESPONSE_WITH_QUERY_PLAN,
             build_mock_supergraph(serde_json::json! {{
                 "plugins": {
                     "experimental.expose_query_plan": true
@@ -262,6 +236,8 @@ mod tests {
             .await,
         )
         .await;
+
+        insta::assert_json_snapshot!(serde_json::to_value(response).unwrap());
     }
 
     #[tokio::test]
@@ -272,11 +248,8 @@ mod tests {
             }
         }})
         .await;
-        execute_supergraph_test(
-            VALID_QUERY,
-            &EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN,
-            supergraph,
-        )
-        .await;
+        let response = execute_supergraph_test(VALID_QUERY, supergraph).await;
+
+        insta::assert_json_snapshot!(serde_json::to_value(response).unwrap());
     }
 }

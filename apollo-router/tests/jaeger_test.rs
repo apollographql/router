@@ -333,6 +333,18 @@ fn verify_router_span_fields(trace: &Value) -> Result<(), BoxError> {
             .get(0),
         Some(&&Value::String("1.0".to_string()))
     );
+    assert_eq!(
+        router_span
+            .select_path("$.tags[?(@.key == 'http.request.method')].value")?
+            .get(0),
+        Some(&&Value::String("POST".to_string()))
+    );
+    assert_eq!(
+        router_span
+            .select_path("$.tags[?(@.key == 'http.request.header.x-not-present')].value")?
+            .get(0),
+        Some(&&Value::String("nope".to_string()))
+    );
 
     Ok(())
 }
@@ -391,6 +403,12 @@ fn verify_supergraph_span_fields(
             .get(0)
             .is_none(),);
     }
+    assert_eq!(
+        supergraph_span
+            .select_path("$.tags[?(@.key == 'graphql.operation.type')].value")?
+            .get(0),
+        Some(&&Value::String("query".to_string()))
+    );
 
     assert_eq!(
         supergraph_span

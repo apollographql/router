@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-pub(crate) use self::execution_service::*;
+pub(crate) use self::execution::service::*;
 pub(crate) use self::query_planner::*;
 pub(crate) use self::subgraph_service::*;
-pub(crate) use self::supergraph_service::*;
+pub(crate) use self::supergraph::service::*;
 use crate::graphql::Request;
 use crate::http_ext;
 pub use crate::http_ext::TryIntoHeaderName;
@@ -18,22 +18,19 @@ pub(crate) use crate::services::router::Request as RouterRequest;
 pub(crate) use crate::services::router::Response as RouterResponse;
 pub(crate) use crate::services::subgraph::Request as SubgraphRequest;
 pub(crate) use crate::services::subgraph::Response as SubgraphResponse;
+pub(crate) use crate::services::supergraph::service::SupergraphCreator;
 pub(crate) use crate::services::supergraph::Request as SupergraphRequest;
 pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
-pub(crate) use crate::services::supergraph_service::SupergraphCreator;
 
 pub mod execution;
-mod execution_service;
 pub(crate) mod external;
 pub(crate) mod layers;
 pub(crate) mod new_service;
 pub(crate) mod query_planner;
 pub mod router;
-pub(crate) mod router_service;
 pub mod subgraph;
 pub(crate) mod subgraph_service;
 pub mod supergraph;
-mod supergraph_service;
 pub mod transport;
 pub(crate) mod trust_dns_connector;
 
