@@ -8,55 +8,33 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🐛 Fixes
 
-### Authorization: Fix fragment filtering ([Issue #4060](https://github.com/apollographql/router/issues/4060))
+### Authorization: Filtered fragments remove corresponding fragment spreads ([Issue #4060](https://github.com/apollographql/router/issues/4060))
 
-If a fragment was removed, whether because its condition cannot be fulfilled or its selections were removed, then the corresponding fragment spreads must be removed from the filtered query.
-
-This also fixes the error paths related to fragments: before, the path started at the fragment definition, while now the fragment's errors are added at the point of application
+When fragments have been removed because they do not meet the authorization requirements to be queried, or in the case that their conditions cannot be fulfilled, any related fragment spreads which remain will be now be removed from the operation before execution.  Additionally, fragment error paths are now applied at the point that the fragment use.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4155
 
-### special case for __typename in authorization ([PR #3821](https://github.com/apollographql/router/pull/3821))
+### Authorization: Maintain a special case for `__typename` ([PR #3821](https://github.com/apollographql/router/pull/3821))
 
-When evaluating authorization directives on fields returning interfaces,
-we require the usage of fragments with type conditions if the interface
-implementors have different security requirements. For the __typename
-field though, we must make an exception, because it should be available
-for all implementors
-
+When evaluating authorization directives on fields returning interfaces, the special GraphQL `__typename` field will be maintained as an exception since it must work for _all_ implementors
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3821
 
-### Replace final group of futures channels with tokio channels ([Issue #4103](https://github.com/apollographql/router/issues/4103))
-
-Replace more futures channels with tokio channels to ensure that channel bounds are respected as expected.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4138
-
-### Ensure that license_stream and files bounded channels are bounded ([Issue #4109](https://github.com/apollographql/router/issues/4109)), ([Issue #4110](https://github.com/apollographql/router/issues/4110))
-
-Convert `futures` channels to `tokio` channels to ensure that channel bounds are correctly observed.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4111
-
-### Enfore JWT expiration for subscriptions ([Issue #3947](https://github.com/apollographql/router/issues/3947))
+### Enforce JWT expiration for subscriptions ([Issue #3947](https://github.com/apollographql/router/issues/3947))
 
 If a JWT expires whilst a subscription is executing, the subscription should be terminated. This also applies to deferred responses.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4166
 
-### Convert notification from futures channels to tokio channels ([Issue #4117](https://github.com/apollographql/router/issues/4117))
+### Improved channel bounding via conversion of `futures` channels into `tokio` channels ([Issue #4103](https://github.com/apollographql/router/issues/4103), [Issue #4109](https://github.com/apollographql/router/issues/4109), [Issue #4110](https://github.com/apollographql/router/issues/4110), [Issue #4117](https://github.com/apollographql/router/issues/4117))
 
-Convert `futures` channels to `tokio` channels to ensure that channel bounds are correctly observed.
+The use of `futures` channels have been converted to `tokio` channels which should ensure that channel bounds are observed correctly.  We hope this brings some additional stability and predictability to the memory footprint.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4118
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4111, https://github.com/apollographql/router/pull/4118, https://github.com/apollographql/router/pull/4138
 
-### Use less recursion in GraphQL parser ([Issue #4142](https://github.com/apollographql/router/issues/4142))
+### Reduce recursion in GraphQL parsing via `apollo-parser` improvements ([Issue #4142](https://github.com/apollographql/router/issues/4142))
 
-This updates the Router with the latest `apollo-parser` version,
-which removes unnecessary use of recursion for parsing repeated syntax elements
-such as enum values and union members in type definitions.
-Some documents that used to hit the parser’s recursion limit will now successfully parse.
+Improvements to `apollo-parser` are brought in which remove unnecessary recursion when parsing repeated syntax elements, such as enum values and union members, in type definitions.  Some documents that used to hit the parser’s recursion limit will now successfully parse.
 
 By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/4167
 
@@ -66,17 +44,11 @@ A bug in batch manipulation meant that the last element in a batch was treated a
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4144
 
-### Port to apollo-compiler 1.0 beta ([PR #4038](https://github.com/apollographql/router/pull/4038))
+### Port to `apollo-compiler` usage to `1.0-beta` ([PR #4038](https://github.com/apollographql/router/pull/4038))
 
-Version 1.0 is a near-complete rewrite of `apollo-compiler`.
-Using it in the Router unblocks a lot of upcoming work.
+Version 1.0 of `apollo-compiler` is a near-complete rewrite and introducing it in the Router unblocks a lot of upcoming work, including our _Rust-ification_ of the query planner.
 
-As a more immediate benefit, some serialization-related bugs including 
-[Issue #3541](https://github.com/apollographql/router/issues/3541) are fixed.
-The representation of GraphQL documents in previous compiler versions was immutable.
-When modifying a query (such as to remove `@authenticated` fields from an unauthenticated request)
-the Router would build a new data structure with `apollo-encoder`, serialize it, and reparse it.
-`apollo-compiler`` 1.0 allows mutating a document in-place, skipping the serialization step entirely.
+As an immediate benefit, some serialization-related bugs — including [Issue #3541](https://github.com/apollographql/router/issues/3541) — are fixed.  Additionally, the representation of GraphQL documents within `apollo-compiler` is now mutable.  This means that when modifying a query (such as to remove `@authenticated` fields from an unauthenticated request) the Router no longer needs to construct a new data structure (with `apollo-encoder`), serialize it, and reparse it.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/4038
 
@@ -88,9 +60,11 @@ By [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollograp
 
 ## 📃 Configuration
 
-### Adds a `poll_interval` option to the JWKS endpoint in the Authentication plugin ([Issue #4185](https://github.com/apollographql/router/issues/4185))
+### Authentication: Allow customizing a `poll_interval` for the JWKS endpoint configuration ([Issue #4185](https://github.com/apollographql/router/issues/4185))
 
-In order to avoid rate limiting concerns on JWKS endpoints, this introduces a new `poll_interval` configuration option to set the interval per each JWKS URL. The configuration option takes in a human-readable duration (e.g. `60s` or `1minute 30s`). Example that sets interval to 30 seconds: 
+In order to compensate for variances in rate-limiting requirements for JWKS endpoints, a new `poll_interval` configuration option exists to adjust the polling interval for each JWKS URL. When not specified for a URL, the polling interval will remain as the default of 60 seconds.
+
+The configuration option accepts a human-readable duration (e.g., `60s` or `1minute 30s`).  For example, the following configuration snippet sets the polling interval for a single JWKS URL to be every 30 seconds:
 
 ```yml
 authentication:
@@ -103,37 +77,27 @@ authentication:
 
 By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/4212
 
-### Configuration: allow custom health check endpoint ([Issue #2938](https://github.com/apollographql/router/issues/2938))
+### Allow customization of the health check endpoint path ([Issue #2938](https://github.com/apollographql/router/issues/2938))
 
 Adds a configuration option for custom health check endpoints, `health_check.path`, with `/health` as the default value.
 
-
-
 By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/4145
-
-### Configurable JWKS Poll Interval ([Issue #4185](https://github.com/apollographql/router/issues/4185))
-
-The poll interval was previously hardcoded to 60 seconds. That remains the default, but can now be configured through the new `poll_interval` configuration option under each JWKS entry to avoid becoming rate-limited per endpoint.
-
-By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/4212
 
 ## 📚 Documentation
 
-### docs: clarify coprocessor router stage responses ([PR #4189](https://github.com/apollographql/router/pull/4189))
+### Coprocessors: Clarify capabilities of `RouterRequest` and `RouterResponse`'s `control` responses ([PR #4189](https://github.com/apollographql/router/pull/4189))
 
-The coprocessor RouterRequest and RouterResponse stages fully support `control: { break: 500 }` but the response body must be a string. This change provides examples in the "Terminating a client request" section.
-
-
-<!-- start metadata -->
----
+The coprocessor `RouterRequest` and `RouterResponse` stages already fully support `control: { break: 500 }`, but the response body *must* be a string. The documentation has been improved to provides examples in the [Terminating a client request](https://www.apollographql.com/docs/router/customizations/coprocessor#terminating-a-client-request) section.
 
 By [@lennyburdette](https://github.com/lennyburdette) in https://github.com/apollographql/router/pull/4189
 
 ## 🧪 Experimental
 
-### support TTL in redis storage ([Issue #4163](https://github.com/apollographql/router/issues/4163))
+### Support time-to-live (TTL) expiration for distributed cache entries ([Issue #4163](https://github.com/apollographql/router/issues/4163))
 
-It is now possible to set an expiration for distributed caching entries, both for APQ and query planning caches, using the configuration file:
+It is now possible to use configuration to set an expiration (time-to-live or TTL) for distributed caching (i.e., Redis) entries, both for APQ and query planning caches (using either `apq` or `query_planning`, respectively).  By default, entries have no expiration.
+
+For example, to define the TTL for cached query plans stored in Redis to be 24 hours, the following configuration snippet could be used which specifies `ttl: 24h`.
 
 ```yaml title="router.yaml"
 supergraph:
@@ -145,9 +109,9 @@ supergraph:
         ttl: 24h # Optional, by default no expiration
 ```
 
+Similarly, it is possible to set the cache for APQ entries.  For details, see the [Distributed APQ caching](https://www.apollographql.com/docs/router/configuration/distributed-caching#distributed-apq-cachinghttps://www.apollographql.com/docs/router/configuration/distributed-caching#distributed-apq-caching) documentation.
+
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4164
-
-
 
 # [1.34.0] - 2023-11-15
 
@@ -155,7 +119,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Authorization: dry run option ([Issue #3843](https://github.com/apollographql/router/issues/3843))
 
-The `authorization.dry_run` option allows you to execute authorization directives without modifying a query while still returning the list of affected paths as top-level errors in a response. Use it to test authorization without breaking existing traffic. 
+The `authorization.dry_run` option allows you to execute authorization directives without modifying a query while still returning the list of affected paths as top-level errors in a response. Use it to test authorization without breaking existing traffic.
 
 For details, see the documentation for [`authorization.dry_run`](https://www.apollographql.com/docs/router/configuration/authorization#dry_run).
 
