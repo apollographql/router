@@ -538,15 +538,13 @@ Suppose you only want a user with a `read_profile` policy to have access to thei
 
 ```graphql
 type Query {
-  me: User @join__field(graph: ACCOUNTS) @policy(policies: [["read_profile"]])
+  me: User @policy(policies: [["read_profile"]])
 }
 
-type User
-  @join__owner(graph: ACCOUNTS)
-  @join__type(graph: ACCOUNTS, key: "id") {
-  id: ID! @join__field(graph: ACCOUNTS)
-  username: String @join__field(graph: ACCOUNTS)
-  credit_card: String @join__field(graph: ACCOUNTS) @policy(policies: [["read_credit_card"]])
+type User {
+  id: ID!
+  username: String
+  credit_card: String @policy(policies: [["read_credit_card"]])
 }
 ```
 
@@ -589,7 +587,6 @@ A user can read their own profile, so `read_profile` will succeed. But only the 
 
 ```json
 {
-    // Control properties
     "version": 1,
     "stage": "SupergraphRequest",
     "control": "continue",
