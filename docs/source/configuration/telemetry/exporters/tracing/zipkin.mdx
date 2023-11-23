@@ -4,6 +4,7 @@ description: Collect and export tracing information from the Apollo Router
 ---
 
 Enable and configure the [Zipkin](https://zipkin.io/) exporter endpoint in the Apollo Router.
+
 For general tracing configuration, refer to [Router Tracing Configuration](./overview).
 
 ## Configuration
@@ -17,6 +18,38 @@ telemetry:
        zipkin:
          enabled: true
    
-         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:9411/api/v2/spans)
+         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:9411/api/v2/span)
          endpoint: "http://${env.ZIPKIN_HOST}:9411/api/v2/spans}"   
 ```
+
+### `enabled`
+Set to true to enable the Zipkin exporter. Defaults to false.
+
+### `endpoint`
+The Zipkin endpoint. Defaults to http://127.0.0.1:9411/api/v2/span
+
+### `batch_processor`
+import BatchProcessor from '../../../../../shared/batch-processor-preamble.mdx';
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      zipkin: 
+        batch_processor: 
+          max_export_batch_size: 512
+          max_concurrent_exports: 1
+          max_export_timeout: 30s 
+          max_queue_size: 2048
+          scheduled_delay: 5s
+```
+
+#### `batch_processor` configuration reference
+import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
+
+## Zipkin configuration reference
+
+| Attribute         | Default                             | Description                    |
+|-------------------|-------------------------------------|--------------------------------|
+| `enabled`         | `false`                             | Enable the Zipkin exporter.    |
+| `endpoint`        | `http://127.0.0.1:9411/api/v2/span` | The endpoint to send spans to. |
+| `batch_processor` |                                     | The batch processor settings.  |

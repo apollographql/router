@@ -31,10 +31,6 @@ telemetry:
   
         # Optional Grpc configuration
         grpc:
-          domain_name: "my.domain"
-          key: ""
-          ca: ""
-          cert: ""
           metadata:
             foo: bar
   
@@ -47,18 +43,96 @@ telemetry:
           max_queue_size: 10000
 ```
 
+
+### `enabled`
+Set to true to enable the Zipkin exporter. Defaults to false.
+
+### `endpoint`
+The OTLP endpoint.
+
+Defaults to:
+* http://127.0.0.1:4317 for gRPC
+* http://127.0.0.1:4318 for HTTP
+
+### `grpc`
+Settings specific to the gRPC protocol for setting a custom SSL certificate, domain name, and metadata.
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      otlp:
+        grpc:
+          domain_name: "<my-domain>"
+          key: "<key>"
+          ca: "<certificate-authority>"
+          cert: "<certificate>"
+          metadata:
+            key1: value1
+            key2: value2    
+```
+
 <Tip>
 
-Use the [variable expansion feature](./overview#variable-expansion) for referencing environment variables and file paths in YAML configuration files. Use `env.` and `file.` prefixes, for example `${file.ca.txt}`.
+Use the [variable expansion feature](../../overview#variable-expansion) for referencing environment variables and file paths in YAML configuration files. Use `env.` and `file.` prefixes, for example `${file.ca.txt}`.
 
 </Tip>
 
+See [gRPC Authentication](https://grpc.io/docs/guides/auth/) for more information.
 
-### `endpoint`
+#### gRPC configuration reference
+
+| Attribute     | Description                            |
+|---------------|----------------------------------------|
+| `domain_name` | An optional domain name.               |
+| `key`         | An optional key.                       |
+| `ca`          | An optional certificate authority.     |
+| `cert`        | An optional certificate.               |
+| `metadata`    | A map of headers to send with requests |
 
 
-### `protocol`
+### `http`
+Settings specific to the HTTP protocol for setting custom headers.
 
-### `grpc`
+```yaml
+http:
+  headers:
+    key1: value1
+    key2: value2    
+```
+
+#### HTTP configuration reference
+
+| Attribute | Description                            |
+|-----------|----------------------------------------|
+| `headers` | A map of headers to send with requests |
+
 
 ### `batch_processor`
+import BatchProcessor from '../../../../../shared/batch-processor-preamble.mdx';
+```yaml
+telemetry:
+  exporters:
+    metrics:
+      otlp: 
+        batch_processor: 
+          max_export_batch_size: 512
+          max_concurrent_exports: 1
+          max_export_timeout: 30s 
+          max_queue_size: 2048
+          scheduled_delay: 5s
+```
+
+#### `batch_processor` configuration reference
+import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
+
+## OTLP configuration reference
+
+| Attribute       | Values                 | Default                                                               | Description                                                            |
+|-----------------|------------------------|-----------------------------------------------------------------------|------------------------------------------------------------------------|
+| `enabled`       |                        | `false`                                                               | Enable the OTLP exporter.                                              |
+| `protocol`      | `grpc`\|`http`         | `grpc`                                                                | Enable the OTLP exporter.                                              |
+| `endpoint`      |                        | `http://127.0.0.1:4317` for gRPC and `http://127.0.0.1:4318` for HTTP | The endpoint to send spans to.                                         |
+| `grpc`          |                        |                                                                       | Configuration specific to gRPC protocol.                               |
+| `http`          |                        |                                                                       | Configuration specific to HTTP protocol.                               |
+| `temporarility` | `delta`\|`cumulative`  |                                                                       | See the documentation for your APM to see what this should be set to.  |

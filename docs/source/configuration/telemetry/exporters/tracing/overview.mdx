@@ -9,6 +9,7 @@ The Apollo Router supports tracing with [OpenTelemetry](https://opentelemetry.io
 * [Jaeger](./jaeger)
 * [Zipkin](./zipkin)
 * [Datadog](./datadog)
+* [New Relic](./new-relic)
 * [OpenTelemetry Protocol (OTLP)](./opentelemetry) over HTTP or gRPC
 
 The Apollo Router generates [**spans**](./spans) that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
@@ -178,44 +179,19 @@ telemetry:
 
 Using this configuration you will have a response header called `my-trace-id` containing the trace ID. It could help you to debug a specific query if you want to grep your log with this trace id to have more context.
 
-## Batch Processor
-
-All trace exporters (apollo|datadog|zipkin|jaeger|otlp) have batch span processor configuration, it will be necessary to tune this if you see the following in your logs:
-
-`OpenTelemetry trace error occurred: cannot send span to the batch span processor because the channel is full`
-
-
-You can use the following configurations for tuning:
-
-* `scheduled_delay` - The delay from receiving the first span to the batch being sent.
-* `max_concurrent_exports` - The maximum number of overlapping export requests. For instance if ingest is taking a long time to respond there may be several overlapping export requests.
-* `max_export_batch_size` - The number of spans to include in a batch. Your ingest may have max message size limits.
-* `max_export_timeout` - The timeout for sending spans before dropping the data.
-* `max_queue_size` - The maximum number of spans to be buffered before dropping span data.
-
-```yaml title="router.yaml"
+## `batch_processor`
+import BatchProcessor from '../../../../../shared/batch-processor-preamble.mdx';
+```yaml
 telemetry:
-  # Apollo tracing
-  apollo:
-    batch_processor:
-      scheduled_delay: 100ms
-      max_concurrent_exports: 1000
-      max_export_batch_size: 10000
-      max_export_timeout: 100s
-      max_queue_size: 10000
   exporters:
-     tracing:
-       # Datadog
-       datadog:
-         enabled: true
-         batch_processor:
-           scheduled_delay: 100ms
-           max_concurrent_exports: 1000
-           max_export_batch_size: 10000
-           max_export_timeout: 100s
-           max_queue_size: 10000
-         endpoint: default
-       # Jaeger
-       # Otlp
-       # Zipkin
+    tracing:
+      otlp: 
+        batch_processor: 
+          max_export_batch_size: 512
+          max_concurrent_exports: 1
+          max_export_timeout: 30s 
+          max_queue_size: 2048
+          scheduled_delay: 5s
 ```
+### `batch_processor` configuration reference
+import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';

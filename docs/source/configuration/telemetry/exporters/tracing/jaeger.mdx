@@ -4,11 +4,12 @@ description: Collect and export tracing information from the Apollo Router
 ---
 
 Enable and configure the [Jaeger](https://www.jaegertracing.io/) exporter endpoint in the Apollo Router.
+
 For general tracing configuration, refer to [Router Tracing Configuration](./overview).
 
-## OTLP configuration
+## Jaeger via OTLP configuration
 
-Since Jaeger v1.35.0, [Jaeger supports native OTLP ingestion](https://medium.com/jaegertracing/introducing-native-support-for-opentelemetry-in-jaeger-eb661be8183c) and it's the preferred way to send traces to Jaeger.
+Since Jaeger v1.35.0, [Jaeger supports native OTLP ingestion](https://medium.com/jaegertracing/introducing-native-support-for-opentelemetry-in-jaeger-eb661be8183c), and it's the preferred way to send traces to Jaeger.
 
 When running Jaeger with Docker, make sure that port **4317** is exposed and that `COLLECTOR_OTLP_ENABLED` is set to `true`. For example:
 
@@ -28,13 +29,14 @@ telemetry:
   exporters:
      tracing:
        otlp:
-         enabled: true
-   
+         enabled: true   
          # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
          endpoint: "http://${env.JAEGER_HOST}:4317"
 ```
 
-## Native configuration
+See [OTLP configuration](./opentelemetry#configuration) for more details on settings.
+
+## Jaeger via Native configuration
 
 <Caution>
 

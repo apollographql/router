@@ -32,31 +32,31 @@ Each service supports a unique set of standard attributes.
 
 Standard attributes of the `router` service:
 
-| Attribute                      | Value                               | Description                                                                                                                                        |
-|--------------------------------|-------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
-| `error.type`                   |                                     | Describes a class of error the operation ended with                                                                                           |
-| `http.request.body.size`       |                                     | The size of the request payload body in bytes                                                                                                 |
-| `http.request.method`          |                                     | HTTP request method                                                                                                                   |
-| `http.request.method.original` |                                     | Original HTTP method sent by the client in the request line                                                                                       |
-| `http.response.body.size`      |                                     | The size of the response payload body in bytes                                                                                                    |
-| `http.response.status_code`    |                                     | HTTP response status code                                                                                                                       |
-| `network.protocol.name`        |                                     | OSI application layer or non-OSI equivalent                                                                                                      |
-| `network.protocol.version`     |                                     | Version of the protocol specified in network.protocol.name                                                                                      |
-| `network.transport`            |                                     | OSI transport layer                                                                                                                        |
-| `network.type`                 |                                     | OSI network layer or non-OSI equivalent                                                                                                      |
-| `user_agent.original`          |                                     | Value of the HTTP User-Agent header sent by the client                                                                                        |
-| `client.address`               |                                     | Client address - domain name if available without reverse DNS lookup, otherwise IP address or Unix domain socket name                       |
-| `client.port`                  |                                     | The port of the original client behind all proxies, if known (e.g. from Forwarded or a similar header). Otherwise, the immediate client peer port |
-| `http.route`                   |                                     | The matched route (path template in the format used by the respective server framework)                                                          |
-| `network.local.address`        |                                     | Local socket address. Useful in case of a multi-IP host                                                                                        |
-| `network.local.port`           |                                     | Local socket port. Useful in case of a multi-port host                                                                                          |
-| `network.peer.address`         |                                     | Peer address of the network connection - IP address or Unix domain socket name                                                                  |
-| `network.peer.port`            |                                     | Peer port number of the network connection                                                                                                        |
-| `server.address`               |                                     | Name of the local HTTP server that received the request                                                                                         |
-| `server.port`                  |                                     | Port of the local HTTP server that received the request                                                                                           |
-| `url.path`                     |                                     | The URI path component                                                                                                                             |
-| `url.query`                    |                                     | The URI query component                                                                                                                            |
-| `url.scheme`                   |                                     | The scheme portion of the URL, such as "https" or "http"                                                                                          |
+| Attribute                      | Values | Description                                                                                                                                        |
+|--------------------------------|--------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `error.type`                   |        | Describes a class of error the operation ended with                                                                                           |
+| `http.request.body.size`       |        | The size of the request payload body in bytes                                                                                                 |
+| `http.request.method`          |        | HTTP request method                                                                                                                   |
+| `http.request.method.original` |        | Original HTTP method sent by the client in the request line                                                                                       |
+| `http.response.body.size`      |        | The size of the response payload body in bytes                                                                                                    |
+| `http.response.status_code`    |        | HTTP response status code                                                                                                                       |
+| `network.protocol.name`        |        | OSI application layer or non-OSI equivalent                                                                                                      |
+| `network.protocol.version`     |        | Version of the protocol specified in network.protocol.name                                                                                      |
+| `network.transport`            |        | OSI transport layer                                                                                                                        |
+| `network.type`                 |        | OSI network layer or non-OSI equivalent                                                                                                      |
+| `user_agent.original`          |        | Value of the HTTP User-Agent header sent by the client                                                                                        |
+| `client.address`               |        | Client address - domain name if available without reverse DNS lookup, otherwise IP address or Unix domain socket name                       |
+| `client.port`                  |        | The port of the original client behind all proxies, if known (e.g. from Forwarded or a similar header). Otherwise, the immediate client peer port |
+| `http.route`                   |        | The matched route (path template in the format used by the respective server framework)                                                          |
+| `network.local.address`        |        | Local socket address. Useful in case of a multi-IP host                                                                                        |
+| `network.local.port`           |        | Local socket port. Useful in case of a multi-port host                                                                                          |
+| `network.peer.address`         |        | Peer address of the network connection - IP address or Unix domain socket name                                                                  |
+| `network.peer.port`            |        | Peer port number of the network connection                                                                                                        |
+| `server.address`               |        | Name of the local HTTP server that received the request                                                                                         |
+| `server.port`                  |        | Port of the local HTTP server that received the request                                                                                           |
+| `url.path`                     |        | The URI path component                                                                                                                             |
+| `url.query`                    |        | The URI query component                                                                                                                            |
+| `url.scheme`                   |        | The scheme portion of the URL, such as "https" or "http"                                                                                          |
 
 <Note>
 
@@ -79,7 +79,7 @@ telemetry:
 
 Standard attributes of the `supergraph` service:
 
-| Attribute                   | Value                               | Description                                 |
+| Attribute                   | Values                              | Description                                 |
 |-----------------------------|-------------------------------------|---------------------------------------------|
 | `graphql.operation.name`    |                                     | The operation name from the graphql query   |
 | `graphql.operation.type`    | `query`\|`mutation`\|`subscription` | The operation kind from the subgraph query  |
@@ -90,7 +90,7 @@ Standard attributes of the `supergraph` service:
 
 Standard attributes of the `subgraph` service:
 
-| Attribute                          | Value                               | Description                                    |
+| Attribute                          | Values                              | Description                                    |
 |------------------------------------|-------------------------------------|------------------------------------------------|
 | `subgraph.name`                    |                                     | The name of the subgraph                       |
 | `subgraph.graphql.operation.name`  |                                     | The operation name from the subgraph query     |

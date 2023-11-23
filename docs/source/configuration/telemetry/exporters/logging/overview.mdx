@@ -84,7 +84,7 @@ The service name can be set by an environment variable or in `router.yaml`, with
 
 1. `OTEL_SERVICE_NAME` environment variable
 2. `OTEL_RESOURCE_ATTRIBUTES` environment variable
-3. `telemetry.logging.common.service_name` in `router.yaml`
+3. `telemetry.exporters.logging.common.service_name` in `router.yaml`
 
       <ExpansionPanel title="Example service_name">
 
@@ -102,11 +102,11 @@ The service name can be set by an environment variable or in `router.yaml`, with
       </ExpansionPanel>
 
 
-4. `telemetry.logging.common.resource` in `router.yaml`
+4. `telemetry.exporters.logging.common.resource` in `router.yaml`
 
       <ExpansionPanel title="Example resource">
 
-      Example setting service name in `telemetry.logging.common.resource`:
+      Example setting service name in `telemetry.exporters.logging.common.resource`:
 
       ```yaml title="router.yaml"
       telemetry:
