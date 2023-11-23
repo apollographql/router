@@ -102,7 +102,7 @@
         "Configuration": "/configuration/telemetry/exporters/metrics/overview",
         "Prometheus": "/configuration/telemetry/exporters/metrics/prometheus",
         "OpenTelemetry": "/configuration/telemetry/exporters/metrics/opentelemetry",
-        "Datadog (OTLP)": "/configuration/telemetry/exporters/metrics/datadog-otlp"
+        "Datadog (OTLP)": "/configuration/telemetry/exporters/metrics/datadog"
       },
       "Trace exporters": {
         "Configuration": "/configuration/telemetry/exporters/tracing/overview",

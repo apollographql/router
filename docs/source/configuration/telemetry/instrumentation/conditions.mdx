@@ -8,6 +8,8 @@ description:
 
 You can set conditions for when an [instrument](./instruments) should be mutated or an [event](./events) should be triggered.
 
+
+## Condition configuration
 Here is an example of a condition on a custom instrument:
 
 ```yaml title="future.router.yaml"
@@ -28,19 +30,6 @@ telemetry:
                   - "foo"
                   - response_header: x-resp-header
 ```
-
-### Condition configuration
-
-The available basic conditions:
-
-| Condition | Description                                             |
-|----------|----------------------------------------------------------|
-| `eq`     | An equality test between selectors or values             |
-| `not`    | A negated equality test between selectors or values      |
-| `all`    | A list of conditions that must all be true               |
-| `any`    | A list of conditions of which at least one must be true  |
-
-You can create complex conditions by using these basic conditions as building blocks.
 
 #### `eq`
 
@@ -108,3 +97,16 @@ any:
       - "val2"
       - request_header: x-req-header2
 ```
+
+### Condition configuration reference
+
+The available basic conditions:
+
+| Condition | Description                                             |
+|----------|----------------------------------------------------------|
+| `eq`     | An equality test between selectors or values             |
+| `not`    | A negated equality test between selectors or values      |
+| `all`    | A list of conditions that must all be true               |
+| `any`    | A list of conditions of which at least one must be true  |
+
+You can create complex conditions by using these basic conditions as building blocks.

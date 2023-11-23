@@ -3,13 +3,16 @@ title: OpenTelemetry exporter
 description: Enable and configure the OpenTelemetry Protocol (OTLP) exporter in the Apollo Router
 ---
 
-Enable and configure the OpenTelemetry Protocol (OTLP) exporter in the Apollo Router.
+Enable and configure the [Open Telemetry](https://www.opentelemetry.io/) exporter for metrics in the Apollo Router.
 
-## Enable OpenTelemetry exporter
+For general tracing configuration, refer to [Router Metrics Configuration](./overview).
 
-You can export metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) for processing and reporting metrics.
+Using the [Open Telemetry](https://www.opentelemetry.io/) OTLP protocol you can export metrics to any OTLP compatible receiver, including:
+* [Open Telemetry Collector](https://opentelemetry.io/docs/collector/)
+* [Datadog](https://www.datadoghq.com/) (see [configuration instructions](./datadog.mdx))
+* [Honeycomb](https://www.honeycomb.io/) (see [configuration instructions](./honecomb.mdx))
 
-To export metrics to OpenTelemetry Collector, enable the OTLP exporter and optionally customize its configuration in [`router.yaml`](./configuration/overview#yaml-config-file). For example: 
+## Open Telemetry configuration
 
 ```yaml title="router.yaml"
 telemetry:
@@ -49,3 +52,13 @@ telemetry:
 Use the [variable expansion feature](./overview#variable-expansion) for referencing environment variables and file paths in YAML configuration files. Use `env.` and `file.` prefixes, for example `${file.ca.txt}`.
 
 </Tip>
+
+
+### `endpoint`
+
+
+### `protocol`
+
+### `grpc`
+
+### `batch_processor`
