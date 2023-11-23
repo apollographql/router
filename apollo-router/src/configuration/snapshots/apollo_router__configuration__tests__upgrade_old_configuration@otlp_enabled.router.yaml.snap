@@ -4,12 +4,13 @@ expression: new_config
 ---
 ---
 telemetry:
-  tracing:
-    otlp:
-      endpoint: default
-      enabled: true
-  metrics:
-    otlp:
-      endpoint: default
-      enabled: true
+  exporters:
+    tracing:
+      otlp:
+        endpoint: default
+        enabled: true
+    metrics:
+      otlp:
+        endpoint: default
+        enabled: true
 

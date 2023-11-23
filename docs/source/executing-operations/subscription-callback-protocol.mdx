@@ -273,4 +273,54 @@ The following are common error states that can occur with this protcol:
 - **Emitter** receives an error HTTP status code from **Router**'s callback endpoint. 
   - If the error code is 404, **Emitter** should consider the associated subscription terminated by **Router**.
   - In other error cases, **Emitter** should consider the subscription terminated due to an unexpected error.
-- **Emitter** fails to send **Router** a [`heartbeat`](#heartbeat) or [`check`](#check) message for an active subscription every five seconds, causing **Router** to terminate that subscription.
+- **Emitter** fails to send **Router** a [`check`](#check) message for an active subscription every five seconds, causing **Router** to terminate that subscription.
+
+## Examples
+
+For the sake of clarity, the following examples demonstrate the callback protocol.
+
+### Streaming operation
+
+#### `subscription` operation
+
+1. _The Apollo Router_ receives a `subscription` operation
+2. _The Apollo Router_ generates an unique ID (uuid v4) for the following subscription
+3. _The Apollo Router_ sends a query containing a [GraphQL request payload](https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#request-parameters) with all callback data in `extensions`
+
+Example:
+
+```json
+{
+    "query": "subscription { userWasCreated { name reviews { body } } }",
+    "extensions": {
+        "subscription": {
+            "callback_url": "http://localhost:4000/callback/c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
+            "subscription_id": "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
+            "verifier": "XXX"
+        }
+    }
+}
+```
+
+4. _Event source_ receives the GraphQL `subscription` with all callback data directly in `extensions`.
+5. _Event source_ calls the callback endpoint given in `extensions` with a [`check`](#check) to init the subscription to _the Apollo Router_.
+
+Payload example for `POST` on `http://localhost:4000/callback/c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945`:
+
+```json
+{
+    "kind": "subscription",
+    "action": "check",
+    "id": "c4a9d1b8-dc57-44ab-9e5a-6e6189b2b945",
+    "verifier": "XXX"
+}
+```
+
+6. _Event source_ receives 204 HTTP status code from the call to the callback endpoint
+    - If an error happens or you don't receive 204 HTTP status code then directly return a >= 400 HTTP status code to the _Apollo Router_
+7. _Event source_ spawns a background task to listen on `subscription` events
+    - Every 5 seconds the _Event source_ must call the callback endpoint with a [`check` payload](#check) to heartbeat and confirm it's still listening to the subscription
+    - Every received events the _Event source_ calls the callback endpoint with a [`next` payload](#next)
+    - If an error appears the _Event source_ calls the callback endpoint with a [`complete` payload with errors field](#complete)
+    - If the stream of events is done then send a [`complete` payload WITHOUT errors field](#complete)
+8. _Event source_ returns empty body containing a new header `subscription-protocol: callback` in answer to the initial call from _Apollo Router_ 

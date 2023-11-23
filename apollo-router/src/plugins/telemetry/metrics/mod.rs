@@ -7,12 +7,12 @@ use http::header::HeaderName;
 use http::response::Parts;
 use http::HeaderMap;
 use multimap::MultiMap;
-use opentelemetry::sdk::metrics::reader::AggregationSelector;
-use opentelemetry::sdk::metrics::Aggregation;
-use opentelemetry::sdk::metrics::InstrumentKind;
-use opentelemetry::sdk::resource::ResourceDetector;
-use opentelemetry::sdk::Resource;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
+use opentelemetry_sdk::metrics::reader::AggregationSelector;
+use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::InstrumentKind;
+use opentelemetry_sdk::resource::ResourceDetector;
+use opentelemetry_sdk::Resource;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -430,9 +430,9 @@ impl AttributesForwardConf {
 }
 
 pub(crate) struct MetricsBuilder {
-    pub(crate) public_meter_provider_builder: opentelemetry::sdk::metrics::MeterProviderBuilder,
-    pub(crate) apollo_meter_provider_builder: opentelemetry::sdk::metrics::MeterProviderBuilder,
-    pub(crate) prometheus_meter_provider: Option<opentelemetry::sdk::metrics::MeterProvider>,
+    pub(crate) public_meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
+    pub(crate) apollo_meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
+    pub(crate) prometheus_meter_provider: Option<opentelemetry_sdk::metrics::MeterProvider>,
     pub(crate) custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     pub(crate) apollo_metrics_sender: Sender,
     pub(crate) resource: Resource,
@@ -474,13 +474,13 @@ impl ResourceDetector for ConfigResourceDetector {
 
 impl MetricsBuilder {
     pub(crate) fn new(config: &Conf) -> Self {
-        let resource = config.metrics.common.to_resource();
+        let resource = config.exporters.metrics.common.to_resource();
 
         Self {
             resource: resource.clone(),
-            public_meter_provider_builder: opentelemetry::sdk::metrics::MeterProvider::builder()
+            public_meter_provider_builder: opentelemetry_sdk::metrics::MeterProvider::builder()
                 .with_resource(resource.clone()),
-            apollo_meter_provider_builder: opentelemetry::sdk::metrics::MeterProvider::builder(),
+            apollo_meter_provider_builder: opentelemetry_sdk::metrics::MeterProvider::builder(),
             prometheus_meter_provider: None,
             custom_endpoints: MultiMap::new(),
             apollo_metrics_sender: Sender::default(),

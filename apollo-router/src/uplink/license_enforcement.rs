@@ -215,6 +215,26 @@ impl LicenseEnforcementReport {
                 .path("$.persisted_queries")
                 .name("Persisted queries")
                 .build(),
+            ConfigurationRestriction::builder()
+                .path("$.telemetry..spans.router")
+                .name("Advanced telemetry")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.telemetry..spans.supergraph")
+                .name("Advanced telemetry")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.telemetry..spans.subgraph")
+                .name("Advanced telemetry")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.telemetry..events")
+                .name("Advanced telemetry")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.telemetry..instruments")
+                .name("Advanced telemetry")
+                .build(),
         ]
     }
 
