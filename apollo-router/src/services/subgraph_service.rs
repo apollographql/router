@@ -280,7 +280,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             .map(|res| res.map_err(|e| Box::new(e) as BoxError))
     }
 
-    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
+    fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
         let subscription_config = (request.operation_kind == OperationKind::Subscription)
             .then(|| self.subscription_config.clone())
             .flatten();
@@ -399,6 +399,10 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                                 status_code: None,
                             }
                         })?;
+                        request.subgraph_request.headers_mut().append(
+                            ACCEPT,
+                            HeaderValue::from_static("application/json+graphql+callback/1.0"),
+                        );
 
                         let subscription_extension = SubscriptionExtension {
                             subscription_id,
@@ -718,7 +722,7 @@ async fn call_http(
         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
     request
         .headers_mut()
-        .insert(ACCEPT, APPLICATION_JSON_HEADER_VALUE.clone());
+        .append(ACCEPT, APPLICATION_JSON_HEADER_VALUE.clone());
     request
         .headers_mut()
         .append(ACCEPT, APP_GRAPHQL_JSON.clone());
