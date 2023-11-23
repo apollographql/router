@@ -97,7 +97,7 @@ The router then enforces these directives on all incoming requests.
 
 Before using the authorization directives in your subgraph schemas, you must:
 - Validate that your Apollo Router uses version `1.29.1` or later and is [connected to your GraphOS Enterprise organization](../enterprise-features/#enabling-enterprise-features)
-- Include **[claims](#configure-request-claims)** in requests made to the router
+- Include **[claims](#configure-request-claims)** in requests made to the router (for `@authenticated` and `@requiresScopes`)
 
 ### Configure request claims
 
@@ -422,7 +422,7 @@ If _every_ requested field requires authentication and a request is unauthentica
 
 </MinVersion>
 
-The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in a [Rhai script](../customizations/rhai/) or [coprocessor](../customizations/coprocessor). This enables custom authorization validation beyond authentication and scopes.
+The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in a [Rhai script](../customizations/rhai/) or [coprocessor](../customizations/coprocessor). This enables custom authorization validation beyond authentication and scopes. It is useful when we need more complex policy evaluation that verifying the presence of a claim value in a list (example: checking specific values in headers).
 
 The `@policy` directive includes a `policies` argument that defines an array of the required policies. The following example shows a policy that requires all roles from the claims object to contain the string `"support"`:
 
@@ -432,7 +432,7 @@ The `@policy` directive includes a `policies` argument that defines an array of 
 
 At the [`RouterService` level](../customizations/overview#the-request-lifecycle), the Apollo Router extracts the list of policies relevant to a request from the schema and then stores them in the request's context in `apollo_authorization::policies::required` as a map `policy -> null|true|false`.
 
-At the `SupergraphService` level, you must provide a Rhai script or coprocessor to evaluate the map. If the policy is validated, the script or coprocessor should set its value to `true` or otherwise set it to `false`. Afterward, the router filters the requests' types and fields to only those where the policy is `true`.
+At the `SupergraphService` level, you must provide a Rhai script or coprocessor to evaluate the map. If the policy is validated, the script or coprocessor should set its value to `true` or otherwise set it to `false`. If the value is left to `null`, it will be treated as `false` by the router. Afterward, the router filters the requests' types and fields to only those where the policy is `true`.
 
 If no field of a subgraph query passes its authorization policies, the router stops further processing of the query and precludes unauthorized subgraph requests. This efficiency gain is a key benefit of the `@policy` and other authorization directives.
 
@@ -486,15 +486,13 @@ As an example, the following schema defines policies as boolean expressions that
 
 ```graphql
 type Query {
-  me: User @join__field(graph: ACCOUNTS) @policy(policies: [["claims[`kind`] == `user`"]])
+  me: User @policy(policies: [["kind:user"]])
 }
 
-type User
-  @join__owner(graph: ACCOUNTS)
-  @join__type(graph: ACCOUNTS, key: "id") {
-  id: ID! @join__field(graph: ACCOUNTS)
-  username: String @join__field(graph: ACCOUNTS)
-  username: String @join__field(graph: ACCOUNTS) @policy(policies: [["claims[`roles`].contains(`support`)"]])
+type User {
+  id: ID!
+  username: String
+  username: String @policy(policies: [["roles:support"]])
 }
 ```
 
@@ -505,17 +503,28 @@ fn supergraph_service(service) {
   let request_callback = |request| {
     let claims = request.context["apollo_authentication::JWT::claims"];
     let policies = request.context["apollo_authorization::policies::required"];
-    for key in policies.keys() {
-      let result = eval(key);
-      policies[key] = result;
+
+    if policies != () {
+      for key in policies.keys() {
+        let array = key.split(":");
+        if array.len == 2 {
+          switch array[0] {
+            "kind" => {
+              policies[key] = claims[`kind`] == array[1];
+            }
+            "roles" => {
+              policies[key] = claims[`roles`].contains(array[1]);
+            }
+            _ => {}
+          }
+        }
+      }
     }
     request.context["apollo_authorization::policies::required"] = policies;
   };
   service.map_request(request_callback);
 }
 ```
-
-The script uses the [`eval` function](https://rhai.rs/book/ref/eval.html) to evaluate each policy and store the result in the `apollo_authorization::policies::required` map.
 
 </ExpansionPanel>
 
