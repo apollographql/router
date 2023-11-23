@@ -127,7 +127,7 @@ impl Endpoints {
         }
     }
 
-    pub fn url_count(&self) -> usize {
+    pub(crate) fn url_count(&self) -> usize {
         match self {
             Endpoints::Fallback { urls } => urls.len(),
             Endpoints::RoundRobin { urls, current: _ } => urls.len(),

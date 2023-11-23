@@ -268,17 +268,7 @@ fn add_log_filter(raw: &str) -> Result<String, String> {
 }
 
 impl Opt {
-    pub(crate) fn uplink_config(&self, log_warnings: bool) -> Result<UplinkConfig, anyhow::Error> {
-        let endpoints = self
-            .apollo_uplink_endpoints
-            .as_ref()
-            .map(|endpoints| Self::parse_endpoints(endpoints))
-            .transpose()?;
-
-        if log_warnings && endpoints.unwrap_or_default().url_count() == 1 {
-            tracing::warn!("Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists.");
-        }
-
+    pub(crate) fn uplink_config(&self) -> Result<UplinkConfig, anyhow::Error> {
         Ok(UplinkConfig {
             apollo_key: self
                 .apollo_key
@@ -560,7 +550,7 @@ impl Executable {
             (_, None, Some(_apollo_key)) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
-                SchemaSource::Registry(opt.uplink_config(false)?)
+                SchemaSource::Registry(opt.uplink_config()?)
             }
             _ => {
                 return Err(anyhow!(
@@ -624,7 +614,7 @@ impl Executable {
                 }
                 (Some(_license), _, _, _) => LicenseSource::Env,
                 (_, _, Some(_apollo_key), Some(_apollo_graph_ref)) => {
-                    LicenseSource::Registry(opt.uplink_config(false)?)
+                    LicenseSource::Registry(opt.uplink_config()?)
                 }
 
                 _ => LicenseSource::default(),
@@ -642,9 +632,21 @@ impl Executable {
             tracing::info!("Custom plugins are present. To see log messages from your plugins you must configure `RUST_LOG` or `APOLLO_ROUTER_LOG` environment variables. See the Router logging documentation for more details");
         }
 
+        let uplink_config = opt.uplink_config().ok();
+        if uplink_config
+            .clone()
+            .unwrap_or_default()
+            .endpoints
+            .unwrap_or_default()
+            .url_count()
+            == 1
+        {
+            tracing::warn!("Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists.");
+        }
+
         let router = RouterHttpServer::builder()
             .configuration(configuration)
-            .and_uplink(opt.uplink_config(true).ok())
+            .and_uplink(uplink_config)
             .schema(schema_source)
             .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
