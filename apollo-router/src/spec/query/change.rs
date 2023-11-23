@@ -233,8 +233,7 @@ impl<'a> QueryHashVisitor<'a> {
 
 impl<'a> Hasher for QueryHashVisitor<'a> {
     fn finish(&self) -> u64 {
-        //self.hasher.finalize()
-        todo!()
+        unreachable!()
     }
 
     fn write(&mut self, bytes: &[u8]) {
