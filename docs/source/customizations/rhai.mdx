@@ -129,8 +129,11 @@ fn supergraph_service(service) {
   service.map_request(request_callback);
 }
 ```
+<Note>
 
-> [Learn more about Rhai modules.](https://rhai.rs/book/language/modules/export.html)
+[Learn more about Rhai modules.](https://rhai.rs/book/language/modules/export.html)
+
+</Note>
 
 ## Router request lifecycle
 
@@ -279,7 +282,7 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
     
     Additionally, callbacks for `subgraph_service` can access and modify the sub-operation request that the router will send to the corresponding subgraph via `request.subgraph`.
     
-    > [See fields of `request`](./rhai-api/#request-interface)
+    For reference, see the fields of [`request`](./rhai-api/#request-interface).
     
 * `map_response` callbacks are called in each service as execution proceeds back "to the left" from subgraphs resolving their individual sub-operations:
 
@@ -372,6 +375,31 @@ fn process_response(response) {
 }
 ```
 
+<Caution>
+
+**Accessing a non-existent header throws an exception**. 
+
+To safely check for the existence of a header before reading it, use `request.headers.contains("header-name")`. 
+
+When using `contains` within `subgraph_service`, you must assign your headers to a temporary local variable. Otherwise, `contains` throws an exception that it "cannot mutate" the original request.
+
+For example, the following `subgraph_service` function checks whether the `x-custom-header` exists before processing it.
+
+```rhai
+// Ensure existence of header before processing
+fn subgraph_service(service, subgraph){
+    service.map_request(|request|{
+        // Reassign to local variable, as contains cannot modify request
+        let headers = request.headers; 
+        if headers.contains("x-custom-header") {
+            // Process existing header
+        }
+    });
+}
+```
+
+</Caution>
+
 ### Converting cookies to headers
 
 This example converts cookies into headers for transmission to subgraphs. There is a complete working example (with tests) of this in the [examples/cookies-to-headers directory](https://github.com/apollographql/router/tree/main/examples/cookies-to-headers).
@@ -421,7 +449,11 @@ The router "watches" your `rhai.scripts` directory (along with all subdirectorie
 
 The router attempts to identify any errors in your scripts before applying changes. If errors are detected, the router logs them and continues using its _existing_ set of scripts.
 
-> Not all error types can be detected reliably! Whenever you make changes to your scripts, check your router's log output to make sure they were applied.
+<Note>
+
+Whenever you make changes to your scripts, check your router's log output to make sure they were applied.
+
+</Note>
 
 ## Limitations
 

@@ -17,8 +17,8 @@ use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
-use super::router_service::MULTIPART_DEFER_HEADER_VALUE;
-use super::router_service::MULTIPART_SUBSCRIPTION_HEADER_VALUE;
+use self::service::MULTIPART_DEFER_HEADER_VALUE;
+use self::service::MULTIPART_SUBSCRIPTION_HEADER_VALUE;
 use super::supergraph;
 use crate::graphql;
 use crate::http_ext::header_map;
@@ -32,6 +32,10 @@ pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxEr
 pub type ServiceResult = Result<Response, BoxError>;
 pub type Body = hyper::Body;
 pub type Error = hyper::Error;
+
+pub(crate) mod service;
+#[cfg(test)]
+mod tests;
 
 assert_impl_all!(Request: Send);
 /// Represents the router processing step of the processing pipeline.

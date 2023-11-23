@@ -9,7 +9,11 @@ Authentication is crucial to prevent illegitimate access and protect sensitive d
 
 By enabling JWT authentication, you can block malicious traffic at the _edge_ of your graph instead of relying on [header forwarding](./header-propagation/) to propagate tokens to your subgraphs.
 
-> ⚠️ Your subgraphs should always be accessible _only_ via the router—not directly by clients. This is especially true if you rely on JWT authentication in the router. See [Securing your subgraphs](/graphos/graphs/securing-a-subgraph) for steps to restrict subgraph access to only your router.
+<Tip>
+
+Your subgraphs should always be accessible _only_ via the router—not directly by clients. This is especially true if you rely on JWT authentication in the router. See [Securing your subgraphs](/graphos/graphs/securing-a-subgraph) for steps to restrict subgraph access to only your router.
+
+</Tip>
 
 ## How JWT authentication works
 
@@ -42,7 +46,7 @@ Otherwise, if you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne
           jwks: # This key is required.
             - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
               issuer: <optional name of issuer>
-
+              poll_interval: <optional poll interval>
           # These keys are optional. Default values are shown.
           header_name: Authorization
           header_value_prefix: Bearer
@@ -94,6 +98,7 @@ The following configuration options are supported:
   - **If you use your own custom IdP,** you need to make its JWKS available at a router-accessible URL if you haven't already. For more information, see [Creating your own JWKS](#creating-your-own-jwks-advanced).
 - `issuer`: **optional** name of the issuer, that will be compared to the `iss` claim in the JWT if present. If it does not match, the request will be rejected.
 - `algorithms`: **optional** list of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
+- `poll_interval`: **optional** interval in human-readable format (e.g. `60s` or `1hour 30s`) at which the JWKS will be polled for changes. If not specified, the JWKS endpoint will be polled every 60 seconds.
 
 </td>
 </tr>
@@ -155,7 +160,11 @@ Below are 2 example [Rhai script](../customizations/rhai/) customizations that d
 
 Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
-> This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+<Note>
+
+This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+
+</Note>
 
 <ExpansionPanel title="Click to expand">
 
@@ -180,13 +189,21 @@ fn process_request(request) {
 
 </ExpansionPanel>
 
-> ⚠️ Explicitly listing claims and _always_ setting headers for them is strongly recommended to avoid possible security issues when [forwarding headers](./header-propagation/) to subgraphs.
+<Tip>
+
+Explicitly listing claims and _always_ setting headers for them is strongly recommended to avoid possible security issues when [forwarding headers](./header-propagation/) to subgraphs.
+
+</Tip>
 
 ### Example: Forwarding claims to subgraphs as GraphQL extensions
 
 Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via GraphQL extension. This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
-> This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+<Note>
+
+This script should be run in the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+
+</Note>
 
 <ExpansionPanel title="Click to expand">
 
@@ -208,7 +225,11 @@ fn process_request(request) {
 
 Below is an example [Rhai script](../customizations/rhai/) that throws distinct errors for different invalid JWT claim details. This function should be imported and run in your [`main.rhai`](#example-mainrhai) file.
 
-> This script should be run in the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+<Note>
+
+This script should be run in the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+
+</Note>
 
 <ExpansionPanel title="Click to expand">
 
@@ -333,18 +354,16 @@ For more information, refer to [the coprocessor documentation](../customizations
 
 ## Creating your own JWKS (advanced)
 
-<blockquote>
-
-⚠️ **Note**:
+<Note>
 
 - **Most third-party IdP services create and host a JSON Web Key Set (JWKS) for you.** Read this section only if you use a _custom_ IdP that doesn't publish its JWKS at a router-accessible URL.
 - To be compatible with JWT authentication supported by Apollo Router, your IdP (or whatever service issues JWTs to authenticated clients) must use one of the [signature algorithms](https://crates.io/crates/jsonwebtoken#algorithms) supported by the router.
 
-</blockquote>
+</Note>
 
 The Apollo Router obtains each JSON Web Key (JWK) that it uses from the URLs that you specify via the [`jwks`](#jwks) configuration option. Each URL must provide a set of valid JWKs in a single JSON object called a JWK Set (or **JWKS**).
 
-> Consult your IdP's documentation to obtain the [JWKS URL](#jwks) to pass to your router.
+Consult your IdP's documentation to obtain the [JWKS URL](#jwks) to pass to your router.
 
 To provide a JWKS to your router, configure your IdP service to do the following whenever its collection of valid JWKs changes (such as when a JWK expires or is rotated):
 
@@ -352,7 +371,11 @@ To provide a JWKS to your router, configure your IdP service to do the following
 2. Write the JWKS object to a location that your router can reach via a `file://` or `https://` URL.
     - ⚠️ **If _any_ of your JWKs uses a symmetric signature algorithm (such as `HS256`), always use a `file://` URL.** Symmetric signature algorithms use a shared key that should _never_ be accessible over the network.
 
-Again, make sure the IdP is configured to perform these steps _every time_ its collection of JWKs changes!
+<Tip>
+
+Make sure the IdP is configured to perform these steps _every time_ its collection of JWKs changes.
+
+</Tip>
 
 ### JWKS format
 
