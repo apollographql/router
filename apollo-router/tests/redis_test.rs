@@ -272,19 +272,17 @@ mod test {
                         "urls": ["redis://127.0.0.1:6379"],
                         "ttl": "2s"
                     },
-                    /*
-                    Uncomment when the configuration PR is merged
                     "enabled": false,
                     "subgraphs": {
                         "products": {
                             "enabled": true,
                             "ttl": "60s"
                         },
-                        "accounts": {
+                        "reviews": {
                             "enabled": true,
                             "ttl": "10s"
                         }
-                    }*/
+                    }
                 },
                 "include_subgraph_errors": {
                     "all": true
@@ -378,19 +376,17 @@ mod test {
                         "urls": ["redis://127.0.0.1:6379"],
                         "ttl": "2s"
                     },
-                    /*
-                    Uncomment when the configuration PR is merged
                     "enabled": false,
                     "subgraphs": {
                         "products": {
                             "enabled": true,
                             "ttl": "60s"
                         },
-                        "accounts": {
+                        "reviews": {
                             "enabled": true,
                             "ttl": "10s"
                         }
-                    }*/
+                    }
                 },
                 "include_subgraph_errors": {
                     "all": true
