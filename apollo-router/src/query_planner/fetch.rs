@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
+use apollo_compiler::ast::Document;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -23,6 +24,8 @@ use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::services::SubgraphRequest;
+use crate::spec::query::change::QueryHashVisitor;
+use crate::spec::query::traverse;
 use crate::spec::Schema;
 
 /// GraphQL operation type.
@@ -113,6 +116,22 @@ pub(crate) struct FetchNode {
 
     // Optionally describes a number of "rewrites" to apply to the data that received from a fetch (and before it is applied to the current in-memory results).
     pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
+
+    // hash for the query and relevant parts of the schema. if two different schemas provide the exact same types, fields and directives
+    // affecting the query, then they will have the same hash
+    #[serde(default)]
+    pub(crate) schema_aware_hash: Arc<QueryHash>,
+}
+
+#[derive(Clone, Default, PartialEq, Deserialize, Serialize)]
+pub(crate) struct QueryHash(#[serde(with = "hex")] pub(crate) Vec<u8>);
+
+impl std::fmt::Debug for QueryHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("QueryHash")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
 }
 
 pub(crate) struct Variables {
@@ -240,7 +259,7 @@ impl FetchNode {
             }
         };
 
-        let subgraph_request = SubgraphRequest::builder()
+        let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
             .subgraph_request(
                 http_ext::Request::builder()
@@ -270,6 +289,7 @@ impl FetchNode {
             .operation_kind(*operation_kind)
             .context(parameters.context.clone())
             .build();
+        subgraph_request.query_hash = self.schema_aware_hash.clone();
 
         let service = parameters
             .service_factory
@@ -454,5 +474,15 @@ impl FetchNode {
 
     pub(crate) fn operation_kind(&self) -> &OperationKind {
         &self.operation_kind
+    }
+
+    pub(crate) fn hash_subquery(&mut self, schema: &apollo_compiler::Schema) {
+        let doc = Document::parse(&self.operation, "query.graphql");
+
+        let mut visitor = QueryHashVisitor::new(schema, &doc);
+        visitor.subgraph_query = !self.requires.is_empty();
+        traverse::document(&mut visitor, &doc).unwrap();
+
+        self.schema_aware_hash = Arc::new(QueryHash(visitor.finish()));
     }
 }

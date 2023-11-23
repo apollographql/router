@@ -273,8 +273,8 @@ impl BridgeQueryPlanner {
             GraphQLValidationMode::Both => Query::validate_query(&self.schema, executable).err(),
         };
 
-        let (fragments, operations, defer_stats) =
-            Query::extract_query_information(&self.schema, executable)?;
+        let (fragments, operations, defer_stats, schema_aware_hash) =
+            Query::extract_query_information(&self.schema, executable, ast)?;
 
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,
@@ -295,6 +295,7 @@ impl BridgeQueryPlanner {
             defer_stats,
             is_original: true,
             validation_error,
+            schema_aware_hash,
         })
     }
 
@@ -377,7 +378,12 @@ impl BridgeQueryPlanner {
             .map_err(QueryPlannerError::RouterBridgeError)?
             .into_result()
         {
-            Ok(plan) => plan,
+            Ok(mut plan) => {
+                plan.data
+                    .query_plan
+                    .hash_subqueries(&self.schema.definitions);
+                plan
+            }
             Err(err) => {
                 if matches!(
                     self.configuration.experimental_graphql_validation_mode,
@@ -668,6 +674,14 @@ pub(crate) struct QueryPlanResult {
 struct QueryPlan {
     /// The hierarchical nodes that make up the query plan
     node: Option<PlanNode>,
+}
+
+impl QueryPlan {
+    fn hash_subqueries(&mut self, schema: &apollo_compiler::Schema) {
+        if let Some(node) = self.node.as_mut() {
+            node.hash_subqueries(schema);
+        }
+    }
 }
 
 #[cfg(test)]

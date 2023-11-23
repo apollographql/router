@@ -2312,6 +2312,7 @@ mod tests {
                 subgraph_name: String::from("test").into(),
                 subscription_stream: None,
                 connection_closed_signal: None,
+                query_hash: Default::default(),
             })
             .await
             .unwrap();

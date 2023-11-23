@@ -995,7 +995,7 @@ impl Telemetry {
         sub_request: &mut Request,
     ) -> Option<CacheAttributes> {
         let body = sub_request.subgraph_request.body_mut();
-        let hashed_query = hash_query(body);
+        let hashed_query = hash_query(&sub_request.query_hash, body);
         let representations = body
             .variables
             .get(REPRESENTATIONS)
