@@ -1,4 +1,4 @@
-FROM debian:bullseye-slim AS downloader
+FROM debian:bookworm-slim AS downloader
 ARG ROUTER_RELEASE=latest
 ARG ARTIFACT_URL=
 
@@ -19,8 +19,11 @@ RUN if [ -z "${ARTIFACT_URL}"]; then \
     cd -; \
   fi
 
-FROM debian:bullseye-slim AS distro
+FROM debian:bookworm-slim AS distro
 ARG DEBUG_IMAGE=false
+
+# Add a user to run the router as
+RUN useradd -m router
 
 WORKDIR /dist
 
@@ -67,6 +70,8 @@ RUN \
 
 # Make sure we can run our wrapper
 RUN chmod 755 /dist/router_wrapper.sh
+
+USER router
 
 # Default executable is the wrapper script
 ENTRYPOINT ["/dist/router_wrapper.sh"]
