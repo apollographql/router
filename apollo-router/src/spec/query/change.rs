@@ -14,6 +14,7 @@ use tower::BoxError;
 
 use super::transform;
 use super::traverse;
+use crate::plugins::cache::entity::ENTITIES;
 
 /// Calculates a hash of the query and the schema, but only looking at the parts of the
 /// schema which affect the query.
@@ -205,7 +206,7 @@ impl<'a> QueryHashVisitor<'a> {
 
         match node.selection_set.first() {
             Some(Selection::Field(field)) => {
-                if field.name.as_str() != "_entities" {
+                if field.name.as_str() != ENTITIES {
                     return Err("expected _entities field".into());
                 }
 
