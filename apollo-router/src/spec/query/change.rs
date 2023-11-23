@@ -276,6 +276,10 @@ impl<'a> traverse::Visitor for QueryHashVisitor<'a> {
                 self.hash_input_value_definition(argument);
             }
 
+            for argument in &node.arguments {
+                self.hash_argument(argument);
+            }
+
             self.hash_type(&field_def.ty);
 
             for directive in &field_def.directives {
