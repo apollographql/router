@@ -13,5 +13,10 @@ Fetch(
         id: None,
         input_rewrites: None,
         output_rewrites: None,
+        authorization: CacheKeyMetadata {
+            is_authenticated: false,
+            scopes: [],
+            policies: [],
+        },
     },
 )

@@ -11,5 +11,10 @@ expression: query_plan
   "operationKind": "query",
   "id": null,
   "inputRewrites": null,
-  "outputRewrites": null
+  "outputRewrites": null,
+  "authorization": {
+    "is_authenticated": false,
+    "scopes": [],
+    "policies": []
+  }
 }
