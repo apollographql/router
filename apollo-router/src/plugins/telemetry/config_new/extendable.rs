@@ -1,8 +1,9 @@
 use std::any::type_name;
 use std::collections::HashMap;
+use std::collections::LinkedList;
 use std::fmt::Debug;
 
-use opentelemetry::Key;
+use opentelemetry::KeyValue;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::Schema;
 use schemars::JsonSchema;
@@ -153,31 +154,31 @@ where
     type Request = Request;
     type Response = Response;
 
-    fn on_request(&self, request: &Self::Request) -> HashMap<Key, opentelemetry::Value> {
+    fn on_request(&self, request: &Self::Request) -> LinkedList<KeyValue> {
         let mut attrs = self.attributes.on_request(request);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
                 .on_request(request)
-                .map(|v| (Key::from(key.clone()), v))
+                .map(|v| KeyValue::new(key.clone(), v))
         });
         attrs.extend(custom_attributes);
 
         attrs
     }
 
-    fn on_response(&self, response: &Self::Response) -> HashMap<Key, opentelemetry::Value> {
+    fn on_response(&self, response: &Self::Response) -> LinkedList<KeyValue> {
         let mut attrs = self.attributes.on_response(response);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
                 .on_response(response)
-                .map(|v| (Key::from(key.clone()), v))
+                .map(|v| KeyValue::new(key.clone(), v))
         });
         attrs.extend(custom_attributes);
 
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
+    fn on_error(&self, error: &BoxError) -> LinkedList<KeyValue> {
         self.attributes.on_error(error)
     }
 }
