@@ -4,9 +4,10 @@ expression: new_config
 ---
 ---
 telemetry:
-  tracing:
-    jaeger:
-      agent:
-        endpoint: default
-      enabled: true
+  exporters:
+    tracing:
+      jaeger:
+        agent:
+          endpoint: default
+        enabled: true
 

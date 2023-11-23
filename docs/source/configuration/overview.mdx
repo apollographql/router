@@ -696,7 +696,7 @@ limits:
 
   # Parser-based limits
   parser_max_tokens: 15000 # Default value
-  parser_max_recursion: 4096 # Default value
+  parser_max_recursion: 500 # Default value
 
   # Operation-based limits (Enterprise only)
   max_depth: 100
@@ -738,7 +738,7 @@ The default value is `15000`.
 
 Limits the deepest level of recursion allowed by the router's GraphQL parser to prevent stack overflows. This corresponds to the deepest nesting level of any single GraphQL operation or fragment defined in a query document.
 
-The default value is `4096`.
+The default value is `500`.
 
 In the example below, the `GetProducts` operation has a recursion of three, and the `ProductVariation` fragment has a recursion of two. Therefore, the _max_ recursion of the query document is three.
 

@@ -1,21 +1,17 @@
 //! Configuration for the telemetry plugin.
 use std::collections::BTreeMap;
-use std::io::IsTerminal;
 
 use axum::headers::HeaderName;
-use opentelemetry::sdk::trace::SpanLimits;
 use opentelemetry::Array;
 use opentelemetry::Value;
-use regex::Regex;
+use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
 use super::metrics::MetricsAttributesConf;
 use super::*;
-use crate::configuration::ConfigurationError;
 use crate::plugin::serde::deserialize_option_header_name;
-use crate::plugin::serde::deserialize_regex;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::resource::ConfigResource;
 
@@ -25,7 +21,7 @@ pub(crate) enum Error {
     InvalidFieldLevelInstrumentationSampler,
 }
 
-pub(crate) trait GenericWith<T>
+pub(in crate::plugins::telemetry) trait GenericWith<T>
 where
     Self: Sized,
 {
@@ -53,28 +49,38 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Conf {
-    /// Logging configuration
-    #[serde(rename = "experimental_logging", default)]
-    pub(crate) logging: Logging,
+    /// Apollo reporting configuration
+    pub(crate) apollo: apollo::Config,
 
-    #[cfg(feature = "telemetry_next")]
-    #[serde(rename = "logging", default)]
-    #[allow(dead_code)]
-    pub(crate) new_logging: config_new::logging::Logging,
+    /// Instrumentation configuration
+    pub(crate) exporters: Exporters,
+
+    /// Instrumentation configuration
+    pub(crate) instrumentation: Instrumentation,
+}
+
+/// Exporter configuration
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct Exporters {
+    /// Logging configuration
+    pub(crate) logging: config_new::logging::Logging,
     /// Metrics configuration
     pub(crate) metrics: Metrics,
     /// Tracing configuration
     pub(crate) tracing: Tracing,
-    /// Apollo reporting configuration
-    pub(crate) apollo: apollo::Config,
+}
 
-    #[cfg(feature = "telemetry_next")]
+/// Instrumentation configuration
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct Instrumentation {
+    #[serde(skip)]
     /// Event configuration
     pub(crate) events: config_new::events::Events,
-    #[cfg(feature = "telemetry_next")]
     /// Span configuration
     pub(crate) spans: config_new::spans::Spans,
-    #[cfg(feature = "telemetry_next")]
+    #[serde(skip)]
     /// Instrument configuration
     pub(crate) instruments: config_new::instruments::Instruments,
 }
@@ -155,7 +161,7 @@ pub(crate) struct Tracing {
     /// Propagation configuration
     pub(crate) propagation: Propagation,
     /// Common configuration
-    pub(crate) common: Trace,
+    pub(crate) common: TracingCommon,
     /// OpenTelemetry native exporter configuration
     pub(crate) otlp: otlp::Config,
     /// Jaeger exporter configuration
@@ -164,154 +170,6 @@ pub(crate) struct Tracing {
     pub(crate) zipkin: tracing::zipkin::Config,
     /// Datadog exporter configuration
     pub(crate) datadog: tracing::datadog::Config,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct Logging {
-    /// Log format
-    pub(crate) format: LoggingFormat,
-    /// Display the target in the logs
-    pub(crate) display_target: bool,
-    /// Display the filename in the logs
-    pub(crate) display_filename: bool,
-    /// Display the line number in the logs
-    pub(crate) display_line_number: bool,
-    /// Log configuration to log request and response for subgraphs and supergraph
-    pub(crate) when_header: Vec<HeaderLoggingCondition>,
-}
-
-impl Logging {
-    pub(crate) fn validate(&self) -> Result<(), ConfigurationError> {
-        let misconfiguration = self.when_header.iter().any(|cfg| match cfg {
-            HeaderLoggingCondition::Matching { headers, body, .. }
-            | HeaderLoggingCondition::Value { headers, body, .. } => !body && !headers,
-        });
-
-        if misconfiguration {
-            Err(ConfigurationError::InvalidConfiguration {
-                message: "'when_header' configuration for logging is invalid",
-                error: String::from(
-                    "body and headers must not be both false because it doesn't enable any logs",
-                ),
-            })
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Returns if we should display the request/response headers and body given the `SupergraphRequest`
-    pub(crate) fn should_log(&self, req: &SupergraphRequest) -> (bool, bool) {
-        self.when_header
-            .iter()
-            .fold((false, false), |(log_headers, log_body), current| {
-                let (current_log_headers, current_log_body) = current.should_log(req);
-                (
-                    log_headers || current_log_headers,
-                    log_body || current_log_body,
-                )
-            })
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(untagged, deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum HeaderLoggingCondition {
-    /// Match header value given a regex to display logs
-    Matching {
-        /// Header name
-        name: String,
-        /// Regex to match the header value
-        #[schemars(with = "String", rename = "match")]
-        #[serde(deserialize_with = "deserialize_regex", rename = "match")]
-        matching: Regex,
-        /// Display request/response headers (default: false)
-        #[serde(default)]
-        headers: bool,
-        /// Display request/response body (default: false)
-        #[serde(default)]
-        body: bool,
-    },
-    /// Match header value given a value to display logs
-    Value {
-        /// Header name
-        name: String,
-        /// Header value
-        value: String,
-        /// Display request/response headers (default: false)
-        #[serde(default)]
-        headers: bool,
-        /// Display request/response body (default: false)
-        #[serde(default)]
-        body: bool,
-    },
-}
-
-impl HeaderLoggingCondition {
-    /// Returns if we should display the request/response headers and body given the `SupergraphRequest`
-    pub(crate) fn should_log(&self, req: &SupergraphRequest) -> (bool, bool) {
-        match self {
-            HeaderLoggingCondition::Matching {
-                name,
-                matching: matched,
-                headers,
-                body,
-            } => {
-                let header_match = req
-                    .supergraph_request
-                    .headers()
-                    .get(name)
-                    .and_then(|h| h.to_str().ok())
-                    .map(|h| matched.is_match(h))
-                    .unwrap_or_default();
-
-                if header_match {
-                    (*headers, *body)
-                } else {
-                    (false, false)
-                }
-            }
-            HeaderLoggingCondition::Value {
-                name,
-                value,
-                headers,
-                body,
-            } => {
-                let header_match = req
-                    .supergraph_request
-                    .headers()
-                    .get(name)
-                    .and_then(|h| h.to_str().ok())
-                    .map(|h| value.as_str() == h)
-                    .unwrap_or_default();
-
-                if header_match {
-                    (*headers, *body)
-                } else {
-                    (false, false)
-                }
-            }
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, Copy)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum LoggingFormat {
-    /// Pretty text format (default if you're running from a tty)
-    Pretty,
-    /// Json log format
-    Json,
-}
-
-impl Default for LoggingFormat {
-    fn default() -> Self {
-        if std::io::stdout().is_terminal() {
-            Self::Pretty
-        } else {
-            Self::Json
-        }
-    }
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
@@ -358,7 +216,7 @@ pub(crate) struct RequestPropagation {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 #[non_exhaustive]
-pub(crate) struct Trace {
+pub(crate) struct TracingCommon {
     /// The trace service name
     pub(crate) service_name: Option<String>,
     /// The trace service namespace
@@ -381,12 +239,12 @@ pub(crate) struct Trace {
     pub(crate) resource: BTreeMap<String, AttributeValue>,
 }
 
-impl ConfigResource for Trace {
-    fn service_name(&self) -> Option<String> {
-        self.service_name.clone()
+impl ConfigResource for TracingCommon {
+    fn service_name(&self) -> &Option<String> {
+        &self.service_name
     }
-    fn service_namespace(&self) -> Option<String> {
-        self.service_namespace.clone()
+    fn service_namespace(&self) -> &Option<String> {
+        &self.service_namespace
     }
     fn resource(&self) -> &BTreeMap<String, AttributeValue> {
         &self.resource
@@ -394,11 +252,11 @@ impl ConfigResource for Trace {
 }
 
 impl ConfigResource for MetricsCommon {
-    fn service_name(&self) -> Option<String> {
-        self.service_name.clone()
+    fn service_name(&self) -> &Option<String> {
+        &self.service_name
     }
-    fn service_namespace(&self) -> Option<String> {
-        self.service_namespace.clone()
+    fn service_namespace(&self) -> &Option<String> {
+        &self.service_namespace
     }
     fn resource(&self) -> &BTreeMap<String, AttributeValue> {
         &self.resource
@@ -413,7 +271,7 @@ fn default_sampler() -> SamplerOption {
     SamplerOption::Always(Sampler::AlwaysOn)
 }
 
-impl Default for Trace {
+impl Default for TracingCommon {
     fn default() -> Self {
         Self {
             service_name: Default::default(),
@@ -459,6 +317,30 @@ pub(crate) enum AttributeValue {
     String(String),
     /// Array of homogeneous values
     Array(AttributeArray),
+}
+
+impl From<&'static str> for AttributeValue {
+    fn from(value: &'static str) -> Self {
+        AttributeValue::String(value.to_string())
+    }
+}
+
+impl From<i64> for AttributeValue {
+    fn from(value: i64) -> Self {
+        AttributeValue::I64(value)
+    }
+}
+
+impl std::fmt::Display for AttributeValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AttributeValue::Bool(val) => write!(f, "{val}"),
+            AttributeValue::I64(val) => write!(f, "{val}"),
+            AttributeValue::F64(val) => write!(f, "{val}"),
+            AttributeValue::String(val) => write!(f, "{val}"),
+            AttributeValue::Array(val) => write!(f, "{val}"),
+        }
+    }
 }
 
 impl TryFrom<serde_json::Value> for AttributeValue {
@@ -534,6 +416,17 @@ pub(crate) enum AttributeArray {
     String(Vec<String>),
 }
 
+impl std::fmt::Display for AttributeArray {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AttributeArray::Bool(val) => write!(f, "{val:?}"),
+            AttributeArray::I64(val) => write!(f, "{val:?}"),
+            AttributeArray::F64(val) => write!(f, "{val:?}"),
+            AttributeArray::String(val) => write!(f, "{val:?}"),
+        }
+    }
+}
+
 impl From<AttributeArray> for opentelemetry::Array {
     fn from(array: AttributeArray) -> Self {
         match array {
@@ -541,6 +434,19 @@ impl From<AttributeArray> for opentelemetry::Array {
             AttributeArray::I64(v) => Array::I64(v),
             AttributeArray::F64(v) => Array::F64(v),
             AttributeArray::String(v) => Array::String(v.into_iter().map(|v| v.into()).collect()),
+        }
+    }
+}
+
+impl From<opentelemetry::Array> for AttributeArray {
+    fn from(array: opentelemetry::Array) -> Self {
+        match array {
+            opentelemetry::Array::Bool(v) => AttributeArray::Bool(v),
+            opentelemetry::Array::I64(v) => AttributeArray::I64(v),
+            opentelemetry::Array::F64(v) => AttributeArray::F64(v),
+            opentelemetry::Array::String(v) => {
+                AttributeArray::String(v.into_iter().map(|v| v.into()).collect())
+            }
         }
     }
 }
@@ -562,31 +468,31 @@ pub(crate) enum Sampler {
     AlwaysOff,
 }
 
-impl From<Sampler> for opentelemetry::sdk::trace::Sampler {
+impl From<Sampler> for opentelemetry_sdk::trace::Sampler {
     fn from(s: Sampler) -> Self {
         match s {
-            Sampler::AlwaysOn => opentelemetry::sdk::trace::Sampler::AlwaysOn,
-            Sampler::AlwaysOff => opentelemetry::sdk::trace::Sampler::AlwaysOff,
+            Sampler::AlwaysOn => opentelemetry_sdk::trace::Sampler::AlwaysOn,
+            Sampler::AlwaysOff => opentelemetry_sdk::trace::Sampler::AlwaysOff,
         }
     }
 }
 
-impl From<SamplerOption> for opentelemetry::sdk::trace::Sampler {
+impl From<SamplerOption> for opentelemetry_sdk::trace::Sampler {
     fn from(s: SamplerOption) -> Self {
         match s {
             SamplerOption::Always(s) => s.into(),
             SamplerOption::TraceIdRatioBased(ratio) => {
-                opentelemetry::sdk::trace::Sampler::TraceIdRatioBased(ratio)
+                opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(ratio)
             }
         }
     }
 }
 
-impl From<&Trace> for opentelemetry::sdk::trace::Config {
-    fn from(config: &Trace) -> Self {
-        let mut common = opentelemetry::sdk::trace::config();
+impl From<&TracingCommon> for opentelemetry_sdk::trace::Config {
+    fn from(config: &TracingCommon) -> Self {
+        let mut common = opentelemetry_sdk::trace::config();
 
-        let mut sampler: opentelemetry::sdk::trace::Sampler = config.sampler.clone().into();
+        let mut sampler: opentelemetry_sdk::trace::Sampler = config.sampler.clone().into();
         if config.parent_based_sampler {
             sampler = parent_based(sampler);
         }
@@ -604,15 +510,15 @@ impl From<&Trace> for opentelemetry::sdk::trace::Config {
     }
 }
 
-fn parent_based(sampler: opentelemetry::sdk::trace::Sampler) -> opentelemetry::sdk::trace::Sampler {
-    opentelemetry::sdk::trace::Sampler::ParentBased(Box::new(sampler))
+fn parent_based(sampler: opentelemetry_sdk::trace::Sampler) -> opentelemetry_sdk::trace::Sampler {
+    opentelemetry_sdk::trace::Sampler::ParentBased(Box::new(sampler))
 }
 
 impl Conf {
     pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
         Ok(
             match (
-                &self.tracing.common.sampler,
+                &self.exporters.tracing.common.sampler,
                 &self.apollo.field_level_instrumentation_sampler,
             ) {
                 // Error conditions
@@ -667,112 +573,6 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-
-    #[test]
-    fn test_logging_conf_validation() {
-        let logging_conf = Logging {
-            format: LoggingFormat::default(),
-            display_target: false,
-            display_filename: false,
-            display_line_number: false,
-            when_header: vec![HeaderLoggingCondition::Value {
-                name: "test".to_string(),
-                value: String::new(),
-                headers: true,
-                body: false,
-            }],
-        };
-
-        logging_conf.validate().unwrap();
-
-        let logging_conf = Logging {
-            format: LoggingFormat::default(),
-            display_target: false,
-            display_filename: false,
-            display_line_number: false,
-            when_header: vec![HeaderLoggingCondition::Value {
-                name: "test".to_string(),
-                value: String::new(),
-                headers: false,
-                body: false,
-            }],
-        };
-
-        let validate_res = logging_conf.validate();
-        assert!(validate_res.is_err());
-        assert_eq!(validate_res.unwrap_err().to_string(), "'when_header' configuration for logging is invalid: body and headers must not be both false because it doesn't enable any logs");
-    }
-
-    #[test]
-    fn test_logging_conf_should_log() {
-        let logging_conf = Logging {
-            format: LoggingFormat::default(),
-            display_target: false,
-            display_filename: false,
-            display_line_number: false,
-            when_header: vec![HeaderLoggingCondition::Matching {
-                name: "test".to_string(),
-                matching: Regex::new("^foo*").unwrap(),
-                headers: true,
-                body: false,
-            }],
-        };
-        let req = SupergraphRequest::fake_builder()
-            .header("test", "foobar")
-            .build()
-            .unwrap();
-        assert_eq!(logging_conf.should_log(&req), (true, false));
-
-        let logging_conf = Logging {
-            format: LoggingFormat::default(),
-            display_target: false,
-            display_filename: false,
-            display_line_number: false,
-            when_header: vec![HeaderLoggingCondition::Value {
-                name: "test".to_string(),
-                value: String::from("foobar"),
-                headers: true,
-                body: false,
-            }],
-        };
-        assert_eq!(logging_conf.should_log(&req), (true, false));
-
-        let logging_conf = Logging {
-            format: LoggingFormat::default(),
-            display_target: false,
-            display_filename: false,
-            display_line_number: false,
-            when_header: vec![
-                HeaderLoggingCondition::Matching {
-                    name: "test".to_string(),
-                    matching: Regex::new("^foo*").unwrap(),
-                    headers: true,
-                    body: false,
-                },
-                HeaderLoggingCondition::Matching {
-                    name: "test".to_string(),
-                    matching: Regex::new("^*bar$").unwrap(),
-                    headers: false,
-                    body: true,
-                },
-            ],
-        };
-        assert_eq!(logging_conf.should_log(&req), (true, true));
-
-        let logging_conf = Logging {
-            format: LoggingFormat::default(),
-            display_target: false,
-            display_filename: false,
-            display_line_number: false,
-            when_header: vec![HeaderLoggingCondition::Matching {
-                name: "testtest".to_string(),
-                matching: Regex::new("^foo*").unwrap(),
-                headers: true,
-                body: false,
-            }],
-        };
-        assert_eq!(logging_conf.should_log(&req), (false, false));
-    }
 
     #[test]
     fn test_attribute_value_from_json() {

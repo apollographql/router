@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io::Cursor;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -15,14 +16,15 @@ use futures::FutureExt;
 use futures::TryFutureExt;
 use itertools::Itertools;
 use lru::LruCache;
-use opentelemetry::sdk::export::trace::ExportResult;
-use opentelemetry::sdk::export::trace::SpanData;
-use opentelemetry::sdk::export::trace::SpanExporter;
-use opentelemetry::sdk::trace::EvictedHashMap;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceError;
 use opentelemetry::Key;
 use opentelemetry::Value;
+use opentelemetry_sdk::export::trace::ExportResult;
+use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::trace::EvictedHashMap;
+use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use prost::Message;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
@@ -73,9 +75,7 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 
-// TODO Remove this and use otel constants again https://github.com/apollographql/router/issues/3833
-const HTTP_METHOD: Key = Key::from_static_str("http.method");
-const APOLLO_PRIVATE_REQUEST: Key = Key::from_static_str("apollo_private.request");
+pub(crate) const APOLLO_PRIVATE_REQUEST: Key = Key::from_static_str("apollo_private.request");
 pub(crate) const APOLLO_PRIVATE_DURATION_NS: &str = "apollo_private.duration_ns";
 const APOLLO_PRIVATE_DURATION_NS_KEY: Key = Key::from_static_str(APOLLO_PRIVATE_DURATION_NS);
 const APOLLO_PRIVATE_SENT_TIME_OFFSET: Key =
@@ -91,13 +91,30 @@ pub(crate) const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
 const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
 const PATH: Key = Key::from_static_str("graphql.path");
 const SUBGRAPH_NAME: Key = Key::from_static_str("apollo.subgraph.name");
-const CLIENT_NAME: Key = Key::from_static_str("client.name");
-const CLIENT_VERSION: Key = Key::from_static_str("client.version");
+pub(crate) const CLIENT_NAME_KEY: Key = Key::from_static_str("client.name");
+pub(crate) const CLIENT_VERSION_KEY: Key = Key::from_static_str("client.version");
 const DEPENDS: Key = Key::from_static_str("graphql.depends");
 const LABEL: Key = Key::from_static_str("graphql.label");
 const CONDITION: Key = Key::from_static_str("graphql.condition");
 const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
 const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
+const INCLUDE_SPANS: [&str; 15] = [
+    PARALLEL_SPAN_NAME,
+    SEQUENCE_SPAN_NAME,
+    FETCH_SPAN_NAME,
+    FLATTEN_SPAN_NAME,
+    SUBGRAPH_SPAN_NAME,
+    SUPERGRAPH_SPAN_NAME,
+    ROUTER_SPAN_NAME,
+    DEFER_SPAN_NAME,
+    DEFER_PRIMARY_SPAN_NAME,
+    DEFER_DEFERRED_SPAN_NAME,
+    CONDITION_SPAN_NAME,
+    CONDITION_IF_SPAN_NAME,
+    CONDITION_ELSE_SPAN_NAME,
+    EXECUTION_SPAN_NAME,
+    SUBSCRIPTION_EVENT_SPAN_NAME,
+];
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
@@ -128,12 +145,19 @@ struct LightSpanData {
 
 impl From<SpanData> for LightSpanData {
     fn from(value: SpanData) -> Self {
+        let attr_len = value.attributes.len();
         Self {
             span_id: value.span_context.span_id(),
             name: value.name,
             start_time: value.start_time,
             end_time: value.end_time,
-            attributes: value.attributes,
+            attributes: value.attributes.into_iter().fold(
+                EvictedHashMap::new(attr_len as u32, attr_len),
+                |mut acc, attr| {
+                    acc.insert(attr);
+                    acc
+                },
+            ),
         }
     }
 }
@@ -150,6 +174,8 @@ pub(crate) struct Exporter {
     report_exporter: Arc<ApolloExporter>,
     field_execution_weight: f64,
     errors_configuration: ErrorsConfiguration,
+    use_legacy_request_span: bool,
+    include_span_names: HashSet<&'static str>,
 }
 
 #[derive(Debug)]
@@ -188,6 +214,7 @@ impl Exporter {
         field_execution_sampler: &'a SamplerOption,
         errors_configuration: &'a ErrorsConfiguration,
         batch_config: &'a BatchProcessorConfig,
+        use_legacy_request_span: Option<bool>,
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");
         Ok(Self {
@@ -206,6 +233,8 @@ impl Exporter {
                 SamplerOption::TraceIdRatioBased(ratio) => 1.0 / ratio,
             },
             errors_configuration: errors_configuration.clone(),
+            use_legacy_request_span: use_legacy_request_span.unwrap_or_default(),
+            include_span_names: INCLUDE_SPANS.into(),
         })
     }
 
@@ -293,7 +322,7 @@ impl Exporter {
         let mut results = vec![];
         for node in self.extract_data_from_spans(&span)? {
             if let TreeData::Request(trace) | TreeData::SubscriptionEvent(trace) = node {
-                results.push(*trace?)
+                results.push(*trace?);
             }
         }
         Ok(results)
@@ -303,14 +332,28 @@ impl Exporter {
         let (mut child_nodes, errors) = match self.spans_by_parent_id.pop_entry(&span.span_id) {
             Some((_, spans)) => spans
                 .into_iter()
-                .map(|(_, span)| self.extract_data_from_spans(&span))
-                .fold((Vec::new(), Vec::new()), |(mut oks, mut errors), next| {
-                    match next {
-                        Ok(mut children) => oks.append(&mut children),
-                        Err(err) => errors.push(err),
-                    }
-                    (oks, errors)
-                }),
+                .map(|(_, span)| {
+                    // If it's an unknown span or a span we don't care here it's better to know it here because as this algo is recursive if we encounter unknown spans it changes the order of spans and break the logics
+                    let unknown = self.include_span_names.contains(span.name.as_ref());
+                    (self.extract_data_from_spans(&span), unknown)
+                })
+                .fold(
+                    (Vec::new(), Vec::new()),
+                    |(mut oks, mut errors), (next, unknown_span)| {
+                        match next {
+                            Ok(mut children) => {
+                                if unknown_span {
+                                    oks.append(&mut children)
+                                } else {
+                                    children.append(&mut oks);
+                                    oks = children;
+                                }
+                            }
+                            Err(err) => errors.push(err),
+                        }
+                        (oks, errors)
+                    },
+                ),
             None => (Vec::new(), Vec::new()),
         };
         if !errors.is_empty() {
@@ -417,18 +460,16 @@ impl Exporter {
                 });
                 child_nodes
             }
-            _ if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some() => self
-                .extract_root_traces(span, child_nodes)?
-                .into_iter()
-                .map(|node| TreeData::Request(Ok(Box::new(node))))
-                .collect(),
             ROUTER_SPAN_NAME => {
                 child_nodes.push(TreeData::Router {
                     http: Box::new(extract_http_data(span)),
-                    client_name: span.attributes.get(&CLIENT_NAME).and_then(extract_string),
+                    client_name: span
+                        .attributes
+                        .get(&CLIENT_NAME_KEY)
+                        .and_then(extract_string),
                     client_version: span
                         .attributes
-                        .get(&CLIENT_VERSION)
+                        .get(&CLIENT_VERSION_KEY)
                         .and_then(extract_string),
                     duration_ns: span
                         .attributes
@@ -437,7 +478,40 @@ impl Exporter {
                         .map(|e| e as u64)
                         .unwrap_or_default(),
                 });
-                child_nodes
+                if self.use_legacy_request_span {
+                    child_nodes
+                } else {
+                    self.extract_root_traces(span, child_nodes)?
+                        .into_iter()
+                        .map(|node| TreeData::Request(Ok(Box::new(node))))
+                        .collect()
+                }
+            }
+            _ if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some() => {
+                if !self.use_legacy_request_span {
+                    child_nodes.push(TreeData::Router {
+                        http: Box::new(extract_http_data(span)),
+                        client_name: span
+                            .attributes
+                            .get(&CLIENT_NAME_KEY)
+                            .and_then(extract_string),
+                        client_version: span
+                            .attributes
+                            .get(&CLIENT_VERSION_KEY)
+                            .and_then(extract_string),
+                        duration_ns: span
+                            .attributes
+                            .get(&APOLLO_PRIVATE_DURATION_NS_KEY)
+                            .and_then(extract_i64)
+                            .map(|e| e as u64)
+                            .unwrap_or_default(),
+                    });
+                }
+
+                self.extract_root_traces(span, child_nodes)?
+                    .into_iter()
+                    .map(|node| TreeData::Request(Ok(Box::new(node))))
+                    .collect()
             }
             DEFER_SPAN_NAME => {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
@@ -516,10 +590,13 @@ impl Exporter {
                 // To put the duration
                 child_nodes.push(TreeData::Router {
                     http: Box::new(extract_http_data(span)),
-                    client_name: span.attributes.get(&CLIENT_NAME).and_then(extract_string),
+                    client_name: span
+                        .attributes
+                        .get(&CLIENT_NAME_KEY)
+                        .and_then(extract_string),
                     client_version: span
                         .attributes
-                        .get(&CLIENT_VERSION)
+                        .get(&CLIENT_VERSION_KEY)
                         .and_then(extract_string),
                     duration_ns: span
                         .attributes
@@ -653,7 +730,7 @@ pub(crate) fn decode_ftv1_trace(string: &str) -> Option<proto::reports::Trace> {
 fn extract_http_data(span: &LightSpanData) -> Http {
     let method = match span
         .attributes
-        .get(&HTTP_METHOD)
+        .get(&HTTP_REQUEST_METHOD)
         .map(|data| data.as_str())
         .unwrap_or_default()
         .as_ref()
@@ -703,7 +780,10 @@ impl SpanExporter for Exporter {
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
         for span in batch {
-            if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
+            if span
+                .attributes
+                .iter()
+                .any(|attr| attr.key == APOLLO_PRIVATE_REQUEST)
                 || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
             {
                 match self.extract_traces(span.into()) {

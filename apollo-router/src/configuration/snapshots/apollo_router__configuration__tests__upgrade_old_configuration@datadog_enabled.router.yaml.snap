@@ -4,8 +4,9 @@ expression: new_config
 ---
 ---
 telemetry:
-  tracing:
-    datadog:
-      endpoint: default
-      enabled: true
+  exporters:
+    tracing:
+      datadog:
+        endpoint: default
+        enabled: true
 
