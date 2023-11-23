@@ -288,7 +288,7 @@ async fn cache_store_from_response(
         (opt_root_cache_key, opt_entities_results)
     };
 
-    let cache_control = CacheControl::new(response.response.headers())?;
+    let cache_control = CacheControl::new(response.response.headers(), cache.ttl)?;
     update_cache_control(&response.context, &cache_control);
 
     if let Some(cache_key) = opt_root_cache_key {
@@ -558,7 +558,7 @@ fn filter_representations(
         let typename = opt_type.as_str().unwrap_or("-").to_string();
 
         // do not use that cache entry if it is stale
-        if let Some(false) = cache_entry.as_ref().map(|c| !c.control.can_use()) {
+        if let Some(false) = cache_entry.as_ref().map(|c| c.control.can_use()) {
             cache_entry = None;
         }
 
