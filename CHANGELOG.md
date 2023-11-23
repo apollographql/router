@@ -82,7 +82,7 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 
 ### Propagate multi-value headers to subgraphs ([Issue #4153](https://github.com/apollographql/router/issues/4153))
 
-Use `HeaderMap.append` instead of `insert` to prevent erasing previous values when using multiple headers with the same name.
+Use `HeaderMap.append` instead of `insert` to avoid erasing previous values when using multiple headers with the same name.
 
 By [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollographql/router/pull/4154
 
@@ -113,7 +113,7 @@ By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollo
 
 ### Configurable JWKS Poll Interval ([Issue #4185](https://github.com/apollographql/router/issues/4185))
 
-The poll interval was previously hardcoded to 60 seconds. It is still the default now, but can be configured through the new `poll_interval` configuration option under each JWKS entry to avoid becoming rate-limited per endpoint.
+The poll interval was previously hardcoded to 60 seconds. That remains the default, but can now be configured through the new `poll_interval` configuration option under each JWKS entry to avoid becoming rate-limited per endpoint.
 
 By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/4212
 
