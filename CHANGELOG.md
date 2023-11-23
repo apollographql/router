@@ -163,7 +163,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Rhai: support alternative base64 alphabets ([Issue #3783](https://github.com/apollographql/router/issues/3783))
 
-When encoding or decoding strings, your Rhai customization scripts can now use alternative base64 alphabets in addition to the default `STANDARD`. 
+When encoding or decoding strings, your Rhai customization scripts can now use alternative base64 alphabets in addition to the default `STANDARD`.
 
 The available base64 alphabets:
 
@@ -191,10 +191,10 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 ### GraphOS authorization directives: `@policy` directive ([PR #3751](https://github.com/apollographql/router/pull/3751))
 
 > ⚠️ This is an Enterprise feature of the Apollo Router. It requires an organization with a GraphOS Enterprise plan.
-> 
+>
 > If your organization doesn't currently have an Enterprise plan, you can test out this functionality by signing up for a free Enterprise trial.
 
-We introduce a new GraphOS authorization directive called `@policy` that is designed to offload authorization policy execution to a coprocessor or Rhai script. 
+We introduce a new GraphOS authorization directive called `@policy` that is designed to offload authorization policy execution to a coprocessor or Rhai script.
 
 When executing an operation, the relevant policy will be determined based on `@policy` directives in the schema. The coprocessor or Rhai script then indicates which of those policies requirements are not met.  Finally, the router filters out fields which are unauthorized in the same way it does when using `@authenticated` or `@requiresScopes` before executing the operation.
 
@@ -276,7 +276,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 The Apollo metrics exporter has been improved to not overconsume memory under high load.
 
-Previously, the router appeared to leak memory when under load. The root cause was a bounded `futures` channel that did not enforce expected bounds on channel capacity and could overconsume memory. 
+Previously, the router appeared to leak memory when under load. The root cause was a bounded `futures` channel that did not enforce expected bounds on channel capacity and could overconsume memory.
 
 We have fixed the issue by:
 
@@ -298,12 +298,12 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 Configuration between tracing and metrics was inconsistent and did not align with the terminology defined in the OpenTelemetry (OTel) specification. To correct this, the following changes have been made to the router's YAML configuration, `router.yaml`:
 
 `telemetry.tracing.trace_config` has been renamed to `common`
-  
+
 ```diff
 telemetry
   tracing:
 -   trace_config:
-+   common:   
++   common:
 ```
 
 `telemetry.tracing.common.attributes` has been renamed to `resource`
@@ -312,7 +312,7 @@ telemetry
   tracing:
     common:
 -      attributes:
-+      resource:   
++      resource:
 ```
 
 `telemetry.metrics.common.resources` has been renamed to `resource`
@@ -321,7 +321,7 @@ telemetry
   metrics:
     common:
 -      resources:
-+      resource:   
++      resource:
 ```
 `telemetry.tracing.propagation.awsxray` has been renamed to `aws_xray`
 ```diff
@@ -332,7 +332,7 @@ telemetry
 +      aws_xray: true
 ```
 
-Although the router will upgrade any existing configuration on startup, you should update your configuration to use the new format as soon as possible. 
+Although the router will upgrade any existing configuration on startup, you should update your configuration to use the new format as soon as possible.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/4044, https://github.com/apollographql/router/pull/4050 and https://github.com/apollographql/router/pull/4051
 
@@ -354,7 +354,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Clarify and fix docs about supported WebSocket subprotocols ([PR #4063](https://github.com/apollographql/router/pull/4063))
 
-The documentation about setting up and configuring WebSocket protocols for router-to-subgraph communication has been improved, including clarifying how to set the subgraph path that exposes WebSocket capabilities. 
+The documentation about setting up and configuring WebSocket protocols for router-to-subgraph communication has been improved, including clarifying how to set the subgraph path that exposes WebSocket capabilities.
 
 For details, see the [updated documentation](https://www.apollographql.com/docs/router/executing-operations/subscription-support/#websocket-setup)
 
@@ -468,7 +468,7 @@ Telemetry configuration now supports `enabled` on all exporters. This allows exp
 
 ```diff
 telemetry:
-  tracing: 
+  tracing:
     datadog:
 +      enabled: true
     jaeger:
@@ -479,7 +479,7 @@ telemetry:
 +      enabled: true
 ```
 
-Existing configurations will be migrated to the new format automatically on startup. However, you should update your configuration to use the new format as soon as possible. 
+Existing configurations will be migrated to the new format automatically on startup. However, you should update your configuration to use the new format as soon as possible.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/3952
 
@@ -513,7 +513,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Move persisted queries to general availability ([PR #3914](https://github.com/apollographql/router/pull/3914))
 
-[Persisted Queries](https://www.apollographql.com/docs/graphos/operations/persisted-queries/) (a GraphOS Enterprise feature) is now moving to General Availability, from Preview where it has been since Apollo Router 1.25. In addition to Safelisting, persisted queries can now also be used to [pre-warm the query plan cache](https://github.com/apollographql/router/releases/tag/v1.31.0) to speed up schema updates. 
+[Persisted Queries](https://www.apollographql.com/docs/graphos/operations/persisted-queries/) (a GraphOS Enterprise feature) is now moving to General Availability, from Preview where it has been since Apollo Router 1.25. In addition to Safelisting, persisted queries can now also be used to [pre-warm the query plan cache](https://github.com/apollographql/router/releases/tag/v1.31.0) to speed up schema updates.
 
 
 The feature is now configured with a `persisted_queries` top-level key in the YAML configuration instead of with `preview_persisted_queries`. Existing configuration files will keep working as before, but with a warning that can be resolved by renaming the configuration section from `preview_persisted_queries` to `persisted_queries`:
@@ -599,7 +599,7 @@ An experimental implementation of query batching has been added to support clien
 
 If you’re using Apollo Client, you can leverage its built-in support for batching to reduce the number of individual requests sent to the Apollo Router.
 
-Once [configured](https://www.apollographql.com/docs/react/api/link/apollo-link-batch-http/), Apollo Client  automatically combines multiple operations into a single HTTP request. The number of operations within a batch is client configurable, including the maximum number of operations in a batch and the maximum duration to wait for operations to accumulate before sending the batch request. 
+Once [configured](https://www.apollographql.com/docs/react/api/link/apollo-link-batch-http/), Apollo Client  automatically combines multiple operations into a single HTTP request. The number of operations within a batch is client configurable, including the maximum number of operations in a batch and the maximum duration to wait for operations to accumulate before sending the batch request.
 
 The Apollo Router must be configured to receive batch requests, otherwise it rejects them. When processing a batch request, the router deserializes and processes each operation of a batch independently, and it responds to the client only after all operations of the batch have been completed.
 
@@ -632,15 +632,15 @@ tls:
   subgraph:
     all:
       client_authentication:
-        certificate_chain: 
-        key: 
+        certificate_chain:
+        key:
     # if configuring for a specific subgraph:
     subgraphs:
       # subgraph name
       products:
         client_authentication:
-          certificate_chain: 
-          key: 
+          certificate_chain:
+          key:
 ```
 
 Details on TLS client authentication can be found in the [documentation](https://www.apollographql.com/docs/router/configuration/overview#tls-client-authentication-for-subgraph-requests)
@@ -1308,7 +1308,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Spelling of `content_negociation` corrected to `content_negotiation` ([Issue #3204](https://github.com/apollographql/router/issues/3204))
 
-We had a bit of a French twist on one of our internal module names.  We won't promise it won't happen again, but  `content_negociation` is spelled as `content_negotiation` now. 😄  
+We had a bit of a French twist on one of our internal module names.  We won't promise it won't happen again, but  `content_negociation` is spelled as `content_negotiation` now. 😄
 
 Thank you for this contribution!
 
