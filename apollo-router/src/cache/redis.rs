@@ -162,6 +162,10 @@ impl RedisCacheStorage {
         })
     }
 
+    pub(crate) fn ttl(&self) -> Option<Duration> {
+        self.ttl
+    }
+
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {
         match urls.get(0) {
             None => Err(RedisError::new(

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ops::ControlFlow;
+use std::sync::Arc;
 use std::time::Duration;
 
 use http::header;
@@ -40,6 +41,8 @@ register_plugin!("apollo", "experimental_entity_cache", EntityCache);
 
 struct EntityCache {
     storage: RedisCacheStorage,
+    subgraphs: Arc<HashMap<String, Subgraph>>,
+    enabled: Option<bool>,
 }
 
 /// Configuration for entity caching
@@ -47,7 +50,34 @@ struct EntityCache {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Config {
     redis: RedisCache,
+    /// activates caching for all subgraphs, unless overriden in subgraph specific configuration
+    #[serde(default)]
+    enabled: Option<bool>,
+    /// Per subgraph configuration
+    #[serde(default)]
+    subgraphs: HashMap<String, Subgraph>,
 }
+
+/// Per subgraph configuration for entity caching
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+struct Subgraph {
+    /// expiration for all keys
+    pub(crate) ttl: Option<Ttl>,
+
+    /// activates caching for this subgraph, overrides the global configuration
+    #[serde(default)]
+    enabled: Option<bool>,
+}
+
+/// Per subgraph configuration for entity caching
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+struct Ttl(
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String")]
+    Duration,
+);
 
 #[async_trait::async_trait]
 impl Plugin for EntityCache {
@@ -59,7 +89,11 @@ impl Plugin for EntityCache {
     {
         let storage = RedisCacheStorage::new(init.config.redis).await?;
 
-        Ok(Self { storage })
+        Ok(Self {
+            storage,
+            enabled: init.config.enabled,
+            subgraphs: Arc::new(init.config.subgraphs),
+        })
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
@@ -83,8 +117,23 @@ impl Plugin for EntityCache {
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         let cache = self.storage.clone();
         let cache2 = self.storage.clone();
+
+        let (subgraph_ttl, subgraph_enabled) = if let Some(config) = self.subgraphs.get(name) {
+            (
+                config
+                    .ttl
+                    .clone()
+                    .map(|t| t.0)
+                    .or_else(|| self.storage.ttl()),
+                config.enabled.or(self.enabled).unwrap_or(false),
+            )
+        } else {
+            (self.storage.ttl(), self.enabled.unwrap_or(false))
+        };
         let name = name.to_string();
-        ServiceBuilder::new()
+
+        if subgraph_enabled {
+            ServiceBuilder::new()
             .oneshot_checkpoint_async(move |request: subgraph::Request| {
                 let name = name.clone();
                 let cache = cache.clone();
@@ -104,10 +153,13 @@ impl Plugin for EntityCache {
             })
             .map_future(move |response| {
                 let cache = cache2.clone();
-                async move { cache_store_from_response(cache, response.await?).await }
+                async move { cache_store_from_response(cache, subgraph_ttl, response.await?).await }
             })
             .service(service)
             .boxed()
+        } else {
+            service
+        }
     }
 }
 
@@ -223,6 +275,7 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
 
 async fn cache_store_from_response(
     cache: RedisCacheStorage,
+    subgraph_ttl: Option<Duration>,
     mut response: subgraph::Response,
 ) -> Result<subgraph::Response, BoxError> {
     let (opt_root_cache_key, opt_entities_results) = {
@@ -239,10 +292,17 @@ async fn cache_store_from_response(
     update_cache_control(&response.context, &cache_control);
 
     if let Some(cache_key) = opt_root_cache_key {
-        cache_store_root_from_response(cache, &response, cache_control, cache_key).await?;
-    } else if let Some(result_from_cache) = opt_entities_results {
-        cache_store_entities_from_response(cache, &mut response, cache_control, result_from_cache)
+        cache_store_root_from_response(cache, subgraph_ttl, &response, cache_control, cache_key)
             .await?;
+    } else if let Some(result_from_cache) = opt_entities_results {
+        cache_store_entities_from_response(
+            cache,
+            subgraph_ttl,
+            &mut response,
+            cache_control,
+            result_from_cache,
+        )
+        .await?;
     }
 
     Ok(response)
@@ -256,6 +316,7 @@ struct CacheEntry {
 
 async fn cache_store_root_from_response(
     cache: RedisCacheStorage,
+    subgraph_ttl: Option<Duration>,
     response: &subgraph::Response,
     cache_control: CacheControl,
     cache_key: String,
@@ -263,7 +324,8 @@ async fn cache_store_root_from_response(
     if let Some(data) = response.response.body().data.as_ref() {
         let ttl: Option<Duration> = cache_control
             .ttl()
-            .map(|secs| Duration::from_secs(secs as u64));
+            .map(|secs| Duration::from_secs(secs as u64))
+            .or(subgraph_ttl);
 
         if cache_control.should_store() {
             cache
@@ -284,6 +346,7 @@ async fn cache_store_root_from_response(
 
 async fn cache_store_entities_from_response(
     cache: RedisCacheStorage,
+    subgraph_ttl: Option<Duration>,
     response: &mut subgraph::Response,
     cache_control: CacheControl,
     mut result_from_cache: Vec<IntermediateResult>,
@@ -304,6 +367,7 @@ async fn cache_store_entities_from_response(
                     reason: "expected an array of entities".to_string(),
                 })?,
             &cache,
+            subgraph_ttl,
             cache_control,
             &mut result_from_cache,
         )
@@ -551,12 +615,14 @@ fn filter_representations(
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     cache: &RedisCacheStorage,
+    subgraph_ttl: Option<Duration>,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
 ) -> Result<Vec<Value>, BoxError> {
     let ttl: Option<Duration> = cache_control
         .ttl()
-        .map(|secs| Duration::from_secs(secs as u64));
+        .map(|secs| Duration::from_secs(secs as u64))
+        .or(subgraph_ttl);
 
     let mut new_entities = Vec::new();
 
