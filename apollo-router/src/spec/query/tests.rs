@@ -5722,3 +5722,80 @@ fn filtered_defer_fragment() {
 
     assert_json_snapshot!(response);
 }
+
+#[test]
+fn fragment_type() {
+    let config = Configuration::default();
+    let schema = Schema::parse_test(
+        r#"
+        schema
+        @core(feature: "https://specs.apollo.dev/core/v0.1")
+        @core(feature: "https://specs.apollo.dev/join/v0.1")
+        {
+            query: Query
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
+        scalar join__FieldSet
+
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        type Query {
+            node: Node @join__field(graph: TEST)
+        }
+
+        interface Node {
+            _id: String
+        }
+
+        type Game implements Node & Video {
+            _id: String
+            title: String
+        }
+
+        interface Video {
+            title: String
+        }
+
+        type Show implements Video {
+            title: String
+        }
+        "#,
+        &config,
+    )
+    .unwrap();
+    let query = r#"{
+        node {
+          __typename
+          _id
+          ... on Video {
+           __isVideo: __typename
+         }
+        }
+      }"#;
+
+    let query = Query::parse(query, &schema, &config).unwrap();
+
+    let mut response = crate::graphql::Response::builder()
+        .data(json! {{
+            "node": {
+                "__typename": "Game",
+                "_id": "1",
+                "__isVideo": "Game"
+              }
+        }})
+        .build();
+
+    query.format_response(
+        &mut response,
+        None,
+        Object::new(),
+        &schema,
+        BooleanValues { bits: 0 },
+    );
+
+    assert_json_snapshot!(response);
+}

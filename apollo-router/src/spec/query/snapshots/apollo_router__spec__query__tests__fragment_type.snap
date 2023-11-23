@@ -1,0 +1,13 @@
+---
+source: apollo-router/src/spec/query/tests.rs
+expression: response
+---
+{
+  "data": {
+    "node": {
+      "__typename": "Game",
+      "_id": "1",
+      "__isVideo": "Game"
+    }
+  }
+}
