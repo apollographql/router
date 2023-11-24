@@ -694,7 +694,7 @@ impl QueryPlan {
         key: &CacheKeyMetadata,
     ) {
         if let Some(node) = self.node.as_mut() {
-            node.extract_authorization_metadata(schema, &key);
+            node.extract_authorization_metadata(schema, key);
         }
     }
 }
