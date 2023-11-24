@@ -3,6 +3,9 @@ title: Export traces to Jaeger
 description: Collect and export tracing information from the Apollo Router
 ---
 
+import BatchProcessorPreamble from '../../../../../shared/batch-processor-preamble.mdx';
+import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
+
 Enable and configure the [Jaeger](https://www.jaegertracing.io/) exporter endpoint in the Apollo Router.
 
 For general tracing configuration, refer to [Router Tracing Configuration](./overview).
@@ -48,7 +51,35 @@ The Apollo Router can be configured to export tracing data to Jaeger either via 
 
 Unless explicitly configured to use a collector, Jaeger will use an agent by default.
 
+## Jaeger configuration
+
+
+### `enabled`
+Set to true to enable the Jaeger exporter. Defaults to false.
+
+### `batch_processor`
+<BatchProcessorPreamble />
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      zipkin: 
+        batch_processor: 
+          max_export_batch_size: 512
+          max_concurrent_exports: 1
+          max_export_timeout: 30s 
+          max_queue_size: 2048
+          scheduled_delay: 5s
+```
+
+### `batch_processor` configuration reference
+<BatchProcessorRef />
+
+
+
 ### Agent configuration
+
+If you are running Jaeger agent then use the `agent` configuration to set the agent endpoint. For example:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -62,11 +93,14 @@ telemetry:
            endpoint: "${env.JAEGER_HOST}:6832"  
 ```
 #### Jaeger agent configuration reference
+
 | Attribute         | Default | Description                        |
 |-------------------|---------|------------------------------------|
 | `endpoint`        | `false` | Enable the OTLP exporter.          |
 
 ### Collector configuration
+
+If you are running Jaeger collector then use the `collector` configuration to set the agent endpoint. For example:
 
 ```yaml title="router.yaml"
 telemetry:
