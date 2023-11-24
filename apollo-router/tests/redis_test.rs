@@ -4,6 +4,7 @@ mod test {
     use apollo_router::services::execution::QueryPlan;
     use apollo_router::services::router;
     use apollo_router::services::supergraph;
+    use apollo_router::Context;
     use apollo_router::MockedSubgraphs;
     use fred::prelude::*;
     use futures::StreamExt;
@@ -418,6 +419,328 @@ mod test {
         .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
         insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
+
+        client.quit().await?;
+        // calling quit ends the connection and event listener tasks
+        let _ = connection_task.await;
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn entity_cache_authorization() -> Result<(), BoxError> {
+        let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
+        let client = RedisClient::new(config, None, None);
+        let connection_task = client.connect();
+        client.wait_for_connect().await?;
+
+        let mut subgraphs = MockedSubgraphs::default();
+        subgraphs.insert(
+            "accounts",
+            MockSubgraph::builder().with_json(
+                serde_json::json!{{
+                    "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{username}}}",
+                    "variables": {
+                        "representations": [
+                            { "__typename": "User", "id": "1" },
+                            { "__typename": "User", "id": "2" }
+                        ],
+                    }
+                }},
+                serde_json::json! {{
+                    "data": {
+                        "_entities":[
+                            {
+                                "username": "ada"
+                            },
+                            {
+                                "username": "charles"
+                            }
+                        ]
+                    }
+                }},
+            ).with_json(
+                    serde_json::json! {{"query":"{me{id}}"}},
+                    serde_json::json! {{"data": {
+                        "me": {
+                            "id": "1"
+                        }
+                    }}},
+                )
+                .build(),
+        );
+        subgraphs.insert(
+            "products",
+            MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{"query":"{topProducts{__typename upc name}}"}},
+                    serde_json::json! {{"data": {
+                            "topProducts": [{
+                                "__typename": "Product",
+                                "upc": "1",
+                                "name": "chair"
+                            },
+                            {
+                                "__typename": "Product",
+                                "upc": "2",
+                                "name": "table"
+                            }]
+                    }}},
+                )
+                .build(),
+        );
+        subgraphs.insert(
+            "reviews",
+            MockSubgraph::builder().with_json(
+                    serde_json::json!{{
+                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
+                        "variables": {
+                            "representations": [
+                                { "upc": "1", "__typename": "Product" },
+                                { "upc": "2", "__typename": "Product" }
+                            ],
+                        }
+                    }},
+                    serde_json::json! {{
+                        "data": {
+                            "_entities":[
+                                {
+                                    "reviews": [{
+                                        "body": "I can sit on it"
+                                    }]
+                                },
+                                {
+                                    "reviews": [{
+                                        "body": "I can sit on it"
+                                    },
+                                    {
+                                        "body": "I can eat on it"
+                                    }]
+                                }
+                            ]
+                        }
+                    }},
+                ).with_json(
+                    serde_json::json!{{
+                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body author{__typename id}}}}}",
+                        "variables": {
+                            "representations": [
+                                { "upc": "1", "__typename": "Product" },
+                                { "upc": "2", "__typename": "Product" }
+                            ],
+                        }
+                    }},
+                    serde_json::json! {{
+                        "data": {
+                            "_entities":[
+                                {
+                                    "reviews": [{
+                                        "body": "I can sit on it",
+                                        "author": {
+                                            "__typename": "User",
+                                            "id": "1"
+                                        }
+                                    }]
+                                },
+                                {
+                                    "reviews": [{
+                                        "body": "I can sit on it",
+                                        "author": {
+                                            "__typename": "User",
+                                            "id": "1"
+                                        }
+                                    },
+                                    {
+                                        "body": "I can eat on it",
+                                        "author": {
+                                            "__typename": "User",
+                                            "id": "2"
+                                        }
+                                    }]
+                                }
+                            ]
+                        }
+                    }},
+                )
+                .build(),
+        );
+
+        let supergraph = apollo_router::TestHarness::builder()
+            .with_subgraph_network_requests()
+            .configuration_json(json!({
+                "experimental_entity_cache": {
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "ttl": "2s"
+                    },
+                    "enabled": false,
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
+                    }
+                },
+                "authorization": {
+                    "preview_directives": {
+                        "enabled": true
+                    }
+                },
+                "include_subgraph_errors": {
+                    "all": true
+                }
+            }))?
+            .extra_plugin(subgraphs)
+            .schema(include_str!("fixtures/supergraph-auth.graphql"))
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let context = Context::new();
+        context
+            .insert(
+                "apollo_authorization::scopes::required",
+                json! {["profile", "read:user", "read:name"]},
+            )
+            .unwrap();
+        let request = supergraph::Request::fake_builder()
+            .query(
+                r#"{ me { id name } topProducts { name reviews { body author { username } } } }"#,
+            )
+            .context(context)
+            .method(Method::POST)
+            .build()?;
+
+        let response = supergraph
+            .clone()
+            .oneshot(request)
+            .await?
+            .next_response()
+            .await
+            .unwrap();
+        insta::assert_json_snapshot!(response);
+
+        let s:String = client
+          .get("subgraph.products|530d594c46b838e725b87d64fd6384b82f6ff14bd902b57bba9dcc34ce684b76|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .await
+          .unwrap();
+        println!("got res: {s}");
+        let v: Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(
+            v.as_object().unwrap().get("data").unwrap(),
+            &json! {{
+                "topProducts": [{
+                    "__typename": "Product",
+                    "upc": "1",
+                    "name": "chair"
+                },
+                {
+                    "__typename": "Product",
+                    "upc": "2",
+                    "name": "table"
+                }]
+            }}
+        );
+
+        let s:String = client
+        .get("subgraph.reviews|Product|4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66|98424704ece0e377929efa619bce2cbd5246281199c72a0902da863270f5839c|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .await
+        .unwrap();
+        println!("got res: {s}");
+        let v: Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(
+            v.as_object().unwrap().get("data").unwrap(),
+            &json! {{
+                "reviews": [
+                    {"body": "I can sit on it"}
+                ]
+            }}
+        );
+
+        //insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
+
+        println!("\n\n///////////////////////////////////\n\n");
+        ///////////////////////////
+        let context = Context::new();
+        context
+            .insert(
+                "apollo_authorization::scopes::required",
+                json! {["profile", "read:user", "read:name"]},
+            )
+            .unwrap();
+        context
+            .insert(
+                "apollo_authentication::JWT::claims",
+                json! {{ "scope": "read:user read:name" }},
+            )
+            .unwrap();
+        let request = supergraph::Request::fake_builder()
+            .query(
+                r#"{ me { id name } topProducts { name reviews { body author { username } } } }"#,
+            )
+            .context(context)
+            .method(Method::POST)
+            .build()?;
+
+        let response = supergraph
+            .clone()
+            .oneshot(request)
+            .await?
+            .next_response()
+            .await
+            .unwrap();
+        insta::assert_json_snapshot!(response);
+
+        let s:String = client
+          .get("subgraph.reviews|Product|4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66|dc8e1fb584d7ad114b3e836a5fe4f642732b82eb39bb8d6dff000d844d0e3baf|f1d914240cfd0c60d5388f3f2d2ae00b5f1e2400ef2c9320252439f354515ce9")
+          .await
+          .unwrap();
+        println!("got res: {s}");
+        let v: Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(
+            v.as_object().unwrap().get("data").unwrap(),
+            &json! {{
+                "reviews": [{
+                    "body": "I can sit on it",
+                    "author": {"__typename": "User", "id": "1"}
+                }]
+            }}
+        );
+
+        println!("\n\n///////////////////////////////////\n\n");
+        ///////////////////////////
+        let context = Context::new();
+        context
+            .insert(
+                "apollo_authorization::scopes::required",
+                json! {["profile", "read:user", "read:name"]},
+            )
+            .unwrap();
+        context
+            .insert(
+                "apollo_authentication::JWT::claims",
+                json! {{ "scope": "read:user profile" }},
+            )
+            .unwrap();
+        let request = supergraph::Request::fake_builder()
+            .query(
+                r#"{ me { id name } topProducts { name reviews { body author { username } } } }"#,
+            )
+            .context(context)
+            .method(Method::POST)
+            .build()?;
+
+        let response = supergraph
+            .clone()
+            .oneshot(request)
+            .await?
+            .next_response()
+            .await
+            .unwrap();
+        insta::assert_json_snapshot!(response);
 
         client.quit().await?;
         // calling quit ends the connection and event listener tasks
