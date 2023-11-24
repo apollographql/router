@@ -2313,6 +2313,7 @@ mod tests {
                 subscription_stream: None,
                 connection_closed_signal: None,
                 query_hash: Default::default(),
+                authorization: Default::default(),
             })
             .await
             .unwrap();

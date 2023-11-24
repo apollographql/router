@@ -124,8 +124,7 @@ impl QueryAnalysisLayer {
                         &self.schema,
                         &self.configuration,
                         &context,
-                    )
-                    .await;
+                    );
                 }
 
                 (*self.cache.lock().await).put(

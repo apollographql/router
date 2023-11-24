@@ -1,3 +1,5 @@
+use std::collections::LinkedList;
+
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use tracing_opentelemetry::OtelData;
@@ -9,26 +11,18 @@ use tracing_subscriber::Registry;
 use super::reload::IsSampled;
 use super::tracing::APOLLO_PRIVATE_PREFIX;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct LogAttributes {
-    attributes: Vec<KeyValue>,
-}
-
-impl Default for LogAttributes {
-    fn default() -> Self {
-        Self {
-            attributes: Vec::with_capacity(0),
-        }
-    }
+    attributes: LinkedList<KeyValue>,
 }
 
 impl LogAttributes {
-    pub(crate) fn attributes(&self) -> &Vec<KeyValue> {
+    pub(crate) fn attributes(&self) -> &LinkedList<KeyValue> {
         &self.attributes
     }
 
     fn insert(&mut self, kv: KeyValue) {
-        self.attributes.push(kv);
+        self.attributes.push_back(kv);
     }
 
     pub(crate) fn extend(&mut self, other: impl IntoIterator<Item = KeyValue>) {
@@ -64,7 +58,7 @@ impl DynAttributeLayer {
 
 pub(crate) trait DynAttribute {
     fn set_dyn_attribute(&self, key: Key, value: opentelemetry::Value);
-    fn set_dyn_attributes(&self, attributes: impl IntoIterator<Item = (Key, opentelemetry::Value)>);
+    fn set_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>);
 }
 
 impl DynAttribute for ::tracing::Span {
@@ -86,7 +80,7 @@ impl DynAttribute for ::tracing::Span {
                                             .builder
                                             .attributes
                                             .as_mut()
-                                            .unwrap()
+                                            .expect("we checked the attributes value in the condition above")
                                             .push(KeyValue::new(key, value));
                                     }
                                 }
@@ -118,11 +112,7 @@ impl DynAttribute for ::tracing::Span {
         });
     }
 
-    fn set_dyn_attributes(
-        &self,
-        attributes: impl IntoIterator<Item = (Key, opentelemetry::Value)>,
-    ) {
-        let kv_attributes = attributes.into_iter().map(|(k, v)| KeyValue::new(k, v));
+    fn set_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>) {
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
@@ -134,14 +124,14 @@ impl DynAttribute for ::tracing::Span {
                                 Some(otel_data) => {
                                     if otel_data.builder.attributes.is_none() {
                                         otel_data.builder.attributes =
-                                            Some(kv_attributes.into_iter().collect());
+                                            Some(attributes.into_iter().collect());
                                     } else {
                                         otel_data
                                             .builder
                                             .attributes
                                             .as_mut()
                                             .unwrap()
-                                            .extend(kv_attributes);
+                                            .extend(attributes);
                                     }
                                 }
                                 None => {
@@ -153,7 +143,7 @@ impl DynAttribute for ::tracing::Span {
                             let mut extensions = s.extensions_mut();
                             match extensions.get_mut::<LogAttributes>() {
                                 Some(registered_attributes) => {
-                                    registered_attributes.extend(kv_attributes.into_iter().filter(
+                                    registered_attributes.extend(attributes.into_iter().filter(
                                         |kv| !kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX),
                                     ));
                                 }

@@ -262,6 +262,7 @@ async fn defer() {
                         input_rewrites: None,
                         output_rewrites: None,
                         schema_aware_hash: Default::default(),
+                        authorization: Default::default(),
                     }))),
                 },
                 deferred: vec![DeferredNode {
@@ -305,6 +306,7 @@ async fn defer() {
                             input_rewrites: None,
                             output_rewrites: None,
                             schema_aware_hash: Default::default(),
+                            authorization: Default::default(),
                         })),
                     }))),
                 }],

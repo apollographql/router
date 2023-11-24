@@ -23,6 +23,8 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
+use crate::plugins::authorization::AuthorizationPlugin;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::SubgraphRequest;
 use crate::spec::query::change::QueryHashVisitor;
 use crate::spec::query::traverse;
@@ -121,6 +123,10 @@ pub(crate) struct FetchNode {
     // affecting the query, then they will have the same hash
     #[serde(default)]
     pub(crate) schema_aware_hash: Arc<QueryHash>,
+
+    // authorization metadata for the subgraph query
+    #[serde(default)]
+    pub(crate) authorization: Arc<CacheKeyMetadata>,
 }
 
 #[derive(Clone, Default, PartialEq, Deserialize, Serialize)]
@@ -290,6 +296,7 @@ impl FetchNode {
             .context(parameters.context.clone())
             .build();
         subgraph_request.query_hash = self.schema_aware_hash.clone();
+        subgraph_request.authorization = self.authorization.clone();
 
         let service = parameters
             .service_factory
@@ -484,5 +491,22 @@ impl FetchNode {
         traverse::document(&mut visitor, &doc).unwrap();
 
         self.schema_aware_hash = Arc::new(QueryHash(visitor.finish()));
+    }
+
+    pub(crate) fn extract_authorization_metadata(
+        &mut self,
+        schema: &apollo_compiler::Schema,
+        global_authorisation_cache_key: &CacheKeyMetadata,
+    ) {
+        let doc = Document::parse(&self.operation, "query.graphql");
+        let subgraph_query_cache_key =
+            AuthorizationPlugin::generate_cache_metadata(&doc, schema, !self.requires.is_empty());
+
+        // we need to intersect the cache keys because the global key already takes into account
+        // the scopes and policies from the client request
+        self.authorization = Arc::new(AuthorizationPlugin::intersect_cache_keys_subgraph(
+            global_authorisation_cache_key,
+            &subgraph_query_cache_key,
+        ));
     }
 }

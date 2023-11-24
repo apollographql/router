@@ -20,6 +20,11 @@ Sequence {
                 schema_aware_hash: QueryHash(
                     "",
                 ),
+                authorization: CacheKeyMetadata {
+                    is_authenticated: false,
+                    scopes: [],
+                    policies: [],
+                },
             },
         ),
         Parallel {
@@ -76,6 +81,11 @@ Sequence {
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),
+                                        authorization: CacheKeyMetadata {
+                                            is_authenticated: false,
+                                            scopes: [],
+                                            policies: [],
+                                        },
                                     },
                                 ),
                             },
@@ -142,6 +152,11 @@ Sequence {
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),
+                                        authorization: CacheKeyMetadata {
+                                            is_authenticated: false,
+                                            scopes: [],
+                                            policies: [],
+                                        },
                                     },
                                 ),
                             },
@@ -197,6 +212,11 @@ Sequence {
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),
+                                        authorization: CacheKeyMetadata {
+                                            is_authenticated: false,
+                                            scopes: [],
+                                            policies: [],
+                                        },
                                     },
                                 ),
                             },
@@ -262,6 +282,11 @@ Sequence {
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),
+                                        authorization: CacheKeyMetadata {
+                                            is_authenticated: false,
+                                            scopes: [],
+                                            policies: [],
+                                        },
                                     },
                                 ),
                             },

@@ -320,6 +320,7 @@ impl BridgeQueryPlanner {
         original_query: String,
         filtered_query: String,
         operation: Option<String>,
+        key: CacheKeyMetadata,
         selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         fn is_validation_error(errors: &router_bridge::planner::PlanErrors) -> bool {
@@ -382,6 +383,9 @@ impl BridgeQueryPlanner {
                 plan.data
                     .query_plan
                     .hash_subqueries(&self.schema.definitions);
+                plan.data
+                    .query_plan
+                    .extract_authorization_metadata(&self.schema.definitions, &key);
                 plan
             }
             Err(err) => {
@@ -654,6 +658,7 @@ impl BridgeQueryPlanner {
             key.original_query,
             key.filtered_query,
             key.operation_name,
+            key.metadata,
             selections,
         )
         .await
@@ -680,6 +685,16 @@ impl QueryPlan {
     fn hash_subqueries(&mut self, schema: &apollo_compiler::Schema) {
         if let Some(node) = self.node.as_mut() {
             node.hash_subqueries(schema);
+        }
+    }
+
+    fn extract_authorization_metadata(
+        &mut self,
+        schema: &apollo_compiler::Schema,
+        key: &CacheKeyMetadata,
+    ) {
+        if let Some(node) = self.node.as_mut() {
+            node.extract_authorization_metadata(schema, &key);
         }
     }
 }
@@ -773,6 +788,7 @@ mod tests {
                 include_str!("testdata/unknown_introspection_query.graphql").to_string(),
                 include_str!("testdata/unknown_introspection_query.graphql").to_string(),
                 None,
+                CacheKeyMetadata::default(),
                 selections,
             )
             .await

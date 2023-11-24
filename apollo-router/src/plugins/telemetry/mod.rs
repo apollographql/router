@@ -1,6 +1,7 @@
 //! Telemetry plugin.
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::LinkedList;
 use std::fmt;
 use std::sync::Arc;
 use std::thread;
@@ -350,21 +351,20 @@ impl Plugin for Telemetry {
                         .attributes
                         .on_request(request);
                     custom_attributes.extend([
-                        (CLIENT_NAME_KEY, client_name.to_string().into()),
-                        (CLIENT_VERSION_KEY, client_version.to_string().into()),
-                        (
+                        KeyValue::new(CLIENT_NAME_KEY, client_name.to_string()),
+                        KeyValue::new(CLIENT_VERSION_KEY, client_version.to_string()),
+                        KeyValue::new(
                             Key::from_static_str("apollo_private.http.request_headers"),
                             filter_headers(
                                 request.router_request.headers(),
                                 &config_request.apollo.send_headers,
-                            )
-                            .into(),
+                            ),
                         ),
                     ]);
 
                     custom_attributes
                 },
-                move |custom_attributes: HashMap<opentelemetry::Key, opentelemetry::Value>, fut| {
+                move |custom_attributes: LinkedList<KeyValue>, fut| {
                     let start = Instant::now();
                     let config = config_later.clone();
 
@@ -488,7 +488,7 @@ impl Plugin for Telemetry {
                     Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
                     (req.context.clone(), custom_attributes)
                 },
-                move |(ctx, custom_attributes): (Context, HashMap<Key, opentelemetry::Value>), fut| {
+                move |(ctx, custom_attributes): (Context, LinkedList<KeyValue>), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -592,7 +592,7 @@ impl Plugin for Telemetry {
                 move |(context, cache_attributes, custom_attributes): (
                     Context,
                     Option<CacheAttributes>,
-                    HashMap<Key, opentelemetry::Value>,
+                    LinkedList<KeyValue>,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let subgraph_attribute = subgraph_attribute.clone();
