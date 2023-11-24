@@ -1794,7 +1794,13 @@ mod tests {
 
     async fn emulate_subgraph_with_callback_data(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-            let (_, body) = request.into_parts();
+            let (parts, body) = request.into_parts();
+            assert!(parts
+                .headers
+                .get_all(ACCEPT)
+                .iter()
+                .any(|header_value| header_value
+                    == HeaderValue::from_static("application/json+graphql+callback/1.0")));
             let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
                 .await
                 .map_err(|_| ())

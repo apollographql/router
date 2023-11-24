@@ -1557,6 +1557,7 @@ impl Telemetry {
             );
         }
     }
+
     fn reload_metrics(&mut self) {
         let meter_provider = meter_provider();
         commit_prometheus();
@@ -1590,7 +1591,7 @@ impl Telemetry {
         }
     }
 
-    fn checked_tracer_shutdown(tracer_provider: opentelemetry::sdk::trace::TracerProvider) {
+    fn checked_tracer_shutdown(tracer_provider: opentelemetry_sdk::trace::TracerProvider) {
         Self::checked_spawn_task(Box::new(move || {
             drop(tracer_provider);
         }));
