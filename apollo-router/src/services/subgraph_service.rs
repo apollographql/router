@@ -134,6 +134,7 @@ impl Display for Compression {
 
 #[cfg_attr(test, derive(Deserialize))]
 #[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 struct SubscriptionExtension {
     subscription_id: String,
     callback_url: url::Url,
