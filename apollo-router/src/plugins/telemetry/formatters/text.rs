@@ -25,7 +25,7 @@ use super::EventFormatter;
 use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config_new::logging::TextFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
-use crate::plugins::telemetry::formatters::to_vec;
+use crate::plugins::telemetry::formatters::to_list;
 use crate::plugins::telemetry::tracing::APOLLO_PRIVATE_PREFIX;
 
 pub(crate) struct Text {
@@ -58,7 +58,7 @@ impl Text {
         Self {
             timer: Default::default(),
             config,
-            resource: to_vec(resource),
+            resource: to_list(resource),
             excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
         }
     }

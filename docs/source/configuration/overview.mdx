@@ -90,9 +90,11 @@ This reference lists and describes the options supported by the `router` binary.
 
 The absolute or relative path to the Apollo Router's [supergraph schema](/federation/federated-types/overview/#supergraph-schema).
 
+Setting this option disables polling from Apollo Uplink to fetch the latest supergraph schema.
+
 To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](/federation/quickstart/local-composition/).
 
-**Required** if you are _not_ using managed federation. If you _are_ using managed federation, do not provide this value.
+**Required** if you are _not_ using managed federation. If you _are_ using managed federation, you may need to set this option when following [advanced deployment workflows](/federation/managed-federation/deployment/#advanced-deployment-workflows).
 
 </td>
 </tr>

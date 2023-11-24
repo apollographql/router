@@ -22,7 +22,7 @@ use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config_new::logging::JsonFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
-use crate::plugins::telemetry::formatters::to_vec;
+use crate::plugins::telemetry::formatters::to_list;
 
 #[derive(Debug)]
 pub(crate) struct Json {
@@ -34,7 +34,7 @@ pub(crate) struct Json {
 impl Json {
     pub(crate) fn new(resource: Resource, config: JsonFormat) -> Self {
         Self {
-            resource: to_vec(resource),
+            resource: to_list(resource),
             config,
             excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
         }
