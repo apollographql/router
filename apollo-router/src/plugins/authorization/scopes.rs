@@ -291,11 +291,6 @@ impl<'a> ScopeFilteringVisitor<'a> {
         field_def: &ast::FieldDefinition,
         node: &ast::Field,
     ) -> bool {
-        println!(
-            "implementors with different requirements for {:?}, node name={}",
-            field_def.name,
-            node.name.as_str()
-        );
         // we can request __typename outside of fragments even if the types have different
         // authorization requirements
         if node.name.as_str() == TYPENAME {

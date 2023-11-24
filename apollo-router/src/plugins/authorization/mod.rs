@@ -67,9 +67,9 @@ pub(crate) struct Conf {
     /// Reject unauthenticated requests
     #[serde(default)]
     require_authentication: bool,
-    /// `@authenticated` and `@requiresScopes` directives
+    /// `@authenticated`, `@requiresScopes` and `@policy` directives
     #[serde(default)]
-    preview_directives: Directives,
+    directives: Directives,
 }
 
 #[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
@@ -142,7 +142,7 @@ impl AuthorizationPlugin {
             .plugins
             .iter()
             .find(|(s, _)| s.as_str() == "authorization")
-            .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
+            .and_then(|(_, v)| v.get("directives").and_then(|v| v.as_object()))
             .and_then(|v| v.get("enabled").and_then(|v| v.as_bool()));
 
         let has_authorization_directives = schema.has_spec(AUTHENTICATED_SPEC_URL)
@@ -158,7 +158,7 @@ impl AuthorizationPlugin {
             .plugins
             .iter()
             .find(|(s, _)| s.as_str() == "authorization")
-            .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
+            .and_then(|(_, v)| v.get("directives").and_then(|v| v.as_object()))
             .and_then(|v| {
                 v.get("errors")
                     .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -320,7 +320,7 @@ impl AuthorizationPlugin {
             .plugins
             .iter()
             .find(|(s, _)| s.as_str() == "authorization")
-            .and_then(|(_, v)| v.get("preview_directives").and_then(|v| v.as_object()))
+            .and_then(|(_, v)| v.get("directives").and_then(|v| v.as_object()))
             .map(|config| {
                 (
                     config
