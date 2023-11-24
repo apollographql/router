@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::collections::LinkedList;
 use std::fmt;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -24,6 +23,7 @@ use http::HeaderValue;
 use http::StatusCode;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
+use opentelemetry::global::GlobalTracerProvider;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
@@ -211,10 +211,16 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
 
 impl Drop for Telemetry {
     fn drop(&mut self) {
-        Self::safe_shutdown_meter_provider(&mut self.private_meter_provider);
-        Self::safe_shutdown_meter_provider(&mut self.public_meter_provider);
-        Self::safe_shutdown_meter_provider(&mut self.public_prometheus_meter_provider);
-        self.safe_shutown_tracer();
+        let metrics_providers: [Option<FilterMeterProvider>; 3] = [
+            self.private_meter_provider.take(),
+            self.public_meter_provider.take(),
+            self.public_prometheus_meter_provider.take(),
+        ];
+        Self::checked_meter_shutdown(metrics_providers);
+
+        if let Some(tracer_provider) = self.tracer_provider.take() {
+            Self::checked_tracer_shutdown(tracer_provider);
+        }
     }
 }
 
@@ -677,10 +683,8 @@ impl Telemetry {
             hot_tracer.reload(tracer);
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
-            // To ensure we don't hang tracing providers are dropped in a blocking task.
-            // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
-            // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
-            tokio::task::spawn_blocking(move || drop(last_provider));
+
+            Self::checked_global_tracer_shutdown(last_provider);
 
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
         }
@@ -1556,69 +1560,67 @@ impl Telemetry {
     fn reload_metrics(&mut self) {
         let meter_provider = meter_provider();
         commit_prometheus();
-        let mut old_meter_providers = Vec::new();
-        if let Some(old_provider) = meter_provider.set(
+        let mut old_meter_providers: [Option<FilterMeterProvider>; 3] = Default::default();
+
+        old_meter_providers[0] = meter_provider.set(
             MeterProviderType::PublicPrometheus,
             self.public_prometheus_meter_provider.take(),
-        ) {
-            old_meter_providers.push((MeterProviderType::PublicPrometheus, old_provider));
-        }
+        );
 
-        if let Some(old_provider) = meter_provider.set(
+        old_meter_providers[1] = meter_provider.set(
             MeterProviderType::Apollo,
             self.private_meter_provider.take(),
-        ) {
-            old_meter_providers.push((MeterProviderType::Apollo, old_provider));
-        }
-        if let Some(old_provider) =
-            meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take())
-        {
-            old_meter_providers.push((MeterProviderType::Public, old_provider));
-        }
+        );
+
+        old_meter_providers[2] =
+            meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take());
 
         metrics_layer().clear();
 
-        // Old providers MUST be shut down in a blocking thread.
-        tokio::task::spawn_blocking(move || {
-            for (meter_provider_type, meter_provider) in old_meter_providers {
-                if let Err(e) = meter_provider.shutdown() {
-                    ::tracing::error!(error = %e, meter_provider_type = ?meter_provider_type, "failed to shutdown meter provider")
-                }
-            }
-        });
+        Self::checked_meter_shutdown(old_meter_providers);
     }
 
-    fn safe_shutdown_meter_provider(meter_provider: &mut Option<FilterMeterProvider>) {
-        if Handle::try_current().is_ok() {
-            if let Some(meter_provider) = meter_provider.take() {
-                // This is a thread for a reason!
-                // Tokio doesn't finish executing tasks before termination https://github.com/tokio-rs/tokio/issues/1156.
-                // This means that if the runtime is shutdown there is potentially a race where the provider may not be flushed.
-                // By using a thread it doesn't matter if the tokio runtime is shut down.
-                // This is likely to happen in tests due to the tokio runtime being destroyed when the test method exits.
-                thread::spawn(move || {
-                    if let Err(e) = meter_provider.shutdown() {
-                        ::tracing::error!(error = %e, "failed to shutdown meter provider")
-                    }
-                });
-            }
+    fn checked_meter_shutdown(meters: [Option<FilterMeterProvider>; 3]) {
+        for meter_provider in meters.into_iter().flatten() {
+            Self::checked_spawn_task(Box::new(move || {
+                if let Err(e) = meter_provider.shutdown() {
+                    ::tracing::error!(error = %e, "failed to shutdown meter provider")
+                }
+            }));
         }
     }
 
-    fn safe_shutown_tracer(&mut self) {
-        // If for some reason we didn't use the trace provider then safely discard it e.g. some other plugin failed `new`
-        // To ensure we don't hang tracing providers are dropped in a blocking task.
-        // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
-        // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
-        if let Some(tracer_provider) = self.tracer_provider.take() {
-            // If we have no runtime then we don't need to spawn a task as we are already in a blocking context.
-            if Handle::try_current().is_ok() {
-                // This is a thread for a reason!
-                // Tokio doesn't finish executing tasks before termination https://github.com/tokio-rs/tokio/issues/1156.
-                // This means that if the runtime is shutdown there is potentially a race where the provider may not be flushed.
-                // By using a thread it doesn't matter if the tokio runtime is shut down.
-                // This is likely to happen in tests due to the tokio runtime being destroyed when the test method exits.
-                thread::spawn(move || drop(tracer_provider));
+    fn checked_tracer_shutdown(tracer_provider: opentelemetry_sdk::trace::TracerProvider) {
+        Self::checked_spawn_task(Box::new(move || {
+            drop(tracer_provider);
+        }));
+    }
+
+    fn checked_global_tracer_shutdown(global_tracer_provider: GlobalTracerProvider) {
+        Self::checked_spawn_task(Box::new(move || {
+            drop(global_tracer_provider);
+        }));
+    }
+
+    fn checked_spawn_task(task: Box<dyn FnOnce() + Send + 'static>) {
+        // If we are in an tokio async context, use `spawn_blocking()`, if not just execute the
+        // task.
+        // Note:
+        //  - If we use spawn_blocking, then tokio looks after waiting for the task to
+        //    terminate
+        //  - We could spawn a thread to execute the task, but if the process terminated that would
+        //    cause the thread to terminate which isn't ideal. Let's just run it in the current
+        //    thread. This won't affect router performance since that will always be within the
+        //    context of tokio.
+        match Handle::try_current() {
+            Ok(hdl) => {
+                hdl.spawn_blocking(move || {
+                    task();
+                });
+                // We don't join here since we can't await or block_on()
+            }
+            Err(_err) => {
+                task();
             }
         }
     }

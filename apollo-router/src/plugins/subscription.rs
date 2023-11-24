@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::task::Poll;
+use std::time::Duration;
 
 use bytes::Buf;
 use futures::future::BoxFuture;
@@ -112,6 +113,7 @@ impl SubscriptionModeConfig {
             if callback_cfg.subgraphs.contains(service_name) || callback_cfg.subgraphs.is_empty() {
                 let callback_cfg = CallbackMode {
                     public_url: callback_cfg.public_url.clone(),
+                    heartbeat_interval: callback_cfg.heartbeat_interval.clone(),
                     listen: callback_cfg.listen.clone(),
                     path: callback_cfg.path.clone(),
                     subgraphs: HashSet::new(), // We don't need it
@@ -148,6 +150,10 @@ pub(crate) struct CallbackMode {
     #[schemars(with = "String")]
     /// URL used to access this router instance
     pub(crate) public_url: url::Url,
+
+    /// Heartbeat interval for callback mode (default: 5secs)
+    #[serde(default = "HeartbeatInterval::default")]
+    pub(crate) heartbeat_interval: HeartbeatInterval,
     // `skip_serializing` We don't need it in the context
     /// Listen address on which the callback must listen (default: 127.0.0.1:4000)
     #[serde(skip_serializing)]
@@ -161,6 +167,21 @@ pub(crate) struct CallbackMode {
     /// If empty it applies to all subgraphs (passthrough mode takes precedence)
     #[serde(default)]
     pub(crate) subgraphs: HashSet<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case", untagged)]
+pub(crate) enum HeartbeatInterval {
+    Disabled,
+    #[serde(with = "humantime_serde")]
+    #[schemars(with = "String")]
+    Duration(Duration),
+}
+
+impl Default for HeartbeatInterval {
+    fn default() -> Self {
+        Self::Duration(Duration::from_secs(5))
+    }
 }
 
 /// Using websocket to directly connect to subgraph
@@ -201,6 +222,22 @@ impl Plugin for Subscription {
                     .get_or_init(|| Uuid::new_v4().to_string())
                     .clone(),
             );
+            #[cfg(not(test))]
+            match init
+                .config
+                .mode
+                .callback
+                .as_ref()
+                .expect("we checked in the condition the callback conf")
+                .heartbeat_interval
+            {
+                HeartbeatInterval::Duration(duration) => {
+                    init.notify.set_ttl(Some(duration)).await?;
+                }
+                HeartbeatInterval::Disabled => {
+                    init.notify.set_ttl(None).await?;
+                }
+            }
         }
 
         Ok(Subscription {
