@@ -308,14 +308,15 @@ mod test {
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-          .get("subgraph.products|3c25d82024f1e8f457912c103a4217469132851090e3ced085a4aac05bdc415d|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("subgraph.products|530d594c46b838e725b87d64fd6384b82f6ff14bd902b57bba9dcc34ce684b76|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
+        println!("got res: {s}");
         let v: Value = serde_json::from_str(&s).unwrap();
         insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
         let s:String = client
-        .get("subgraph.reviews|Product|4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66|51b48bcac2fe71c01543e6e4ce115a5142193d885162ddf5d299f5ed59dc2341|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("subgraph.reviews|Product|4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66|98424704ece0e377929efa619bce2cbd5246281199c72a0902da863270f5839c|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
@@ -412,7 +413,7 @@ mod test {
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-        .get("subgraph.reviews|Product|d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d|51b48bcac2fe71c01543e6e4ce115a5142193d885162ddf5d299f5ed59dc2341|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("subgraph.reviews|Product|d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d|98424704ece0e377929efa619bce2cbd5246281199c72a0902da863270f5839c|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
