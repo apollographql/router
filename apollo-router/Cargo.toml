@@ -199,7 +199,7 @@ serde_json = { version = "1.0.108", features = [
     "float_roundtrip",
 ] }
 serde_urlencoded = "0.7.1"
-serde_yaml = "0.8.26"
+serde_yaml = "0.9.27"
 static_assertions = "1.1.0"
 strum_macros = "0.25.3"
 sys-info = "0.9.1"
