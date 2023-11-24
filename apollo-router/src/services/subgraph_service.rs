@@ -63,6 +63,7 @@ use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
+use crate::plugins::subscription::HeartbeatInterval;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::subscription::WebSocketConfiguration;
@@ -137,6 +138,7 @@ struct SubscriptionExtension {
     subscription_id: String,
     callback_url: url::Url,
     verifier: String,
+    heartbeat_interval_ms: u64,
 }
 
 /// Client for interacting with subgraphs.
@@ -349,7 +351,10 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                         .await;
                     }
                     Some(SubscriptionMode::Callback(CallbackMode {
-                        public_url, path, ..
+                        public_url,
+                        path,
+                        heartbeat_interval,
+                        ..
                     })) => {
                         // Hash the subgraph_request
                         let subscription_id = hashed_request;
@@ -408,14 +413,20 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             subscription_id,
                             callback_url,
                             verifier,
+                            heartbeat_interval_ms: match heartbeat_interval {
+                                HeartbeatInterval::Disabled => 0,
+                                HeartbeatInterval::Duration(duration) => {
+                                    duration.as_millis() as u64
+                                }
+                            },
                         };
                         body.extensions.insert(
                             "subscription",
-                            serde_json_bytes::to_value(subscription_extension).map_err(|_err| {
+                            serde_json_bytes::to_value(subscription_extension).map_err(|err| {
                                 FetchError::SubrequestHttpError {
                                     service: service_name.clone(),
-                                    reason: String::from(
-                                        "cannot serialize the subscription extension",
+                                    reason: format!(
+                                        "cannot serialize the subscription extension: {err:?}",
                                     ),
                                     status_code: None,
                                 }
@@ -1806,6 +1817,7 @@ mod tests {
                     subscription_extension.subscription_id
                 )
             );
+            assert_eq!(subscription_extension.heartbeat_interval_ms, 0);
 
             Ok(http::Response::builder()
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
@@ -1832,6 +1844,7 @@ mod tests {
                     listen: None,
                     path: Some("/testcallback".to_string()),
                     subgraphs: vec![String::from("testbis")].into_iter().collect(),
+                    heartbeat_interval: HeartbeatInterval::Disabled,
                 }),
                 passthrough: Some(SubgraphPassthroughMode {
                     all: None,
