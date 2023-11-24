@@ -173,7 +173,13 @@ async fn cache_lookup_root(
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError> {
     let body = request.subgraph_request.body_mut();
 
-    let key = extract_cache_key_root(&name, &request.query_hash, body, &request.context);
+    let key = extract_cache_key_root(
+        &name,
+        &request.query_hash,
+        body,
+        &request.context,
+        &request.authorization,
+    );
 
     let cache_result: Option<RedisValue<CacheEntry>> = cache.get(RedisKey(key.clone())).await;
 
@@ -214,7 +220,13 @@ async fn cache_lookup_entities(
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError> {
     let body = request.subgraph_request.body_mut();
 
-    let keys = extract_cache_keys(&name, &request.query_hash, body, &request.context)?;
+    let keys = extract_cache_keys(
+        &name,
+        &request.query_hash,
+        body,
+        &request.context,
+        &request.authorization,
+    )?;
 
     let cache_result: Vec<Option<CacheEntry>> = cache
         .get_multiple(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
@@ -416,7 +428,11 @@ pub(crate) fn hash_query(query_hash: &QueryHash, body: &graphql::Request) -> Str
     hex::encode(digest.finalize().as_slice())
 }
 
-pub(crate) fn hash_additional_data(body: &mut graphql::Request, context: &Context) -> String {
+pub(crate) fn hash_additional_data(
+    body: &mut graphql::Request,
+    context: &Context,
+    cache_key: &CacheKeyMetadata,
+) -> String {
     let mut digest = Sha256::new();
 
     let repr_key = ByteString::from(REPRESENTATIONS);
@@ -427,13 +443,7 @@ pub(crate) fn hash_additional_data(body: &mut graphql::Request, context: &Contex
         body.variables.insert(repr_key, representations);
     }
 
-    let cache_key = context
-        .private_entries
-        .lock()
-        .get::<CacheKeyMetadata>()
-        .cloned()
-        .unwrap_or_default();
-    digest.update(&serde_json::to_vec(&cache_key).unwrap());
+    digest.update(&serde_json::to_vec(cache_key).unwrap());
 
     if let Ok(Some(cache_data)) = context.get::<&str, Object>(CONTEXT_CACHE_KEY) {
         if let Some(v) = cache_data.get("all") {
@@ -457,11 +467,12 @@ fn extract_cache_key_root(
     query_hash: &QueryHash,
     body: &mut graphql::Request,
     context: &Context,
+    cache_key: &CacheKeyMetadata,
 ) -> String {
     // hash the query and operation name
     let query_hash = hash_query(query_hash, body);
     // hash more data like variables and authorization status
-    let additional_data_hash = hash_additional_data(body, context);
+    let additional_data_hash = hash_additional_data(body, context, cache_key);
 
     // the cache key is written to easily find keys matching a prefix for deletion:
     // - subgraph name: caching is done per subgraph
@@ -479,11 +490,12 @@ fn extract_cache_keys(
     query_hash: &QueryHash,
     body: &mut graphql::Request,
     context: &Context,
+    cache_key: &CacheKeyMetadata,
 ) -> Result<Vec<String>, BoxError> {
     // hash the query and operation name
     let query_hash = hash_query(query_hash, body);
     // hash more data like variables and authorization status
-    let additional_data_hash = hash_additional_data(body, context);
+    let additional_data_hash = hash_additional_data(body, context, cache_key);
 
     let representations = body
         .variables
