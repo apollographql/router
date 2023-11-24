@@ -1088,7 +1088,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
         let mut cloned_notify = notify.clone();
         tokio::spawn(async move {
             let mut handle = cloned_notify.subscribe(topic_1).await.unwrap().into_sink();
@@ -1098,7 +1098,7 @@ mod tests {
         });
         let new_msg = handle_1_bis.next().await.unwrap();
         assert_eq!(new_msg, serde_json_bytes::json!({"test": "ok"}));
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
 
         let res = handle_1_bis.next().now_or_never().unwrap();
         assert_eq!(
