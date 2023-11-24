@@ -1557,6 +1557,7 @@ impl Telemetry {
             );
         }
     }
+
     fn reload_metrics(&mut self) {
         let meter_provider = meter_provider();
         commit_prometheus();

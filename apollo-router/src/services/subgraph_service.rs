@@ -101,6 +101,9 @@ const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5)
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
 static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
+#[allow(clippy::declare_interior_mutable_const)]
+static CALLBACK_PROTOCOL_ACCEPT: HeaderValue =
+    HeaderValue::from_static("application/json+graphql+callback/1.0");
 pub(crate) static APPLICATION_JSON_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static("application/json");
 static APP_GRAPHQL_JSON: HeaderValue = HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
@@ -282,7 +285,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             .map(|res| res.map_err(|e| Box::new(e) as BoxError))
     }
 
-    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
+    fn call(&mut self, mut request: SubgraphRequest) -> Self::Future {
         let subscription_config = (request.operation_kind == OperationKind::Subscription)
             .then(|| self.subscription_config.clone())
             .flatten();
@@ -404,6 +407,10 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                                 status_code: None,
                             }
                         })?;
+                        request
+                            .subgraph_request
+                            .headers_mut()
+                            .append(ACCEPT, CALLBACK_PROTOCOL_ACCEPT.clone());
 
                         let subscription_extension = SubscriptionExtension {
                             subscription_id,
@@ -729,7 +736,7 @@ async fn call_http(
         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
     request
         .headers_mut()
-        .insert(ACCEPT, APPLICATION_JSON_HEADER_VALUE.clone());
+        .append(ACCEPT, APPLICATION_JSON_HEADER_VALUE.clone());
     request
         .headers_mut()
         .append(ACCEPT, APP_GRAPHQL_JSON.clone());
@@ -1790,7 +1797,12 @@ mod tests {
 
     async fn emulate_subgraph_with_callback_data(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-            let (_, body) = request.into_parts();
+            let (parts, body) = request.into_parts();
+            assert!(parts
+                .headers
+                .get_all(ACCEPT)
+                .iter()
+                .any(|header_value| header_value == CALLBACK_PROTOCOL_ACCEPT));
             let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
                 .await
                 .map_err(|_| ())
