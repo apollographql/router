@@ -303,7 +303,7 @@ test-log = { version = "0.2.13", default-features = false, features = [
     "trace",
 ] }
 test-span = "0.7"
-toml = "0.7"
+toml = "0.8.8"
 tower-test = "0.4.0"
 
 # See note above in this file about `^tracing` packages which also applies to
