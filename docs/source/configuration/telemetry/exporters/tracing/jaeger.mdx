@@ -75,6 +75,15 @@ telemetry:
 ### `batch_processor` configuration reference
 <BatchProcessorRef />
 
+### Jaeger configuration reference
+
+| Attribute         | Default | Description                   |
+|-------------------|---------|-------------------------------|
+| `enabled`         | `false` | Enable the OTLP exporter.     |
+| `collector`       |         | Collector specific settings.  |
+| `agent`           |         | Agent specific settings.      |
+| `batch_processor` |         | The batch processor settings. |
+
 
 
 ### Agent configuration
@@ -121,13 +130,4 @@ telemetry:
 | `endpoint`        | `false` | Enable the OTLP exporter.          |
 | `username`        |         | The username for Jaeger collector. |
 | `password`        |         | The password for Jaeger collector. |
-
-### Jaeger configuration reference
-
-| Attribute         | Default | Description                   |
-|-------------------|---------|-------------------------------|
-| `enabled`         | `false` | Enable the OTLP exporter.     |
-| `collector`       |         | Collector specific settings.  |
-| `agent`           |         | Agent specific settings.      |
-| `batch_processor` |         | The batch processor settings. |
 

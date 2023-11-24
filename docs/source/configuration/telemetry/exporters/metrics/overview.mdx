@@ -4,7 +4,8 @@ subtitle: Export Apollo Router metrics for Prometheus and OpenTelemetry
 description: Export and collect metrics from the Apollo Router with Prometheus and OpenTelemetry Collector.
 ---
 
-The Apollo Router exports metrics for collection by:
+The Apollo Router supports collection of metrics with [OpenTelemetry](https://opentelemetry.io/), with exporters for:
+
 * [Prometheus](./exporters/prometheus)
 * [OpenTelemetry Protocol (OTLP)](./opentelemetry)
 * [Datadog via OTLP](./datadog)
@@ -16,7 +17,7 @@ In [`router.yaml`](./overview#yaml-config-file), you configure router metrics wi
 - `telemetry.exporters.metrics.prometheus`. Configure the Prometheus exporter.
 - `telemetry.exporters.metrics.otlp`. Configure the OpenTelemetry exporter. Supports sending traces to Datadog.
 
-## Common metrics configuration
+## Metrics common configuration
 
 Common metrics configuration contains global settings for all exporters:
 
