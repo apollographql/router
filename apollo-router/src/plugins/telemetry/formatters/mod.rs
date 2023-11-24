@@ -109,7 +109,7 @@ pub(crate) fn filter_metric_events(event: &tracing::Event<'_>) -> bool {
     })
 }
 
-pub(crate) fn to_vec(resource: Resource) -> LinkedList<(String, serde_json::Value)> {
+pub(crate) fn to_list(resource: Resource) -> LinkedList<(String, serde_json::Value)> {
     resource
         .into_iter()
         .map(|(k, v)| {

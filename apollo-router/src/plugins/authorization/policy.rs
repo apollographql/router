@@ -26,6 +26,7 @@ pub(crate) struct PolicyExtractionVisitor<'a> {
     fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
     pub(crate) extracted_policies: HashSet<String>,
     policy_directive_name: String,
+    entity_query: bool,
 }
 
 pub(crate) const POLICY_DIRECTIVE_NAME: &str = "policy";
@@ -33,9 +34,14 @@ pub(crate) const POLICY_SPEC_URL: &str = "https://specs.apollo.dev/policy/v0.1";
 
 impl<'a> PolicyExtractionVisitor<'a> {
     #[allow(dead_code)]
-    pub(crate) fn new(schema: &'a schema::Schema, executable: &'a ast::Document) -> Option<Self> {
+    pub(crate) fn new(
+        schema: &'a schema::Schema,
+        executable: &'a ast::Document,
+        entity_query: bool,
+    ) -> Option<Self> {
         Some(Self {
             schema,
+            entity_query,
             fragments: transform::collect_fragments(executable),
             extracted_policies: HashSet::new(),
             policy_directive_name: Schema::directive_name(
@@ -60,6 +66,38 @@ impl<'a> PolicyExtractionVisitor<'a> {
         self.extracted_policies.extend(policy_argument(
             ty.directives().get(&self.policy_directive_name),
         ));
+    }
+
+    fn entities_operation(&mut self, node: &ast::OperationDefinition) -> Result<(), BoxError> {
+        use crate::spec::query::traverse::Visitor;
+
+        if node.selection_set.len() != 1 {
+            return Err("invalid number of selections for _entities query".into());
+        }
+
+        match node.selection_set.first() {
+            Some(ast::Selection::Field(field)) => {
+                if field.name.as_str() != "_entities" {
+                    return Err("expected _entities field".into());
+                }
+
+                for selection in &field.selection_set {
+                    match selection {
+                        ast::Selection::InlineFragment(f) => {
+                            match f.type_condition.as_ref() {
+                                None => {
+                                    return Err("expected type condition".into());
+                                }
+                                Some(condition) => self.inline_fragment(condition.as_str(), f)?,
+                            };
+                        }
+                        _ => return Err("expected inline fragment".into()),
+                    }
+                }
+                Ok(())
+            }
+            _ => Err("expected _entities field".into()),
+        }
     }
 }
 
@@ -90,7 +128,11 @@ impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
             ));
         }
 
-        traverse::operation(self, root_type, node)
+        if !self.entity_query {
+            traverse::operation(self, root_type, node)
+        } else {
+            self.entities_operation(node)
+        }
     }
 
     fn field(
@@ -666,7 +708,7 @@ mod tests {
         let doc = ast::Document::parse(query, "query.graphql");
         schema.validate().unwrap();
         doc.to_executable(&schema).validate(&schema).unwrap();
-        let mut visitor = PolicyExtractionVisitor::new(&schema, &doc).unwrap();
+        let mut visitor = PolicyExtractionVisitor::new(&schema, &doc, false).unwrap();
         traverse::document(&mut visitor, &doc).unwrap();
 
         visitor.extracted_policies.into_iter().collect()

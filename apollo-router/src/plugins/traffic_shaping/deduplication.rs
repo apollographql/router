@@ -36,7 +36,7 @@ where
     }
 }
 
-type CacheKey = (http_ext::Request<Request>, CacheKeyMetadata);
+type CacheKey = (http_ext::Request<Request>, Arc<CacheKeyMetadata>);
 
 type WaitMap = Arc<Mutex<HashMap<CacheKey, Sender<Result<CloneSubgraphResponse, String>>>>>;
 
@@ -75,16 +75,8 @@ where
     ) -> Result<SubgraphResponse, BoxError> {
         loop {
             let mut locked_wait_map = wait_map.lock().await;
-            let cache_key = (
-                (&request.subgraph_request).into(),
-                request
-                    .context
-                    .private_entries
-                    .lock()
-                    .get::<CacheKeyMetadata>()
-                    .cloned()
-                    .unwrap_or_default(),
-            );
+            let authorization_cache_key = request.authorization.clone();
+            let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
 
             match locked_wait_map.get_mut(&cache_key) {
                 Some(waiter) => {
@@ -114,16 +106,8 @@ where
                     drop(locked_wait_map);
 
                     let context = request.context.clone();
-                    let cache_key = (
-                        (&request.subgraph_request).into(),
-                        request
-                            .context
-                            .private_entries
-                            .lock()
-                            .get::<CacheKeyMetadata>()
-                            .cloned()
-                            .unwrap_or_default(),
-                    );
+                    let authorization_cache_key = request.authorization.clone();
+                    let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
                     let res = {
                         // when _drop_signal is dropped, either by getting out of the block, returning
                         // the error from ready_oneshot or by cancellation, the drop_sentinel future will
