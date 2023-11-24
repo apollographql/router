@@ -2,10 +2,12 @@
 title: Export traces to OpenTelemetry Protocol (OTLP)
 description: Collect and export tracing information from the Apollo Router
 ---
+import BatchProcessorPreamble from '../../../../../shared/batch-processor-preamble.mdx';
+import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
 
-[OTLP (OpenTelemetry Protocol)](https://github.com/open-telemetry/opentelemetry-proto/blob/main/docs/specification.md) is the native protocol for Open Telemetry. It can be used to export traces over HTTP or gRPC to a variety of backends including:
+[OTLP (OpenTelemetry Protocol)](https://github.com/open-telemetry/opentelemetry-proto/blob/main/docs/specification.md) is the native protocol for OpenTelemetry. It can be used to export traces over HTTP or gRPC to a variety of backends including:
 
-* [Open Telemetry Collector](https://opentelemetry.io/docs/collector/)
+* [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/)
 * [Datadog](./datadog)
 * [Jaeger](./jaeger)
 * [New Relic](./newrelic)
@@ -39,7 +41,7 @@ telemetry:
 ```
 
 ### `enabled`
-Set to true to enable the Zipkin exporter. Defaults to false.
+Set to true to enable the OTLP exporter. Defaults to false.
 
 ### `endpoint`
 The OTLP endpoint. 
@@ -100,7 +102,8 @@ http:
 | `headers` | A map of headers to send with requests |
 
 ### `batch_processor`
-import BatchProcessor from '../../../../../shared/batch-processor-preamble.mdx';
+<BatchProcessorPreamble/>
+
 ```yaml
 telemetry:
   exporters:
@@ -115,7 +118,7 @@ telemetry:
 ```
 
 #### `batch_processor` configuration reference
-import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
+<BatchProcessorRef/>
 
 ## OTLP configuration reference
 

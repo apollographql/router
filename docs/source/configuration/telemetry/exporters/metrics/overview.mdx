@@ -16,13 +16,14 @@ In [`router.yaml`](./overview#yaml-config-file), you configure router metrics wi
 - `telemetry.exporters.metrics.prometheus`. Configure the Prometheus exporter.
 - `telemetry.exporters.metrics.otlp`. Configure the OpenTelemetry exporter. Supports sending traces to Datadog.
 
-## Configure common metrics settings
+## Common metrics configuration
 
-Common settings for router metrics include:
+Common metrics configuration contains global settings for all exporters:
 
 * [Service name](#service-name)
 * [Resource attributes](#resource-attribute)
 * [Custom historgram buckets](#custom-histogram-buckets)
+* [`apollo_router_http_requests` attributes](#attributes)
 
 ### Service name
 
@@ -68,9 +69,9 @@ The service name can be set by an environment variable or in [`router.yaml`](./o
 
       </ExpansionPanel>
 
-If the service name isn't explicitly set, it defaults to `unknown_service:apollo_router` or `unknown_service` if the executable name cannot be determined.
+If the service name isn't explicitly set, it defaults to `unknown_service:router` or `unknown_service` if the executable name cannot be determined.
 
-### Resource attribute
+### `resource`
 
 A resource attribute is a set of key-value pairs that provide additional information to an exporter. Application performance monitors (APM) may interpret and display resource information. 
 
@@ -89,7 +90,7 @@ telemetry:
 For OpenTelemetry conventions for resources, see [Resource Semantic Conventions](https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/README.md).
 
 
-### Custom histogram buckets
+### `buckets`
 
 You can customize bucket boundaries for all generated histograms by setting `telemetry.exporters.metrics.common.buckets` in [`router.yaml`](./overview#yaml-config-file). For example:
 
@@ -110,22 +111,8 @@ telemetry:
           - 20.00
 ```
 
-## Metrics reference
 
-The following metrics for the Apollo Router are available for Prometheus and OpenTelemetry. Attributes are listed where applicable.
-
-### HTTP
-
-- `apollo_router_http_request_duration_seconds_bucket` - HTTP router request duration
-- `apollo_router_http_request_duration_seconds_bucket` - HTTP subgraph request duration, attributes:
-  - `subgraph`: (Optional) The subgraph being queried
-- `apollo_router_http_requests_total` [**deprecated**] - Total number of HTTP requests by HTTP status
-- `apollo_router_timeout` - Number of triggered timeouts
-- `apollo_router_http_request_retry_total` - Number of subgraph requests retried, attributes:
-  - `subgraph`: The subgraph being queried
-  - `status` : If the retry was aborted (`aborted`)
-
-#### Customizing `apollo_router_http_requests`
+### `attributes`
 
 <Caution>
 
@@ -200,3 +187,14 @@ telemetry:
 OpenTelemetry includes many [standard attributes](https://opentelemetry.io/docs/specs/semconv/attributes-registry/) that you can use these via custom [instruments](./instruments). 
 
 </Note>
+
+## Metrics common reference
+
+| Attribute           | Default                  | Description                                                   |
+|---------------------|--------------------------|---------------------------------------------------------------|
+| `service_name`      | `unknown_service:router` | The OpenTelemetry service name.                               |
+| `service_namespace` |                          | The OpenTelemetry namespace.                                  |
+| `resource`          |                          | The OpenTelemetry resource to attach to metrics.              |
+| `attributes`        |                          | Customization for the apollo_router_http_requests instrument. |
+
+

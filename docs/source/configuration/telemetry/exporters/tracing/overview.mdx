@@ -26,7 +26,9 @@ To get the most out of distributed tracing, _all_ components in your system shou
 
 </Tip>
 
-## Configure common tracing
+## Common tracing configuration
+
+Common tracing configuration contains global settings for all exporters.
 
 ### Service name
 
@@ -72,9 +74,9 @@ The service name can be set by an environment variable or in [`router.yaml`](./o
 
       </ExpansionPanel>
 
-If the service name isn't explicitly set, it defaults to `unknown_service:apollo_router` or `unknown_service` if the executable name cannot be determined.
+If the service name isn't explicitly set, it defaults to `unknown_service:router` or `unknown_service` if the executable name cannot be determined.
 
-### Resource attribute
+### `resource`
 
 A resource attribute is a set of key-value pairs that provide additional information to an exporter. Application performance monitors (APM) may interpret and display resource information. 
 
@@ -92,7 +94,7 @@ telemetry:
 
 For OpenTelemetry conventions for resources, see [Resource Semantic Conventions](https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/README.md).
 
-### Sampling
+### `sampler`
 
 You can configure the sampling rate of traces to match the rate of your application performance monitors (APM). To enable sampling configuration, in [`router.yaml`](./configuration/overview#yaml-config-file) set `telemetry.exporters.tracing.common.sampler` and `telemetry.exporters.tracing.common.parent_based_sampler`:
 
@@ -109,7 +111,7 @@ telemetry:
 
 - `parent_based_sampler` enables clients to make the sampling decision. This guarantees that a trace that starts at a client will also have spans at the router. You may wish to disable it (setting `parent_based_sampler: false`) if your router is exposed directly to the internet.
 
-### Propagation
+### `propagation`
 
 The `telemetry.exporters.tracing.propagation` section allows you to configure which propagators are active in addition to those automatically activated by using an exporter.
 
@@ -145,7 +147,7 @@ telemetry:
            header_name: my-trace-id
 ```
 
-### Span limits
+### Limits
 
 You may set limits on spans to prevent sending too much data to your APM. For example:
 
@@ -154,15 +156,36 @@ telemetry:
   exporters:
      tracing:
        common:
-         # Optional limits
-         max_attributes_per_event: 10
-         max_attributes_per_link: 10
-         max_attributes_per_span: 10
-         max_events_per_span: 10
-         max_links_per_span: 10
+         max_attributes_per_event: 128
+         max_attributes_per_link: 128
+         max_attributes_per_span: 128
+         max_events_per_span: 128
+         max_links_per_span: 128
 ```
 
-## Trace ID
+Attributes, events and links that exceed the limits are dropped silently.
+
+#### `max_attributes_per_event` 
+
+Events are used to describe something that happened in the context of a span. For example, an exception or a message sent. These events can have attributes that are key-value pairs that provide additional information to display via APM. 
+
+#### `max_attributes_per_link`
+
+Spans may link to other spans in the same or different trace. For example, a span may link to a parent span, or a span may link to a span in a different trace to represent that trace's parent. These links may have attributes that are key-value pairs that provide additional information to display via APM.
+
+#### `max_attributes_per_span`
+
+Spans are used to a activity in the context of a trace. For example, a request to a subgraph or a query planning. Spans can have attributes that are key-value pairs that provide additional information to display via APM.
+
+#### `max_events_per_span`
+
+Spans may have events that describe something that happened in the context of a span. For example, an exception or a message sent. The number of events per span can be limited to prevent spans becoming very large.
+
+#### `max_links_per_span`
+
+Spans may link to other spans in the same or different trace. For example, a span may link to a parent span, or a span may link to a span in a different trace to represent that trace's parent. The number of links per span can be limited to prevent spans becoming very large.
+
+### `experimental_response_trace_id`
 
 <ExperimentalFeature appendText="You can also give feedback in the [discussion on GitHub](https://github.com/apollographql/router/discussions/2147)." />
 
@@ -176,22 +199,31 @@ telemetry:
          enabled: true # default: false
          header_name: "my-trace-id" # default: "apollo-trace-id"
 ```
-
 Using this configuration you will have a response header called `my-trace-id` containing the trace ID. It could help you to debug a specific query if you want to grep your log with this trace id to have more context.
 
-## `batch_processor`
-import BatchProcessor from '../../../../../shared/batch-processor-preamble.mdx';
-```yaml
-telemetry:
-  exporters:
-    tracing:
-      otlp: 
-        batch_processor: 
-          max_export_batch_size: 512
-          max_concurrent_exports: 1
-          max_export_timeout: 30s 
-          max_queue_size: 2048
-          scheduled_delay: 5s
-```
-### `batch_processor` configuration reference
-import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
+#### `experimental_response_trace_id` reference
+
+| Attribute      | Default           | Description                                           |
+|----------------|-------------------|-------------------------------------------------------|
+| `enabled`      | `false`           | Set to true to return trace IDs on response headers.  |
+| `header_name`  | `apollo-trace-id` | The name of the header to respond with.               |
+
+
+
+## Tracing common reference
+
+| Attribute                        | Default                  | Description                                     |
+|----------------------------------|--------------------------|-------------------------------------------------|
+| `service_name`                   | `unknown_service:router` | The OpenTelemetry service name.                 |
+| `service_namespace`              |                          | The OpenTelemetry namespace.                    |
+| `resource`                       |                          | The OpenTelemetry resource to attach to traces. |
+| `experimental_response_trace_id` |                          | Return the trace ID in a response header.       |
+| `max_attributes_per_event`       | 128                      | The maximum number of attributes per event.     |
+| `max_attributes_per_link`        | 128                      | The maximum number of attributes per link.      |
+| `max_attributes_per_span`        | 128                      | The maximum number of attributes per span.      |
+| `max_events_per_span`            | 128                      | The maximum number of events per span.          |
+| `max_links_per_span`             | 128                      | The maximum links per span.                     |
+
+
+
+

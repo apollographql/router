@@ -2,6 +2,8 @@
 title: Export traces to Zipkin
 description: Collect and export tracing information from the Apollo Router
 ---
+import BatchProcessorPreamble from '../../../../../shared/batch-processor-preamble.mdx';
+import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
 
 Enable and configure the [Zipkin](https://zipkin.io/) exporter endpoint in the Apollo Router.
 
@@ -29,7 +31,7 @@ Set to true to enable the Zipkin exporter. Defaults to false.
 The Zipkin endpoint. Defaults to http://127.0.0.1:9411/api/v2/span
 
 ### `batch_processor`
-import BatchProcessor from '../../../../../shared/batch-processor-preamble.mdx';
+<BatchProcessorPreamble />
 ```yaml
 telemetry:
   exporters:
@@ -44,7 +46,7 @@ telemetry:
 ```
 
 #### `batch_processor` configuration reference
-import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
+<BatchProcessorRef />
 
 ## Zipkin configuration reference
 

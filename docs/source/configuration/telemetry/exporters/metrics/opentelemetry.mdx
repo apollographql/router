@@ -2,17 +2,19 @@
 title: OpenTelemetry exporter
 description: Enable and configure the OpenTelemetry Protocol (OTLP) exporter in the Apollo Router
 ---
+import BatchProcessorPreamble from '../../../../../shared/batch-processor-preamble.mdx';
+import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
 
-Enable and configure the [Open Telemetry](https://www.opentelemetry.io/) exporter for metrics in the Apollo Router.
+Enable and configure the [OpenTelemetry](https://www.opentelemetry.io/) exporter for metrics in the Apollo Router.
 
 For general tracing configuration, refer to [Router Metrics Configuration](./overview).
 
-Using the [Open Telemetry](https://www.opentelemetry.io/) OTLP protocol you can export metrics to any OTLP compatible receiver, including:
-* [Open Telemetry Collector](https://opentelemetry.io/docs/collector/)
+Using the [OpenTelemetry](https://www.opentelemetry.io/) OTLP protocol you can export metrics to any OTLP compatible receiver, including:
+* [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/)
 * [Datadog](https://www.datadoghq.com/) (see [configuration instructions](./datadog.mdx))
 * [Honeycomb](https://www.honeycomb.io/) (see [configuration instructions](./honecomb.mdx))
 
-## Open Telemetry configuration
+## OpenTelemetry configuration
 
 ```yaml title="router.yaml"
 telemetry:
@@ -109,7 +111,7 @@ http:
 
 
 ### `batch_processor`
-import BatchProcessor from '../../../../../shared/batch-processor-preamble.mdx';
+<BatchProcessorPreamble />
 ```yaml
 telemetry:
   exporters:
@@ -124,7 +126,7 @@ telemetry:
 ```
 
 #### `batch_processor` configuration reference
-import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
+<BatchProcessorRef />
 
 ## OTLP configuration reference
 

@@ -1,5 +1,15 @@
 
 
+### HTTP
+
+- `apollo_router_http_request_duration_seconds_bucket` - HTTP router request duration
+- `apollo_router_http_request_duration_seconds_bucket` - HTTP subgraph request duration, attributes:
+  - `subgraph`: (Optional) The subgraph being queried
+- `apollo_router_http_requests_total` [**deprecated**] - Total number of HTTP requests by HTTP status
+- `apollo_router_timeout` - Number of triggered timeouts
+- `apollo_router_http_request_retry_total` - Number of subgraph requests retried, attributes:
+  - `subgraph`: The subgraph being queried
+  - `status` : If the retry was aborted (`aborted`)
 
 
 ### Session

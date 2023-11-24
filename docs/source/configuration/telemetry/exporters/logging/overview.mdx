@@ -69,9 +69,9 @@ In both examples, the actual filter used by the router is as defined in the RUST
 For more information about specifying filters for more granular control over Apollo Router logging, see the [Env Logger documentation](https://docs.rs/env_logger/latest/env_logger/).
 
 
-## Common logging settings
+## Common tracing configuration
 
-Common settings for router logging:
+Common logging configuration contains global settings for all exporters:
 
 * [Service name](#service-name)
 * [Resource attributes](#resource)
@@ -139,3 +139,13 @@ telemetry:
 ```
 
 For OpenTelemetry conventions for resources, see [Resource Semantic Conventions](https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/README.md).
+
+## Logging common reference
+
+| Attribute           | Default                  | Description                                                   |
+|---------------------|--------------------------|---------------------------------------------------------------|
+| `service_name`      | `unknown_service:router` | The OpenTelemetry service name.                               |
+| `service_namespace` |                          | The OpenTelemetry namespace.                                  |
+| `resource`          |                          | The OpenTelemetry resource to attach to generated log events. |
+
+
