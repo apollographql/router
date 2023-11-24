@@ -1,15 +1,15 @@
 ---
-title: Datadog exporter (via OTLP)
-description: Enable and configure the Datadog exporter endpoint via OpenTelemetry in the Apollo Router
+title: New Relic exporter (via OTLP)
+description: Enable and configure the New Relic exporter endpoint via OpenTelemetry in the Apollo Router
 ---
 
-Enable and configure the [OpenTelemetry](https://www.opentelemetry.io/) exporter for tracing in the Apollo Router for use with [New Relic](https://newrelic.com/).
+Enable and configure the [OTLP exporter](./opentelemetry) for tracing in the Apollo Router for use with [New Relic](https://newrelic.com/).
 
 For general tracing configuration, refer to [Router Tracing Configuration](./overview).
 
 ## New Relic configuration
 
-To configure the router, enable [OpenTelemetry tracing exporter](./opentelemetry#configuration) and set both `endpoint: <new-relic-endpoint>` and `api-key: <new-relic-api-key>` for example: 
+To configure the router, enable the [OTLP exporter](./opentelemetry#configuration) and set both `endpoint: <new-relic-endpoint>` and `api-key: <new-relic-api-key>` for example: 
 
 ```yaml title="router.yaml"
 telemetry:
