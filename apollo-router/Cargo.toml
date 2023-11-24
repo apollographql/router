@@ -275,7 +275,7 @@ axum = { version = "0.6.20", features = [
     "original-uri",
     "ws",
 ] }
-ecdsa = { version = "0.15.1", features = ["signing", "pem", "pkcs8"] }
+ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "6.3.2", features = ["enable-rustls", "no-client-setname"] }
 futures-test = "0.3.29"
 insta = { version = "1.34.0", features = ["json", "redactions", "yaml"] }
@@ -286,10 +286,7 @@ num-traits = "0.2.17"
 once_cell = "1.18.0"
 opentelemetry_sdk = { version = "0.21.0", features = ["testing"] }
 opentelemetry-stdout = { version = "0.2.0", features = ["trace"] }
-p256 = { version = "0.13.2", default-features = false, features = [
-    "ecdsa",
-    "pkcs8"
-] }
+p256 = "0.13.2"
 rand_core = "0.6.4"
 reqwest = { version = "0.11.22", default-features = false, features = [
     "json",
