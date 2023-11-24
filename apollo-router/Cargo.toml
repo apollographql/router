@@ -105,7 +105,7 @@ hyper-rustls = { version = "0.24.2", features = ["http1", "http2"] }
 indexmap = { version = "2.1.0", features = ["serde"] }
 itertools = "0.11.0"
 jsonpath_lib = "0.3.0"
-jsonpath-rust = "0.3.4"
+jsonpath-rust = "0.3.5"
 jsonschema = { version = "0.17.1", default-features = false }
 jsonwebtoken = "8.3.0"
 lazy_static = "1.4.0"
