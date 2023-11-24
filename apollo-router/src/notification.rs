@@ -114,6 +114,9 @@ enum Notification<K, V> {
         topics: Vec<K>,
         response_sender: oneshot::Sender<(Vec<K>, Vec<K>)>,
     },
+    UpdateHeartbeat {
+        new_ttl: Option<Duration>,
+    },
     #[cfg(test)]
     TryDelete {
         topic: K,
@@ -202,6 +205,14 @@ where
     pub(crate) fn set_queue_size(mut self, queue_size: Option<usize>) -> Self {
         self.queue_size = queue_size;
         self
+    }
+
+    pub(crate) async fn set_ttl(&self, new_ttl: Option<Duration>) -> Result<(), NotifyError<V>> {
+        self.sender
+            .send(Notification::UpdateHeartbeat { new_ttl })
+            .await?;
+
+        Ok(())
     }
 
     // boolean in the tuple means `created`
@@ -585,7 +596,7 @@ impl<K, V> Handle<K, V> where K: Clone {}
 
 async fn task<K, V>(
     mut receiver: ReceiverStream<Notification<K, V>>,
-    ttl: Option<Duration>,
+    mut ttl: Option<Duration>,
     heartbeat_error_message: Option<V>,
 ) where
     K: Send + Hash + Eq + Clone + 'static,
@@ -639,6 +650,25 @@ async fn task<K, V>(
                             } => {
                                 let invalid_topics = pubsub.invalid_topics(topics);
                                 let _ = response_sender.send(invalid_topics);
+                            }
+                            Notification::UpdateHeartbeat {
+                                mut new_ttl
+                            } => {
+                                // We accept to miss max 3 heartbeats before cutting the connection
+                                new_ttl = new_ttl.map(|ttl| ttl * 3);
+                                if ttl != new_ttl {
+                                    ttl = new_ttl;
+                                    pubsub.ttl = new_ttl;
+                                    match new_ttl {
+                                        Some(new_ttl) => {
+                                            ttl_fut = Box::new(IntervalStream::new(tokio::time::interval(new_ttl)));
+                                        },
+                                        None => {
+                                            ttl_fut = Box::new(tokio_stream::pending());
+                                        }
+                                    }
+                                }
+
                             }
                             Notification::Exist {
                                 topic,
@@ -933,6 +963,8 @@ impl RouterBroadcasts {
 #[cfg(test)]
 mod tests {
 
+    use futures::FutureExt;
+    use tokio_stream::StreamExt;
     use uuid::Uuid;
 
     use super::*;
@@ -1022,7 +1054,7 @@ mod tests {
     #[tokio::test]
     async fn it_test_ttl() {
         let mut notify = Notify::builder()
-            .ttl(Duration::from_millis(100))
+            .ttl(Duration::from_millis(300))
             .heartbeat_error_message(serde_json_bytes::json!({"error": "connection_closed"}))
             .build();
         let topic_1 = Uuid::new_v4();
@@ -1051,9 +1083,28 @@ mod tests {
         let new_msg = handle_1_other.next().await.unwrap();
         assert_eq!(new_msg, serde_json_bytes::json!({"test": "ok"}));
 
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        let res = handle_1_bis.next().await.unwrap();
-        assert_eq!(res, serde_json_bytes::json!({"error": "connection_closed"}));
+        notify
+            .set_ttl(Duration::from_millis(70).into())
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let mut cloned_notify = notify.clone();
+        tokio::spawn(async move {
+            let mut handle = cloned_notify.subscribe(topic_1).await.unwrap().into_sink();
+            handle
+                .send_sync(serde_json_bytes::json!({"test": "ok"}))
+                .unwrap();
+        });
+        let new_msg = handle_1_bis.next().await.unwrap();
+        assert_eq!(new_msg, serde_json_bytes::json!({"test": "ok"}));
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        let res = handle_1_bis.next().now_or_never().unwrap();
+        assert_eq!(
+            res,
+            Some(serde_json_bytes::json!({"error": "connection_closed"}))
+        );
 
         assert!(handle_1_bis.next().await.is_none());
 

@@ -962,3 +962,93 @@ async fn it_rejects_and_accepts_keys_with_restricted_algorithms_and_unknown_jwks
 
     assert!(search_jwks(&jwks_manager, &criteria).is_some());
 }
+
+#[tokio::test]
+async fn it_accepts_key_without_use_or_keyops() {
+    let mut sets = vec![];
+    let mut urls = vec![];
+
+    let jwks_url = create_an_url("jwks-no-use.json");
+
+    sets.push(jwks_url);
+
+    for s_url in &sets {
+        let url: Url = Url::from_str(s_url).expect("created a valid url");
+        urls.push(JwksConfig {
+            url,
+            issuer: None,
+            algorithms: None,
+            poll_interval: Duration::from_secs(60),
+        });
+    }
+
+    let jwks_manager = JwksManager::new(urls).await.unwrap();
+
+    // the JWT contains a HMAC key but we configured a restriction to RSA signing
+    let criteria = JWTCriteria {
+        kid: None,
+        alg: Algorithm::ES256,
+    };
+
+    assert!(search_jwks(&jwks_manager, &criteria).is_some());
+}
+
+#[tokio::test]
+async fn it_accepts_elliptic_curve_key_without_alg() {
+    let mut sets = vec![];
+    let mut urls = vec![];
+
+    let jwks_url = create_an_url("jwks-ec-no-alg.json");
+
+    sets.push(jwks_url);
+
+    for s_url in &sets {
+        let url: Url = Url::from_str(s_url).expect("created a valid url");
+        urls.push(JwksConfig {
+            url,
+            issuer: None,
+            algorithms: None,
+            poll_interval: Duration::from_secs(60),
+        });
+    }
+
+    let jwks_manager = JwksManager::new(urls).await.unwrap();
+
+    // the JWT contains a HMAC key but we configured a restriction to RSA signing
+    let criteria = JWTCriteria {
+        kid: None,
+        alg: Algorithm::ES256,
+    };
+
+    assert!(search_jwks(&jwks_manager, &criteria).is_some());
+}
+
+#[tokio::test]
+async fn it_accepts_rsa_key_without_alg() {
+    let mut sets = vec![];
+    let mut urls = vec![];
+
+    let jwks_url = create_an_url("jwks-rsa-no-alg.json");
+
+    sets.push(jwks_url);
+
+    for s_url in &sets {
+        let url: Url = Url::from_str(s_url).expect("created a valid url");
+        urls.push(JwksConfig {
+            url,
+            issuer: None,
+            algorithms: None,
+            poll_interval: Duration::from_secs(60),
+        });
+    }
+
+    let jwks_manager = JwksManager::new(urls).await.unwrap();
+
+    // the JWT contains a HMAC key but we configured a restriction to RSA signing
+    let criteria = JWTCriteria {
+        kid: None,
+        alg: Algorithm::RS384,
+    };
+
+    assert!(search_jwks(&jwks_manager, &criteria).is_some());
+}
