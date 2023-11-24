@@ -14,7 +14,9 @@ Using the [OpenTelemetry](https://www.opentelemetry.io/) OTLP protocol you can e
 * [Datadog](https://www.datadoghq.com/) (see [configuration instructions](./datadog.mdx))
 * [Honeycomb](https://www.honeycomb.io/) (see [configuration instructions](./honecomb.mdx))
 
-## OpenTelemetry configuration
+## OTLP configuration
+
+The Apollo Router can be configured to export metrics data using OTLP either via HTTP or gRPC:
 
 ```yaml title="router.yaml"
 telemetry:

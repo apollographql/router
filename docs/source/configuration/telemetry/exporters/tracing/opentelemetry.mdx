@@ -16,6 +16,8 @@ For general tracing configuration, refer to [Router Tracing Configuration](./ove
 
 ## OTLP configuration
 
+The Apollo Router can be configured to export tracing data using OTLP either via HTTP or gRPC:
+
 ```yaml title="router.yaml"
 telemetry:
   exporters:
@@ -32,12 +34,12 @@ telemetry:
          # Optional Grpc configuration
          grpc:
            metadata:
-             foo: bar
+             "my-header": "value1"
    
          # Optional Http configuration
          http:
            headers:
-             foo: bar
+             "my-header": "value1"
 ```
 
 ### `enabled`
