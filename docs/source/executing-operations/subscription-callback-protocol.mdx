@@ -30,7 +30,7 @@ All actions described in these steps are performed by one of **Router**, **Subgr
 
 ### Initialization
 
-1. Before it executes a subscription operation, **Router** generates a unique ID (version 4 UUID recommended) to represent that operation.
+1. Before it executes a subscription operation, **Router** generates a unique ID to represent that operation.
 
 2. **Router** sends a GraphQL subscription operation to **Subgraph** via HTTP POST using the standard [GraphQL request payload](https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#request-parameters):
 
@@ -284,7 +284,7 @@ For the sake of clarity, the following examples demonstrate the callback protoco
 #### `subscription` operation
 
 1. _The Apollo Router_ receives a `subscription` operation
-2. _The Apollo Router_ generates an unique ID (uuid v4) for the following subscription
+2. _The Apollo Router_ generates an unique ID for the following subscription
 3. _The Apollo Router_ sends a query containing a [GraphQL request payload](https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#request-parameters) with all callback data in `extensions`
 
 Example:
