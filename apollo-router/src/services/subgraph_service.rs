@@ -101,6 +101,9 @@ const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5)
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
 static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
+#[allow(clippy::declare_interior_mutable_const)]
+static CALLBACK_PROTOCOL_ACCEPT: HeaderValue =
+    HeaderValue::from_static("application/json+graphql+callback/1.0");
 pub(crate) static APPLICATION_JSON_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static("application/json");
 static APP_GRAPHQL_JSON: HeaderValue = HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
@@ -404,10 +407,10 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                                 status_code: None,
                             }
                         })?;
-                        request.subgraph_request.headers_mut().append(
-                            ACCEPT,
-                            HeaderValue::from_static("application/json+graphql+callback/1.0"),
-                        );
+                        request
+                            .subgraph_request
+                            .headers_mut()
+                            .append(ACCEPT, CALLBACK_PROTOCOL_ACCEPT.clone());
 
                         let subscription_extension = SubscriptionExtension {
                             subscription_id,
@@ -1799,8 +1802,7 @@ mod tests {
                 .headers
                 .get_all(ACCEPT)
                 .iter()
-                .any(|header_value| header_value
-                    == HeaderValue::from_static("application/json+graphql+callback/1.0")));
+                .any(|header_value| header_value == CALLBACK_PROTOCOL_ACCEPT));
             let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
                 .await
                 .map_err(|_| ())
