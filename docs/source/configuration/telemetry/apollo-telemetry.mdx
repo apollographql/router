@@ -21,7 +21,7 @@ For more information, see [Sending operation metrics to GraphOS](/graphos/metric
 In their responses to your router, your subgraphs can include [field-level traces](/federation/metrics) that indicate how long the subgraph took to resolve each field in an operation. By analyzing this data in GraphOS Studio, you can identify and optimize your slower fields:
 
 <img
-  src="../images/studio-trace.jpg"
+  src="../../images/studio-trace.jpg"
   class="screenshot"
   alt="Viewing a trace in GraphOS Studio"
   width="500"
@@ -56,7 +56,7 @@ telemetry:
 
 <Note>
 
-Because field-level instrumentation is dependent on general-purpose [OpenTelemetry tracing](./tracing/), the value of `apollo.field_level_instrumentation_sampler` cannot exceed the value of `tracing.common.sampler`.
+Because field-level instrumentation is dependent on general-purpose [OpenTelemetry tracing](./tracing/), the value of `telemetry.apollo.field_level_instrumentation_sampler` cannot exceed the value of `telemetry.exporters.tracing.common.sampler`.
 
 </Note>
 

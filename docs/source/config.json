@@ -98,6 +98,7 @@
       }
     },
     "Telemetry and Monitoring": {
+      "Overview": "/configuration/telemetry/overview",
       "GraphOS reporting": "/configuration/telemetry/apollo-telemetry",
       "Log exporters": {
         "Configuration": "/configuration/telemetry/exporters/logging/overview",
