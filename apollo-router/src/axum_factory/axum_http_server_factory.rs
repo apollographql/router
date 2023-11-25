@@ -104,7 +104,7 @@ where
 
     if configuration.health_check.enabled {
         tracing::info!(
-            "Health check exposed at {}/{}",
+            "Health check exposed at {}{}",
             configuration.health_check.listen,
             configuration.health_check.path
         );
