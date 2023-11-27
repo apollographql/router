@@ -422,7 +422,7 @@ If _every_ requested field requires authentication and a request is unauthentica
 
 </MinVersion>
 
-The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in a [Rhai script](../customizations/rhai/) or [coprocessor](../customizations/coprocessor). This enables custom authorization validation beyond authentication and scopes. It is useful when we need more complex policy evaluation that verifying the presence of a claim value in a list (example: checking specific values in headers).
+The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in a [Rhai script](../customizations/rhai/) or [coprocessor](../customizations/coprocessor). This enables custom authorization validation beyond authentication and scopes. It is useful when we need more complex policy evaluation than verifying the presence of a claim value in a list (example: checking specific values in headers).
 
 The `@policy` directive includes a `policies` argument that defines an array of the required policies. The following example shows a policy that requires all roles from the claims object to contain the string `"support"`:
 
@@ -473,7 +473,7 @@ Alternatively, to introduce **OR** logic you can use nested arrays. For the foll
 You can nest arrays and elements as needed to achieve your desired logic. For the following example, its syntax requires requests to have either (`policy1` **AND** `policy2`) **OR** just `policy3` to be authorized:
 
 ```graphql
-@policy(policies: [["policy", "policy2"], ["policy3"]])
+@policy(policies: [["policy1", "policy2"], ["policy3"]])
 ```
 
 ##### Usage with a Rhai script
@@ -574,7 +574,7 @@ A coprocessor can then receive a request with this format:
             },
             "apollo_authorization::policies::required": {
                 "read_profile": null,
-                "read_address": null
+                "read_credit_card": null
             }
         }
     },
@@ -599,7 +599,7 @@ A user can read their own profile, so `read_profile` will succeed. But only the 
             },
             "apollo_authorization::policies::required": {
                 "read_profile": true,
-                "read_address": false
+                "read_credit_card": false
             }
         }
     }
