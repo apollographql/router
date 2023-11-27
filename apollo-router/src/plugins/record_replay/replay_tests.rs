@@ -1,3 +1,7 @@
+#![cfg(test)]
+
+use std::path::Path;
+
 use console::style;
 use tower::ServiceExt;
 
@@ -13,7 +17,7 @@ async fn replay_recording() {
         return;
     };
 
-    let replay = Replay::from_file(recording_file).await.unwrap();
+    let replay = Replay::from_file(Path::new(&recording_file)).await.unwrap();
 
     let req = replay.make_client_request().unwrap();
     let report = replay.report.clone();

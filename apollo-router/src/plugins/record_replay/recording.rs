@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 
 use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
 use crate::graphql::Response;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct Recording {
     pub(crate) supergraph_sdl: String,
     pub(crate) client_request: RequestDetails,

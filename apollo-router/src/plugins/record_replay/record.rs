@@ -4,17 +4,15 @@ use std::sync::Arc;
 
 use futures::stream::once;
 use futures::StreamExt;
-use serde_json::json;
 use tokio::fs;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt as TowerServiceExt;
 
+use super::recording::Recording;
 use super::recording::RequestDetails;
 use super::recording::ResponseDetails;
 use super::recording::Subgraph;
-use super::recording::Subgraphs;
-use crate::context::Context;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -28,11 +26,6 @@ use crate::spec::Schema;
 use crate::Configuration;
 
 const RECORD_HEADER: &str = "x-apollo-router-record";
-const RECORD: &str = "record";
-const CLIENT_REQUEST: &str = "client_request";
-const CLIENT_RESPONSE: &str = "client_response";
-const QUERY_PLAN: &str = "query_plan";
-const SUBGRAPHS: &str = "subgraphs";
 
 /// Request recording configuration.
 #[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
@@ -42,15 +35,11 @@ struct RecordConfig {
     enabled: bool,
     /// The path to the directory where recordings will be stored. Defaults to
     /// the current working directory.
-    storage_path: Option<String>,
+    storage_path: Option<PathBuf>,
 }
 
-fn default_storage_path() -> String {
-    std::env::current_dir()
-        .expect("failed to get current directory")
-        .to_str()
-        .expect("failed to convert current directory to string")
-        .to_string()
+fn default_storage_path() -> PathBuf {
+    std::env::current_dir().expect("failed to get current directory")
 }
 
 #[derive(Debug)]
@@ -68,28 +57,29 @@ impl Plugin for Record {
     type Config = RecordConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let storage_path = PathBuf::from(
-            init.config
-                .storage_path
-                .unwrap_or_else(default_storage_path),
-        );
-
-        write_file(
-            storage_path.clone().into(),
-            "README.md",
-            include_str!("recording-readme.md").as_bytes(),
-        )
-        .await?;
+        let storage_path = init
+            .config
+            .storage_path
+            .unwrap_or_else(default_storage_path);
 
         let plugin = Self {
             enabled: init.config.enabled,
             supergraph_sdl: init.supergraph_sdl.clone(),
-            storage_path: storage_path.into(),
+            storage_path: storage_path.clone().into(),
             schema: Arc::new(Schema::parse(
                 init.supergraph_sdl.clone().as_str(),
                 &Configuration::default(),
             )?),
         };
+
+        if init.config.enabled {
+            write_file(
+                storage_path.into(),
+                "README.md",
+                include_str!("recording-readme.md").as_bytes(),
+            )
+            .await?;
+        }
 
         Ok(plugin)
     }
@@ -100,12 +90,10 @@ impl Plugin for Record {
         }
 
         let dir = self.storage_path.clone();
-        let supergraph_sdl = self.supergraph_sdl.clone();
 
         ServiceBuilder::new()
             .map_future(move |future| {
                 let dir = dir.clone();
-                let supergraph_sdl = supergraph_sdl.clone();
 
                 async move {
                     let res: router::Response = future.await?;
@@ -115,53 +103,44 @@ impl Plugin for Record {
                     let context = res.context.clone();
 
                     let after_complete = once(async move {
-                        if recording_enabled(&context) {
-                            let client_request =
-                                context.get::<_, RequestDetails>(CLIENT_REQUEST)?;
-                            let client_response =
-                                context.get::<_, ResponseDetails>(CLIENT_RESPONSE)?;
+                        let recording = context
+                            .private_entries
+                            .lock()
+                            .get_mut::<Recording>()
+                            .cloned();
 
-                            if let (Some(client_request), Some(client_response)) =
-                                (client_request, client_response)
-                            {
-                                let res_headers = externalize_header_map(&headers)?;
-                                let client_response = ResponseDetails {
-                                    headers: res_headers,
-                                    ..client_response
-                                };
+                        if let Some(mut recording) = recording {
+                            let res_headers = externalize_header_map(&headers)?;
+                            recording.client_response.headers = res_headers;
 
-                                let operation_name = client_request
-                                    .operation_name
-                                    .clone()
-                                    .unwrap_or("UnnamedOperation".to_string());
+                            let operation_name = recording
+                                .client_request
+                                .operation_name
+                                .clone()
+                                .unwrap_or("UnnamedOperation".to_string());
 
-                                let unix_time = std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)?
-                                    .as_secs();
+                            let unix_time = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)?
+                                .as_secs();
 
-                                let filename =
-                                    format!("{}-{}.json", operation_name, unix_time).to_string();
+                            let filename =
+                                format!("{}-{}.json", operation_name, unix_time).to_string();
 
-                                tokio::spawn(async move {
-                                  tracing::info!("Writing recording to {}", filename);
-                                  let contents = json!({
-                                      "supergraph_sdl": &supergraph_sdl,
-                                      "client_request": &client_request,
-                                      "client_response": &client_response,
-                                      "formatted_query_plan": &context.get::<_, String>(QUERY_PLAN)?,
-                                      "subgraph_fetches": &context.get::<_, Subgraphs>(SUBGRAPHS)?,
-                                  });
+                            let contents = serde_json::to_value(recording)?;
 
-                                  write_file(
-                                      dir,
-                                      filename.as_str(),
-                                      serde_json::to_string_pretty(&contents)?.as_bytes(),
-                                  )
-                                  .await?;
+                            tokio::spawn(async move {
+                                tracing::info!("Writing recording to {}", filename);
 
-                                  Ok::<(), BoxError>(())
-                                }).await??;
-                            }
+                                write_file(
+                                    dir,
+                                    filename.as_str(),
+                                    serde_json::to_string_pretty(&contents)?.as_bytes(),
+                                )
+                                .await?;
+
+                                Ok::<(), BoxError>(())
+                            })
+                            .await??;
                         }
                         Ok::<Option<_>, BoxError>(None)
                     })
@@ -188,6 +167,7 @@ impl Plugin for Record {
         }
 
         let schema = self.schema.clone();
+        let supergraph_sdl = self.supergraph_sdl.clone();
 
         ServiceBuilder::new()
             .map_request(move |req: supergraph::Request| {
@@ -200,7 +180,13 @@ impl Plugin for Record {
 
                 let recording_enabled =
                     if req.supergraph_request.headers().contains_key(RECORD_HEADER) {
-                        req.context.insert(RECORD, true).unwrap();
+                        req.context.private_entries.lock().insert(Recording {
+                            supergraph_sdl: supergraph_sdl.clone().to_string(),
+                            client_request: Default::default(),
+                            client_response: Default::default(),
+                            formatted_query_plan: Default::default(),
+                            subgraph_fetches: Default::default(),
+                        });
                         true
                     } else {
                         false
@@ -212,32 +198,29 @@ impl Plugin for Record {
                     let variables = req.supergraph_request.body().variables.clone();
                     let headers = externalize_header_map(req.supergraph_request.headers())
                         .expect("failed to externalize header map");
-                    req.context
-                        .upsert::<_, RequestDetails>(CLIENT_REQUEST, |_value| RequestDetails {
+
+                    if let Some(recording) =
+                        req.context.private_entries.lock().get_mut::<Recording>()
+                    {
+                        recording.client_request = RequestDetails {
                             query,
                             operation_name,
                             variables,
                             headers,
-                        })
-                        .expect("failed to insert client request into context");
+                        };
+                    }
                 }
                 req
             })
             .map_response(|res: supergraph::Response| {
-                if recording_enabled(&res.context) {
-                    let context = res.context.clone();
+                let context = res.context.clone();
+                res.map_stream(move |chunk| {
+                    if let Some(recording) = context.private_entries.lock().get_mut::<Recording>() {
+                        recording.client_response.chunks.push(chunk.clone());
+                    }
 
-                    return res.map_stream(move |chunk| {
-                        context
-                            .upsert::<_, ResponseDetails>(CLIENT_RESPONSE, |mut value| {
-                                value.chunks.push(chunk.clone());
-                                value
-                            })
-                            .expect("failed to insert client response into context");
-                        chunk
-                    });
-                }
-                res
+                    chunk
+                })
             })
             .service(service)
             .boxed()
@@ -246,10 +229,8 @@ impl Plugin for Record {
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
             .map_request(|req: execution::Request| {
-                if recording_enabled(&req.context) {
-                    req.context
-                        .insert(QUERY_PLAN, req.query_plan.formatted_query_plan.clone())
-                        .unwrap();
+                if let Some(recording) = req.context.private_entries.lock().get_mut::<Recording>() {
+                    recording.formatted_query_plan = req.query_plan.formatted_query_plan.clone();
                 }
                 req
             })
@@ -301,12 +282,17 @@ impl Plugin for Record {
                                     request: req,
                                 };
 
-                                res.context
-                                    .upsert::<_, Subgraphs>(SUBGRAPHS, |mut value| {
-                                        value.insert(operation_name, subgraph);
-                                        value
-                                    })
-                                    .expect("failed to insert subgraph into context");
+                                if let Some(recording) =
+                                    res.context.private_entries.lock().get_mut::<Recording>()
+                                {
+                                    if recording.subgraph_fetches.is_none() {
+                                        recording.subgraph_fetches = Some(Default::default());
+                                    }
+
+                                    if let Some(fetches) = &mut recording.subgraph_fetches {
+                                        fetches.insert(operation_name, subgraph);
+                                    }
+                                }
                                 Ok(res)
                             }
                             Err(err) => Err(err),
@@ -327,13 +313,6 @@ async fn write_file(dir: Arc<Path>, path: &str, contents: &[u8]) -> Result<(), B
     fs::create_dir_all(dir).await?;
     fs::write(path, contents).await?;
     Ok(())
-}
-
-fn recording_enabled(context: &Context) -> bool {
-    context
-        .get::<_, bool>(RECORD)
-        .unwrap_or(None)
-        .unwrap_or(false)
 }
 
 fn is_introspection(query: String, schema: Arc<Schema>) -> bool {

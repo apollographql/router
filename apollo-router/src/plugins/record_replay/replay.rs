@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::ops::ControlFlow;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -33,7 +34,7 @@ pub(crate) struct Replay {
 
 #[allow(dead_code)]
 impl Replay {
-    pub(crate) async fn from_file(recording_file: String) -> Result<Self, BoxError> {
+    pub(crate) async fn from_file(recording_file: &Path) -> Result<Self, BoxError> {
         let recording = fs::read_to_string(recording_file).await?;
         let recording: Recording = serde_json::from_str(&recording)?;
         Ok(Self::new(recording))
@@ -42,7 +43,7 @@ impl Replay {
     pub(crate) fn new(recording: Recording) -> Self {
         Self {
             recording,
-            report: Arc::from(Mutex::from(vec![])),
+            report: Arc::default(),
         }
     }
 
@@ -126,10 +127,6 @@ impl Plugin for Replay {
         let recorded_chunks = self.recording.client_response.chunks.clone();
 
         ServiceBuilder::new()
-            .map_request(|req: supergraph::Request| {
-                // TODO - nothing? request is coming from elsewhere
-                req
-            })
             .map_response(|res: supergraph::Response| {
                 let mut i = 0;
                 res.map_stream(move |chunk| {
@@ -413,6 +410,5 @@ fn render_invisible(s: &str, newlines_matter: bool) -> Cow<'_, str> {
     }
 }
 
-#[cfg(test)]
 #[path = "replay_tests.rs"]
 mod tests;
