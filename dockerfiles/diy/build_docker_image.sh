@@ -11,7 +11,7 @@
 #
 # Requirements: To run successfully, you need quite a few utilities installed.
 # Most of them are likely to be installed on your OS. Some will require
-# installation, such as: docker, git, curl, mktemp, getopt
+# installation, such as: docker, git, mktemp, getopt
 #
 # Note: git is only required if you are building an image from source with the
 #       -b flag.

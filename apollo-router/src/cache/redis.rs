@@ -2,6 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use fred::interfaces::EventInterface;
 use fred::interfaces::RedisResult;
 use fred::prelude::ClientLike;
 use fred::prelude::KeysInterface;
@@ -18,6 +19,15 @@ use url::Url;
 use super::KeyType;
 use super::ValueType;
 use crate::configuration::RedisCache;
+
+const SUPPORTED_REDIS_SCHEMES: [&str; 6] = [
+    "redis",
+    "rediss",
+    "redis-cluster",
+    "rediss-cluster",
+    "redis-sentinel",
+    "rediss-sentinel",
+];
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct RedisKey<K>(pub(crate) K)
@@ -123,19 +133,17 @@ impl RedisCacheStorage {
         let client = RedisClient::new(
             client_config,
             Some(PerformanceConfig {
-                default_command_timeout_ms: config
-                    .timeout
-                    .map(|t| t.as_millis() as u64)
-                    .unwrap_or(2),
+                default_command_timeout: config.timeout.unwrap_or(Duration::from_millis(2)),
                 ..Default::default()
             }),
+            None,
             Some(ReconnectPolicy::new_exponential(0, 1, 2000, 5)),
         );
         let _handle = client.connect();
 
         // spawn tasks that listen for connection close or reconnect events
-        let mut error_rx = client.on_error();
-        let mut reconnect_rx = client.on_reconnect();
+        let mut error_rx = client.error_rx();
+        let mut reconnect_rx = client.reconnect_rx();
 
         tokio::spawn(async move {
             while let Ok(error) = error_rx.recv().await {
@@ -163,13 +171,16 @@ impl RedisCacheStorage {
     }
 
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {
-        match urls.get(0) {
+        let url_len = urls.len();
+        let mut urls_iter = urls.into_iter();
+        let first = urls_iter.next();
+        match first {
             None => Err(RedisError::new(
                 RedisErrorKind::Config,
                 "empty Redis URL list",
             )),
             Some(first) => {
-                if urls.len() == 1 {
+                if url_len == 1 {
                     return Ok(first.clone());
                 }
 
@@ -180,25 +191,19 @@ impl RedisCacheStorage {
 
                 let mut result = first.clone();
 
-                match scheme {
-                    "redis" => {
-                        let _ = result.set_scheme("redis-cluster");
-                    }
-                    "rediss" => {
-                        let _ = result.set_scheme("rediss-cluster");
-                    }
-                    other => {
-                        return Err(RedisError::new(
-                            RedisErrorKind::Config,
-                            format!(
-                                "invalid Redis URL scheme, expected 'redis' or 'rediss', got: {}",
-                                other
-                            ),
-                        ))
-                    }
+                if SUPPORTED_REDIS_SCHEMES.contains(&scheme) {
+                    let _ = result.set_scheme(scheme);
+                } else {
+                    return Err(RedisError::new(
+                        RedisErrorKind::Config,
+                        format!(
+                            "invalid Redis URL scheme, expected a scheme from {SUPPORTED_REDIS_SCHEMES:?}, got: {}",
+                            scheme
+                        ),
+                    ));
                 }
 
-                for url in &urls[1..] {
+                for mut url in urls_iter {
                     if url.username() != username {
                         return Err(RedisError::new(
                             RedisErrorKind::Config,
@@ -211,7 +216,24 @@ impl RedisCacheStorage {
                             "incompatible passwords between Redis URLs",
                         ));
                     }
-                    if url.scheme() != scheme {
+
+                    // Backwords compatibility with old redis client
+                    // If our url has a scheme of redis or rediss, convert it to be cluster form
+                    // and if our result is of matching scheme, convert that to be cluster form.
+                    if url.scheme() == "redis" {
+                        let _ = url.set_scheme("redis-cluster");
+                        if result.scheme() == "redis" {
+                            let _ = result.set_scheme("redis-cluster");
+                        }
+                    }
+                    if url.scheme() == "rediss" {
+                        let _ = url.set_scheme("rediss-cluster");
+                        if result.scheme() == "rediss" {
+                            let _ = result.set_scheme("rediss-cluster");
+                        }
+                    }
+                    // Now check to make sure our schemes match
+                    if url.scheme() != result.scheme() {
                         return Err(RedisError::new(
                             RedisErrorKind::Config,
                             "incompatible schemes between Redis URLs",
@@ -359,6 +381,8 @@ impl RedisCacheStorage {
 mod test {
     use std::time::SystemTime;
 
+    use url::Url;
+
     #[test]
     fn ensure_invalid_payload_serialization_doesnt_fail() {
         #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -374,5 +398,91 @@ mod test {
         let as_value: Result<fred::types::RedisValue, _> = invalid_json_payload.try_into();
 
         assert!(as_value.is_err());
+    }
+
+    #[test]
+    fn it_preprocesses_redis_schemas_correctly() {
+        // Base Format
+        for scheme in ["redis", "rediss"] {
+            let url_s = format!("{}://username:password@host:6666/database", scheme);
+            let url = Url::parse(&url_s).expect("it's a valid url");
+            let urls = vec![url.clone(), url];
+            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+        }
+        // Cluster Format
+        for scheme in ["redis-cluster", "rediss-cluster"] {
+            let url_s = format!(
+                "{}://username:password@host:6666?node=host1:6667&node=host2:6668",
+                scheme
+            );
+            let url = Url::parse(&url_s).expect("it's a valid url");
+            let urls = vec![url.clone(), url];
+            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+        }
+        // Sentinel Format
+        for scheme in ["redis-sentinel", "rediss-sentinel"] {
+            let url_s = format!(
+                "{}://username:password@host:6666?node=host1:6667&node=host2:6668&sentinelServiceName=myservice&sentinelUserName=username2&sentinelPassword=password2",
+                scheme
+            );
+            let url = Url::parse(&url_s).expect("it's a valid url");
+            let urls = vec![url.clone(), url];
+            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+        }
+        // Make sure it fails on sample invalid schemes
+        for scheme in ["wrong", "something"] {
+            let url_s = format!("{}://username:password@host:6666/database", scheme);
+            let url = Url::parse(&url_s).expect("it's a valid url");
+            let urls = vec![url.clone(), url];
+            assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        }
+    }
+
+    // This isn't an exhaustive list of combinations, but some of the more common likely mistakes
+    // that we should catch.
+    #[test]
+    fn it_preprocesses_redis_schemas_correctly_backwards_compatibility() {
+        // Two redis schemes
+        let url_s = "redis://username:password@host:6666/database";
+        let url = Url::parse(url_s).expect("it's a valid url");
+        let url_s1 = "redis://username:password@host:6666/database";
+        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let urls = vec![url, url_1];
+        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+        // redis-cluster, redis
+        let url_s = "redis-cluster://username:password@host:6666/database";
+        let url = Url::parse(url_s).expect("it's a valid url");
+        let url_s1 = "redis://username:password@host:6666/database";
+        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let urls = vec![url, url_1];
+        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_ok());
+        // redis, redis-cluster
+        let url_s = "redis://username:password@host:6666/database";
+        let url = Url::parse(url_s).expect("it's a valid url");
+        let url_s1 = "redis-cluster://username:password@host:6666/database";
+        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let urls = vec![url, url_1];
+        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        // redis-sentinel, redis
+        let url_s = "redis-sentinel://username:password@host:6666/database";
+        let url = Url::parse(url_s).expect("it's a valid url");
+        let url_s1 = "redis://username:password@host:6666/database";
+        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let urls = vec![url, url_1];
+        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        // redis, rediss
+        let url_s = "redis://username:password@host:6666/database";
+        let url = Url::parse(url_s).expect("it's a valid url");
+        let url_s1 = "rediss://username:password@host:6666/database";
+        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let urls = vec![url, url_1];
+        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
+        // redis, rediss-cluster
+        let url_s = "redis://username:password@host:6666/database";
+        let url = Url::parse(url_s).expect("it's a valid url");
+        let url_s1 = "rediss-cluster://username:password@host:6666/database";
+        let url_1 = Url::parse(url_s1).expect("it's a valid url");
+        let urls = vec![url, url_1];
+        assert!(super::RedisCacheStorage::preprocess_urls(urls).is_err());
     }
 }
