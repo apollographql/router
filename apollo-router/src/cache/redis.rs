@@ -2,6 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use fred::interfaces::EventInterface;
 use fred::interfaces::RedisResult;
 use fred::prelude::ClientLike;
 use fred::prelude::KeysInterface;
@@ -132,19 +133,17 @@ impl RedisCacheStorage {
         let client = RedisClient::new(
             client_config,
             Some(PerformanceConfig {
-                default_command_timeout_ms: config
-                    .timeout
-                    .map(|t| t.as_millis() as u64)
-                    .unwrap_or(2),
+                default_command_timeout: config.timeout.unwrap_or(Duration::from_millis(2)),
                 ..Default::default()
             }),
+            None,
             Some(ReconnectPolicy::new_exponential(0, 1, 2000, 5)),
         );
         let _handle = client.connect();
 
         // spawn tasks that listen for connection close or reconnect events
-        let mut error_rx = client.on_error();
-        let mut reconnect_rx = client.on_reconnect();
+        let mut error_rx = client.error_rx();
+        let mut reconnect_rx = client.reconnect_rx();
 
         tokio::spawn(async move {
             while let Ok(error) = error_rx.recv().await {
