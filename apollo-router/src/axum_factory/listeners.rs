@@ -481,14 +481,13 @@ mod tests {
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
     use crate::services::router;
-    use crate::services::router_service;
 
     #[tokio::test]
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
         let configuration = Configuration::fake_builder().build().unwrap();
 
         init_with_config(
-            router_service::empty().await,
+            router::service::empty().await,
             Arc::new(configuration),
             MultiMap::new(),
         )
@@ -525,7 +524,7 @@ mod tests {
         );
 
         let error = init_with_config(
-            router_service::empty().await,
+            router::service::empty().await,
             Arc::new(configuration),
             web_endpoints,
         )
@@ -563,7 +562,7 @@ mod tests {
             Endpoint::from_router_service("/".to_string(), endpoint),
         );
 
-        let error = init_with_config(router_service::empty().await, Arc::new(configuration), mm)
+        let error = init_with_config(router::service::empty().await, Arc::new(configuration), mm)
             .await
             .unwrap_err();
 

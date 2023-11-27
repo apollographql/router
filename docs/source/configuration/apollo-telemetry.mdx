@@ -26,15 +26,11 @@ In their responses to your router, your subgraphs can include [field-level trace
   width="500"
 />
 
-<blockquote>
-
-**Your subgraph libraries must support federated tracing (also known as FTV1 tracing) to provide this data.**
+Your subgraph libraries must support federated tracing (also known as FTV1 tracing) to provide this data.
 
 - To confirm support, check the `FEDERATED TRACING` entry for your library on [this page](/federation/building-supergraphs/supported-subgraphs).
 - Consult your library's documentation to learn how to enable federated tracing.
     - If you use Apollo Server with `@apollo/subgraph`, federated tracing support is enabled automatically.
-
-</blockquote>
 
 ### Trace sampling rate
 
@@ -56,7 +52,11 @@ telemetry:
       sampler: 0.5
 ```
 
-> **Note:** Because field-level instrumentation is dependent on general-purpose [OpenTelemetry tracing](./tracing/), the value of `apollo.field_level_instrumentation_sampler` cannot exceed the value of `tracing.common.sampler`.
+<Note>
+
+Because field-level instrumentation is dependent on general-purpose [OpenTelemetry tracing](./tracing/), the value of `apollo.field_level_instrumentation_sampler` cannot exceed the value of `tracing.common.sampler`.
+
+</Note>
 
 ### Disabling field-level traces
 
@@ -299,20 +299,16 @@ telemetry:
 
 You can configure whether the Apollo Router reports GraphQL error information to GraphOS, and whether the details of those errors are redacted. You can customize this behavior globally and override that global behavior on a per-subgraph basis.
 
-> By default, your router _does_ report error information, and it _does_ redact the details of those errors.
+By default, your router _does_ report error information, and it _does_ redact the details of those errors.
 
 - To prevent your router from reporting error information at all, you can set the `send` option to `false`.
 - To include all error details in your router's reports to GraphOS, you can set the `redact` option to `false`.
 
-<blockquote>
-
-**Note:** Your subgraph libraries must support federated tracing (also known as FTV1 tracing) to provide errors to GraphOS. If you use Apollo Server with `@apollo/subgraph`, federated tracing support is enabled automatically.
+Your subgraph libraries must support federated tracing (also known as FTV1 tracing) to provide errors to GraphOS. If you use Apollo Server with `@apollo/subgraph`, federated tracing support is enabled automatically.
 
 To confirm support:
 - Check the `FEDERATED TRACING` entry for your library on [the supported subgraphs page](/federation/building-supergraphs/supported-subgraphs).
 - If federated tracing isn't enabled automatically for your library, consult its documentation to learn how to enable it.
-
-</blockquote>
 
 See the example below:
 

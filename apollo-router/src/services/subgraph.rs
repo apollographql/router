@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use futures::channel::mpsc;
 use http::StatusCode;
 use http::Version;
 use serde_json_bytes::ByteString;
@@ -12,6 +11,7 @@ use sha2::Digest;
 use sha2::Sha256;
 use static_assertions::assert_impl_all;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tower::BoxError;
 
 use crate::error::Error;

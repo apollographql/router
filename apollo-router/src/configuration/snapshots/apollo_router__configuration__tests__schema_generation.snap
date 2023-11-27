@@ -89,6 +89,12 @@ expression: "&schema"
                       "type": "string",
                       "nullable": true
                     },
+                    "ttl": {
+                      "description": "TTL for entries",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
                     "urls": {
                       "description": "List of URLs to the Redis cluster",
                       "type": "array",
@@ -204,6 +210,14 @@ expression: "&schema"
                         "description": "Expected issuer for tokens verified by that JWKS",
                         "type": "string",
                         "nullable": true
+                      },
+                      "poll_interval": {
+                        "description": "Polling interval for each JWKS endpoint in human-readable format; defaults to 60s",
+                        "default": {
+                          "secs": 60,
+                          "nanos": 0
+                        },
+                        "type": "string"
                       },
                       "url": {
                         "description": "Retrieve the JWK Set",
@@ -1061,6 +1075,33 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "experimental_api_schema_generation_mode": {
+      "description": "Set the API schema generation implementation to use.",
+      "default": "legacy",
+      "oneOf": [
+        {
+          "description": "Use the new Rust-based implementation.",
+          "type": "string",
+          "enum": [
+            "new"
+          ]
+        },
+        {
+          "description": "Use the old JavaScript-based implementation.",
+          "type": "string",
+          "enum": [
+            "legacy"
+          ]
+        },
+        {
+          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
+          "type": "string",
+          "enum": [
+            "both"
+          ]
+        }
+      ]
+    },
     "experimental_batching": {
       "description": "Batching configuration.",
       "default": {
@@ -1530,12 +1571,13 @@ expression: "&schema"
       "description": "Health check configuration",
       "default": {
         "listen": "127.0.0.1:8088",
-        "enabled": true
+        "enabled": true,
+        "path": "/health"
       },
       "type": "object",
       "properties": {
         "enabled": {
-          "description": "Set to false to disable the health check endpoint",
+          "description": "Set to false to disable the health check",
           "default": true,
           "type": "boolean"
         },
@@ -1552,6 +1594,11 @@ expression: "&schema"
               "type": "string"
             }
           ]
+        },
+        "path": {
+          "description": "Optionally set a custom healthcheck path Defaults to /health",
+          "default": "/health",
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -2082,6 +2129,12 @@ expression: "&schema"
                   "properties": {
                     "timeout": {
                       "description": "Redis request timeout (default: 2ms)",
+                      "default": null,
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "ttl": {
+                      "description": "TTL for entries",
                       "default": null,
                       "type": "string",
                       "nullable": true
@@ -5698,6 +5751,12 @@ expression: "&schema"
           "properties": {
             "timeout": {
               "description": "Redis request timeout (default: 2ms)",
+              "default": null,
+              "type": "string",
+              "nullable": true
+            },
+            "ttl": {
+              "description": "TTL for entries",
               "default": null,
               "type": "string",
               "nullable": true

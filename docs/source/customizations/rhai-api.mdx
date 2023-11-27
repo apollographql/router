@@ -236,8 +236,11 @@ fn supergraph_service(service) {
     }
 }
 ```
+<Note>
 
-Note: You don't need to import the "base64" module. It is imported in the router.
+You don't need to import the "base64" module. It is imported in the router.
+
+</Note>
 
 ### Different alphabets
 
@@ -309,8 +312,12 @@ fn router_service(service) {
 }
 ```
 
-Note: You don't need to import the "env" module. It is imported in the router.
-Note: get() may fail, so it's best to handle exceptions when using it.
+<Note>
+
+* You don't need to import the "env" module. It is imported in the router.
+* `get()` may fail, so it's best to handle exceptions when using it.
+
+</Note>
 
 ## `Request` interface
 
@@ -327,7 +334,12 @@ request.body.extensions
 request.uri.host
 request.uri.path
 ```
-Note: These fields are typically modifiable, apart from `method` which is always read-only. However, when the callback service is `subgraph_service`,the only modifiable field is `request.context`.
+
+<Note>
+
+These fields are typically modifiable, apart from `method` which is always read-only. However, when the callback service is `subgraph_service`, the only modifiable field is `request.context`.
+
+</Note>
 
 **For `subgraph_service` callbacks only,** the `request` object provides _additional_ modifiable fields for interacting with the request that will be sent to the corresponding subgraph:
 
@@ -516,7 +528,9 @@ The following fields are identical in behavior to their `request` counterparts:
 * [`body`](#requestbody)
 * [`body.extensions`](#requestbodyextensions)
 
-Note: Be particularly careful when interacting with headers in a response context. For router_service(), supergraph_service() and execution_service(), response headers only exist for the first response in a deferred response stream. You can handle this by making use of the `is_primary()` function which will return true if a response is the first (or primary) response. If you do try to access the headers in a non-primary response, then you'll raise an exception which can be handled like any other rhai exception, but is not so convenient as using the `is_primary()` method.
+### `response.is_primary()`
+
+Be particularly careful when interacting with headers in a response context. For router_service(), supergraph_service() and execution_service(), response headers only exist for the first response in a deferred response stream. You can handle this by making use of the `is_primary()` function which will return true if a response is the first (or primary) response. If you do try to access the headers in a non-primary response, then you'll raise an exception which can be handled like any other rhai exception, but is not so convenient as using the `is_primary()` method.
 
 ```rhai
     if response.is_primary() {

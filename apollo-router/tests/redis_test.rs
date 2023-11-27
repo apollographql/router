@@ -3,10 +3,9 @@ mod test {
     use apollo_router::services::execution::QueryPlan;
     use apollo_router::services::router;
     use apollo_router::services::supergraph;
+    use fred::prelude::*;
     use futures::StreamExt;
     use http::Method;
-    use redis::AsyncCommands;
-    use redis::Client;
     use serde::Deserialize;
     use serde::Serialize;
     use serde_json::json;
@@ -15,14 +14,12 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn query_planner() -> Result<(), BoxError> {
-        let client = Client::open("redis://127.0.0.1:6379").expect("opening ClusterClient");
-        let mut connection = client
-            .get_async_connection()
-            .await
-            .expect("got redis connection");
+        let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
+        let client = RedisClient::new(config, None, None);
+        let connection_task = client.connect();
+        client.wait_for_connect().await?;
 
-        connection
-        .del::<&'static str, ()>("plan.5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76.4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec.3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112.4f918cb09d5956bea87fe8addb4db3bd16de2cdf935e899cf252cac5528090e4").await.unwrap();
+        client.del::<String, _>("plan.5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76.4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec.3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112.4f918cb09d5956bea87fe8addb4db3bd16de2cdf935e899cf252cac5528090e4").await.unwrap();
 
         let supergraph = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
@@ -51,7 +48,7 @@ mod test {
 
         let _ = supergraph.oneshot(request).await?.next_response().await;
 
-        let s:String = connection
+        let s:String = client
           .get("plan.5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76.4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec.3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112.4f918cb09d5956bea87fe8addb4db3bd16de2cdf935e899cf252cac5528090e4")
           .await
           .unwrap();
@@ -69,7 +66,9 @@ mod test {
             .get("root");
 
         insta::assert_json_snapshot!(query_plan);
-
+        client.quit().await?;
+        // calling quit ends the connection and event listener tasks
+        let _ = connection_task.await;
         Ok(())
     }
 
@@ -81,11 +80,10 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apq() -> Result<(), BoxError> {
-        let client = Client::open("redis://127.0.0.1:6379").expect("opening ClusterClient");
-        let mut connection = client
-            .get_async_connection()
-            .await
-            .expect("got redis connection");
+        let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
+        let client = RedisClient::new(config, None, None);
+        let connection_task = client.connect();
+        client.wait_for_connect().await?;
 
         let config = json!({
             "apq": {
@@ -111,8 +109,8 @@ mod test {
 
         let query_hash = "4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec";
 
-        connection
-            .del::<String, ()>(format!("apq\x00{query_hash}"))
+        client
+            .del::<String, _>(&format!("apq\x00{query_hash}"))
             .await
             .unwrap();
 
@@ -141,10 +139,7 @@ mod test {
             .unwrap()?;
         assert_eq!(res.errors.get(0).unwrap().message, "PersistedQueryNotFound");
 
-        let r: Option<String> = connection
-            .get(&format!("apq\x00{query_hash}"))
-            .await
-            .unwrap();
+        let r: Option<String> = client.get(&format!("apq\x00{query_hash}")).await.unwrap();
         assert!(r.is_none());
 
         // Now we register the query
@@ -169,10 +164,7 @@ mod test {
         assert!(res.data.is_some());
         assert!(res.errors.is_empty());
 
-        let s: Option<String> = connection
-            .get(&format!("apq\x00{query_hash}"))
-            .await
-            .unwrap();
+        let s: Option<String> = client.get(&format!("apq\x00{query_hash}")).await.unwrap();
         insta::assert_display_snapshot!(s.unwrap());
 
         // we start a new router with the same config
@@ -204,6 +196,9 @@ mod test {
         assert!(res.data.is_some());
         assert!(res.errors.is_empty());
 
+        client.quit().await?;
+        // calling quit ends the connection and event listener tasks
+        let _ = connection_task.await;
         Ok(())
     }
 }

@@ -10,20 +10,21 @@ use std::task::Poll;
 use std::time::Duration;
 use std::time::Instant;
 
-use futures::channel::mpsc;
-use futures::channel::mpsc::SendError;
-use futures::channel::oneshot;
-use futures::channel::oneshot::Canceled;
 use futures::Sink;
-use futures::SinkExt;
 use futures::Stream;
 use futures::StreamExt;
 use pin_project_lite::pin_project;
 use thiserror::Error;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::oneshot;
+use tokio::sync::oneshot::error::RecvError;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::IntervalStream;
+use tokio_stream::wrappers::ReceiverStream;
 
 use crate::graphql;
 use crate::spec::Schema;
@@ -35,13 +36,40 @@ static DEFAULT_MSG_CHANNEL_SIZE: usize = 128;
 #[derive(Error, Debug)]
 pub(crate) enum NotifyError<V> {
     #[error("cannot send data to pubsub")]
-    SendError(#[from] SendError),
+    SendError(#[from] SendError<V>),
     #[error("cannot send data to response stream")]
     BroadcastSendError(#[from] broadcast::error::SendError<V>),
-    #[error("cannot send data to pubsub because channel has been closed")]
-    Canceled(#[from] Canceled),
     #[error("this topic doesn't exist")]
     UnknownTopic,
+}
+
+impl<K, V> From<SendError<Notification<K, V>>> for NotifyError<V>
+where
+    K: Send + Hash + Eq + Clone + 'static,
+    V: Send + Clone + 'static,
+{
+    fn from(error: SendError<Notification<K, V>>) -> Self {
+        error.into()
+    }
+}
+
+impl<V> From<RecvError> for NotifyError<V>
+where
+    V: Send + Clone + 'static,
+{
+    fn from(error: RecvError) -> Self {
+        error.into()
+    }
+}
+
+impl<K, V> From<TrySendError<Notification<K, V>>> for NotifyError<V>
+where
+    K: Send + Hash + Eq + Clone + 'static,
+    V: Send + Clone + 'static,
+{
+    fn from(error: TrySendError<Notification<K, V>>) -> Self {
+        error.into()
+    }
 }
 
 type ResponseSender<V> =
@@ -124,7 +152,8 @@ where
         router_broadcasts: Option<Arc<RouterBroadcasts>>,
     ) -> Notify<K, V> {
         let (sender, receiver) = mpsc::channel(NOTIFY_CHANNEL_SIZE);
-        tokio::task::spawn(task(receiver, ttl, heartbeat_error_message));
+        let receiver_stream = ReceiverStream::new(receiver);
+        tokio::task::spawn(task(receiver_stream, ttl, heartbeat_error_message));
         Notify {
             sender,
             queue_size,
@@ -305,7 +334,7 @@ where
         // if disconnected, we don't care (the task was stopped)
         self.sender
             .try_send(Notification::TryDelete { topic })
-            .map_err(|try_send_error| try_send_error.into_send_error().into())
+            .map_err(|try_send_error| try_send_error.into())
     }
 
     #[cfg(test)]
@@ -542,10 +571,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn poll_close(
-        mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let topic = self.handle_guard.topic.clone();
         let _ = self
             .handle_guard
@@ -558,7 +584,7 @@ where
 impl<K, V> Handle<K, V> where K: Clone {}
 
 async fn task<K, V>(
-    mut receiver: mpsc::Receiver<Notification<K, V>>,
+    mut receiver: ReceiverStream<Notification<K, V>>,
     ttl: Option<Duration>,
     heartbeat_error_message: Option<V>,
 ) where

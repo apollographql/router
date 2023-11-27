@@ -1,0 +1,26 @@
+---
+source: apollo-router/src/plugins/authorization/authenticated.rs
+expression: "TestResult { query: QUERY, result: doc, paths }"
+---
+query:
+
+        query Anonymous {
+            post(id: "1") {
+              ... on PublicBlog {
+                __typename
+                title
+              }
+            }
+          }
+        
+filtered:
+query Anonymous {
+  post(id: "1") {
+    ... on PublicBlog {
+      __typename
+      title
+    }
+  }
+}
+
+paths: []

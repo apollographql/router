@@ -4,7 +4,7 @@ Collecting structured, event based diagnostics (Telemetry)
 
 ## Status
 
-Proposed
+Approved
 
 ## Context
 

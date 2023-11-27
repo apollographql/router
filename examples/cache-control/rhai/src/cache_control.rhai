@@ -43,13 +43,18 @@ fn subgraph_service(service, subgraph) {
 fn supergraph_service(service) {
   // attach the cache-control header if enough data is available
   service.map_response(|response| {
-    let uncacheable = response.context.cache_control_uncacheable;
-    let max_age = response.context.cache_control_max_age;
-    let scope = response.context.cache_control_scope;
 
-    if uncacheable != true && max_age != () && scope != () {
-      response.headers["cache-control"] = `max-age=${max_age}, ${scope}`;
-    }
+    // Note the check for is_primary() to support deferred response headers
+    // https://www.apollographql.com/docs/router/customizations/rhai-api/#response-interface
+    if response.is_primary() {
+      let uncacheable = response.context.cache_control_uncacheable;
+      let max_age = response.context.cache_control_max_age;
+      let scope = response.context.cache_control_scope;
+  
+      if uncacheable != true && max_age != () && scope != () {
+        response.headers["cache-control"] = `max-age=${max_age}, ${scope}`;
+      }
+  }
   });
 }
 

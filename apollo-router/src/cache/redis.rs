@@ -17,6 +17,7 @@ use url::Url;
 
 use super::KeyType;
 use super::ValueType;
+use crate::configuration::RedisCache;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct RedisKey<K>(pub(crate) K)
@@ -115,18 +116,17 @@ where
 }
 
 impl RedisCacheStorage {
-    pub(crate) async fn new(
-        urls: Vec<Url>,
-        ttl: Option<Duration>,
-        timeout: Option<Duration>,
-    ) -> Result<Self, RedisError> {
-        let url = Self::preprocess_urls(urls)?;
-        let config = RedisConfig::from_url(url.as_str())?;
+    pub(crate) async fn new(config: RedisCache) -> Result<Self, RedisError> {
+        let url = Self::preprocess_urls(config.urls)?;
+        let client_config = RedisConfig::from_url(url.as_str())?;
 
         let client = RedisClient::new(
-            config,
+            client_config,
             Some(PerformanceConfig {
-                default_command_timeout_ms: timeout.map(|t| t.as_millis() as u64).unwrap_or(2),
+                default_command_timeout_ms: config
+                    .timeout
+                    .map(|t| t.as_millis() as u64)
+                    .unwrap_or(2),
                 ..Default::default()
             }),
             Some(ReconnectPolicy::new_exponential(0, 1, 2000, 5)),
@@ -158,7 +158,7 @@ impl RedisCacheStorage {
         tracing::trace!("redis connection established");
         Ok(Self {
             inner: Arc::new(client),
-            ttl,
+            ttl: config.ttl,
         })
     }
 

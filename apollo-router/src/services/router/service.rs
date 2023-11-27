@@ -34,22 +34,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
-use super::layers::apq::APQLayer;
-use super::layers::content_negotiation;
-use super::layers::query_analysis::QueryAnalysisLayer;
-use super::layers::static_page::StaticPageLayer;
-use super::new_service::ServiceFactory;
-use super::router;
-use super::router::ClientRequestAccepts;
-#[cfg(test)]
-use super::supergraph;
-use super::HasPlugins;
-#[cfg(test)]
-use super::HasSchema;
-use super::SupergraphCreator;
-use super::APPLICATION_JSON_HEADER_VALUE;
-use super::MULTIPART_DEFER_CONTENT_TYPE;
-use super::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
+use super::ClientRequestAccepts;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
@@ -62,12 +47,27 @@ use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::QueryPlanResult;
 use crate::query_planner::WarmUpCachingQueryKey;
 use crate::router_factory::RouterFactory;
+use crate::services::layers::apq::APQLayer;
+use crate::services::layers::content_negotiation;
 use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
+use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::layers::static_page::StaticPageLayer;
+use crate::services::new_service::ServiceFactory;
+use crate::services::router;
+#[cfg(test)]
+use crate::services::supergraph;
+use crate::services::HasPlugins;
+#[cfg(test)]
+use crate::services::HasSchema;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
+use crate::services::SupergraphCreator;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::services::APPLICATION_JSON_HEADER_VALUE;
+use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
 use crate::Configuration;
 use crate::Context;
 use crate::Endpoint;
@@ -402,13 +402,16 @@ impl RouterService {
         if results.len() == 1 {
             Ok(results.pop().expect("we should have at least one response"))
         } else {
-            let first = results.pop().expect("we should have at least one response");
+            let mut results_it = results.into_iter();
+            let first = results_it
+                .next()
+                .expect("we should have at least one response");
             let (parts, body) = first.response.into_parts();
             let context = first.context;
             let mut bytes = BytesMut::new();
             bytes.put_u8(b'[');
             bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
-            for result in results {
+            for result in results_it {
                 bytes.put(&b", "[..]);
                 bytes.extend_from_slice(&hyper::body::to_bytes(result.response.into_body()).await?);
             }
@@ -599,19 +602,22 @@ impl RouterService {
             }
         };
 
-        let mut ok_results = graphql_requests?;
+        let ok_results = graphql_requests?;
         let mut results = Vec::with_capacity(ok_results.len());
-        let first = ok_results
-            .pop()
-            .expect("We must have at least one response");
-        let sg = http::Request::from_parts(parts, first);
 
-        if !ok_results.is_empty() {
+        if ok_results.len() > 1 {
             context
                 .private_entries
                 .lock()
                 .insert(self.experimental_batching.clone());
         }
+
+        let mut ok_results_it = ok_results.into_iter();
+        let first = ok_results_it
+            .next()
+            .expect("we should have at least one request");
+        let sg = http::Request::from_parts(parts, first);
+
         // Building up the batch of supergraph requests is tricky.
         // Firstly note that any http extensions are only propagated for the first request sent
         // through the pipeline. This is because there is simply no way to clone http
@@ -626,7 +632,7 @@ impl RouterService {
         // would mean all the requests in a batch shared the same set of private entries and review
         // comments expressed the sentiment that this may be a bad thing...)
         //
-        for graphql_request in ok_results {
+        for graphql_request in ok_results_it {
             // XXX Lose http extensions, is that ok?
             let mut new = http_ext::clone_http_request(&sg);
             *new.body_mut() = graphql_request;
@@ -673,7 +679,7 @@ struct TranslateError<'a> {
 }
 
 // Process the headers to make sure that `VARY` is set correctly
-fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
+pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
     if headers.get(VARY).is_none() {
         // We don't have a VARY header, add one with value "origin"
         headers.insert(VARY, ORIGIN_HEADER_VALUE.clone());
@@ -782,513 +788,5 @@ impl RouterCreator {
 
     pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
         self.supergraph_creator.planner()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use http::Uri;
-    use mime::APPLICATION_JSON;
-    use serde_json_bytes::json;
-
-    use super::*;
-    use crate::services::supergraph;
-    use crate::Context;
-
-    // Test Vary processing
-
-    #[test]
-    fn it_adds_default_with_value_origin_if_no_vary_header() {
-        let mut default_headers = HeaderMap::new();
-        process_vary_header(&mut default_headers);
-        let vary_opt = default_headers.get(VARY);
-        assert!(vary_opt.is_some());
-        let vary = vary_opt.expect("has a value");
-        assert_eq!(vary, "origin");
-    }
-
-    #[test]
-    fn it_leaves_vary_alone_if_set() {
-        let mut default_headers = HeaderMap::new();
-        default_headers.insert(VARY, HeaderValue::from_static("*"));
-        process_vary_header(&mut default_headers);
-        let vary_opt = default_headers.get(VARY);
-        assert!(vary_opt.is_some());
-        let vary = vary_opt.expect("has a value");
-        assert_eq!(vary, "*");
-    }
-
-    #[test]
-    fn it_leaves_varys_alone_if_there_are_more_than_one() {
-        let mut default_headers = HeaderMap::new();
-        default_headers.insert(VARY, HeaderValue::from_static("one"));
-        default_headers.append(VARY, HeaderValue::from_static("two"));
-        process_vary_header(&mut default_headers);
-        let vary = default_headers.get_all(VARY);
-        assert_eq!(vary.iter().count(), 2);
-        for value in vary {
-            assert!(value == "one" || value == "two");
-        }
-    }
-
-    #[tokio::test]
-    async fn it_extracts_query_and_operation_name() {
-        let query = "query";
-        let expected_query = query;
-        let operation_name = "operationName";
-        let expected_operation_name = operation_name;
-
-        let expected_response = graphql::Response::builder()
-            .data(json!({"response": "yay"}))
-            .build();
-
-        let mut router_service = super::from_supergraph_mock_callback(move |req| {
-            let example_response = expected_response.clone();
-
-            assert_eq!(
-                req.supergraph_request.body().query.as_deref().unwrap(),
-                expected_query
-            );
-            assert_eq!(
-                req.supergraph_request
-                    .body()
-                    .operation_name
-                    .as_deref()
-                    .unwrap(),
-                expected_operation_name
-            );
-
-            Ok(SupergraphResponse::new_from_graphql_response(
-                example_response,
-                req.context,
-            ))
-        })
-        .await;
-
-        // get request
-        let get_request = supergraph::Request::builder()
-            .query(query)
-            .operation_name(operation_name)
-            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-            .uri(Uri::from_static("/"))
-            .method(Method::GET)
-            .context(Context::new())
-            .build()
-            .unwrap()
-            .try_into()
-            .unwrap();
-
-        router_service.call(get_request).await.unwrap();
-
-        // post request
-        let post_request = supergraph::Request::builder()
-            .query(query)
-            .operation_name(operation_name)
-            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-            .uri(Uri::from_static("/"))
-            .method(Method::POST)
-            .context(Context::new())
-            .build()
-            .unwrap();
-
-        router_service
-            .call(post_request.try_into().unwrap())
-            .await
-            .unwrap();
-    }
-
-    #[tokio::test]
-    async fn it_fails_on_empty_query() {
-        let expected_error = "Must provide query string.";
-
-        let router_service = from_supergraph_mock_callback(move |_req| unreachable!()).await;
-
-        let request = SupergraphRequest::fake_builder()
-            .query("".to_string())
-            .build()
-            .expect("expecting valid request")
-            .try_into()
-            .unwrap();
-
-        let response = router_service
-            .oneshot(request)
-            .await
-            .unwrap()
-            .into_graphql_response_stream()
-            .await
-            .next()
-            .await
-            .unwrap()
-            .unwrap();
-        let actual_error = response.errors[0].message.clone();
-
-        assert_eq!(expected_error, actual_error);
-        assert!(response.errors[0].extensions.contains_key("code"));
-    }
-
-    #[tokio::test]
-    async fn it_fails_on_no_query() {
-        let expected_error = "Must provide query string.";
-
-        let router_service = from_supergraph_mock_callback(move |_req| unreachable!()).await;
-
-        let request = SupergraphRequest::fake_builder()
-            .build()
-            .expect("expecting valid request")
-            .try_into()
-            .unwrap();
-
-        let response = router_service
-            .oneshot(request)
-            .await
-            .unwrap()
-            .into_graphql_response_stream()
-            .await
-            .next()
-            .await
-            .unwrap()
-            .unwrap();
-        let actual_error = response.errors[0].message.clone();
-        assert_eq!(expected_error, actual_error);
-        assert!(response.errors[0].extensions.contains_key("code"));
-    }
-
-    #[tokio::test]
-    async fn test_experimental_http_max_request_bytes() {
-        /// Size of the JSON serialization of the request created by `fn canned_new`
-        /// in `apollo-router/src/services/supergraph.rs`
-        const CANNED_REQUEST_LEN: usize = 391;
-
-        async fn with_config(experimental_http_max_request_bytes: usize) -> router::Response {
-            let http_request = supergraph::Request::canned_builder()
-                .build()
-                .unwrap()
-                .supergraph_request
-                .map(|body| {
-                    let json_bytes = serde_json::to_vec(&body).unwrap();
-                    assert_eq!(
-                        json_bytes.len(),
-                        CANNED_REQUEST_LEN,
-                        "The request generated by `fn canned_new` \
-                         in `apollo-router/src/services/supergraph.rs` has changed. \
-                         Please update `CANNED_REQUEST_LEN` accordingly."
-                    );
-                    hyper::Body::from(json_bytes)
-                });
-            let config = serde_json::json!({
-                "limits": {
-                    "experimental_http_max_request_bytes": experimental_http_max_request_bytes
-                }
-            });
-            crate::TestHarness::builder()
-                .configuration_json(config)
-                .unwrap()
-                .build_router()
-                .await
-                .unwrap()
-                .oneshot(router::Request::from(http_request))
-                .await
-                .unwrap()
-        }
-        // Send a request just at (under) the limit
-        let response = with_config(CANNED_REQUEST_LEN).await.response;
-        assert_eq!(response.status(), http::StatusCode::OK);
-
-        // Send a request just over the limit
-        let response = with_config(CANNED_REQUEST_LEN - 1).await.response;
-        assert_eq!(response.status(), http::StatusCode::PAYLOAD_TOO_LARGE);
-    }
-
-    //  Test query batching
-
-    #[tokio::test]
-    async fn it_only_accepts_batch_http_link_mode_for_query_batch() {
-        let expected_response: serde_json::Value = serde_json::from_str(include_str!(
-            "query_batching/testdata/batching_not_enabled_response.json"
-        ))
-        .unwrap();
-
-        async fn with_config() -> router::Response {
-            let http_request = supergraph::Request::canned_builder()
-                .build()
-                .unwrap()
-                .supergraph_request
-                .map(|req: crate::request::Request| {
-                    // Modify the request so that it is a valid array of requests.
-                    let mut json_bytes = serde_json::to_vec(&req).unwrap();
-                    let mut result = vec![b'['];
-                    result.append(&mut json_bytes.clone());
-                    result.push(b',');
-                    result.append(&mut json_bytes);
-                    result.push(b']');
-                    hyper::Body::from(result)
-                });
-            let config = serde_json::json!({});
-            crate::TestHarness::builder()
-                .configuration_json(config)
-                .unwrap()
-                .build_router()
-                .await
-                .unwrap()
-                .oneshot(router::Request::from(http_request))
-                .await
-                .unwrap()
-        }
-        // Send a request
-        let response = with_config().await.response;
-        assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
-        let data: serde_json::Value =
-            serde_json::from_slice(&hyper::body::to_bytes(response.into_body()).await.unwrap())
-                .unwrap();
-        assert_eq!(expected_response, data);
-    }
-
-    #[tokio::test]
-    async fn it_processes_a_valid_query_batch() {
-        let expected_response: serde_json::Value = serde_json::from_str(include_str!(
-            "query_batching/testdata/expected_good_response.json"
-        ))
-        .unwrap();
-
-        async fn with_config() -> router::Response {
-            let http_request = supergraph::Request::canned_builder()
-                .build()
-                .unwrap()
-                .supergraph_request
-                .map(|req: crate::request::Request| {
-                    // Modify the request so that it is a valid array of requests.
-                    let mut json_bytes = serde_json::to_vec(&req).unwrap();
-                    let mut result = vec![b'['];
-                    result.append(&mut json_bytes.clone());
-                    result.push(b',');
-                    result.append(&mut json_bytes);
-                    result.push(b']');
-                    hyper::Body::from(result)
-                });
-            let config = serde_json::json!({
-                "experimental_batching": {
-                    "enabled": true,
-                    "mode" : "batch_http_link"
-                }
-            });
-            crate::TestHarness::builder()
-                .configuration_json(config)
-                .unwrap()
-                .build_router()
-                .await
-                .unwrap()
-                .oneshot(router::Request::from(http_request))
-                .await
-                .unwrap()
-        }
-        // Send a request
-        let response = with_config().await.response;
-        assert_eq!(response.status(), http::StatusCode::OK);
-        let data: serde_json::Value =
-            serde_json::from_slice(&hyper::body::to_bytes(response.into_body()).await.unwrap())
-                .unwrap();
-        assert_eq!(expected_response, data);
-    }
-
-    #[tokio::test]
-    async fn it_will_not_process_a_query_batch_without_enablement() {
-        let expected_response: serde_json::Value = serde_json::from_str(include_str!(
-            "query_batching/testdata/batching_not_enabled_response.json"
-        ))
-        .unwrap();
-
-        async fn with_config() -> router::Response {
-            let http_request = supergraph::Request::canned_builder()
-                .build()
-                .unwrap()
-                .supergraph_request
-                .map(|req: crate::request::Request| {
-                    // Modify the request so that it is a valid array of requests.
-                    let mut json_bytes = serde_json::to_vec(&req).unwrap();
-                    let mut result = vec![b'['];
-                    result.append(&mut json_bytes.clone());
-                    result.push(b',');
-                    result.append(&mut json_bytes);
-                    result.push(b']');
-                    hyper::Body::from(result)
-                });
-            let config = serde_json::json!({});
-            crate::TestHarness::builder()
-                .configuration_json(config)
-                .unwrap()
-                .build_router()
-                .await
-                .unwrap()
-                .oneshot(router::Request::from(http_request))
-                .await
-                .unwrap()
-        }
-        // Send a request
-        let response = with_config().await.response;
-        assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
-        let data: serde_json::Value =
-            serde_json::from_slice(&hyper::body::to_bytes(response.into_body()).await.unwrap())
-                .unwrap();
-        assert_eq!(expected_response, data);
-    }
-
-    #[tokio::test]
-    async fn it_will_not_process_a_poorly_formatted_query_batch() {
-        let expected_response: serde_json::Value = serde_json::from_str(include_str!(
-            "query_batching/testdata/badly_formatted_batch_response.json"
-        ))
-        .unwrap();
-
-        async fn with_config() -> router::Response {
-            let http_request = supergraph::Request::canned_builder()
-                .build()
-                .unwrap()
-                .supergraph_request
-                .map(|req: crate::request::Request| {
-                    // Modify the request so that it is a valid array of requests.
-                    let mut json_bytes = serde_json::to_vec(&req).unwrap();
-                    let mut result = vec![b'['];
-                    result.append(&mut json_bytes.clone());
-                    result.push(b',');
-                    result.append(&mut json_bytes);
-                    // Deliberately omit the required trailing ]
-                    hyper::Body::from(result)
-                });
-            let config = serde_json::json!({
-                "experimental_batching": {
-                    "enabled": true,
-                    "mode" : "batch_http_link"
-                }
-            });
-            crate::TestHarness::builder()
-                .configuration_json(config)
-                .unwrap()
-                .build_router()
-                .await
-                .unwrap()
-                .oneshot(router::Request::from(http_request))
-                .await
-                .unwrap()
-        }
-        // Send a request
-        let response = with_config().await.response;
-        assert_eq!(response.status(), http::StatusCode::BAD_REQUEST);
-        let data: serde_json::Value =
-            serde_json::from_slice(&hyper::body::to_bytes(response.into_body()).await.unwrap())
-                .unwrap();
-        assert_eq!(expected_response, data);
-    }
-
-    #[tokio::test]
-    async fn it_will_process_a_non_batched_defered_query() {
-        let expected_response = "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"topProducts\":[{\"upc\":\"1\",\"name\":\"Table\",\"reviews\":[{\"product\":{\"name\":\"Table\"},\"author\":{\"id\":\"1\",\"name\":\"Ada Lovelace\"}},{\"product\":{\"name\":\"Table\"},\"author\":{\"id\":\"2\",\"name\":\"Alan Turing\"}}]},{\"upc\":\"2\",\"name\":\"Couch\",\"reviews\":[{\"product\":{\"name\":\"Couch\"},\"author\":{\"id\":\"1\",\"name\":\"Ada Lovelace\"}}]}]},\"hasNext\":true}\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":false,\"incremental\":[{\"data\":{\"id\":\"1\"},\"path\":[\"topProducts\",0,\"reviews\",0]},{\"data\":{\"id\":\"4\"},\"path\":[\"topProducts\",0,\"reviews\",1]},{\"data\":{\"id\":\"2\"},\"path\":[\"topProducts\",1,\"reviews\",0]}]}\r\n--graphql--\r\n";
-        async fn with_config() -> router::Response {
-            let query = "
-                query TopProducts($first: Int) {
-                    topProducts(first: $first) {
-                        upc
-                        name
-                        reviews {
-                            ... @defer {
-                            id
-                            }
-                            product { name }
-                            author { id name }
-                        }
-                    }
-                }
-            ";
-            let http_request = supergraph::Request::canned_builder()
-                .header(http::header::ACCEPT, MULTIPART_DEFER_CONTENT_TYPE)
-                .query(query)
-                .build()
-                .unwrap()
-                .supergraph_request
-                .map(|req: crate::request::Request| {
-                    let bytes = serde_json::to_vec(&req).unwrap();
-                    hyper::Body::from(bytes)
-                });
-            let config = serde_json::json!({
-                "experimental_batching": {
-                    "enabled": true,
-                    "mode" : "batch_http_link"
-                }
-            });
-            crate::TestHarness::builder()
-                .configuration_json(config)
-                .unwrap()
-                .build_router()
-                .await
-                .unwrap()
-                .oneshot(router::Request::from(http_request))
-                .await
-                .unwrap()
-        }
-        // Send a request
-        let response = with_config().await.response;
-        assert_eq!(response.status(), http::StatusCode::OK);
-        let bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
-        let data = String::from_utf8_lossy(&bytes);
-        assert_eq!(expected_response, data);
-    }
-
-    #[tokio::test]
-    async fn it_will_not_process_a_batched_deferred_query() {
-        let expected_response = "[\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"errors\":[{\"message\":\"Deferred responses and subscriptions aren't supported in batches\",\"extensions\":{\"code\":\"BATCHING_DEFER_UNSUPPORTED\"}}]}\r\n--graphql--\r\n, \r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"errors\":[{\"message\":\"Deferred responses and subscriptions aren't supported in batches\",\"extensions\":{\"code\":\"BATCHING_DEFER_UNSUPPORTED\"}}]}\r\n--graphql--\r\n]";
-
-        async fn with_config() -> router::Response {
-            let query = "
-                query TopProducts($first: Int) {
-                    topProducts(first: $first) {
-                        upc
-                        name
-                        reviews {
-                            ... @defer {
-                            id
-                            }
-                            product { name }
-                            author { id name }
-                        }
-                    }
-                }
-            ";
-            let http_request = supergraph::Request::canned_builder()
-                .header(http::header::ACCEPT, MULTIPART_DEFER_CONTENT_TYPE)
-                .query(query)
-                .build()
-                .unwrap()
-                .supergraph_request
-                .map(|req: crate::request::Request| {
-                    // Modify the request so that it is a valid array of requests.
-                    let mut json_bytes = serde_json::to_vec(&req).unwrap();
-                    let mut result = vec![b'['];
-                    result.append(&mut json_bytes.clone());
-                    result.push(b',');
-                    result.append(&mut json_bytes);
-                    result.push(b']');
-                    hyper::Body::from(result)
-                });
-            let config = serde_json::json!({
-                "experimental_batching": {
-                    "enabled": true,
-                    "mode" : "batch_http_link"
-                }
-            });
-            crate::TestHarness::builder()
-                .configuration_json(config)
-                .unwrap()
-                .build_router()
-                .await
-                .unwrap()
-                .oneshot(router::Request::from(http_request))
-                .await
-                .unwrap()
-        }
-        // Send a request
-        let response = with_config().await.response;
-        assert_eq!(response.status(), http::StatusCode::NOT_ACCEPTABLE);
-        let bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
-        let data = String::from_utf8_lossy(&bytes);
-        assert_eq!(expected_response, data);
     }
 }

@@ -208,8 +208,8 @@ expression: get_spans()
                 }
               },
               "children": {
-                "apollo_router::services::supergraph_service::query_planning": {
-                  "name": "apollo_router::services::supergraph_service::query_planning",
+                "apollo_router::services::supergraph::service::query_planning": {
+                  "name": "apollo_router::services::supergraph::service::query_planning",
                   "record": {
                     "entries": [
                       [
@@ -259,9 +259,9 @@ expression: get_spans()
                     ],
                     "metadata": {
                       "name": "query_planning",
-                      "target": "apollo_router::services::supergraph_service",
+                      "target": "apollo_router::services::supergraph::service",
                       "level": "INFO",
-                      "module_path": "apollo_router::services::supergraph_service",
+                      "module_path": "apollo_router::services::supergraph::service",
                       "fields": {
                         "names": [
                           "otel.kind"
