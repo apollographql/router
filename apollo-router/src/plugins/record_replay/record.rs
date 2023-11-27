@@ -75,7 +75,7 @@ impl Plugin for Record {
         if init.config.enabled {
             write_file(
                 storage_path.into(),
-                "README.md",
+                &PathBuf::from("README.md"),
                 include_str!("recording-readme.md").as_bytes(),
             )
             .await?;
@@ -113,27 +113,15 @@ impl Plugin for Record {
                             let res_headers = externalize_header_map(&headers)?;
                             recording.client_response.headers = res_headers;
 
-                            let operation_name = recording
-                                .client_request
-                                .operation_name
-                                .clone()
-                                .unwrap_or("UnnamedOperation".to_string());
-
-                            let unix_time = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)?
-                                .as_secs();
-
-                            let filename =
-                                format!("{}-{}.json", operation_name, unix_time).to_string();
-
+                            let filename = recording.filename();
                             let contents = serde_json::to_value(recording)?;
 
                             tokio::spawn(async move {
-                                tracing::info!("Writing recording to {}", filename);
+                                tracing::info!("Writing recording to {:?}", filename);
 
                                 write_file(
                                     dir,
-                                    filename.as_str(),
+                                    &filename,
                                     serde_json::to_string_pretty(&contents)?.as_bytes(),
                                 )
                                 .await?;
@@ -313,7 +301,7 @@ impl Plugin for Record {
     }
 }
 
-async fn write_file(dir: Arc<Path>, path: &str, contents: &[u8]) -> Result<(), BoxError> {
+async fn write_file(dir: Arc<Path>, path: &PathBuf, contents: &[u8]) -> Result<(), BoxError> {
     let path = dir.join(path);
     let dir = path.parent().unwrap();
     fs::create_dir_all(dir).await?;
