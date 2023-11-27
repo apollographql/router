@@ -312,7 +312,6 @@ mod test {
           .get("subgraph.products|530d594c46b838e725b87d64fd6384b82f6ff14bd902b57bba9dcc34ce684b76|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
-        println!("got res: {s}");
         let v: Value = serde_json::from_str(&s).unwrap();
         insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
@@ -627,7 +626,6 @@ mod test {
           .get("subgraph.products|530d594c46b838e725b87d64fd6384b82f6ff14bd902b57bba9dcc34ce684b76|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
-        println!("got res: {s}");
         let v: Value = serde_json::from_str(&s).unwrap();
         assert_eq!(
             v.as_object().unwrap().get("data").unwrap(),
@@ -645,11 +643,10 @@ mod test {
             }}
         );
 
-        let s:String = client
+        let s: String = client
         .get("subgraph.reviews|Product|4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66|98424704ece0e377929efa619bce2cbd5246281199c72a0902da863270f5839c|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
-        println!("got res: {s}");
         let v: Value = serde_json::from_str(&s).unwrap();
         assert_eq!(
             v.as_object().unwrap().get("data").unwrap(),
@@ -660,10 +657,6 @@ mod test {
             }}
         );
 
-        //insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
-
-        println!("\n\n///////////////////////////////////\n\n");
-        ///////////////////////////
         let context = Context::new();
         context
             .insert(
@@ -698,7 +691,6 @@ mod test {
           .get("subgraph.reviews|Product|4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66|dc8e1fb584d7ad114b3e836a5fe4f642732b82eb39bb8d6dff000d844d0e3baf|f1d914240cfd0c60d5388f3f2d2ae00b5f1e2400ef2c9320252439f354515ce9")
           .await
           .unwrap();
-        println!("got res: {s}");
         let v: Value = serde_json::from_str(&s).unwrap();
         assert_eq!(
             v.as_object().unwrap().get("data").unwrap(),
@@ -710,8 +702,6 @@ mod test {
             }}
         );
 
-        println!("\n\n///////////////////////////////////\n\n");
-        ///////////////////////////
         let context = Context::new();
         context
             .insert(
