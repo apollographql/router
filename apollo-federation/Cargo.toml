@@ -7,6 +7,7 @@ description = "Apollo Federation"
 documentation = "https://docs.rs/apollo-federation"
 repository = "https://github.com/apollographql/federation-next"
 license = "Elastic-2.0"
+autotests = false # Integration tests are modules of tests/main.rs
 
 [dependencies]
 apollo-compiler = "=1.0.0-beta.7"
@@ -22,3 +23,6 @@ strum_macros = "0.25.2"
 [dev-dependencies]
 env_logger = "0.7"
 insta = { version = "1.34.0", features = ["yaml"] }
+
+[[test]]
+name = "main"
