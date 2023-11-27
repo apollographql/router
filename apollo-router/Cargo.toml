@@ -248,7 +248,7 @@ hmac = "0.12.1"
 parking_lot = "0.12.1"
 memchr = "2.6.4"
 brotli = "3.4.0"
-zstd = "0.12.4"
+zstd = "0.13.0"
 zstd-safe = "7.0.0"
 # note: AWS dependencies should always use the same version
 aws-sigv4 = "0.56.1"
