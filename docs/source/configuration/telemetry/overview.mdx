@@ -1,60 +1,74 @@
 ---
 title: Apollo Router Telemetry
+subtitle: Collect telemetry to observe and monitor the router's health
+description: Observe and monitor the health of the Apollo Router by collecting and exporting telemetry as logs, metrics, and traces
 ---
 import RouterServices from '../../../shared/router-lifecycle-services.mdx';
 
-The Apollo Router supports the collection and export of Logs, Metrics and traces.
+Observe and monitor the health of your supergraph with Apollo Router telemetry.
 
-These can be used to ensure that your federated graph services are running smoothly, and to help you debug issues when they arise.
+The Apollo Router supports the collection and export of logs, metrics and traces. Use them to check that your federated graph services are running smoothly and to help debug issues when they arise.
 
-## Key concepts
+## Router telemetry concepts
 
 ### Router request lifecycle services
 
 <RouterServices />
 
-### Logs and events
-Logs are used to record that something has happened in the Router. They can be consumed by [logging exporter](./exporters/logging/overview) and also as part of spans via [tracing exporter](./exporters/tracing/overview).
+For more details, see [the request lifecycle](../../customizations/overview/#the-request-lifecycle).
 
-Examples of log events include:
-* Router lifecycle information.
-* Warnings of misconfiguration.
-* Errors that occurred during a request.
+### Logs and events
+
+Logs are used to record that something has happened in the Apollo Router. They can be consumed by [logging exporters](./exporters/logging/overview) and as part of spans via [tracing exporters](./exporters/tracing/overview). 
+
+Notable happenings in the router that can be recorded in logs or traces are [events](./instrumentation/events).
+
+Examples of logged events include:
+
+* Information about the router lifecycle
+* Warnings about misconfiguration
+* Errors that occurred during a request
 
 ### Metrics and instruments
 
-Metrics are used to monitor aggregate information about the Router such as histograms, gauges or counts. They are consumed via [metrics exporter](./exporters/metrics/overview).
+Metrics are used to monitor aggregate information about the Apollo Router, such as histograms, gauges or counts. They are consumed via [metrics exporter](./exporters/metrics/overview).
 
 An individual metric is called an *instrument*.
 
 Examples of instruments include:
-* Number of requests received.
-* Histogram of request duration.
-* Number of requests in flight.
+
+* Number of received requests 
+* Histogram of request durations
+* Number of in-flight requests
 
 A full list of instruments can be found [here](./instrumentation/standard-instruments).
 
 ### Traces
 
-Traces are used to monitor the flow of a request through the Router. They are consumed via [tracing exporter](./exporters/tracing/overview).
+Traces are used to monitor the flow of a request through the Apollo Router. They are consumed via [tracing exporters](./exporters/tracing/overview).
 
-A trace is composed of spans, which are used to capture duration and contextual information about the request as it flows through the Router request pipeline.
+A trace is composed of [spans](./instrumentation/spans), which are used to capture duration and contextual information about the request as it flows through the router request pipeline. Spans may include contextual information from the request, such as the HTTP status code or the name of the subgraph being queried.
 
 Examples of spans include:
-* router - Wraps an entire request from the http perspective.
-* supergraph - Wraps a request once graphql parsing has taken place.
-* subgraph - Wraps a request to a subgraph.
 
-Spans may include contextual information from the request such as the HTTP status code, or the name of the subgraph being queried.
+* `router` - Wraps an entire request from the HTTP perspective
+* `supergraph` - Wraps a request once GraphQL parsing has taken place
+* `subgraph` - Wraps a request to a subgraph.
 
 ### Attributes
 
-Events, metrics and spans may all have attributes attached to them from the Apollo Router pipeline. These attributes are used to filter and group data in your APM.
+Events, metrics and spans may all have attributes attached to them from the Apollo Router pipeline. These attributes are used to filter and group data in your application performance monitor (APM).
 
 Example attributes include:
-* HTTP status code.
-* GraphQL operation name.
-* Subgraph name.
 
-Spans attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors).
-We are actively working on adding support for custom attributes for events and metrics.
+* HTTP status code
+* GraphQL operation name
+* Subgraph name
+
+Span attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors).
+
+<Note>
+
+Support for custom attributes for events and metrics is under active development.
+
+</Note>

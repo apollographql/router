@@ -26,7 +26,7 @@
         ]
       },
       "Debugging": {
-        "Logging": "/configuration/logging",
+        "Telemetry": "/configuration/telemetry/overview",
         "Subgraph error inclusion": "/configuration/subgraph-error-inclusion"
       },
       "Networking": {
@@ -125,13 +125,13 @@
         "Standard attributes": "/configuration/telemetry/instrumentation/standard-attributes",
         "Standard instruments": "/configuration/telemetry/instrumentation/standard-instruments"
       },
-      "Client awareness": "/managed-federation/client-awareness",
-      "Health check": "/configuration/health-checks"
+      "Client awareness": "/managed-federation/client-awareness"
     },
     "Containerization": {
       "Overview": "/containerization/overview",
       "Deploy on Kubernetes": "/containerization/kubernetes",
-      "Run with Docker": "/containerization/docker"
+      "Run with Docker": "/containerization/docker",
+      "Health checks": "/configuration/health-checks"
     },
     "Managed Federation": {
       "Overview": "https://www.apollographql.com/docs/federation/managed-federation/overview",
