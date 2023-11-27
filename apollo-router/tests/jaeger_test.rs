@@ -40,6 +40,7 @@ async fn test_reload() -> Result<(), BoxError> {
             &query,
             Some("ExampleQuery"),
             &["my_app", "router", "products"],
+            false,
         )
         .await?;
         router.touch_config().await;
@@ -72,6 +73,7 @@ async fn test_remote_root() -> Result<(), BoxError> {
         &query,
         Some("ExampleQuery"),
         &["my_app", "router", "products"],
+        false,
     )
     .await?;
 
@@ -97,7 +99,14 @@ async fn test_local_root() -> Result<(), BoxError> {
         .get("apollo-custom-trace-id")
         .unwrap()
         .is_empty());
-    validate_trace(id, &query, Some("ExampleQuery"), &["router", "products"]).await?;
+    validate_trace(
+        id,
+        &query,
+        Some("ExampleQuery"),
+        &["router", "products"],
+        false,
+    )
+    .await?;
 
     router.graceful_shutdown().await;
     Ok(())
@@ -138,9 +147,15 @@ async fn test_local_root_50_percent_sample() -> Result<(), BoxError> {
         let (id, result) = router.execute_untraced_query(&query).await;
 
         if result.headers().get("apollo-custom-trace-id").is_some()
-            && validate_trace(id, &query, Some("ExampleQuery"), &["router", "products"])
-                .await
-                .is_ok()
+            && validate_trace(
+                id,
+                &query,
+                Some("ExampleQuery"),
+                &["router", "products"],
+                false,
+            )
+            .await
+            .is_ok()
         {
             router.graceful_shutdown().await;
 
@@ -195,6 +210,7 @@ async fn test_default_operation() -> Result<(), BoxError> {
         &query,
         Some("ExampleQuery1"),
         &["my_app", "router", "products"],
+        false,
     )
     .await?;
     router.graceful_shutdown().await;
@@ -220,7 +236,7 @@ async fn test_anonymous_operation() -> Result<(), BoxError> {
         .get("apollo-custom-trace-id")
         .unwrap()
         .is_empty());
-    validate_trace(id, &query, None, &["my_app", "router", "products"]).await?;
+    validate_trace(id, &query, None, &["my_app", "router", "products"], false).await?;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -248,9 +264,37 @@ async fn test_selected_operation() -> Result<(), BoxError> {
         &query,
         Some("ExampleQuery2"),
         &["my_app", "router", "products"],
+        false,
     )
     .await?;
     router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_span_customization() -> Result<(), BoxError> {
+    if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
+        let mut router = IntegrationTest::builder()
+            .telemetry(Telemetry::Jaeger)
+            .config(include_str!("fixtures/jaeger-advanced.router.yaml"))
+            .build()
+            .await;
+
+        router.start().await;
+        router.assert_started().await;
+
+        let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+        let (id, _) = router.execute_query(&query).await;
+        validate_trace(
+            id,
+            &query,
+            Some("ExampleQuery"),
+            &["my_app", "router", "products"],
+            true,
+        )
+        .await?;
+        router.graceful_shutdown().await;
+    }
     Ok(())
 }
 
@@ -259,6 +303,7 @@ async fn validate_trace(
     query: &Value,
     operation_name: Option<&str>,
     services: &[&'static str],
+    custom_span_instrumentation: bool,
 ) -> Result<(), BoxError> {
     let params = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("service", services.first().expect("expected root service"))
@@ -266,15 +311,28 @@ async fn validate_trace(
 
     let url = format!("http://localhost:16686/api/traces/{id}?{params}");
     for _ in 0..10 {
-        if find_valid_trace(&url, query, operation_name, services)
-            .await
-            .is_ok()
+        if find_valid_trace(
+            &url,
+            query,
+            operation_name,
+            services,
+            custom_span_instrumentation,
+        )
+        .await
+        .is_ok()
         {
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    find_valid_trace(&url, query, operation_name, services).await?;
+    find_valid_trace(
+        &url,
+        query,
+        operation_name,
+        services,
+        custom_span_instrumentation,
+    )
+    .await?;
     Ok(())
 }
 
@@ -283,6 +341,7 @@ async fn find_valid_trace(
     query: &Value,
     operation_name: Option<&str>,
     services: &[&'static str],
+    custom_span_instrumentation: bool,
 ) -> Result<(), BoxError> {
     // A valid trace has:
     // * All three services
@@ -310,17 +369,21 @@ async fn find_valid_trace(
     verify_root_span_fields(&trace, operation_name)?;
 
     // Verify that supergraph span fields are present
-    verify_supergraph_span_fields(&trace, query, operation_name)?;
+    verify_supergraph_span_fields(&trace, query, operation_name, custom_span_instrumentation)?;
 
     // Verify that router span fields are present
-    verify_router_span_fields(&trace)?;
+    verify_router_span_fields(&trace, custom_span_instrumentation)?;
 
     Ok(())
 }
 
-fn verify_router_span_fields(trace: &Value) -> Result<(), BoxError> {
+fn verify_router_span_fields(
+    trace: &Value,
+    custom_span_instrumentation: bool,
+) -> Result<(), BoxError> {
     let router_span = trace.select_path("$..spans[?(@.operationName == 'router')]")?[0];
     // We can't actually assert the values on a span. Only that a field has been set.
+
     assert_eq!(
         router_span
             .select_path("$.tags[?(@.key == 'client.name')].value")?
@@ -333,18 +396,20 @@ fn verify_router_span_fields(trace: &Value) -> Result<(), BoxError> {
             .get(0),
         Some(&&Value::String("1.0".to_string()))
     );
-    assert_eq!(
-        router_span
-            .select_path("$.tags[?(@.key == 'http.request.method')].value")?
-            .get(0),
-        Some(&&Value::String("POST".to_string()))
-    );
-    assert_eq!(
-        router_span
-            .select_path("$.tags[?(@.key == 'http.request.header.x-not-present')].value")?
-            .get(0),
-        Some(&&Value::String("nope".to_string()))
-    );
+    if custom_span_instrumentation {
+        assert_eq!(
+            router_span
+                .select_path("$.tags[?(@.key == 'http.request.method')].value")?
+                .get(0),
+            Some(&&Value::String("POST".to_string()))
+        );
+        assert_eq!(
+            router_span
+                .select_path("$.tags[?(@.key == 'http.request.header.x-not-present')].value")?
+                .get(0),
+            Some(&&Value::String("nope".to_string()))
+        );
+    }
 
     Ok(())
 }
@@ -386,6 +451,7 @@ fn verify_supergraph_span_fields(
     trace: &Value,
     query: &Value,
     operation_name: Option<&str>,
+    custom_span_instrumentation: bool,
 ) -> Result<(), BoxError> {
     // We can't actually assert the values on a span. Only that a field has been set.
     let supergraph_span = trace.select_path("$..spans[?(@.operationName == 'supergraph')]")?[0];
@@ -403,12 +469,14 @@ fn verify_supergraph_span_fields(
             .get(0)
             .is_none(),);
     }
-    assert_eq!(
-        supergraph_span
-            .select_path("$.tags[?(@.key == 'graphql.operation.type')].value")?
-            .get(0),
-        Some(&&Value::String("query".to_string()))
-    );
+    if custom_span_instrumentation {
+        assert_eq!(
+            supergraph_span
+                .select_path("$.tags[?(@.key == 'graphql.operation.type')].value")?
+                .get(0),
+            Some(&&Value::String("query".to_string()))
+        );
+    }
 
     assert_eq!(
         supergraph_span

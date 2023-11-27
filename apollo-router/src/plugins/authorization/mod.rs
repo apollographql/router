@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::ops::ControlFlow;
 
 use apollo_compiler::ast;
+use apollo_compiler::ast::Document;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -52,11 +53,11 @@ const AUTHENTICATED_KEY: &str = "apollo_authorization::authenticated::required";
 const REQUIRED_SCOPES_KEY: &str = "apollo_authorization::scopes::required";
 const REQUIRED_POLICIES_KEY: &str = "apollo_authorization::policies::required";
 
-#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct CacheKeyMetadata {
-    is_authenticated: bool,
-    scopes: Vec<String>,
-    policies: Vec<String>,
+    pub(crate) is_authenticated: bool,
+    pub(crate) scopes: Vec<String>,
+    pub(crate) policies: Vec<String>,
 }
 
 /// Authorization plugin
@@ -165,7 +166,7 @@ impl AuthorizationPlugin {
             .unwrap_or_default()
     }
 
-    pub(crate) async fn query_analysis(
+    pub(crate) fn query_analysis(
         query: &str,
         schema: &Schema,
         configuration: &Configuration,
@@ -174,43 +175,65 @@ impl AuthorizationPlugin {
         let doc = Query::parse_document(query, schema, configuration);
         let ast = &doc.ast;
 
-        if let Some(mut visitor) = AuthenticatedCheckVisitor::new(&schema.definitions, ast) {
+        let CacheKeyMetadata {
+            is_authenticated,
+            scopes,
+            policies,
+        } = Self::generate_cache_metadata(ast, &schema.definitions, false);
+        if is_authenticated {
+            context.insert(AUTHENTICATED_KEY, true).unwrap();
+        }
+
+        if !scopes.is_empty() {
+            context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
+        }
+
+        if !policies.is_empty() {
+            let policies: HashMap<String, Option<bool>> =
+                policies.into_iter().map(|policy| (policy, None)).collect();
+            context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
+        }
+    }
+
+    pub(crate) fn generate_cache_metadata(
+        ast: &Document,
+        schema: &apollo_compiler::Schema,
+        entity_query: bool,
+    ) -> CacheKeyMetadata {
+        let mut is_authenticated = false;
+        if let Some(mut visitor) = AuthenticatedCheckVisitor::new(schema, ast, entity_query) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
             if traverse::document(&mut visitor, ast).is_ok() && visitor.found {
-                context.insert(AUTHENTICATED_KEY, true).unwrap();
+                is_authenticated = true;
             }
         }
 
-        if let Some(mut visitor) = ScopeExtractionVisitor::new(&schema.definitions, ast) {
+        let mut scopes = Vec::new();
+        if let Some(mut visitor) = ScopeExtractionVisitor::new(schema, ast, entity_query) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
             if traverse::document(&mut visitor, ast).is_ok() {
-                let scopes: Vec<String> = visitor.extracted_scopes.into_iter().collect();
-
-                if !scopes.is_empty() {
-                    context.insert(REQUIRED_SCOPES_KEY, scopes).unwrap();
-                }
+                scopes = visitor.extracted_scopes.into_iter().collect();
             }
         }
 
-        if let Some(mut visitor) = PolicyExtractionVisitor::new(&schema.definitions, ast) {
+        let mut policies: Vec<String> = Vec::new();
+        if let Some(mut visitor) = PolicyExtractionVisitor::new(schema, ast, entity_query) {
             // if this fails, the query is invalid and will fail at the query planning phase.
             // We do not return validation errors here for now because that would imply a huge
             // refactoring of telemetry and tests
             if traverse::document(&mut visitor, ast).is_ok() {
-                let policies: HashMap<String, Option<bool>> = visitor
-                    .extracted_policies
-                    .into_iter()
-                    .map(|policy| (policy, None))
-                    .collect();
-
-                if !policies.is_empty() {
-                    context.insert(REQUIRED_POLICIES_KEY, policies).unwrap();
-                }
+                policies = visitor.extracted_policies.into_iter().collect();
             }
+        }
+
+        CacheKeyMetadata {
+            is_authenticated,
+            scopes,
+            policies,
         }
     }
 
@@ -262,6 +285,29 @@ impl AuthorizationPlugin {
             scopes,
             policies,
         });
+    }
+
+    pub(crate) fn intersect_cache_keys_subgraph(
+        left: &CacheKeyMetadata,
+        right: &CacheKeyMetadata,
+    ) -> CacheKeyMetadata {
+        CacheKeyMetadata {
+            is_authenticated: left.is_authenticated && right.is_authenticated,
+            scopes: left
+                .scopes
+                .iter()
+                .collect::<HashSet<_>>()
+                .intersection(&right.scopes.iter().collect::<HashSet<_>>())
+                .map(|s| s.to_string())
+                .collect(),
+            policies: left
+                .policies
+                .iter()
+                .collect::<HashSet<_>>()
+                .intersection(&right.policies.iter().collect::<HashSet<_>>())
+                .map(|s| s.to_string())
+                .collect(),
+        }
     }
 
     pub(crate) fn filter_query(
