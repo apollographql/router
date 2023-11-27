@@ -202,6 +202,11 @@ subscription:
         - accounts
 ```
 
+> You can disable the heartbeat if you're running in callback mode in an infrastructure based on lamba functions for example. To not heartbeat or keep a lambda awake just to heartbeat subscriptions. To disable it you just have to set `heartbeat_interval_ms: disabled`.
+> But you have to be careful, once you disabled the heartbeat it means you'll heave to handle by yourself the way subscription has to be closed server side. For example if something crashed on your side for a specific subscription on specific events
+> and you don't close the subscription by yourself, you will end up with a subscription still opened on the client but without any events and you won't know at the client side that the subscription crashed.
+> Be sure to also store subscription's payload coming from the request (including extensions data with callback url and verifier) to be able to send the right events on the right callback url when you start your lambda function triggered by an event.
+
 ### Using a combination of modes
 
 If some of your subgraphs require [passthrough mode](#websocket-setup) and others require [callback mode](#http-callback-setup) for subscriptions, you can apply different modes to different subgraphs in your configuration:
