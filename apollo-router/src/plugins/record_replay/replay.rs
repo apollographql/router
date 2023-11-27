@@ -64,8 +64,13 @@ impl Replay {
             .variables(client_request.variables.clone())
             .headers(request_headers)
             .context(Context::default())
-            .uri(Uri::from_static("http://localhost:8080"))
-            .method(Method::POST)
+            .uri(client_request.uri.parse::<Uri>().expect("uri is valid"))
+            .method(
+                client_request
+                    .method
+                    .parse::<Method>()
+                    .expect("method is valid"),
+            )
             .build()?;
 
         Ok(req.try_into()?)

@@ -198,6 +198,8 @@ impl Plugin for Record {
                     let variables = req.supergraph_request.body().variables.clone();
                     let headers = externalize_header_map(req.supergraph_request.headers())
                         .expect("failed to externalize header map");
+                    let method = req.supergraph_request.method().to_string();
+                    let uri = req.supergraph_request.uri().to_string();
 
                     if let Some(recording) =
                         req.context.private_entries.lock().get_mut::<Recording>()
@@ -207,6 +209,8 @@ impl Plugin for Record {
                             operation_name,
                             variables,
                             headers,
+                            method,
+                            uri,
                         };
                     }
                 }
@@ -257,6 +261,8 @@ impl Plugin for Record {
                     variables: req.subgraph_request.body().variables.clone(),
                     headers: externalize_header_map(req.subgraph_request.headers())
                         .expect("failed to externalize header map"),
+                    method: req.subgraph_request.method().to_string(),
+                    uri: req.subgraph_request.uri().to_string(),
                 },
                 move |req: RequestDetails, future| {
                     let subgraph_name = subgraph_name.clone();

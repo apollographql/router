@@ -23,6 +23,8 @@ pub(crate) struct RequestDetails {
     pub(crate) operation_name: Option<String>,
     pub(crate) variables: Map<ByteString, Value>,
     pub(crate) headers: HashMap<String, Vec<String>>,
+    pub(crate) method: String,
+    pub(crate) uri: String,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
