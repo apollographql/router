@@ -343,19 +343,17 @@ async fn cache_store_root_from_response(
             .map(|secs| Duration::from_secs(secs as u64))
             .or(subgraph_ttl);
 
-        if response.response.body().errors.is_empty() {
-            if cache_control.should_store() {
-                cache
-                    .insert(
-                        RedisKey(cache_key),
-                        RedisValue(CacheEntry {
-                            control: cache_control,
-                            data: data.clone(),
-                        }),
-                        ttl,
-                    )
-                    .await;
-            }
+        if response.response.body().errors.is_empty() && cache_control.should_store() {
+            cache
+                .insert(
+                    RedisKey(cache_key),
+                    RedisValue(CacheEntry {
+                        control: cache_control,
+                        data: data.clone(),
+                    }),
+                    ttl,
+                )
+                .await;
         }
     }
 
