@@ -6,6 +6,6 @@
     "experimental_http_max_request_bytes": "https://github.com/apollographql/router/discussions/3220",
     "experimental_batching": "https://github.com/apollographql/router/discussions/3840"
   },
-  "preview"': {
+  "preview": {
   }
 }
