@@ -1,7 +1,9 @@
 use std::fmt::Write;
+use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use http::header::AGE;
 use http::header::CACHE_CONTROL;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -76,8 +78,14 @@ impl Default for CacheControl {
 }
 
 impl CacheControl {
-    pub(crate) fn new(headers: &HeaderMap) -> Result<Self, BoxError> {
+    pub(crate) fn new(
+        headers: &HeaderMap,
+        default_ttl: Option<Duration>,
+    ) -> Result<Self, BoxError> {
         let mut result = CacheControl::default();
+        if let Some(duration) = default_ttl {
+            result.max_age = Some(duration.as_secs() as u32);
+        }
 
         for header_value in headers.get_all(CACHE_CONTROL) {
             for value in header_value.to_str()?.split(',') {
@@ -208,7 +216,12 @@ impl CacheControl {
             write!(&mut s, "{}stale-if-error", if prev { "," } else { "" },)?;
         }
         headers.insert(CACHE_CONTROL, HeaderValue::from_str(&s)?);
-        //TODO: Age header
+
+        if let Some(age) = self.age {
+            if age != 0 {
+                headers.insert(AGE, age.into());
+            }
+        }
 
         Ok(())
     }

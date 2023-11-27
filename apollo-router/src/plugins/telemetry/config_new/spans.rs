@@ -120,10 +120,16 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values.get(&HTTP_REQUEST_METHOD).is_none());
-        assert!(values.get(&NETWORK_PROTOCOL_VERSION).is_none());
-        assert!(values.get(&URL_PATH).is_none());
-        assert!(values.get(&USER_AGENT_ORIGINAL).is_none());
+        assert!(!values
+            .iter()
+            .any(|key_val| key_val.key == HTTP_REQUEST_METHOD));
+        assert!(!values
+            .iter()
+            .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION));
+        assert!(!values.iter().any(|key_val| key_val.key == URL_PATH));
+        assert!(!values
+            .iter()
+            .any(|key_val| key_val.key == USER_AGENT_ORIGINAL));
     }
 
     #[test]
@@ -137,10 +143,16 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values.get(&HTTP_REQUEST_METHOD).is_some());
-        assert!(values.get(&NETWORK_PROTOCOL_VERSION).is_none());
-        assert!(values.get(&URL_PATH).is_some());
-        assert!(values.get(&USER_AGENT_ORIGINAL).is_none());
+        assert!(values
+            .iter()
+            .any(|key_val| key_val.key == HTTP_REQUEST_METHOD));
+        assert!(!values
+            .iter()
+            .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION));
+        assert!(values.iter().any(|key_val| key_val.key == URL_PATH));
+        assert!(!values
+            .iter()
+            .any(|key_val| key_val.key == USER_AGENT_ORIGINAL));
     }
 
     #[test]
@@ -154,10 +166,16 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values.get(&HTTP_REQUEST_METHOD).is_some());
-        assert!(values.get(&NETWORK_PROTOCOL_VERSION).is_some());
-        assert!(values.get(&URL_PATH).is_some());
-        assert!(values.get(&USER_AGENT_ORIGINAL).is_some());
+        assert!(values
+            .iter()
+            .any(|key_val| key_val.key == HTTP_REQUEST_METHOD));
+        assert!(values
+            .iter()
+            .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION));
+        assert!(values.iter().any(|key_val| key_val.key == URL_PATH));
+        assert!(values
+            .iter()
+            .any(|key_val| key_val.key == USER_AGENT_ORIGINAL));
     }
 
     #[test]
@@ -170,7 +188,7 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values.get(&GRAPHQL_DOCUMENT).is_none());
+        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
     }
 
     #[test]
@@ -183,7 +201,7 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values.get(&GRAPHQL_DOCUMENT).is_none());
+        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
     }
 
     #[test]
@@ -196,7 +214,7 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values.get(&GRAPHQL_DOCUMENT).is_some());
+        assert!(values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
     }
 
     #[test]
@@ -217,7 +235,7 @@ mod test {
                 )
                 .build(),
         );
-        assert!(values.get(&GRAPHQL_DOCUMENT).is_none());
+        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
     }
 
     #[test]
@@ -238,7 +256,7 @@ mod test {
                 )
                 .build(),
         );
-        assert!(values.get(&GRAPHQL_DOCUMENT).is_none());
+        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
     }
 
     #[test]
@@ -259,7 +277,9 @@ mod test {
                 )
                 .build(),
         );
-        assert!(values.get(&SUBGRAPH_GRAPHQL_DOCUMENT).is_some());
+        assert!(values
+            .iter()
+            .any(|key_val| key_val.key == SUBGRAPH_GRAPHQL_DOCUMENT));
     }
 
     #[test]
@@ -281,8 +301,8 @@ mod test {
                 .unwrap(),
         );
         assert!(values
-            .get(&opentelemetry::Key::from_static_str("test"))
-            .is_some());
+            .iter()
+            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
     }
 
     #[test]
@@ -303,8 +323,8 @@ mod test {
                 .unwrap(),
         );
         assert!(values
-            .get(&opentelemetry::Key::from_static_str("test"))
-            .is_some());
+            .iter()
+            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
     }
 
     #[test]
@@ -326,8 +346,8 @@ mod test {
                 .unwrap(),
         );
         assert!(values
-            .get(&opentelemetry::Key::from_static_str("test"))
-            .is_some());
+            .iter()
+            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
     }
 
     #[test]
@@ -348,8 +368,8 @@ mod test {
                 .unwrap(),
         );
         assert!(values
-            .get(&opentelemetry::Key::from_static_str("test"))
-            .is_some());
+            .iter()
+            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
     }
 
     #[test]
@@ -379,8 +399,8 @@ mod test {
                 .build(),
         );
         assert!(values
-            .get(&opentelemetry::Key::from_static_str("test"))
-            .is_some());
+            .iter()
+            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
     }
 
     #[test]
@@ -401,7 +421,7 @@ mod test {
                 .unwrap(),
         );
         assert!(values
-            .get(&opentelemetry::Key::from_static_str("test"))
-            .is_some());
+            .iter()
+            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
     }
 }

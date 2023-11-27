@@ -319,8 +319,8 @@ mod tests {
             let _enter = nested_test_span.enter();
 
             nested_test_span.set_dyn_attributes([
-                ("inner".into(), (-42).into()),
-                ("graphql.operation.kind".into(), "Subscription".into()),
+                KeyValue::new("inner", -42_i64),
+                KeyValue::new("graphql.operation.kind", "Subscription"),
             ]);
 
             error!(http.method = "GET", "Hello from nested test");

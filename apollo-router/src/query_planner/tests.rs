@@ -261,6 +261,8 @@ async fn defer() {
                         id: Some("fetch1".to_string()),
                         input_rewrites: None,
                         output_rewrites: None,
+                        schema_aware_hash: Default::default(),
+                        authorization: Default::default(),
                     }))),
                 },
                 deferred: vec![DeferredNode {
@@ -303,6 +305,8 @@ async fn defer() {
                             id: Some("fetch2".to_string()),
                             input_rewrites: None,
                             output_rewrites: None,
+                            schema_aware_hash: Default::default(),
+                            authorization: Default::default(),
                         })),
                     }))),
                 }],

@@ -31,12 +31,13 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::query_planner::fetch::QueryHash;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::TYPENAME;
 use crate::Context;
 
-const ENTITIES: &str = "_entities";
+pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
 
@@ -175,7 +176,7 @@ async fn cache_lookup_root(
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError> {
     let body = request.subgraph_request.body_mut();
 
-    let key = extract_cache_key_root(&name, body, &request.context);
+    let key = extract_cache_key_root(&name, &request.query_hash, body, &request.context);
 
     let cache_result: Option<RedisValue<CacheEntry>> = cache.get(RedisKey(key.clone())).await;
 
@@ -216,7 +217,7 @@ async fn cache_lookup_entities(
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError> {
     let body = request.subgraph_request.body_mut();
 
-    let keys = extract_cache_keys(&name, body, &request.context)?;
+    let keys = extract_cache_keys(&name, &request.query_hash, body, &request.context)?;
 
     let cache_result: Vec<Option<CacheEntry>> = cache
         .get_multiple(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
@@ -291,7 +292,7 @@ async fn cache_store_from_response(
         (opt_root_cache_key, opt_entities_results)
     };
 
-    let cache_control = CacheControl::new(response.response.headers())?;
+    let cache_control = CacheControl::new(response.response.headers(), cache.ttl)?;
     update_cache_control(&response.context, &cache_control);
 
     if let Some(cache_key) = opt_root_cache_key {
@@ -412,9 +413,9 @@ pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
     hex::encode(digest.finalize().as_slice())
 }
 
-pub(crate) fn hash_query(body: &graphql::Request) -> String {
+pub(crate) fn hash_query(query_hash: &QueryHash, body: &graphql::Request) -> String {
     let mut digest = Sha256::new();
-    digest.update(body.query.as_deref().unwrap_or("-").as_bytes());
+    digest.update(&query_hash.0);
     digest.update(&[0u8; 1][..]);
     digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);
@@ -460,11 +461,12 @@ pub(crate) fn hash_additional_data(body: &mut graphql::Request, context: &Contex
 // build a cache key for the root operation
 fn extract_cache_key_root(
     subgraph_name: &str,
+    query_hash: &QueryHash,
     body: &mut graphql::Request,
     context: &Context,
 ) -> String {
     // hash the query and operation name
-    let query_hash = hash_query(body);
+    let query_hash = hash_query(query_hash, body);
     // hash more data like variables and authorization status
     let additional_data_hash = hash_additional_data(body, context);
 
@@ -481,11 +483,12 @@ fn extract_cache_key_root(
 // build a list of keys to get from the cache in one query
 fn extract_cache_keys(
     subgraph_name: &str,
+    query_hash: &QueryHash,
     body: &mut graphql::Request,
     context: &Context,
 ) -> Result<Vec<String>, BoxError> {
     // hash the query and operation name
-    let query_hash = hash_query(body);
+    let query_hash = hash_query(query_hash, body);
     // hash more data like variables and authorization status
     let additional_data_hash = hash_additional_data(body, context);
 
@@ -565,7 +568,7 @@ fn filter_representations(
         let typename = opt_type.as_str().unwrap_or("-").to_string();
 
         // do not use that cache entry if it is stale
-        if let Some(false) = cache_entry.as_ref().map(|c| !c.control.can_use()) {
+        if let Some(false) = cache_entry.as_ref().map(|c| c.control.can_use()) {
             cache_entry = None;
         }
 
