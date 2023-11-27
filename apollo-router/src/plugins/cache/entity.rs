@@ -23,7 +23,10 @@ use crate::cache::redis::RedisValue;
 use crate::configuration::RedisCache;
 use crate::error::FetchError;
 use crate::graphql;
+use crate::graphql::Error;
 use crate::json_ext::Object;
+use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -328,17 +331,19 @@ async fn cache_store_root_from_response(
             .map(|secs| Duration::from_secs(secs as u64))
             .or(subgraph_ttl);
 
-        if cache_control.should_store() {
-            cache
-                .insert(
-                    RedisKey(cache_key),
-                    RedisValue(CacheEntry {
-                        control: cache_control,
-                        data: data.clone(),
-                    }),
-                    ttl,
-                )
-                .await;
+        if response.response.body().errors.is_empty() {
+            if cache_control.should_store() {
+                cache
+                    .insert(
+                        RedisKey(cache_key),
+                        RedisValue(CacheEntry {
+                            control: cache_control,
+                            data: data.clone(),
+                        }),
+                        ttl,
+                    )
+                    .await;
+            }
         }
     }
 
@@ -361,12 +366,13 @@ async fn cache_store_entities_from_response(
         .and_then(|v| v.as_object_mut())
         .and_then(|o| o.remove(ENTITIES))
     {
-        let new_entities = insert_entities_in_result(
+        let (new_entities, new_errors) = insert_entities_in_result(
             entities
                 .as_array_mut()
                 .ok_or_else(|| FetchError::MalformedResponse {
                     reason: "expected an array of entities".to_string(),
                 })?,
+            &response.response.body().errors,
             &cache,
             subgraph_ttl,
             cache_control,
@@ -378,6 +384,7 @@ async fn cache_store_entities_from_response(
             .and_then(|v| v.as_object_mut())
             .map(|o| o.insert(ENTITIES, new_entities.into()));
         response.response.body_mut().data = data;
+        response.response.body_mut().errors = new_errors;
     }
 
     Ok(())
@@ -617,49 +624,81 @@ fn filter_representations(
 // fill in the entities for the response
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
+    errors: &[Error],
     cache: &RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
-) -> Result<Vec<Value>, BoxError> {
+) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let ttl: Option<Duration> = cache_control
         .ttl()
         .map(|secs| Duration::from_secs(secs as u64))
         .or(subgraph_ttl);
 
     let mut new_entities = Vec::new();
+    let mut new_errors = Vec::new();
 
     let mut inserted_types: HashMap<String, usize> = HashMap::new();
     let mut to_insert: Vec<_> = Vec::new();
-    let mut entities_it = entities.drain(..);
+    let mut entities_it = entities.drain(..).enumerate();
 
     // insert requested entities and cached entities in the same order as
     // they were requested
-    for IntermediateResult {
-        key,
-        typename,
-        cache_entry,
-    } in result.drain(..)
+    for (
+        new_entity_idx,
+        IntermediateResult {
+            key,
+            typename,
+            cache_entry,
+        },
+    ) in result.drain(..).enumerate()
     {
         match cache_entry {
-            Some(v) => new_entities.push(v.data),
+            Some(v) => {
+                new_entities.push(v.data);
+            }
             None => {
-                let value = entities_it
-                    .next()
-                    .ok_or_else(|| FetchError::MalformedResponse {
-                        reason: "invalid number of entities".to_string(),
-                    })?;
+                let (entity_idx, value) =
+                    entities_it
+                        .next()
+                        .ok_or_else(|| FetchError::MalformedResponse {
+                            reason: "invalid number of entities".to_string(),
+                        })?;
 
                 if cache_control.should_store() {
                     *inserted_types.entry(typename).or_default() += 1;
 
-                    to_insert.push((
-                        RedisKey(key),
-                        RedisValue(CacheEntry {
-                            control: cache_control.clone(),
-                            data: value.clone(),
-                        }),
-                    ));
+                    let mut has_errors = false;
+                    for error in errors.iter().filter(|e| {
+                        e.path
+                            .as_ref()
+                            .map(|path| {
+                                path.starts_with(&Path(vec![
+                                    PathElement::Key(ENTITIES.to_string()),
+                                    PathElement::Index(entity_idx),
+                                ]))
+                            })
+                            .unwrap_or(false)
+                    }) {
+                        // update the entity index, because it does not match with the original one
+                        let mut e = error.clone();
+                        if let Some(path) = e.path.as_mut() {
+                            path.0[1] = PathElement::Index(new_entity_idx);
+                        }
+
+                        new_errors.push(e);
+                        has_errors = true;
+                    }
+
+                    if !has_errors {
+                        to_insert.push((
+                            RedisKey(key),
+                            RedisValue(CacheEntry {
+                                control: cache_control.clone(),
+                                data: value.clone(),
+                            }),
+                        ));
+                    }
                 }
 
                 new_entities.push(value);
@@ -675,7 +714,7 @@ async fn insert_entities_in_result(
         tracing::event!(Level::INFO, entity_type = ty.as_str(), cache_insert = nb,);
     }
 
-    Ok(new_entities)
+    Ok((new_entities, new_errors))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
