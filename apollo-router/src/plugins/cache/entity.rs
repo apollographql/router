@@ -674,7 +674,7 @@ async fn insert_entities_in_result(
                             .as_ref()
                             .map(|path| {
                                 path.starts_with(&Path(vec![
-                                    PathElement::Key("_entities".to_string()),
+                                    PathElement::Key(ENTITIES.to_string()),
                                     PathElement::Index(entity_idx),
                                 ]))
                             })
