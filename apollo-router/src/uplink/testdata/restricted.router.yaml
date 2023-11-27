@@ -52,7 +52,7 @@ subscription:
       subgraphs:
         reviews:
           path: /graphql
-    preview_callback:
+    callback:
       public_url: "http://localhost:4040/"
       listen: 0.0.0.0:4040
       subgraphs:

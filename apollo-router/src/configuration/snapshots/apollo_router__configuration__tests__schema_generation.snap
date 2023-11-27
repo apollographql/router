@@ -1899,11 +1899,68 @@ expression: "&schema"
         "mode": {
           "description": "Select a subscription mode (callback or passthrough)",
           "default": {
-            "preview_callback": null,
+            "callback": null,
             "passthrough": null
           },
           "type": "object",
           "properties": {
+            "callback": {
+              "description": "Enable callback mode for subgraph(s)",
+              "type": "object",
+              "required": [
+                "public_url"
+              ],
+              "properties": {
+                "heartbeat_interval": {
+                  "description": "Heartbeat interval for callback mode (default: 5secs)",
+                  "default": "5s",
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "listen": {
+                  "description": "Listen address on which the callback must listen (default: 127.0.0.1:4000)",
+                  "writeOnly": true,
+                  "anyOf": [
+                    {
+                      "description": "Socket address.",
+                      "type": "string"
+                    },
+                    {
+                      "description": "Unix socket.",
+                      "type": "string"
+                    }
+                  ],
+                  "nullable": true
+                },
+                "path": {
+                  "description": "Specify on which path you want to listen for callbacks (default: /callback)",
+                  "writeOnly": true,
+                  "type": "string",
+                  "nullable": true
+                },
+                "public_url": {
+                  "description": "URL used to access this router instance",
+                  "type": "string"
+                },
+                "subgraphs": {
+                  "description": "Specify on which subgraph we enable the callback mode for subscription If empty it applies to all subgraphs (passthrough mode takes precedence)",
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "uniqueItems": true
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
             "passthrough": {
               "description": "Enable passthrough mode for subgraph(s)",
               "type": "object",
@@ -1958,63 +2015,6 @@ expression: "&schema"
                     },
                     "additionalProperties": false
                   }
-                }
-              },
-              "additionalProperties": false,
-              "nullable": true
-            },
-            "preview_callback": {
-              "description": "Enable callback mode for subgraph(s)",
-              "type": "object",
-              "required": [
-                "public_url"
-              ],
-              "properties": {
-                "heartbeat_interval": {
-                  "description": "Heartbeat interval for callback mode (default: 5secs)",
-                  "default": "5s",
-                  "anyOf": [
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "string"
-                    }
-                  ]
-                },
-                "listen": {
-                  "description": "Listen address on which the callback must listen (default: 127.0.0.1:4000)",
-                  "writeOnly": true,
-                  "anyOf": [
-                    {
-                      "description": "Socket address.",
-                      "type": "string"
-                    },
-                    {
-                      "description": "Unix socket.",
-                      "type": "string"
-                    }
-                  ],
-                  "nullable": true
-                },
-                "path": {
-                  "description": "Specify on which path you want to listen for callbacks (default: /callback)",
-                  "writeOnly": true,
-                  "type": "string",
-                  "nullable": true
-                },
-                "public_url": {
-                  "description": "URL used to access this router instance",
-                  "type": "string"
-                },
-                "subgraphs": {
-                  "description": "Specify on which subgraph we enable the callback mode for subscription If empty it applies to all subgraphs (passthrough mode takes precedence)",
-                  "default": [],
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "uniqueItems": true
                 }
               },
               "additionalProperties": false,

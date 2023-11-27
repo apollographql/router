@@ -4,7 +4,7 @@ subscription:
     passthrough:
       all:
         protocol: graphql_ws
-    preview_callback:
+    callback:
       path: /graphql
       public_url: https://example.com
   enable_deduplication: false

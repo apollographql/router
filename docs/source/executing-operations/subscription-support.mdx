@@ -81,7 +81,7 @@ flowchart LR;
 2. When your router receives a subscription, it executes that _same_ subscription against whichever subgraph defines the requested field (`stockPricesChanged` in the example above).
 
    - This communication usually _does_ use [a WebSocket subprotocol](#websocket-setup), for compatibility with most subgraph libraries.
-   - An HTTP-callback-based protocol is also available in preview. See [HTTP callback setup](#http-callback-setup).
+   - An HTTP-callback-based protocol is also available. See [HTTP callback setup](#http-callback-setup).
 
 3. The subgraph periodically sends new data to your router. Whenever it does, the router returns that data to the client in an additional HTTP response "chunk".
    - A subscription can include federated entity fields that are defined in _other_ subgraphs. If it does, the router _first_ fetches those fields by querying the corresponding subgraphs (such as **Portfolios** in the diagram above). These queries use HTTP as usual.
@@ -128,7 +128,7 @@ After you complete these prerequisites, you can safely [configure your router](#
 
 After completing all [prerequisites](#prerequisites), in your router's [YAML config file](../configuration/overview/#yaml-config-file), you configure how the router communicates with each of your subgraphs when executing GraphQL subscriptions.
 
-The Apollo Router supports two popular [WebSocket protocols](#websocket-setup) for subscriptions, and it also provides preview support for an [HTTP-callback-based protocol](#http-callback-setup). Your router must use whichever protocol is expected by each subgraph.
+The Apollo Router supports two popular [WebSocket protocols](#websocket-setup) for subscriptions, and it also provides support for an [HTTP-callback-based protocol](#http-callback-setup). Your router must use whichever protocol is expected by each subgraph.
 
 ### WebSocket setup
 
@@ -163,8 +163,6 @@ Your router creates a separate WebSocket connection for each client subscription
 
 ### HTTP callback setup
 
-<PreviewFeature />
-
 <Note>
   
 * Your router must use whichever subprotocol is expected by each of your subgraphs.
@@ -174,7 +172,7 @@ Your router creates a separate WebSocket connection for each client subscription
 
 </Note>
 
-The Apollo Router provides preview support for receiving subgraph subscription events via HTTP callbacks, _instead of_ over a persistent WebSocket connection. This **callback mode** provides the following advantages over WebSocket-based subscriptions:
+The Apollo Router provides support for receiving subgraph subscription events via HTTP callbacks, _instead of_ over a persistent WebSocket connection. This **callback mode** provides the following advantages over WebSocket-based subscriptions:
 
 - The router doesn't need to maintain a persistent connection for each distinct subscription.
 - You can publish events directly to the router from a pubsub system, instead of routing those events through the subgraph.
@@ -193,7 +191,7 @@ Here's an example configuration that sets up subgraph subscriptions in callback 
 subscription:
   enabled: true
   mode:
-    preview_callback:
+    callback:
       public_url: https://example.com:4000 # The router's public URL, the one on which your subgraphs can have access to the Router
       listen: 127.0.0.1:4000 # The IP address and port the router will listen on for subscription callbacks, for security reasons it might be better to expose on another port that is only available from your internal network
       path: /callback # The path of the router's callback endpoint
@@ -215,7 +213,7 @@ subscription:
         reviews: #highlight-line
           path: /ws
           protocol: graphql_ws
-    preview_callback:
+    callback:
       public_url: http://public_url_of_my_router_instance:4000
       listen: 127.0.0.1:4000
       path: /callback
