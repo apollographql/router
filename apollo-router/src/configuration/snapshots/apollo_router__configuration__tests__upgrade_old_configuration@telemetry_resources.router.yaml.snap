@@ -4,8 +4,9 @@ expression: new_config
 ---
 ---
 telemetry:
-  metrics:
-    common:
-      resource:
-        test: val
+  exporters:
+    metrics:
+      common:
+        resource:
+          test: val
 

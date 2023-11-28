@@ -13,6 +13,7 @@ use crate::json_ext::PathElement;
 use crate::spec::query::transform;
 use crate::spec::query::traverse;
 use crate::spec::Schema;
+use crate::spec::TYPENAME;
 
 pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: &str = "authenticated";
 pub(crate) const AUTHENTICATED_SPEC_URL: &str = "https://specs.apollo.dev/authenticated/v0.1";
@@ -22,12 +23,18 @@ pub(crate) struct AuthenticatedCheckVisitor<'a> {
     fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
     pub(crate) found: bool,
     authenticated_directive_name: String,
+    entity_query: bool,
 }
 
 impl<'a> AuthenticatedCheckVisitor<'a> {
-    pub(crate) fn new(schema: &'a schema::Schema, executable: &'a ast::Document) -> Option<Self> {
+    pub(crate) fn new(
+        schema: &'a schema::Schema,
+        executable: &'a ast::Document,
+        entity_query: bool,
+    ) -> Option<Self> {
         Some(Self {
             schema,
+            entity_query,
             fragments: transform::collect_fragments(executable),
             found: false,
             authenticated_directive_name: Schema::directive_name(
@@ -50,9 +57,52 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
     fn is_type_authenticated(&self, t: &schema::ExtendedType) -> bool {
         t.directives().has(&self.authenticated_directive_name)
     }
+
+    fn entities_operation(&mut self, node: &ast::OperationDefinition) -> Result<(), BoxError> {
+        use crate::spec::query::traverse::Visitor;
+
+        if node.selection_set.len() != 1 {
+            return Err("invalid number of selections for _entities query".into());
+        }
+
+        match node.selection_set.first() {
+            Some(ast::Selection::Field(field)) => {
+                if field.name.as_str() != "_entities" {
+                    return Err("expected _entities field".into());
+                }
+
+                for selection in &field.selection_set {
+                    match selection {
+                        ast::Selection::InlineFragment(f) => {
+                            match f.type_condition.as_ref() {
+                                None => {
+                                    return Err("expected type condition".into());
+                                }
+                                Some(condition) => self.inline_fragment(condition.as_str(), f)?,
+                            };
+                        }
+                        _ => return Err("expected inline fragment".into()),
+                    }
+                }
+                Ok(())
+            }
+            _ => Err("expected _entities field".into()),
+        }
+    }
 }
 
 impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
+    fn operation(
+        &mut self,
+        root_type: &str,
+        node: &ast::OperationDefinition,
+    ) -> Result<(), BoxError> {
+        if !self.entity_query {
+            traverse::operation(self, root_type, node)
+        } else {
+            self.entities_operation(node)
+        }
+    }
     fn field(
         &mut self,
         _parent_type: &str,
@@ -179,13 +229,16 @@ impl<'a> AuthenticatedVisitor<'a> {
         field_def: &ast::FieldDefinition,
         node: &ast::Field,
     ) -> bool {
-        // if all selections under the interface field are fragments with type conditions
+        // we can request __typename outside of fragments even if the types have different
+        // authorization requirements
+        if node.name.as_str() == TYPENAME {
+            return false;
+        }
+        // if all selections under the interface field are __typename or fragments with type conditions
         // then we don't need to check that they have the same authorization requirements
-        if node.selection_set.iter().all(|sel| {
-            matches!(
-                sel,
-                ast::Selection::FragmentSpread(_) | ast::Selection::InlineFragment(_)
-            )
+        if node.selection_set.iter().all(|sel| match sel {
+            ast::Selection::Field(f) => f.name == TYPENAME,
+            ast::Selection::FragmentSpread(_) | ast::Selection::InlineFragment(_) => true,
         }) {
             return false;
         }
@@ -1231,6 +1284,103 @@ mod tests {
         let _ = filter(ALTERNATIVE_DIRECTIVE_SCHEMA, QUERY);
     }
 
+    #[test]
+    fn interface_typename() {
+        static SCHEMA: &str = r#"
+        schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
+        {
+        query: Query
+      }
+      directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+      directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+      directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+      scalar link__Import
+        enum link__Purpose {
+      """
+      `SECURITY` features provide metadata necessary to securely resolve fields.
+      """
+      SECURITY
+    
+      """
+      `EXECUTION` features provide metadata necessary for operation execution.
+      """
+      EXECUTION
+    }
+        type Query {
+            post(id: ID!): Post
+          }
+          
+          interface Post {
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+          }
+          
+          type Stats {
+            views: Int
+          }
+          
+          type PublicBlog implements Post {
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+            stats: Stats @authenticated
+          }
+          
+          type PrivateBlog implements Post @authenticated {
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+            publishAt: String
+          }
+        "#;
+
+        static QUERY: &str = r#"
+        query Anonymous {
+            post(id: "1") {
+              ... on PublicBlog {
+                __typename
+                title
+              }
+            }
+          }
+        "#;
+
+        let (doc, paths) = filter(SCHEMA, QUERY);
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            result: doc,
+            paths
+        });
+
+        static QUERY2: &str = r#"
+        query Anonymous {
+            post(id: "1") {
+              __typename
+              ... on PublicBlog {
+                __typename
+                title
+              }
+            }
+          }
+        "#;
+
+        let (doc, paths) = filter(SCHEMA, QUERY2);
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY2,
+            result: doc,
+            paths
+        });
+    }
+
     const SCHEMA: &str = r#"schema
       @link(url: "https://specs.apollo.dev/link/v1.0")
       @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
@@ -1332,7 +1482,7 @@ mod tests {
                 "all": true
             },
             "authorization": {
-                "preview_directives": {
+                "directives": {
                     "enabled": true
                 }
             }}))
@@ -1413,7 +1563,7 @@ mod tests {
                 "all": true
             },
             "authorization": {
-                "preview_directives": {
+                "directives": {
                     "enabled": true
                 }
             }}))
@@ -1488,7 +1638,7 @@ mod tests {
                 "all": true
             },
             "authorization": {
-                "preview_directives": {
+                "directives": {
                     "enabled": true
                 }
             }}))

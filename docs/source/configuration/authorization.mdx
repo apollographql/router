@@ -70,7 +70,6 @@ The Apollo Router provides access controls via **authorization directives** that
 
 - The [`@requiresScopes`](#requiresscopes) directive allows granular access control through the scopes you define.
 - The [`@authenticated`](#authenticated) directive allows access to the annotated field or type for _authenticated requests only_.
-- The [`@policy`](#policy) directive offloads authorization validation to a [Rhai script](../customizations/rhai/) or a [coprocessor](../customizations/coprocessor) and integrates the result in the router. It's useful when your authorization policies go beyond simple authentication and scopes.
 
 For example, imagine you're building a social media platform that includes a `Users` subgraph. You can use the [`@requiresScopes`](#requiresscopes) directive to declare that viewing other users' information requires the `read:user` scope:
 
@@ -413,198 +412,6 @@ The response retains the initial request's shape but returns `null` for unauthor
 
 If _every_ requested field requires authentication and a request is unauthenticated, the router generates an error indicating that the query is unauthorized.
 
-
-### `@policy`
-
-The `@policy` directive marks fields and types as restricted based on authorization policies evaluated in a [Rhai script](../customizations/rhai/) or [coprocessor](../customizations/coprocessor). This enables custom authorization validation beyond authentication and scopes.
-The directive should include a `policies` argument that defines an array of the required policies.
-
-```graphql
-@policy(policies: [[]"claims[`roles`].contains(`support`)"]])
-```
-
-The preceding example includes one policy that requires all roles from the claims object to include the string `"support"`.
-
-The Apollo Router extracts the list of policies relevant to a request from the schema. It then stores them in the request's context in `apollo_authorization::policies::required` as a map `policy -> null|true|false`. This process happens at the [`RouterService` level](../customizations/overview#the-request-lifecycle).
-
-You need to provide a Rhai script or a coprocessor at the `SupergraphService` level that evaluates the map, setting the value to `true` if the policy is validated and `false` if not. After that, the router filters the requests' types and fields to only those where the policy is `true`.
-
-Like the efficiencies gained via the other authorization directives, if every field on a particular subgraph query is unauthorized because none of its policies pass, this can eliminate entire subgraph requests.
-
-#### Usage
-
-To use the `@policy` directive in a subgraph, you can [import it from the `@link` directive](/federation/federated-types/federated-directives/#importing-directives) like so:
-
-```graphql
-extend schema
-  @link(
-    url: "https://specs.apollo.dev/federation/v2.5",
-    import: [..., "@policy"])
-```
-
-It is defined as follows:
-
-```graphql
-scalar federation__Policy
-directive @policy(scopes: [[federation__Policy!]!]!) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
-```
-
-Using the `@policy` directive requires a [Supergraph plugin](../customizations/overview) to evaluate the authorization policies. You can do this with a [Rhai script](../customizations/rhai/), [coprocessor](../customizations/coprocessor), or [native plugin](../customizations/native). Refer to the following Rhai script and coprocessor examples for more information.
-
-
-#### Combining policies with `AND`/`OR` logic
-
-A request must include _all_ elements in the inner-level `policies` array to resolve the associated field or type. In other words, the authorization validation uses **AND** logic between the elements in the inner-level `policies` array.
-
-```graphql
-@requiresScopes(policies: [["policy1", "policy2", "policy3"]])
-```
-
-For the preceding example, a request would need `policy1` **AND** `policy2` **AND** `policy3` to be authorized.
-
-You can use nested arrays to introduce **OR** logic:
-
-```graphql
-@requiresScopes(policies: [["policy1"], ["policy2"], ["policy3"]])
-```
-
-For the preceding example, a request would need `policy1` **OR** `policy2` **OR** `policy3` to be authorized.
-
-You can nest arrays and elements as needed to achieve your desired logic. For example:
-
-```graphql
-@policy(policies: [["policy", "policy2"], ["policy3"]])
-```
-
-This syntax requires requests to have either (`policy1` **AND** `policy2`) **OR** just `policy3` to be authorized.
-
-
-##### Usage with a Rhai script
-
-The `policies` argument contains a list of strings with no formatting constraints. That means you can use them to store Rhai code.
-
-<ExpansionPanel title="Click to expand">
-
-As an example, the following schema defines policies as boolean expressions that can be evaluated in Rhai:
-
-```graphql
-type Query {
-  me: User @join__field(graph: ACCOUNTS) @policy(policies: [["claims[`kind`] == `user`"]])
-}
-
-type User
-  @join__owner(graph: ACCOUNTS)
-  @join__type(graph: ACCOUNTS, key: "id") {
-  id: ID! @join__field(graph: ACCOUNTS)
-  username: String @join__field(graph: ACCOUNTS)
-  username: String @join__field(graph: ACCOUNTS) @policy(policies: [["claims[`roles`].contains(`support`)"]])
-}
-```
-
-You can then use the following Rhai script to evaluate the policies:
-
-```
-fn supergraph_service(service) {
-  let request_callback = |request| {
-    let claims = request.context["apollo_authentication::JWT::claims"];
-    let policies = request.context["apollo_authorization::policies::required"];
-    for key in policies.keys() {
-      let result = eval(key);
-      policies[key] = result;
-    }
-    request.context["apollo_authorization::policies::required"] = policies;
-  };
-  service.map_request(request_callback);
-}
-```
-
-The script uses the [`eval` function](https://rhai.rs/book/ref/eval.html) to evaluate each policy and store the result in the `apollo_authorization::policies::required` map.
-
-</ExpansionPanel>
-
-##### Usage with a coprocessor
-
-You can use a [coprocessor](../customizations/coprocessor) called at the Supergraph request stage to receive and execute the list of policies. This is useful to bridge router authorization with an existing authorization stack or link policy execution with lookups in a database.
-
-<ExpansionPanel title="Click to expand">
-
-Suppose you only want a user with a `read_profile` policy to have access to their own information. An additional policy `read_credit_card` is required to access credit card information. Your schema may look something like this:
-
-```graphql
-type Query {
-  me: User @join__field(graph: ACCOUNTS) @policy(policies: [["read_profile"]])
-}
-
-type User
-  @join__owner(graph: ACCOUNTS)
-  @join__type(graph: ACCOUNTS, key: "id") {
-  id: ID! @join__field(graph: ACCOUNTS)
-  username: String @join__field(graph: ACCOUNTS)
-  credit_card: String @join__field(graph: ACCOUNTS) @policy(policies: [["read_credit_card"]])
-}
-```
-
-If you configure your router like this:
-
-```yaml title="router.yaml"
-coprocessor:
-  url: http://127.0.0.1:8081
-  supergraph:
-    request:
-      context: true
-```
-
-then a coprocessor can then receive a request with this format:
-
-```json
-{
-    "version": 1,
-    "stage": "SupergraphRequest",
-    "control": "continue",
-    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
-    "context": {
-        "entries": {
-            "apollo_authentication::JWT::claims": {
-                "exp": 10000000000,
-                "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a"
-            },
-            "apollo_authorization::policies::required": {
-                "read_profile": null,
-                "read_address": null
-            }
-        }
-    },
-    "method": "POST"
-}
-```
-
-A user can read their own profile, so `read_profile` will succeed. But only the billing system should be able to see the credit card, so `read_credit_card` will fail. The corpocessor will then return:
-
-
-```json
-{
-    // Control properties
-    "version": 1,
-    "stage": "SupergraphRequest",
-    "control": "continue",
-    "id": "d0a8245df0efe8aa38a80dba1147fb2e",
-    "context": {
-        "entries": {
-            "apollo_authentication::JWT::claims": {
-                "exp": 10000000000,
-                "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a"
-            },
-            "apollo_authorization::policies::required": {
-                "read_profile": true,
-                "read_address": false
-            }
-        }
-    }
-}
-```
-
-</ExpansionPanel>
-
 ## Composition and federation
 
 GraphOS's composition strategy for authorization directives is intentionally accumulative. When you define authorization directives on fields and types in subgraphs, GraphOS composes them into the supergraph schema. In other words, if subgraph fields or types include `@requiresScopes` or `@authenticated` directives, they are set on the supergraph too.
@@ -823,9 +630,11 @@ With introspection turned off, you can use GraphOS's [schema registry](/graphos/
 
 ## Configuration options
 
-The authorization plugin behaviour can be modified with various options.
+The behavior of the authorization plugin can be modified with various options.
 
 ### reject_unauthorized
+
+The `reject_unauthorized` option configures whether to reject an entire query if any authorization directive failed, or any part of the query was filtered by authorization directives. When enabled, a response contains the list of paths that are affected.
 
 ```yaml title="router.yaml"
 authorization:
@@ -834,15 +643,13 @@ authorization:
     reject_unauthorized: true # default: false
 ```
 
-This option will entirely reject queries that would have some parts filtered by authorization directives. The response will contain the list of paths that are affected.
-
 ### errors
 
-By default, when part of a query is filtered by authorization, the list of filtered paths is added to the response and logged by the router. This is behavior can be customized for your needs.
+By default, when part of a query is filtered by authorization, the list of filtered paths is added to the response and logged by the router. This behavior can be customized for your needs.
 
 #### log
 
-By enabling the option, you can choose if query filtering will result in a log event being output.
+By enabling the `log` option, you can choose if query filtering will result in a log event being output.
 
 ```yaml title="router.yaml"
 authorization:
@@ -851,14 +658,17 @@ authorization:
       log: false # default: true
 ```
 
-If filtering parts of a query according to the client's rights may be seen as normal operation, and not warrant investigation by platform operators, logging should be disabled.
+<Note>
+
+The `log` option should be disabled if filtering parts of queries according to the client's rights is approved as normal operation by platform operators.
+
+</Note>
 
 #### response
 
-By default, filtered paths are placed in the errors part of the graphql response.
+You can configure `response` to define what part of the GraphQL response should include filtered paths:
 
-You can configure response to carry them in:
-- `errors` (default) : place filtered paths in graphql errors
+- `errors` (default) : place filtered paths in GraphQL errors
 - `extensions`: place filtered paths in extensions. Useful to suppress exceptions on the client side while still giving information that parts of the query were filtered
 - `disabled`: suppress all information that the query was filtered.
 
@@ -871,11 +681,11 @@ authorization:
 
 ### dry_run
 
+The `dry_run` option allows you to execute authorization directives without modifying a query, and evaluate the impact of authorization policies without interfering with existing traffic. It generates and returns the list of unauthorized paths as part of the response.
+
 ```yaml title="router.yaml"
 authorization:
   preview_directives:
     enabled: true
     dry_run: true # default: false
 ```
-
-This option executes the authorization directives without modifying the query: it only generates the list of unauthorized paths and returns it as part of the response. This is a way to evaluate the impact of authorization policies without breaking existing traffic.

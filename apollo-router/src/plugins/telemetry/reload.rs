@@ -5,9 +5,9 @@ use std::sync::atomic::Ordering;
 use anyhow::anyhow;
 use anyhow::Result;
 use once_cell::sync::OnceCell;
-use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry_sdk::trace::Tracer;
 use rand::thread_rng;
 use rand::Rng;
 use tower::BoxError;
@@ -27,16 +27,20 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
 use super::config::SamplerOption;
+use super::dynamic_attribute::DynAttributeLayer;
+use super::fmt_layer::FmtLayer;
+use super::formatters::json::Json;
 use super::metrics::span_metrics_exporter::SpanMetricsLayer;
+use super::ROUTER_SPAN_NAME;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::metrics::layer::MetricsLayer;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::formatters::filter_metric_events;
-use crate::plugins::telemetry::formatters::text::TextFormatter;
+use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 
-pub(crate) type LayeredRegistry = Layered<SpanMetricsLayer, Registry>;
+pub(crate) type LayeredRegistry = Layered<SpanMetricsLayer, Layered<DynAttributeLayer, Registry>>;
 
 pub(super) type LayeredTracer = Layered<
     Filtered<
@@ -50,7 +54,7 @@ pub(super) type LayeredTracer = Layered<
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
 // generic types in the layer definition.
 pub(super) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
-    ReloadTracer<opentelemetry::sdk::trace::Tracer>,
+    ReloadTracer<opentelemetry_sdk::trace::Tracer>,
 > = OnceCell::new();
 
 static FMT_LAYER_HANDLE: OnceCell<
@@ -66,7 +70,7 @@ pub(crate) fn metrics_layer() -> &'static MetricsLayer {
 
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = ReloadTracer::new(
-        opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer(
+        opentelemetry_sdk::trace::TracerProvider::default().versioned_tracer(
             "noop",
             None::<String>,
             None::<String>,
@@ -79,30 +83,17 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
 
     // We choose json or plain based on tty
     let fmt = if std::io::stdout().is_terminal() {
-        tracing_subscriber::fmt::Layer::new()
-            .event_format(FilteringFormatter::new(
-                TextFormatter::new()
-                    .with_filename(false)
-                    .with_line(false)
-                    .with_target(false),
-                filter_metric_events,
-            ))
-            .fmt_fields(NullFieldFormatter)
-            .boxed()
+        FmtLayer::new(
+            FilteringFormatter::new(Text::default(), filter_metric_events),
+            std::io::stdout,
+        )
+        .boxed()
     } else {
-        tracing_subscriber::fmt::Layer::new()
-            .json()
-            .map_event_format(|e| {
-                FilteringFormatter::new(
-                    e.json()
-                        .with_current_span(true)
-                        .with_span_list(true)
-                        .flatten_event(true),
-                    filter_metric_events,
-                )
-            })
-            .fmt_fields(NullFieldFormatter)
-            .boxed()
+        FmtLayer::new(
+            FilteringFormatter::new(Json::default(), filter_metric_events),
+            std::io::stdout,
+        )
+        .boxed()
     };
 
     let (fmt_layer, fmt_handle) = tracing_subscriber::reload::Layer::new(fmt);
@@ -118,6 +109,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
             // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
             // the tracing registry is only created once
             tracing_subscriber::registry()
+                .with(DynAttributeLayer::new())
                 .with(SpanMetricsLayer::default())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
@@ -141,7 +133,7 @@ pub(super) fn reload_fmt(layer: Box<dyn Layer<LayeredTracer> + Send + Sync>) {
     }
 }
 
-pub(crate) struct SamplingFilter {}
+pub(crate) struct SamplingFilter;
 
 #[allow(dead_code)]
 impl SamplingFilter {
@@ -190,7 +182,7 @@ where
 
         // if there's an exsting otel context set by the client request, and it is sampled,
         // then that trace is sampled
-        let current_otel_context = opentelemetry_api::Context::current();
+        let current_otel_context = opentelemetry::Context::current();
         if current_otel_context.span().span_context().is_sampled() {
             return true;
         }
@@ -207,7 +199,7 @@ where
 
         // we only make the sampling decision on the root span. If we reach here for any other span,
         // it means that the parent span was not enabled, so we should not enable this span either
-        if meta.name() != REQUEST_SPAN_NAME {
+        if meta.name() != REQUEST_SPAN_NAME && meta.name() != ROUTER_SPAN_NAME {
             return false;
         }
 

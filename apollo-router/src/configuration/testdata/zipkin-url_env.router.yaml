@@ -1,7 +1,8 @@
 telemetry:
-  tracing:
-    common:
-      service_name: router
-    zipkin:
-      enabled: true
-      endpoint: ${env.TEST_CONFIG_ENDPOINT}
+  exporters:
+    tracing:
+      common:
+        service_name: router
+      zipkin:
+        enabled: true
+        endpoint: ${env.TEST_CONFIG_ENDPOINT}
