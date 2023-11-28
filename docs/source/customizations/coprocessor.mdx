@@ -39,16 +39,17 @@ flowchart TB;
   routerService --"<b>3</b>"--> supergraphService;
   supergraphService <-."<b>4.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;
   supergraphService --"<b>5</b>"--> executionService;
-  executionService --"<b>6</b>"--> subgraphService;
-  subgraphService <-."<b>7.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;
-  subgraphService -- "<b>8</b>"--> subgraphs;
+  executionService <-."<b>6.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;
+  executionService --"<b>7</b>"--> subgraphService;
+  subgraphService <-."<b>8.</b> Can send request<br/>details to coprocessor<br/>and receive modifications".-> coprocessing;
+  subgraphService -- "<b>9</b>"--> subgraphs;
 
   class client,subgraphs,coprocessing secondary;
 ```
 
 This diagram shows request execution proceeding "down" from a client, through the router, to individual subgraphs. Execution then proceeds back "up" to the client in the reverse order.
 
-As shown in the diagram above, the `RouterService`, `SupergraphService` and `SubgraphService` steps of the [request-handling lifecycle](./rhai/#router-request-lifecycle) can send these POST requests (also called **coprocessor requests**).
+As shown in the diagram above, the `RouterService`, `SupergraphService`, `ExecutionService` and `SubgraphService` steps of the [request-handling lifecycle](./rhai/#router-request-lifecycle) can send these POST requests (also called **coprocessor requests**).
 
 Each supported service can send its coprocessor requests at two different **stages**:
 
@@ -298,7 +299,115 @@ Properties of the JSON body are divided into two high-level categories:
 {
   // Control properties
   "version": 1,
-  "stage": "SupergraphRequest",
+  "stage": "SupergraphResponse",
+  "control": {
+    "break": 200
+  },
+
+  // Data properties
+  "body": {
+    "errors": [{ "message": "my error message" }]
+  },
+  "context": {
+    "entries": {
+      "testKey": true
+    }
+  },
+  "headers": {
+    "aheader": ["a value"]
+  }
+}
+
+```
+
+</ExpansionPanel>
+
+#### `ExecutionRequest`
+
+<ExpansionPanel title="Click to expand">
+
+```json
+
+{
+  // Control properties
+  "version": 1,
+  "stage": "ExecutionRequest",
+  "control": "continue",
+
+  // Data properties
+  "headers": {
+    "cookie": [
+      "tasty_cookie=strawberry"
+    ],
+    "content-type": [
+      "application/json"
+    ],
+    "host": [
+      "127.0.0.1:4000"
+    ],
+    "apollo-federation-include-trace": [
+      "ftv1"
+    ],
+    "apollographql-client-name": [
+      "manual"
+    ],
+    "accept": [
+      "*/*"
+    ],
+    "user-agent": [
+      "curl/7.79.1"
+    ],
+    "content-length": [
+      "46"
+    ]
+  },
+  "body": {
+    "query": "query Long {\n  me {\n  name\n}\n}",
+    "operationName": "MyQuery"
+  },
+  "context": {
+    "entries": {
+      "accepts-json": false,
+      "accepts-wildcard": true,
+      "accepts-multipart": false,
+      "this-is-a-test-context": 42
+    }
+  },
+  "serviceName": "service name shouldn't change",
+  "uri": "http://thisurihaschanged",
+  "query_plan": {
+    "usage_reporting":{"statsReportKey":"# Me\nquery Me{me{name username}}","referencedFieldsByType":{"User":{"fieldNames":["name","username"],"isInterface":false},"Query":{"fieldNames":["me"],"isInterface":false}}},
+    "root":{
+      "kind":"Fetch",
+      "serviceName":"accounts",
+      "variableUsages":[],
+      "operation":"query Me__accounts__0{me{name username}}",
+      "operationName":"Me__accounts__0",
+      "operationKind":"query",
+      "id":null,
+      "inputRewrites":null,
+      "outputRewrites":null,
+      "authorization":{"is_authenticated":false,"scopes":[],"policies":[]}},
+      "formatted_query_plan":"QueryPlan {\n  Fetch(service: \"accounts\") {\n    {\n      me {\n        name\n        username\n      }\n    }\n  },\n}",
+      "query":{
+        "string":"query Me {\n  me {\n    name\n    username\n  }\n}\n","fragments":{"map":{}},"operations":[{"name":"Me","kind":"query","type_name":"Query","selection_set":[{"Field":{"name":"me","alias":null,"selection_set":[{"Field":{"name":"name","alias":null,"selection_set":null,"field_type":{"Named":"String"},"include_skip":{"include":"Yes","skip":"No"}}},{"Field":{"name":"username","alias":null,"selection_set":null,"field_type":{"Named":"String"},"include_skip":{"include":"Yes","skip":"No"}}}],"field_type":{"Named":"User"},"include_skip":{"include":"Yes","skip":"No"}}}],"variables":{}}],"subselections":{},"unauthorized":{"paths":[],"errors":{"log":true,"response":"errors"}},"filtered_query":null,"defer_stats":{"has_defer":false,"has_unconditional_defer":false,"conditional_defer_variable_names":[]},"is_original":true}
+      }
+}
+
+```
+
+</ExpansionPanel>
+
+#### `ExecutionResponse`
+
+<ExpansionPanel title="Click to expand">
+
+```json
+
+{
+  // Control properties
+  "version": 1,
+  "stage": "ExecutionResponse",
   "control": {
     "break": 200
   },
@@ -816,6 +925,21 @@ The HTTP status code returned with a response.
 <td>
 
 When `stage` is `SubgraphRequest`, this is the full URI of the subgraph the router will query.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `query_plan`
+
+`string`
+
+</td>
+<td>
+
+When `stage` is `ExecutionRequest`, this contains the query plan for the client query. It cannot be modified by the coprocessor.
 
 </td>
 </tr>
