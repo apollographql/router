@@ -1482,7 +1482,7 @@ mod tests {
                 "all": true
             },
             "authorization": {
-                "preview_directives": {
+                "directives": {
                     "enabled": true
                 }
             }}))
@@ -1563,7 +1563,7 @@ mod tests {
                 "all": true
             },
             "authorization": {
-                "preview_directives": {
+                "directives": {
                     "enabled": true
                 }
             }}))
@@ -1638,7 +1638,7 @@ mod tests {
                 "all": true
             },
             "authorization": {
-                "preview_directives": {
+                "directives": {
                     "enabled": true
                 }
             }}))
