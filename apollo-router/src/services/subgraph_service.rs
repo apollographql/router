@@ -1235,13 +1235,13 @@ mod tests {
     // Some of these tests fail intermittently in CI. In particular, `tls_self_signed()` often
     // fails with the wrong payload.
     //
-    // It's possible that the cause of this is the fact that all the tests require a listener and
+    // It's possible that the cause of this is the fact that all the tests require a listener,
     // but the failing tests require a Tokio TcpListener, which enables SO_REUSEADDR. This would
     // mean that tests are not as well isolated as we would like if the tests run in parallel.
     // See: https://docs.rs/tokio/latest/tokio/net/struct.TcpListener.html#method.bind
     //
     // To eliminate the risk we use `serial_test::serial` to force those tests using Tokio
-    // TcpListener to run individually.
+    // TcpListener to run serially with respect to each other.
 
     // starts a local server emulating a subgraph returning status code 400
     async fn emulate_subgraph_bad_request(listener: TcpListener) {
