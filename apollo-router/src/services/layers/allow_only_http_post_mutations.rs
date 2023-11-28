@@ -269,13 +269,11 @@ mod forbid_http_get_mutations_tests {
             .lock()
             .insert::<ParsedDocument>(Arc::new(ParsedDocumentInner { ast, executable }));
 
-        let request = SupergraphRequest::fake_builder()
+        SupergraphRequest::fake_builder()
             .method(method)
             .query(query)
             .context(context)
             .build()
-            .unwrap();
-
-        request
+            .unwrap()
     }
 }
