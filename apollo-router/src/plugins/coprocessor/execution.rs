@@ -574,6 +574,7 @@ mod tests {
                 body: true,
                 sdl: false,
                 method: false,
+                query_plan: false,
             },
             response: Default::default(),
         };
@@ -707,6 +708,7 @@ mod tests {
                 body: true,
                 sdl: false,
                 method: false,
+                query_plan: false,
             },
             response: Default::default(),
         };
