@@ -1,13 +1,12 @@
 ---
 title: Router Logging
-subtitle: Configure logging in the Apollo Router, including log level and output format
-description: Configure logging in the Apollo Router. Set the log level and output format
+subtitle: Configure logging in the Apollo Router
+description: Configure logging in the Apollo Router. Set the log level and output format.
 ---
 
-The Apollo Router provides built-in support for logging with support for:
+The Apollo Router provides built-in logging to capture records about the router's activity.
 
-* [Configurable log level](#log-level)
-* [stdout output](./stdout) with [configurable output formats](./stdout/#logging-output-format)
+The router supports [configurable log levels](#log-level) and [stdout output](./stdout) of log  messages (with [configurable output formats](./stdout/#logging-output-format)).
 
 ## Log level
 
@@ -41,12 +40,13 @@ The default value is `info`.
 </tbody>
 </table>
 
-The router also accepts both `RUST_LOG` and `APOLLO_ROUTER_LOG` environment variables with the same possible values as the command-line argument. The precedence is as follows (top to bottom):
- - RUST_LOG
- - command-line argument
- - APOLLO_ROUTER_LOG
+The router also accepts both `RUST_LOG` and `APOLLO_ROUTER_LOG` environment variables with the same possible values as the command-line argument. With multiple ways to set the log level, the router checks for them in the following order, and it uses the first one that is set:
 
-`RUST_LOG` is supported for advanced users with specific filtering requirements who may wish to see log messages from crates consumed by the router. Most users should use the command-line argument or APOLLO_ROUTER_LOG. Both of these options constrain log output to the router.
+ 1. `RUST_LOG`
+ 1. Command-line argument
+ 1. `APOLLO_ROUTER_LOG`
+
+`RUST_LOG` is supported for advanced users with specific filtering requirements who may wish to see log messages from crates consumed by the router. Most users should use the command-line argument or `APOLLO_ROUTER_LOG`. Both of these options constrain log output to the router.
 
 To be clear:
 
@@ -64,23 +64,23 @@ APOLLO_ROUTER_LOG=hyper=debug,info,h2=trace
 --log=hyper=debug,info,h2=trace
 ```
 
-In both examples, the actual filter used by the router is as defined in the RUST_LOG entry.
+In both examples, the actual filter used by the router is as defined in the `RUST_LOG` entry.
 
 For more information about specifying filters for more granular control over Apollo Router logging, see the [Env Logger documentation](https://docs.rs/env_logger/latest/env_logger/).
 
 
 ## Logging common configuration
 
-Common logging configuration contains global settings for all exporters:
+The router supports configuration options that apply to all logging exporters:
 
 * [Service name](#service-name)
 * [Resource attributes](#resource)
 
 ### Service name
 
-Set a service name for your router logging so they can be easily searched and found in your metrics dashboards. 
+Set a service name for your router's logs so they can be easily searched and found in your metrics dashboards. 
 
-The service name can be set by an environment variable or in `router.yaml`, with the following order of precedence (first to last):
+The service name can be set by an environment variable or in `router.yaml`. With multiple ways to set the service name, the router checks for them in the following order, and it uses the first one that is set:
 
 1. `OTEL_SERVICE_NAME` environment variable
 2. `OTEL_RESOURCE_ATTRIBUTES` environment variable
@@ -120,7 +120,7 @@ The service name can be set by an environment variable or in `router.yaml`, with
 
       </ExpansionPanel>
 
-If the service name isn't explicitly set, then by default the service name will be set to `unknown_service:apollo_router` (or `unknown_service` if the executable name cannot be determined).
+If the service name isn't explicitly set, then it is set by default to `unknown_service:apollo_router` (or `unknown_service` if the executable name cannot be determined).
 
 ### Resource attribute
 

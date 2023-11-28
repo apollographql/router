@@ -6,7 +6,7 @@ description: Capture standard and custom events from the Apollo Router's request
 
 import RouterServices from '../../../../shared/router-lifecycle-services.mdx';
 
-An **event** is used to signal when something of note happens in the [Apollo Router's request lifecycle (pipeline)](../customizations/overview/#the-request-lifecycle). Events are output to both logs and traces.
+An **event** is used to signal when something of note happens in the [Apollo Router's request lifecycle](../customizations/overview/#the-request-lifecycle). Events are output to both logs and traces.
 
 You can configure events for each service in `router.yaml`. Events can be standard or custom, and they can be triggered by configurable conditions.
 
@@ -36,11 +36,11 @@ Each service has a set of standard events that can be configured:
 
 * `request` - The request has been received.
 * `response` - The response has been sent.
-* `error` - An error in the router pipeline has occurred.
+* `error` - An error in the request lifecycle has occurred.
 
 <Note>
 
-The `error` level applies only to router pipeline errors, not GraphQL errors.
+The `error` level applies only to request lifecycle errors, not GraphQL errors.
 
 </Note>
 
@@ -139,10 +139,10 @@ For more details, see [Conditions](./conditions).
 
 ### `attributes`
 
-Custom events may have attributes attached to them from the Router pipeline. These attributes are used to filter and group spans in your APM.
+Custom events may have attributes attached to them from the router's request lifecycle. These attributes are used to filter and group spans in your APM.
 
 Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors).
-The attributes available depend on the service of the pipeline.
+The attributes available depend on the service of the request lifecycle.
 
 ```yaml title="future.router.yaml"
 telemetry:

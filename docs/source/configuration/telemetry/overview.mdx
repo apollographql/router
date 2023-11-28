@@ -21,7 +21,7 @@ For more details, see [the request lifecycle](../../customizations/overview/#the
 
 Logs are used to record that something has happened in the Apollo Router. They can be consumed by [logging exporters](./exporters/logging/overview) and as part of spans via [tracing exporters](./exporters/tracing/overview). 
 
-Notable happenings in the router that can be recorded in logs or traces are [events](./instrumentation/events).
+[Events](./instrumentation/events) are notable happenings in the router that can be recorded in logs or traces.
 
 Examples of logged events include:
 
@@ -47,7 +47,7 @@ A full list of instruments can be found [here](./instrumentation/standard-instru
 
 Traces are used to monitor the flow of a request through the Apollo Router. They are consumed via [tracing exporters](./exporters/tracing/overview).
 
-A trace is composed of [spans](./instrumentation/spans), which are used to capture duration and contextual information about the request as it flows through the router request pipeline. Spans may include contextual information from the request, such as the HTTP status code or the name of the subgraph being queried.
+A trace is composed of [spans](./instrumentation/spans), which are used to capture duration and contextual information about the request as it flows through the router request lifecycle. Spans may include contextual information from the request, such as the HTTP status code or the name of the subgraph being queried.
 
 Examples of spans include:
 
