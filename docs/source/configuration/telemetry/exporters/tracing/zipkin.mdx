@@ -1,5 +1,6 @@
 ---
 title: Zipkin exporter (via OTLP)
+subtitle: Configure the Zipkin exporter for tracing
 description: Enable and configure the Zipkin exporter for tracing via OpenTelemetry in the Apollo Router
 ---
 import BatchProcessorPreamble from '../../../../../shared/batch-processor-preamble.mdx';
@@ -25,13 +26,21 @@ telemetry:
 ```
 
 ### `enabled`
+
+Flag to enable the Zipkin exporter.
+
 Set to true to enable the Zipkin exporter. Defaults to false.
 
 ### `endpoint`
-The Zipkin endpoint. Defaults to http://127.0.0.1:9411/api/v2/span
+
+The Zipkin endpoint address. Defaults to http://127.0.0.1:9411/api/v2/span
 
 ### `batch_processor`
+
 <BatchProcessorPreamble />
+
+An example configuration using Zipkin with `batch_processor`:
+
 ```yaml
 telemetry:
   exporters:
@@ -46,6 +55,7 @@ telemetry:
 ```
 
 #### `batch_processor` configuration reference
+
 <BatchProcessorRef />
 
 ## Zipkin configuration reference

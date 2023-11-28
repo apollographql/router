@@ -12,12 +12,14 @@ For general metrics configuration, refer to [Router Metrics Configuration](./ove
 
 Using the [OpenTelemetry](https://www.opentelemetry.io/) OTLP protocol you can export metrics to any OTLP compatible receiver, including:
 * [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/)
-* [Datadog](https://www.datadoghq.com/) (see [configuration instructions](./datadog.mdx))
-* [Honeycomb](https://www.honeycomb.io/) (see [configuration instructions](./honecomb.mdx))
+* [Datadog](https://www.datadoghq.com/) (see [configuration instructions](./datadog))
+* [New Relic](https://www.newrelic.com/) (see [configuration instructions](./new-relic))
 
 ## OTLP configuration
 
-The Apollo Router can be configured to export metrics data using OTLP either via HTTP or gRPC:
+The Apollo Router can be configured to export metrics data using OTLP over either HTTP or gRPC.
+
+An example router configuration using OTLP with gRPC:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -30,11 +32,10 @@ telemetry:
         # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317 for gRPC and http://127.0.0.1:4318 for HTTP)
         endpoint: default
   
-        # Optional protocol. Only grpc is supported currently.
-        # Setting it to any other protocol will result in configuration failure.
+        # Optional protocol
         protocol: grpc
   
-        # Optional Grpc configuration
+        # Optional gRPC configuration
         grpc:
           metadata:
             foo: bar
@@ -50,16 +51,21 @@ telemetry:
 
 
 ### `enabled`
-Set to true to enable the Zipkin exporter. Defaults to false.
+
+Flag to enable the OTLP exporter.
+
+Set to true to enable the OTLP exporter. Defaults to false.
 
 ### `endpoint`
-The OTLP endpoint.
+
+The OTLP endpoint address.
 
 Defaults to:
 * http://127.0.0.1:4317 for gRPC
 * http://127.0.0.1:4318 for HTTP
 
 ### `grpc`
+
 Settings specific to the gRPC protocol for setting a custom SSL certificate, domain name, and metadata.
 
 ```yaml
@@ -89,14 +95,15 @@ See [gRPC Authentication](https://grpc.io/docs/guides/auth/) for more informatio
 
 | Attribute     | Description                            |
 |---------------|----------------------------------------|
-| `domain_name` | An optional domain name.               |
-| `key`         | An optional key.                       |
-| `ca`          | An optional certificate authority.     |
-| `cert`        | An optional certificate.               |
+| `domain_name` | An optional domain name                |
+| `key`         | An optional key                        |
+| `ca`          | An optional certificate authority      |
+| `cert`        | An optional certificate                |
 | `metadata`    | A map of headers to send with requests |
 
 
 ### `http`
+
 Settings specific to the HTTP protocol for setting custom headers.
 
 ```yaml
@@ -114,7 +121,10 @@ http:
 
 
 ### `batch_processor`
+
 <BatchProcessorPreamble />
+
+An example configuration using OTLP with `batch_processor`:
 
 ```yaml
 telemetry:
@@ -130,6 +140,7 @@ telemetry:
 ```
 
 #### `batch_processor` configuration reference
+
 <BatchProcessorRef />
 
 ## OTLP configuration reference
@@ -137,7 +148,7 @@ telemetry:
 | Attribute       | Values                 | Default                                                               | Description                                                            |
 |-----------------|------------------------|-----------------------------------------------------------------------|------------------------------------------------------------------------|
 | `enabled`       |                        | `false`                                                               | Enable the OTLP exporter.                                              |
-| `protocol`      | `grpc`\|`http`         | `grpc`                                                                | Enable the OTLP exporter.                                              |
+| `protocol`      | `grpc`\|`http`         | `grpc`                                                                | The protocol to use.                                              |
 | `endpoint`      |                        | `http://127.0.0.1:4317` for gRPC and `http://127.0.0.1:4318` for HTTP | The endpoint to send spans to.                                         |
 | `grpc`          |                        |                                                                       | Configuration specific to gRPC protocol.                               |
 | `http`          |                        |                                                                       | Configuration specific to HTTP protocol.                               |

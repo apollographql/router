@@ -13,7 +13,7 @@ For general tracing configuration, refer to [Router Tracing Configuration](./ove
 
 ## Jaeger OTLP configuration
 
-Since Jaeger v1.35.0, [Jaeger supports native OTLP ingestion](https://medium.com/jaegertracing/introducing-native-support-for-opentelemetry-in-jaeger-eb661be8183c), and it's the preferred way to send traces to Jaeger.
+Since Jaeger v1.35.0, [Jaeger supports native OTLP ingestion](https://medium.com/jaegertracing/introducing-native-support-for-opentelemetry-in-jaeger-eb661be8183c), and it's the recommended way to send traces to Jaeger.
 
 When running Jaeger with Docker, make sure that port **4317** is exposed and that `COLLECTOR_OTLP_ENABLED` is set to `true`. For example:
 
@@ -44,13 +44,13 @@ See [OTLP configuration](./opentelemetry#configuration) for more details on sett
 
 <Caution>
 
-[Native Jaegar tracing is deprecated](https://opentelemetry.io/blog/2022/jaeger-native-otlp/) and will be removed in a future release of the Apollo Router. Use [Jaeger via OTLP](#otlp-configuration) instead.
+[Native Jaegar tracing is deprecated](https://opentelemetry.io/blog/2022/jaeger-native-otlp/) and will be removed in a future release of the Apollo Router. Use [Jaeger via OTLP](#jaeger-otlp-configuration) instead.
 
 </Caution>
 
 The Apollo Router can be configured to export tracing data to Jaeger either via an agent or HTTP collector.
 
-Unless explicitly configured to use a collector, the Router will use Jaeger agent by default.
+Unless explicitly configured to use a collector, the router will use Jaeger agent by default.
 
 ```yaml title="router.yaml"
 telemetry:
