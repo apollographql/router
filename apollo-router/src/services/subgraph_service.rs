@@ -1207,6 +1207,7 @@ mod tests {
     use rustls::ServerConfig;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
+    use serial_test::serial;
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::ReceiverStream;
     use tower::service_fn;
@@ -1230,6 +1231,17 @@ mod tests {
     use crate::protocols::websocket::WebSocketProtocol;
     use crate::query_planner::fetch::OperationKind;
     use crate::Context;
+
+    // Some of these tests fail intermittently in CI. In particular, `tls_self_signed()` often
+    // fails with the wrong payload.
+    //
+    // It's possible that the cause of this is the fact that all the tests require a listener and
+    // but the failing tests require a Tokio TcpListener, which enables SO_REUSEADDR. This would
+    // mean that tests are not as well isolated as we would like if the tests run in parallel.
+    // See: https://docs.rs/tokio/latest/tokio/net/struct.TcpListener.html#method.bind
+    //
+    // To eliminate the risk we use `serial_test::serial` to force those tests using Tokio
+    // TcpListener to run individually.
 
     // starts a local server emulating a subgraph returning status code 400
     async fn emulate_subgraph_bad_request(listener: TcpListener) {
@@ -2681,6 +2693,7 @@ mod tests {
     // That will give you another 10 years, assuming nothing else in the signing
     // framework has expired.
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn tls_self_signed() {
         let certificate_pem = include_str!("./testdata/server_self_signed.crt");
         let key_pem = include_str!("./testdata/server.key");
@@ -2725,6 +2738,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn tls_custom_root() {
         let certificate_pem = include_str!("./testdata/server.crt");
         let ca_pem = include_str!("./testdata/CA/ca.crt");
@@ -2808,6 +2822,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn tls_client_auth() {
         let server_certificate_pem = include_str!("./testdata/server.crt");
         let ca_pem = include_str!("./testdata/CA/ca.crt");
