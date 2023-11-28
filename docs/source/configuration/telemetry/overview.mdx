@@ -9,6 +9,31 @@ Observe and monitor the health of your supergraph with Apollo Router telemetry.
 
 The Apollo Router supports the collection and export of logs, metrics and traces. Use them to check that your federated graph services are running smoothly and to help debug issues when they arise.
 
+## About health and observability
+
+An observable router that provides all the data necessary to both monitor its health and troubleshoot its problems is critical for maintaining a healthy supergraph and minimizing its mean time to repair (MTTR).   
+
+The health of your supergraph is only as good as the health of your router. Because the router is the single entry point to the supergraph, every client request goes through the pipeline of services in the router's request lifecycle. A problem in the router likely impacts the handling of all requests to your supergraph.
+
+Diagnosing your router's health requires it to show symptoms or observable data about its inner workings. The more observable data you can monitor and analyze, then the faster you can identify unhealthy behaviors, deduce root causes, and implement fixes.
+ 
+## About router telemetry and exporters
+
+The Apollo Router collects telemetry that encompasses all its observable data. The kinds of telemetry include [logs](#logs-and-events), [metrics](#metrics-and-instruments), and [traces](#traces).
+
+Effective router telemetry provides just the right amount and granularity of information to maintain your graph. Too much telemetry can overwhelm your system (for example, with high cardinality metrics), while too little or irrelevant telemetry may not provide enough information to debug issues. Specific events that need to be captured, and the conditions under which they need to be captured, can change as client applications and graphs change. Different environments can have different observability requirements, such as production and development environments.
+
+Router telemetry is customizable to meet the observability needs of different graphs. You can record custom events in different stages of the router request lifecycle, and you can create custom contexts with annotations (attributes) to track a request or response as it flows through the router. You can shape the volume of telemetry emitted.
+
+The router exports its collected telemetry in formats compatible with industry-standard application performance monitors (APM). The router supports metrics and tracing exporters for a variety of tools and vendors, including the following:
+
+- Prometheus
+- OpenTelemetry Collector (OTLP)
+- Datadog
+- New Relic
+- Jaeger
+- Zipkin
+
 ## Router telemetry concepts
 
 ### Router request lifecycle services
@@ -21,7 +46,7 @@ For more details, see [the request lifecycle](../../customizations/overview/#the
 
 Logs are used to record that something has happened in the Apollo Router. They can be consumed by [logging exporters](./exporters/logging/overview) and as part of spans via [tracing exporters](./exporters/tracing/overview). 
 
-[Events](./instrumentation/events) are notable happenings in the router that can be recorded in logs or traces.
+Events are notable happenings in the router that can be recorded in logs or traces. 
 
 Examples of logged events include:
 
