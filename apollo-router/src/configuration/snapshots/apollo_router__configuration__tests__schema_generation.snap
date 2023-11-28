@@ -89,6 +89,44 @@ expression: "&schema"
                       "type": "string",
                       "nullable": true
                     },
+                    "tls": {
+                      "description": "TLS client configuration",
+                      "default": null,
+                      "type": "object",
+                      "properties": {
+                        "certificate_authorities": {
+                          "description": "list of certificate authorities in PEM format",
+                          "default": null,
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "client_authentication": {
+                          "description": "client certificate authentication",
+                          "default": null,
+                          "type": "object",
+                          "required": [
+                            "certificate_chain",
+                            "key"
+                          ],
+                          "properties": {
+                            "certificate_chain": {
+                              "description": "list of certificates in PEM format",
+                              "writeOnly": true,
+                              "type": "string"
+                            },
+                            "key": {
+                              "description": "key in PEM format",
+                              "writeOnly": true,
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false,
+                          "nullable": true
+                        }
+                      },
+                      "additionalProperties": false,
+                      "nullable": true
+                    },
                     "ttl": {
                       "description": "TTL for entries",
                       "default": null,
@@ -2143,6 +2181,44 @@ expression: "&schema"
                       "description": "Redis request timeout (default: 2ms)",
                       "default": null,
                       "type": "string",
+                      "nullable": true
+                    },
+                    "tls": {
+                      "description": "TLS client configuration",
+                      "default": null,
+                      "type": "object",
+                      "properties": {
+                        "certificate_authorities": {
+                          "description": "list of certificate authorities in PEM format",
+                          "default": null,
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "client_authentication": {
+                          "description": "client certificate authentication",
+                          "default": null,
+                          "type": "object",
+                          "required": [
+                            "certificate_chain",
+                            "key"
+                          ],
+                          "properties": {
+                            "certificate_chain": {
+                              "description": "list of certificates in PEM format",
+                              "writeOnly": true,
+                              "type": "string"
+                            },
+                            "key": {
+                              "description": "key in PEM format",
+                              "writeOnly": true,
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false,
+                          "nullable": true
+                        }
+                      },
+                      "additionalProperties": false,
                       "nullable": true
                     },
                     "ttl": {
@@ -7772,6 +7848,44 @@ expression: "&schema"
               "description": "Redis request timeout (default: 2ms)",
               "default": null,
               "type": "string",
+              "nullable": true
+            },
+            "tls": {
+              "description": "TLS client configuration",
+              "default": null,
+              "type": "object",
+              "properties": {
+                "certificate_authorities": {
+                  "description": "list of certificate authorities in PEM format",
+                  "default": null,
+                  "type": "string",
+                  "nullable": true
+                },
+                "client_authentication": {
+                  "description": "client certificate authentication",
+                  "default": null,
+                  "type": "object",
+                  "required": [
+                    "certificate_chain",
+                    "key"
+                  ],
+                  "properties": {
+                    "certificate_chain": {
+                      "description": "list of certificates in PEM format",
+                      "writeOnly": true,
+                      "type": "string"
+                    },
+                    "key": {
+                      "description": "key in PEM format",
+                      "writeOnly": true,
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false,
               "nullable": true
             },
             "ttl": {
