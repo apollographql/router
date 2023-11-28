@@ -295,8 +295,8 @@ There is no sequencing for plugin registration, and registrations might even exe
 
 Within a given service (router, subgraph, etc.), a _request_ is handled in the following order:
 
-* [Rhai script](../rhai)
-* [External coprocessor](../coprocessor)
+* [Rhai script](./rhai)
+* [External coprocessor](./coprocessor)
 * Rust plugins, in the same order they're declared in your [YAML configuration file](../configuration/overview/#yaml-config-file).
 
 The corresponding _response_ is handled in the opposite order.
