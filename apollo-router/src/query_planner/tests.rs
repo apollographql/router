@@ -7,6 +7,7 @@ use futures::StreamExt;
 use http::Method;
 use router_bridge::planner::UsageReporting;
 use serde_json_bytes::json;
+use tokio_stream::wrappers::ReceiverStream;
 use tower::ServiceExt;
 
 use super::DeferredNode;
@@ -96,7 +97,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
         mock_products_service
     });
 
-    let (sender, _) = futures::channel::mpsc::channel(10);
+    let (sender, _) = tokio::sync::mpsc::channel(10);
     let sf = Arc::new(SubgraphServiceFactory {
         services: Arc::new(HashMap::from([(
             "product".into(),
@@ -155,7 +156,7 @@ async fn fetch_includes_operation_name() {
         mock_products_service
     });
 
-    let (sender, _) = futures::channel::mpsc::channel(10);
+    let (sender, _) = tokio::sync::mpsc::channel(10);
 
     let sf = Arc::new(SubgraphServiceFactory {
         services: Arc::new(HashMap::from([(
@@ -212,7 +213,7 @@ async fn fetch_makes_post_requests() {
         mock_products_service
     });
 
-    let (sender, _) = futures::channel::mpsc::channel(10);
+    let (sender, _) = tokio::sync::mpsc::channel(10);
 
     let sf = Arc::new(SubgraphServiceFactory {
         services: Arc::new(HashMap::from([(
@@ -260,6 +261,7 @@ async fn defer() {
                         id: Some("fetch1".to_string()),
                         input_rewrites: None,
                         output_rewrites: None,
+                        authorization: Default::default(),
                     }))),
                 },
                 deferred: vec![DeferredNode {
@@ -302,6 +304,7 @@ async fn defer() {
                             id: Some("fetch2".to_string()),
                             input_rewrites: None,
                             output_rewrites: None,
+                            authorization: Default::default(),
                         })),
                     }))),
                 }],
@@ -350,7 +353,7 @@ async fn defer() {
         mock_y_service
     });
 
-    let (sender, mut receiver) = futures::channel::mpsc::channel(10);
+    let (sender, receiver) = tokio::sync::mpsc::channel(10);
 
     let schema = include_str!("testdata/defer_schema.graphql");
     let schema = Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
@@ -387,7 +390,7 @@ async fn defer() {
         serde_json::json! {{"data":{"t":{"id":1234,"__typename":"T","x":"X"}}}}
     );
 
-    let response = receiver.next().await.unwrap();
+    let response = ReceiverStream::new(receiver).next().await.unwrap();
 
     // deferred response
     assert_eq!(
@@ -450,7 +453,8 @@ async fn defer_if_condition() {
     )
         .build();
 
-    let (sender, mut receiver) = futures::channel::mpsc::channel(10);
+    let (sender, receiver) = tokio::sync::mpsc::channel(10);
+    let mut receiver_stream = ReceiverStream::new(receiver);
 
     let service_factory = Arc::new(SubgraphServiceFactory {
         services: Arc::new(HashMap::from([(
@@ -482,12 +486,13 @@ async fn defer_if_condition() {
 
     // shouldDefer: true
     insta::assert_json_snapshot!(defer_primary_response);
-    let deferred_response = receiver.next().await.unwrap();
+    let deferred_response = receiver_stream.next().await.unwrap();
     insta::assert_json_snapshot!(deferred_response);
-    assert!(receiver.next().await.is_none());
+    assert!(receiver_stream.next().await.is_none());
 
     // shouldDefer: not provided, should default to true
-    let (default_sender, mut default_receiver) = futures::channel::mpsc::channel(10);
+    let (default_sender, default_receiver) = tokio::sync::mpsc::channel(10);
+    let mut default_receiver_stream = ReceiverStream::new(default_receiver);
     let default_primary_response = query_plan
         .execute(
             &Context::new(),
@@ -502,11 +507,15 @@ async fn defer_if_condition() {
         .await;
 
     assert_eq!(defer_primary_response, default_primary_response);
-    assert_eq!(deferred_response, default_receiver.next().await.unwrap());
-    assert!(default_receiver.next().await.is_none());
+    assert_eq!(
+        deferred_response,
+        default_receiver_stream.next().await.unwrap()
+    );
+    assert!(default_receiver_stream.next().await.is_none());
 
     // shouldDefer: false, only 1 response
-    let (sender, mut no_defer_receiver) = futures::channel::mpsc::channel(10);
+    let (sender, no_defer_receiver) = tokio::sync::mpsc::channel(10);
+    let mut no_defer_receiver_stream = ReceiverStream::new(no_defer_receiver);
     let defer_disabled = query_plan
         .execute(
             &Context::new(),
@@ -528,7 +537,7 @@ async fn defer_if_condition() {
         )
         .await;
     insta::assert_json_snapshot!(defer_disabled);
-    assert!(no_defer_receiver.next().await.is_none());
+    assert!(no_defer_receiver_stream.next().await.is_none());
 }
 
 #[tokio::test]
@@ -634,7 +643,7 @@ async fn dependent_mutations() {
         plugins: Default::default(),
     });
 
-    let (sender, _) = futures::channel::mpsc::channel(10);
+    let (sender, _) = tokio::sync::mpsc::channel(10);
     let _response = query_plan
         .execute(
             &Context::new(),

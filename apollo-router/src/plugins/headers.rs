@@ -792,8 +792,10 @@ mod test {
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,
             context: ctx,
+            subgraph_name: String::from("test").into(),
             subscription_stream: None,
             connection_closed_signal: None,
+            authorization: Default::default(),
         }
     }
 

@@ -4,7 +4,8 @@ expression: new_config
 ---
 ---
 telemetry:
-  tracing:
-    common:
-      service_name: foo
+  exporters:
+    tracing:
+      common:
+        service_name: foo
 

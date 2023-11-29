@@ -24,7 +24,6 @@ mod tests {
     use crate::services::external::Externalizable;
     use crate::services::external::PipelineStep;
     use crate::services::external::EXTERNALIZABLE_VERSION;
-    use crate::services::router_service;
     use crate::services::subgraph;
     use crate::services::supergraph;
 
@@ -713,7 +712,7 @@ mod tests {
             response: Default::default(),
         };
 
-        let mock_router_service = router_service::from_supergraph_mock_callback(move |req| {
+        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
             // Let's assert that the router request has been transformed as it should have.
             assert_eq!(
                 req.supergraph_request.headers().get("cookie").unwrap(),
@@ -831,7 +830,7 @@ mod tests {
             response: Default::default(),
         };
 
-        let mock_router_service = router_service::from_supergraph_mock_callback(move |req| {
+        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
             // Let's assert that the router request has been transformed as it should have.
             assert_eq!(
                 req.supergraph_request.headers().get("cookie").unwrap(),
@@ -1125,7 +1124,7 @@ mod tests {
             request: Default::default(),
         };
 
-        let mock_router_service = router_service::from_supergraph_mock_callback(move |req| {
+        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
             Ok(supergraph::Response::builder()
                 .data(json!("{ \"test\": 1234_u32 }"))
                 .context(req.context)

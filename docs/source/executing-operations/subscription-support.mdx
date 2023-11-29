@@ -118,15 +118,9 @@ flowchart LR;
 
     - You can _skip_ modifying subgraph schemas that don't define any `Subscription` fields.
 
-1. If you're using Apollo Server, [update your Apollo Server instances to version 4 or later](/apollo-server/migration).
+1. If you're using Apollo Server to implement subgraphs, [update your Apollo Server instances to version 4 or later](/apollo-server/migration).
     - Follow the Apollo Server 4 [guide for enabling subscriptions](/apollo-server/data/subscriptions#enabling-subscriptions). 
-    - Update each `npm` package that makes up Apollo Federation to version 2.4 or later:
-        - `@apollo/gateway`
-        - `@apollo/query-planner`
-        - `@apollo/subgraph`
-        - `@apollo/federation-internals`
-        - `@apollo/query-graphs`
-        - `@apollo/composition`
+    - Update [`@apollo/subgraph`](/apollo-server/using-federation/apollo-subgraph-setup/#1-install-and-import-apollosubgraph).
 
 After you complete these prerequisites, you can safely [configure your router](#router-setup) for subscriptions.
 
@@ -200,9 +194,10 @@ subscription:
   enabled: true
   mode:
     preview_callback:
-      public_url: https://example.com:4000 # The router's public URL
-      listen: 0.0.0.0:4000 # The IP address and port the router will listen on for subscription callbacks
+      public_url: https://example.com:4000 # The router's public URL, the one on which your subgraphs can have access to the Router
+      listen: 127.0.0.1:4000 # The IP address and port the router will listen on for subscription callbacks, for security reasons it might be better to expose on another port that is only available from your internal network
       path: /callback # The path of the router's callback endpoint
+      heartbeat_interval: 5s # Optional (default: 5secs)
       subgraphs: # The list of subgraphs that use the HTTP callback protocol
         - accounts
 ```
@@ -222,7 +217,7 @@ subscription:
           protocol: graphql_ws
     preview_callback:
       public_url: http://public_url_of_my_router_instance:4000
-      listen: 0.0.0.0:4000
+      listen: 127.0.0.1:4000
       path: /callback
       subgraphs:
         - accounts #highlight-line

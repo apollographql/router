@@ -60,3 +60,16 @@ subscription:
 plugins:
   experimental.restricted:
     enabled: true
+
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          http.response.status_code: true
+      supergraph:
+        attributes:
+          graphql.document: true
+      subgraph:
+        attributes:
+          subgraph.graphql.document: true

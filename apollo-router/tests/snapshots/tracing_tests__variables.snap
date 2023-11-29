@@ -17,12 +17,16 @@ expression: get_spans()
     }
   },
   "children": {
-    "apollo_router::axum_factory::utils::request": {
-      "name": "apollo_router::axum_factory::utils::request",
+    "apollo_router::plugins::telemetry::span_factory::request": {
+      "name": "apollo_router::plugins::telemetry::span_factory::request",
       "record": {
         "entries": [
           [
             "http.method",
+            "POST"
+          ],
+          [
+            "http.request.method",
             "POST"
           ],
           [
@@ -42,22 +46,27 @@ expression: get_spans()
             true
           ],
           [
+            "graphql.operation.type",
+            "query"
+          ],
+          [
             "graphql.operation.name",
             "ExampleQuery"
           ],
           [
             "otel.name",
-            "GraphQL Operation"
+            "query ExampleQuery"
           ]
         ],
         "metadata": {
           "name": "request",
-          "target": "apollo_router::axum_factory::utils",
+          "target": "apollo_router::plugins::telemetry::span_factory",
           "level": "INFO",
-          "module_path": "apollo_router::axum_factory::utils",
+          "module_path": "apollo_router::plugins::telemetry::span_factory",
           "fields": {
             "names": [
               "http.method",
+              "http.request.method",
               "http.route",
               "http.flavor",
               "otel.name",
@@ -70,12 +79,16 @@ expression: get_spans()
         }
       },
       "children": {
-        "apollo_router::plugins::telemetry::router": {
-          "name": "apollo_router::plugins::telemetry::router",
+        "apollo_router::plugins::telemetry::span_factory::router": {
+          "name": "apollo_router::plugins::telemetry::span_factory::router",
           "record": {
             "entries": [
               [
                 "http.method",
+                "POST"
+              ],
+              [
+                "http.request.method",
                 "POST"
               ],
               [
@@ -91,20 +104,8 @@ expression: get_spans()
                 "[REDACTED]"
               ],
               [
-                "client.name",
-                ""
-              ],
-              [
-                "client.version",
-                ""
-              ],
-              [
                 "otel.kind",
                 "INTERNAL"
-              ],
-              [
-                "apollo_private.http.request_headers",
-                "{}"
               ],
               [
                 "apollo_private.duration_ns",
@@ -117,12 +118,13 @@ expression: get_spans()
             ],
             "metadata": {
               "name": "router",
-              "target": "apollo_router::plugins::telemetry",
+              "target": "apollo_router::plugins::telemetry::span_factory",
               "level": "INFO",
-              "module_path": "apollo_router::plugins::telemetry",
+              "module_path": "apollo_router::plugins::telemetry::span_factory",
               "fields": {
                 "names": [
                   "http.method",
+                  "http.request.method",
                   "http.route",
                   "http.flavor",
                   "trace_id",
@@ -161,17 +163,17 @@ expression: get_spans()
               },
               "children": {}
             },
-            "apollo_router::plugins::telemetry::supergraph": {
-              "name": "apollo_router::plugins::telemetry::supergraph",
+            "apollo_router::plugins::telemetry::span_factory::supergraph": {
+              "name": "apollo_router::plugins::telemetry::span_factory::supergraph",
               "record": {
                 "entries": [
                   [
-                    "graphql.document",
-                    "query ExampleQuery($topProductsFirst: Int, $reviewsForAuthorAuthorId: ID!) {\n                topProducts(first: $topProductsFirst) {\n                    name\n                    reviewsForAuthor(authorID: $reviewsForAuthorAuthorId) {\n                        body\n                        author {\n                            id\n                            name\n                        }\n                    }\n                }\n            }"
-                  ],
-                  [
                     "otel.kind",
                     "INTERNAL"
+                  ],
+                  [
+                    "graphql.document",
+                    "query ExampleQuery($topProductsFirst: Int, $reviewsForAuthorAuthorId: ID!) {\n                topProducts(first: $topProductsFirst) {\n                    name\n                    reviewsForAuthor(authorID: $reviewsForAuthorAuthorId) {\n                        body\n                        author {\n                            id\n                            name\n                        }\n                    }\n                }\n            }"
                   ],
                   [
                     "apollo_private.field_level_instrumentation_ratio",
@@ -192,14 +194,14 @@ expression: get_spans()
                 ],
                 "metadata": {
                   "name": "supergraph",
-                  "target": "apollo_router::plugins::telemetry",
+                  "target": "apollo_router::plugins::telemetry::span_factory",
                   "level": "INFO",
-                  "module_path": "apollo_router::plugins::telemetry",
+                  "module_path": "apollo_router::plugins::telemetry::span_factory",
                   "fields": {
                     "names": [
-                      "graphql.document",
-                      "graphql.operation.name",
                       "otel.kind",
+                      "graphql.operation.name",
+                      "graphql.document",
                       "apollo_private.field_level_instrumentation_ratio",
                       "apollo_private.operation_signature",
                       "apollo_private.graphql.variables"
@@ -208,8 +210,8 @@ expression: get_spans()
                 }
               },
               "children": {
-                "apollo_router::services::supergraph_service::query_planning": {
-                  "name": "apollo_router::services::supergraph_service::query_planning",
+                "apollo_router::services::supergraph::service::query_planning": {
+                  "name": "apollo_router::services::supergraph::service::query_planning",
                   "record": {
                     "entries": [
                       [
@@ -259,9 +261,9 @@ expression: get_spans()
                     ],
                     "metadata": {
                       "name": "query_planning",
-                      "target": "apollo_router::services::supergraph_service",
+                      "target": "apollo_router::services::supergraph::service",
                       "level": "INFO",
-                      "module_path": "apollo_router::services::supergraph_service",
+                      "module_path": "apollo_router::services::supergraph::service",
                       "fields": {
                         "names": [
                           "otel.kind"

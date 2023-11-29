@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,12 +21,16 @@ use tokio::sync::mpsc;
 use tokio::sync::Notify;
 use tower_service::Service;
 
+use crate::axum_factory::utils::ConnectionInfo;
+use crate::axum_factory::utils::InjectConnectionInfo;
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::ListenAddr;
+
+pub(crate) static SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug)]
 pub(crate) struct ListenAddrAndRouter(pub(crate) ListenAddr, pub(crate) Router);
@@ -220,8 +225,9 @@ pub(super) fn serve_router_on_listen_addr(
                                 max_open_file_warning = None;
                             }
 
+                            let session_count = SESSION_COUNT.fetch_add(1, Ordering::Acquire)+1;
                             tracing::info!(
-                                counter.apollo_router_session_count_total = 1i64,
+                                value.apollo_router_session_count_total = session_count,
                                 listener = &address
                             );
 
@@ -233,6 +239,10 @@ pub(super) fn serve_router_on_listen_addr(
                                 match res {
                                     NetworkStream::Tcp(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
+                                        let app = InjectConnectionInfo::new(app, ConnectionInfo {
+                                            peer_address: stream.peer_addr().ok(),
+                                            server_address: stream.local_addr().ok(),
+                                        });
                                         let app = IdleConnectionChecker::new(received_first_request.clone(), app);
 
                                         stream
@@ -337,8 +347,9 @@ pub(super) fn serve_router_on_listen_addr(
                                     }
                                 }
 
+                                let session_count = SESSION_COUNT.fetch_sub(1, Ordering::Acquire)-1;
                                 tracing::info!(
-                                    counter.apollo_router_session_count_total = -1i64,
+                                    value.apollo_router_session_count_total = session_count,
                                     listener = &address
                                 );
 
@@ -481,14 +492,13 @@ mod tests {
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
     use crate::services::router;
-    use crate::services::router_service;
 
     #[tokio::test]
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
         let configuration = Configuration::fake_builder().build().unwrap();
 
         init_with_config(
-            router_service::empty().await,
+            router::service::empty().await,
             Arc::new(configuration),
             MultiMap::new(),
         )
@@ -525,7 +535,7 @@ mod tests {
         );
 
         let error = init_with_config(
-            router_service::empty().await,
+            router::service::empty().await,
             Arc::new(configuration),
             web_endpoints,
         )
@@ -563,7 +573,7 @@ mod tests {
             Endpoint::from_router_service("/".to_string(), endpoint),
         );
 
-        let error = init_with_config(router_service::empty().await, Arc::new(configuration), mm)
+        let error = init_with_config(router::service::empty().await, Arc::new(configuration), mm)
             .await
             .unwrap_err();
 

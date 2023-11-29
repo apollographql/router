@@ -1,14 +1,15 @@
 //! Configuration for zipkin tracing.
 use http::Uri;
 use lazy_static::lazy_static;
-use opentelemetry::sdk::trace::BatchSpanProcessor;
-use opentelemetry::sdk::trace::Builder;
+use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::trace::Builder;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::GenericWith;
-use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::spans::Spans;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
@@ -38,7 +39,12 @@ impl TracingConfigurator for Config {
         self.enabled
     }
 
-    fn apply(&self, builder: Builder, common: &Trace) -> Result<Builder, BoxError> {
+    fn apply(
+        &self,
+        builder: Builder,
+        common: &TracingCommon,
+        _spans_config: &Spans,
+    ) -> Result<Builder, BoxError> {
         tracing::info!("configuring Zipkin tracing: {}", self.batch_processor);
 
         let exporter = opentelemetry_zipkin::new_pipeline()
@@ -49,7 +55,7 @@ impl TracingConfigurator for Config {
             .init_exporter()?;
 
         Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
+            BatchSpanProcessor::builder(exporter, opentelemetry_sdk::runtime::Tokio)
                 .with_batch_config(self.batch_processor.clone().into())
                 .build()
                 .filtered(),
