@@ -1,13 +1,17 @@
-use crate::error::{FederationError, SingleFederationError};
-use crate::link::federation_spec_definition::{FederationSpecDefinition, FEDERATION_VERSIONS};
+use crate::error::{FederationError, MultipleFederationErrors, SingleFederationError};
+use crate::link::federation_spec_definition::{
+    get_federation_spec_definition_from_subgraph, FederationSpecDefinition, FEDERATION_VERSIONS,
+};
 use crate::link::join_spec_definition::{
     FieldDirectiveArguments, JoinSpecDefinition, TypeDirectiveArguments, JOIN_VERSIONS,
 };
 use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::{Identity, Version};
 use crate::link::spec_definition::{spec_definitions, SpecDefinition};
+use crate::query_graph::field_set::parse_field_set;
 use crate::schema::position::{
-    DirectiveDefinitionPosition, EnumTypeDefinitionPosition, InputObjectFieldDefinitionPosition,
+    is_graphql_reserved_name, CompositeTypeDefinitionPosition, DirectiveDefinitionPosition,
+    EnumTypeDefinitionPosition, FieldDefinitionPosition, InputObjectFieldDefinitionPosition,
     InputObjectTypeDefinitionPosition, InterfaceTypeDefinitionPosition,
     ObjectFieldDefinitionPosition, ObjectOrInterfaceFieldDefinitionPosition,
     ObjectOrInterfaceTypeDefinitionPosition, ObjectTypeDefinitionPosition,
@@ -16,6 +20,7 @@ use crate::schema::position::{
 };
 use crate::schema::FederationSchema;
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::executable::{Field, Selection, SelectionSet};
 use apollo_compiler::schema::{
     Component, ComponentName, ComponentOrigin, DirectiveDefinition, DirectiveList,
     DirectiveLocation, EnumType, EnumValueDefinition, ExtendedType, ExtensionId, InputObjectType,
@@ -27,27 +32,26 @@ use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 use std::ops::Deref;
 
-// Assumes the given schema has been validated.
-//
-// TODO: A lot of common data gets passed around in the functions called by this one, considering
-// making an e.g. ExtractSubgraphs struct to contain the data.
+/// Assumes the given schema has been validated.
+///
+/// TODO: A lot of common data gets passed around in the functions called by this one, considering
+/// making an e.g. ExtractSubgraphs struct to contain the data.
 pub(super) fn extract_subgraphs_from_supergraph(
-    supergraph_schema: Schema,
+    supergraph_schema: &FederationSchema,
     validate_extracted_subgraphs: Option<bool>,
 ) -> Result<FederationSubgraphs, FederationError> {
     let validate_extracted_subgraphs = validate_extracted_subgraphs.unwrap_or(true);
-    let (supergraph_schema, link_spec_definition, join_spec_definition) =
-        validate_supergraph(supergraph_schema)?;
+    let (link_spec_definition, join_spec_definition) = validate_supergraph(supergraph_schema)?;
     let is_fed_1 = *join_spec_definition.version() == Version { major: 0, minor: 1 };
     let (mut subgraphs, federation_spec_definitions, graph_enum_value_name_to_subgraph_name) =
-        collect_empty_subgraphs(&supergraph_schema, join_spec_definition)?;
+        collect_empty_subgraphs(supergraph_schema, join_spec_definition)?;
 
     let mut filtered_types = Vec::new();
     for type_definition_position in supergraph_schema.get_types() {
         if !join_spec_definition
-            .is_spec_type_name(&supergraph_schema, type_definition_position.type_name())?
+            .is_spec_type_name(supergraph_schema, type_definition_position.type_name())?
             && !link_spec_definition
-                .is_spec_type_name(&supergraph_schema, type_definition_position.type_name())?
+                .is_spec_type_name(supergraph_schema, type_definition_position.type_name())?
         {
             filtered_types.push(type_definition_position);
         }
@@ -57,7 +61,7 @@ pub(super) fn extract_subgraphs_from_supergraph(
         todo!()
     } else {
         extract_subgraphs_from_fed_2_supergraph(
-            &supergraph_schema,
+            supergraph_schema,
             &mut subgraphs,
             &graph_enum_value_name_to_subgraph_name,
             &federation_spec_definitions,
@@ -103,14 +107,11 @@ pub(super) fn extract_subgraphs_from_supergraph(
     Ok(subgraphs)
 }
 
-type ValidateSupergraphOk = (
-    FederationSchema,
-    &'static LinkSpecDefinition,
-    &'static JoinSpecDefinition,
-);
+type ValidateSupergraphOk = (&'static LinkSpecDefinition, &'static JoinSpecDefinition);
 
-fn validate_supergraph(supergraph_schema: Schema) -> Result<ValidateSupergraphOk, FederationError> {
-    let supergraph_schema = FederationSchema::new(supergraph_schema)?;
+fn validate_supergraph(
+    supergraph_schema: &FederationSchema,
+) -> Result<ValidateSupergraphOk, FederationError> {
     let Some(metadata) = supergraph_schema.metadata() else {
         return Err(SingleFederationError::InvalidFederationSupergraph {
             message: "Invalid supergraph: must be a core schema".to_owned(),
@@ -135,11 +136,7 @@ fn validate_supergraph(supergraph_schema: Schema) -> Result<ValidateSupergraphOk
             ),
         }.into());
     };
-    Ok((
-        supergraph_schema,
-        link_spec_definition,
-        join_spec_definition,
-    ))
+    Ok((link_spec_definition, join_spec_definition))
 }
 
 type CollectEmptySubgraphsOk = (
@@ -160,8 +157,7 @@ fn collect_empty_subgraphs(
     for (enum_value_name, enum_value_definition) in graph_enum.values.iter() {
         let graph_application = enum_value_definition
             .directives
-            .iter()
-            .find(|d| d.name == graph_directive_definition.name)
+            .get(&graph_directive_definition.name)
             .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
                 message: format!(
                     "Value \"{}\" of join__Graph enum has no @join__graph directive",
@@ -200,7 +196,7 @@ fn collect_empty_subgraphs(
     ))
 }
 
-// TODO: Use the JS/programmatic approach instead of hard-coding definitions.
+/// TODO: Use the JS/programmatic approach instead of hard-coding definitions.
 pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, FederationError> {
     FederationSchema::new(Schema::parse(
         r#"
@@ -376,8 +372,8 @@ fn extract_subgraphs_from_fed_2_supergraph(
         })
         .collect::<Vec<_>>();
     for subgraph in subgraphs.subgraphs.values_mut() {
-        // TODO: removeInactiveProvidesAndRequires(subgraph.schema)
-        remove_unused_types_from_subgraph(subgraph)?;
+        remove_inactive_requires_and_provides_from_subgraph(&mut subgraph.schema)?;
+        remove_unused_types_from_subgraph(&mut subgraph.schema)?;
         for definition in all_executable_directive_definitions.iter() {
             DirectiveDefinitionPosition {
                 directive_name: definition.name.clone(),
@@ -409,10 +405,7 @@ fn add_all_empty_subgraph_types(
     for type_definition_position in filtered_types {
         let type_ = type_definition_position.get(supergraph_schema.schema())?;
         let mut type_directive_applications = Vec::new();
-        for directive in type_.directives().iter() {
-            if directive.name != type_directive_definition.name {
-                continue;
-            }
+        for directive in type_.directives().get_all(&type_directive_definition.name) {
             type_directive_applications
                 .push(join_spec_definition.type_directive_arguments(directive)?);
         }
@@ -703,10 +696,10 @@ fn extract_object_type_content(
         };
         let type_ = pos.get(supergraph_schema.schema())?;
 
-        for directive in type_.directives.iter() {
-            if directive.name != implements_directive_definition.name {
-                continue;
-            }
+        for directive in type_
+            .directives
+            .get_all(&implements_directive_definition.name)
+        {
             let implements_directive_application =
                 join_spec_definition.implements_directive_arguments(directive)?;
             if !subgraph_info.contains_key(&implements_directive_application.graph) {
@@ -734,10 +727,7 @@ fn extract_object_type_content(
         for (field_name, field) in type_.fields.iter() {
             let field_pos = pos.field(field_name.clone());
             let mut field_directive_applications = Vec::new();
-            for directive in field.directives.iter() {
-                if directive.name != field_directive_definition.name {
-                    continue;
-                }
+            for directive in field.directives.get_all(&field_directive_definition.name) {
                 field_directive_applications
                     .push(join_spec_definition.field_directive_arguments(directive)?);
             }
@@ -895,10 +885,10 @@ fn extract_interface_type_content(
             })
         }
 
-        for directive in type_.directives.iter() {
-            if directive.name != implements_directive_definition.name {
-                continue;
-            }
+        for directive in type_
+            .directives
+            .get_all(&implements_directive_definition.name)
+        {
             let implements_directive_application =
                 join_spec_definition.implements_directive_arguments(directive)?;
             let subgraph = get_subgraph(
@@ -934,10 +924,7 @@ fn extract_interface_type_content(
 
         for (field_name, field) in type_.fields.iter() {
             let mut field_directive_applications = Vec::new();
-            for directive in field.directives.iter() {
-                if directive.name != field_directive_definition.name {
-                    continue;
-                }
+            for directive in field.directives.get_all(&field_directive_definition.name) {
                 field_directive_applications
                     .push(join_spec_definition.field_directive_arguments(directive)?);
             }
@@ -1042,10 +1029,10 @@ fn extract_union_type_content(
 
         let mut union_member_directive_applications = Vec::new();
         if let Some(union_member_directive_definition) = union_member_directive_definition {
-            for directive in type_.directives.iter() {
-                if directive.name != union_member_directive_definition.name {
-                    continue;
-                }
+            for directive in type_
+                .directives
+                .get_all(&union_member_directive_definition.name)
+            {
                 union_member_directive_applications
                     .push(join_spec_definition.union_member_directive_arguments(directive)?);
             }
@@ -1133,10 +1120,10 @@ fn extract_enum_type_content(
             let value_pos = pos.value(value_name.clone());
             let mut enum_value_directive_applications = Vec::new();
             if let Some(enum_value_directive_definition) = enum_value_directive_definition {
-                for directive in value.directives.iter() {
-                    if directive.name != enum_value_directive_definition.name {
-                        continue;
-                    }
+                for directive in value
+                    .directives
+                    .get_all(&enum_value_directive_definition.name)
+                {
                     enum_value_directive_applications
                         .push(join_spec_definition.enum_value_directive_arguments(directive)?);
                 }
@@ -1215,10 +1202,10 @@ fn extract_input_object_type_content(
         for (input_field_name, input_field) in type_.fields.iter() {
             let input_field_pos = pos.field(input_field_name.clone());
             let mut field_directive_applications = Vec::new();
-            for directive in input_field.directives.iter() {
-                if directive.name != field_directive_definition.name {
-                    continue;
-                }
+            for directive in input_field
+                .directives
+                .get_all(&field_directive_definition.name)
+            {
                 field_directive_applications
                     .push(join_spec_definition.field_directive_arguments(directive)?);
             }
@@ -1488,9 +1475,7 @@ lazy_static! {
     };
 }
 
-fn remove_unused_types_from_subgraph(
-    subgraph: &mut FederationSubgraph,
-) -> Result<(), FederationError> {
+fn remove_unused_types_from_subgraph(schema: &mut FederationSchema) -> Result<(), FederationError> {
     // We now do an additional path on all types because we sometimes added types to subgraphs
     // without being sure that the subgraph had the type in the first place (especially with the
     // join 0.1 spec), and because we later might not have added any fields/members to said type,
@@ -1498,7 +1483,7 @@ fn remove_unused_types_from_subgraph(
     // need to remove them. Note that need to do this _after_ the `add_external_fields()` call above
     // since it may have added (external) fields to some of the types.
     let mut type_definition_positions: Vec<TypeDefinitionPosition> = Vec::new();
-    for (type_name, type_) in subgraph.schema.schema().types.iter() {
+    for (type_name, type_) in schema.schema().types.iter() {
         match type_ {
             ExtendedType::Object(type_) => {
                 if type_.fields.is_empty() {
@@ -1549,16 +1534,16 @@ fn remove_unused_types_from_subgraph(
     for position in type_definition_positions {
         match position {
             TypeDefinitionPosition::Object(position) => {
-                position.remove_recursive(&mut subgraph.schema)?;
+                position.remove_recursive(schema)?;
             }
             TypeDefinitionPosition::Interface(position) => {
-                position.remove_recursive(&mut subgraph.schema)?;
+                position.remove_recursive(schema)?;
             }
             TypeDefinitionPosition::Union(position) => {
-                position.remove_recursive(&mut subgraph.schema)?;
+                position.remove_recursive(schema)?;
             }
             TypeDefinitionPosition::InputObject(position) => {
-                position.remove_recursive(&mut subgraph.schema)?;
+                position.remove_recursive(schema)?;
             }
             _ => {
                 return Err(SingleFederationError::Internal {
@@ -1633,11 +1618,7 @@ fn add_federation_operations(
             let ExtendedType::Object(type_) = type_ else {
                 return None;
             };
-            if !type_
-                .directives
-                .iter()
-                .any(|d| d.name == key_directive_definition.name)
-            {
+            if !type_.directives.has(&key_directive_definition.name) {
                 return None;
             }
             Some(ComponentName::from(type_name))
@@ -1728,4 +1709,273 @@ fn add_federation_operations(
     )?;
 
     Ok(())
+}
+
+/// It makes no sense to have a @requires/@provides on a non-external leaf field, and we usually
+/// reject it during schema validation. But this function remove such fields for when:
+///  1. We extract subgraphs from a Fed 1 supergraph, where such validations haven't been run.
+///  2. Fed 1 subgraphs are upgraded to Fed 2 subgraphs.
+///
+/// The reason we do this (and generally reject it) is that such @requires/@provides have a negative
+/// impact on later query planning, because it sometimes make us try type-exploding some interfaces
+/// unnecessarily. Besides, if a usage adds something useless, there is a chance it hasn't fully
+/// understood something, and warning about that fact through an error is more helpful.
+fn remove_inactive_requires_and_provides_from_subgraph(
+    schema: &mut FederationSchema,
+) -> Result<(), FederationError> {
+    let federation_spec_definition = get_federation_spec_definition_from_subgraph(schema)?;
+    let requires_directive_definition_name = federation_spec_definition
+        .requires_directive_definition(schema)?
+        .name
+        .clone();
+    let provides_directive_definition_name = federation_spec_definition
+        .provides_directive_definition(schema)?
+        .name
+        .clone();
+
+    for type_pos in schema.get_types() {
+        // Ignore introspection types.
+        if is_graphql_reserved_name(type_pos.type_name()) {
+            continue;
+        }
+
+        // Ignore non-object/interface types.
+        let Ok(type_pos): Result<ObjectOrInterfaceTypeDefinitionPosition, _> = type_pos.try_into()
+        else {
+            continue;
+        };
+
+        let object_or_interface_field_definition_positions: Vec<
+            ObjectOrInterfaceFieldDefinitionPosition,
+        > = match type_pos {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(type_pos) => type_pos
+                .get(schema.schema())?
+                .fields
+                .keys()
+                .map(|field_name| type_pos.field(field_name.clone()).into())
+                .collect(),
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_pos) => type_pos
+                .get(schema.schema())?
+                .fields
+                .keys()
+                .map(|field_name| type_pos.field(field_name.clone()).into())
+                .collect(),
+        };
+
+        for pos in object_or_interface_field_definition_positions {
+            remove_inactive_applications(
+                schema,
+                federation_spec_definition,
+                FieldSetDirectiveKind::Requires,
+                &requires_directive_definition_name,
+                pos.clone(),
+            )?;
+            remove_inactive_applications(
+                schema,
+                federation_spec_definition,
+                FieldSetDirectiveKind::Provides,
+                &provides_directive_definition_name,
+                pos,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+enum FieldSetDirectiveKind {
+    Provides,
+    Requires,
+}
+
+fn remove_inactive_applications(
+    schema: &mut FederationSchema,
+    federation_spec_definition: &'static FederationSpecDefinition,
+    directive_kind: FieldSetDirectiveKind,
+    name_in_schema: &Name,
+    object_or_interface_field_definition_position: ObjectOrInterfaceFieldDefinitionPosition,
+) -> Result<(), FederationError> {
+    let mut replacement_directives = Vec::new();
+    let field = object_or_interface_field_definition_position.get(schema.schema())?;
+    for directive in field.directives.get_all(name_in_schema) {
+        let (fields, parent_type_pos) = match directive_kind {
+            FieldSetDirectiveKind::Provides => {
+                let fields = federation_spec_definition
+                    .provides_directive_arguments(directive)?
+                    .fields;
+                let parent_type_pos: CompositeTypeDefinitionPosition = schema
+                    .get_type(field.ty.inner_named_type().clone())?
+                    .try_into()?;
+                (fields, parent_type_pos)
+            }
+            FieldSetDirectiveKind::Requires => {
+                let fields = federation_spec_definition
+                    .requires_directive_arguments(directive)?
+                    .fields;
+                let parent_type_pos: CompositeTypeDefinitionPosition =
+                    object_or_interface_field_definition_position
+                        .parent()
+                        .clone()
+                        .into();
+                (fields, parent_type_pos)
+            }
+        };
+        // TODO: In the JS codebase, this function ends up getting additionally used in the schema
+        // upgrader, where parsing the field set may error. In such cases, we end up skipping those
+        // directives instead of returning error here, as it pollutes the list of error messages
+        // during composition (another site in composition will properly check for field set
+        // validity and give better error messaging).
+        let mut fields =
+            parse_field_set(schema.schema(), parent_type_pos.type_name().clone(), fields)?;
+        let is_modified = remove_non_external_leaf_fields(schema, &mut fields)?;
+        if is_modified {
+            let replacement_directive = if fields.selections.is_empty() {
+                None
+            } else {
+                let fields = NodeStr::from(fields.serialize().no_indent().to_string());
+                Some(Node::new(match directive_kind {
+                    FieldSetDirectiveKind::Provides => {
+                        federation_spec_definition.provides_directive(schema, fields)?
+                    }
+                    FieldSetDirectiveKind::Requires => {
+                        federation_spec_definition.requires_directive(schema, fields)?
+                    }
+                }))
+            };
+            replacement_directives.push((directive.clone(), replacement_directive))
+        }
+    }
+
+    for (old_directive, new_directive) in replacement_directives {
+        object_or_interface_field_definition_position.remove_directive(schema, &old_directive);
+        if let Some(new_directive) = new_directive {
+            object_or_interface_field_definition_position
+                .insert_directive(schema, new_directive)?;
+        }
+    }
+    Ok(())
+}
+
+/// Removes any non-external leaf fields from the selection set, returning true if the selection
+/// set was modified.
+fn remove_non_external_leaf_fields(
+    schema: &FederationSchema,
+    selection_set: &mut SelectionSet,
+) -> Result<bool, FederationError> {
+    let federation_spec_definition = get_federation_spec_definition_from_subgraph(schema)?;
+    let external_directive_definition_name = federation_spec_definition
+        .external_directive_definition(schema)?
+        .name
+        .clone();
+    remove_non_external_leaf_fields_internal(
+        schema,
+        &external_directive_definition_name,
+        selection_set,
+    )
+}
+
+fn remove_non_external_leaf_fields_internal(
+    schema: &FederationSchema,
+    external_directive_definition_name: &Name,
+    selection_set: &mut SelectionSet,
+) -> Result<bool, FederationError> {
+    let mut is_modified = false;
+    let mut errors = MultipleFederationErrors { errors: Vec::new() };
+    selection_set.selections.retain_mut(|selection| {
+        let child_selection_set = match selection {
+            Selection::Field(field) => {
+                match is_external_or_has_external_implementations(
+                    schema,
+                    external_directive_definition_name,
+                    &selection_set.ty,
+                    field,
+                ) {
+                    Ok(is_external) => {
+                        if is_external {
+                            // Either the field or one of its implementors is external, so we keep
+                            // the entire selection in that case.
+                            return true;
+                        }
+                    }
+                    Err(error) => {
+                        errors.push(error);
+                        return false;
+                    }
+                };
+                if field.selection_set.selections.is_empty() {
+                    // An empty selection set means this is a leaf field. We would have returned
+                    // earlier if this were external, so this is a non-external leaf field.
+                    is_modified = true;
+                    return false;
+                }
+                &mut field.make_mut().selection_set
+            }
+            Selection::InlineFragment(inline_fragment) => {
+                &mut inline_fragment.make_mut().selection_set
+            }
+            Selection::FragmentSpread(_) => {
+                errors.push(
+                    SingleFederationError::Internal {
+                        message: "Unexpectedly found named fragment in FieldSet scalar".to_owned(),
+                    }
+                    .into(),
+                );
+                return false;
+            }
+        };
+        // At this point, we either have a non-leaf non-external field, or an inline fragment. In
+        // either case, we recurse into its selection set.
+        match remove_non_external_leaf_fields_internal(
+            schema,
+            external_directive_definition_name,
+            child_selection_set,
+        ) {
+            Ok(is_child_modified) => {
+                if is_child_modified {
+                    is_modified = true;
+                }
+            }
+            Err(error) => {
+                errors.push(error);
+                return false;
+            }
+        }
+        // If the recursion resulted in the selection set becoming empty, we remove this selection.
+        // Note that it shouldn't have started out empty, so if it became empty, is_child_modified
+        // would have been true, which means is_modified has already been set appropriately.
+        !child_selection_set.selections.is_empty()
+    });
+    if errors.errors.is_empty() {
+        Ok(is_modified)
+    } else {
+        Err(errors.into())
+    }
+}
+
+fn is_external_or_has_external_implementations(
+    schema: &FederationSchema,
+    external_directive_definition_name: &Name,
+    parent_type_name: &NamedType,
+    selection: &Node<Field>,
+) -> Result<bool, FederationError> {
+    let type_pos: CompositeTypeDefinitionPosition =
+        schema.get_type(parent_type_name.clone())?.try_into()?;
+    let field_pos = type_pos.field(selection.name.clone())?;
+    let field = field_pos.get(schema.schema())?;
+    if field.directives.has(external_directive_definition_name) {
+        return Ok(true);
+    }
+    if let FieldDefinitionPosition::Interface(field_pos) = field_pos {
+        for runtime_object_pos in schema.possible_runtime_types(field_pos.parent().into())? {
+            let runtime_field_pos = runtime_object_pos.field(field_pos.field_name.clone());
+            let runtime_field = runtime_field_pos.get(schema.schema())?;
+            if runtime_field
+                .directives
+                .has(external_directive_definition_name)
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }

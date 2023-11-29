@@ -1,4 +1,5 @@
 use apollo_compiler::ast::InvalidNameError;
+use apollo_compiler::DiagnosticList;
 use lazy_static::lazy_static;
 use std::fmt::{Display, Formatter, Write};
 
@@ -371,6 +372,22 @@ pub struct MultipleFederationErrors {
     pub errors: Vec<SingleFederationError>,
 }
 
+impl MultipleFederationErrors {
+    pub fn push(&mut self, error: FederationError) {
+        match error {
+            FederationError::SingleFederationError(error) => {
+                self.errors.push(error);
+            }
+            FederationError::MultipleFederationErrors(errors) => {
+                self.errors.extend(errors.errors);
+            }
+            FederationError::AggregateFederationError(errors) => {
+                self.errors.extend(errors.causes);
+            }
+        }
+    }
+}
+
 impl Display for MultipleFederationErrors {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "The following errors occurred:")?;
@@ -385,6 +402,19 @@ impl Display for MultipleFederationErrors {
             }
         }
         Ok(())
+    }
+}
+
+impl From<DiagnosticList> for MultipleFederationErrors {
+    fn from(value: DiagnosticList) -> Self {
+        Self {
+            errors: value
+                .iter()
+                .map(|e| SingleFederationError::InvalidGraphQL {
+                    message: e.message().to_string(),
+                })
+                .collect(),
+        }
     }
 }
 
@@ -424,6 +454,13 @@ pub enum FederationError {
     MultipleFederationErrors(#[from] MultipleFederationErrors),
     #[error(transparent)]
     AggregateFederationError(#[from] AggregateFederationError),
+}
+
+impl From<DiagnosticList> for FederationError {
+    fn from(value: DiagnosticList) -> Self {
+        let value: MultipleFederationErrors = value.into();
+        value.into()
+    }
 }
 
 // We didn't track errors addition precisely pre-2.0 and tracking it now has an unclear ROI, so we

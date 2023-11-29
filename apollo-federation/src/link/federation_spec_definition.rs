@@ -3,7 +3,7 @@ use crate::link::argument::{
     directive_optional_boolean_argument, directive_required_fieldset_argument,
 };
 use crate::link::spec::{Identity, Url, Version};
-use crate::link::spec_definition::{SpecDefinition, SpecDefinitions};
+use crate::link::spec_definition::{spec_definitions, SpecDefinition, SpecDefinitions};
 use crate::schema::FederationSchema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::schema::{
@@ -11,6 +11,7 @@ use apollo_compiler::schema::{
 };
 use apollo_compiler::{name, Node, NodeStr};
 use lazy_static::lazy_static;
+use std::ops::Deref;
 
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
@@ -29,6 +30,14 @@ pub(crate) const FEDERATION_FROM_ARGUMENT_NAME: Name = name!("from");
 pub(crate) struct KeyDirectiveArguments {
     pub(crate) fields: NodeStr,
     pub(crate) resolvable: bool,
+}
+
+pub(crate) struct RequiresDirectiveArguments {
+    pub(crate) fields: NodeStr,
+}
+
+pub(crate) struct ProvidesDirectiveArguments {
+    pub(crate) fields: NodeStr,
 }
 
 pub(crate) struct FederationSpecDefinition {
@@ -143,8 +152,7 @@ impl FederationSpecDefinition {
                         "Unexpectedly could not find federation spec's \"@{}\" directive definition",
                         FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC
                     ),
-                }
-                    .into()
+                }.into()
             })
             .map(Some)
     }
@@ -181,8 +189,7 @@ impl FederationSpecDefinition {
                         "Unexpectedly could not find federation spec's \"@{}\" directive definition",
                         FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC
                     ),
-                }
-                    .into()
+                }.into()
             })
     }
 
@@ -220,8 +227,7 @@ impl FederationSpecDefinition {
                         "Unexpectedly could not find federation spec's \"@{}\" directive definition",
                         FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC
                     ),
-                }
-                    .into()
+                }.into()
             })
     }
 
@@ -244,6 +250,33 @@ impl FederationSpecDefinition {
         })
     }
 
+    pub(crate) fn requires_directive_arguments(
+        &self,
+        application: &Node<Directive>,
+    ) -> Result<RequiresDirectiveArguments, FederationError> {
+        Ok(RequiresDirectiveArguments {
+            fields: directive_required_fieldset_argument(
+                application,
+                &FEDERATION_FIELDS_ARGUMENT_NAME,
+            )?,
+        })
+    }
+
+    pub(crate) fn provides_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                SingleFederationError::Internal {
+                    message: format!(
+                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
+                        FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC
+                    ),
+                }.into()
+            })
+    }
+
     pub(crate) fn provides_directive(
         &self,
         schema: &FederationSchema,
@@ -260,6 +293,18 @@ impl FederationSpecDefinition {
                 name: FEDERATION_FIELDS_ARGUMENT_NAME,
                 value: Node::new(Value::String(fields)),
             })],
+        })
+    }
+
+    pub(crate) fn provides_directive_arguments(
+        &self,
+        application: &Node<Directive>,
+    ) -> Result<ProvidesDirectiveArguments, FederationError> {
+        Ok(ProvidesDirectiveArguments {
+            fields: directive_required_fieldset_argument(
+                application,
+                &FEDERATION_FIELDS_ARGUMENT_NAME,
+            )?,
         })
     }
 
@@ -337,4 +382,22 @@ lazy_static! {
         }))?;
         Ok(definitions)
     };
+}
+
+pub(crate) fn get_federation_spec_definition_from_subgraph(
+    schema: &FederationSchema,
+) -> Result<&'static FederationSpecDefinition, FederationError> {
+    let federation_link = schema
+        .metadata()
+        .as_ref()
+        .and_then(|metadata| metadata.for_identity(&Identity::federation_identity()))
+        .ok_or_else(|| SingleFederationError::Internal {
+            message: "Subgraph unexpectedly does not use federation spec".to_owned(),
+        })?;
+    Ok(spec_definitions(FEDERATION_VERSIONS.deref())?
+        .find(&federation_link.url.version)
+        .ok_or_else(|| SingleFederationError::Internal {
+            message: "Subgraph unexpectedly does not use a supported federation spec version"
+                .to_owned(),
+        })?)
 }
