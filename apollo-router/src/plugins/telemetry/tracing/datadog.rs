@@ -4,11 +4,11 @@ use std::collections::HashMap;
 
 use http::Uri;
 use lazy_static::lazy_static;
+use opentelemetry::sdk;
+use opentelemetry::sdk::trace::BatchSpanProcessor;
+use opentelemetry::sdk::trace::Builder;
 use opentelemetry::Value;
-use opentelemetry_sdk::runtime;
-use opentelemetry_sdk::trace;
-use opentelemetry_sdk::trace::BatchSpanProcessor;
-use opentelemetry_sdk::trace::Builder;
+use opentelemetry_api::Key;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -68,7 +68,7 @@ impl TracingConfigurator for Config {
     ) -> Result<Builder, BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
         let enable_span_mapping = self.enable_span_mapping.then_some(true);
-        let common: trace::Config = trace.into();
+        let common: sdk::trace::Config = trace.into();
         let exporter = opentelemetry_datadog::new_pipeline()
             .with(&self.endpoint.to_uri(&DEFAULT_ENDPOINT), |builder, e| {
                 builder.with_agent_endpoint(e.to_string().trim_end_matches('/'))
@@ -79,10 +79,8 @@ impl TracingConfigurator for Config {
                     .with_resource_mapping(|span, _model_config| {
                         SPAN_RESOURCE_NAME_ATTRIBUTE_MAPPING
                             .get(span.name.as_ref())
-                            .and_then(|key| {
-                                span.attributes.iter().find(|kv| kv.key.as_str() == *key)
-                            })
-                            .and_then(|kv| match &kv.value {
+                            .and_then(|key| span.attributes.get(&Key::from_static_str(key)))
+                            .and_then(|value| match value {
                                 Value::String(value) => Some(value.as_str()),
                                 _ => None,
                             })
@@ -107,7 +105,7 @@ impl TracingConfigurator for Config {
             .with_trace_config(common)
             .build_exporter()?;
         Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, runtime::Tokio)
+            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
                 .with_batch_config(self.batch_processor.clone().into())
                 .build()
                 .filtered(),

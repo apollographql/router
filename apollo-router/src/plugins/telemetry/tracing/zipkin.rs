@@ -1,8 +1,8 @@
 //! Configuration for zipkin tracing.
 use http::Uri;
 use lazy_static::lazy_static;
-use opentelemetry_sdk::trace::BatchSpanProcessor;
-use opentelemetry_sdk::trace::Builder;
+use opentelemetry::sdk::trace::BatchSpanProcessor;
+use opentelemetry::sdk::trace::Builder;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -55,7 +55,7 @@ impl TracingConfigurator for Config {
             .init_exporter()?;
 
         Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, opentelemetry_sdk::runtime::Tokio)
+            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
                 .with_batch_config(self.batch_processor.clone().into())
                 .build()
                 .filtered(),
