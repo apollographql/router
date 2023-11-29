@@ -196,7 +196,7 @@ impl CacheControl {
             write!(&mut s, "{}private", if prev { "," } else { "" },)?;
             prev = true;
         }
-        if self.public {
+        if self.public && !self.private {
             write!(&mut s, "{}public", if prev { "," } else { "" },)?;
             prev = true;
         }
@@ -251,7 +251,12 @@ impl CacheControl {
             proxy_revalidate: self.proxy_revalidate || other.proxy_revalidate,
             no_store: self.no_store || other.no_store,
             private: self.private || other.private,
-            public: self.public || other.public,
+            // private takes precedence over public
+            public: if self.private || other.private {
+                false
+            } else {
+                self.public || other.public
+            },
             must_understand: self.must_understand || other.must_understand,
             no_transform: self.no_transform || other.no_transform,
             immutable: self.immutable || other.immutable,
