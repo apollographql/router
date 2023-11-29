@@ -1,16 +1,17 @@
 ---
-title: OpenTelemetry exporter
+title: OpenTelemetry Protocol (OTLP) exporter
 subtitle: Configure the OpenTelemetry Protocol (OTLP) exporter for metrics
 description: Configure the OpenTelemetry Protocol (OTLP) exporter for metrics in the Apollo Router
 ---
 import BatchProcessorPreamble from '../../../../../shared/batch-processor-preamble.mdx';
 import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
 
-Enable and configure the [OpenTelemetry](https://www.opentelemetry.io/) exporter for metrics in the Apollo Router.
+Enable and configure the [OpenTelemetry Protocol (OTLP)](https://www.opentelemetry.io/) exporter for metrics in the Apollo Router.
 
 For general metrics configuration, refer to [Router Metrics Configuration](./overview).
 
-Using the [OpenTelemetry](https://www.opentelemetry.io/) OTLP protocol you can export metrics to any OTLP compatible receiver, including:
+Using the OTLP protocol, you can export metrics to any OTLP compatible receiver, including:
+
 * [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/)
 * [Datadog](https://www.datadoghq.com/) (see [configuration instructions](./datadog))
 * [New Relic](https://www.newrelic.com/) (see [configuration instructions](./new-relic))
@@ -48,7 +49,6 @@ telemetry:
           max_export_timeout: 100s
           max_queue_size: 10000
 ```
-
 
 ### `enabled`
 

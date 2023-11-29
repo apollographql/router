@@ -9,6 +9,26 @@ Observe and monitor the health and performance of your supergraph with Apollo Ro
 
 Collect data about the inner workings of your router, and export logs, metrics, and traces to your application performance monitoring (APM) and observability tools.
 
+```mermaid
+flowchart LR
+    subgraph Apollo Router
+    lifecycle("Request Lifecycle<br/>(telemetry sources)")
+    collector("OpenTelemetry<br/>Collector")
+    prometheus(Prometheus<br/>Exporter)
+    otlp("OTLP<br/>Exporter")
+    lifecycle--"metrics,<br/>traces"-->collector
+    collector--"metrics"-->prometheus
+    collector--"metrics,<br/>traces"-->otlp
+    end
+
+    apm1[APM]
+    apm2[APM]
+    terminal(stdout)
+    prometheus--"HTTP"-->apm1
+    otlp--"gRPC or HTTP"-->apm2
+    lifecycle--"logs"---->terminal
+```
+
 ## Observability to maintain health and performance
 
 An observable router that provides all the data necessary to both monitor its health and troubleshoot its problems is critical for maintaining a healthy, performant supergraph and minimizing its mean time to repair (MTTR).   
@@ -74,7 +94,7 @@ Examples of spans include:
 The Apollo Router exports its collected telemetry in formats compatible with industry-standard APM tools. The router supports logging, metrics, and tracing exporters for a variety of tools, including:
 
 * Prometheus
-* OpenTelemetry Collector (OTLP)
+* OpenTelemetry Collector
 * Datadog
 * New Relic
 * Jaeger
