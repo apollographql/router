@@ -48,7 +48,7 @@ The router also accepts both `RUST_LOG` and `APOLLO_ROUTER_LOG` environment vari
 
 `RUST_LOG` is supported for advanced users with specific filtering requirements who may wish to see log messages from crates consumed by the router. Most users should use the command-line argument or `APOLLO_ROUTER_LOG`. Both of these options constrain log output to the router.
 
-To be clear:
+For example, every environment variable and command-line argument below sets the log level to `debug`:
 
 ```
 RUST_LOG=apollo_router::debug
@@ -56,7 +56,7 @@ APOLLO_ROUTER_LOG=debug
 --log=debug
 ```
 
-are equivalent, as are:
+For another example, every line below sets the same log levels:
 
 ```
 RUST_LOG=hyper=debug,apollo_router::info,h2=trace
@@ -64,7 +64,7 @@ APOLLO_ROUTER_LOG=hyper=debug,info,h2=trace
 --log=hyper=debug,info,h2=trace
 ```
 
-In both examples, the actual filter used by the router is as defined in the `RUST_LOG` entry.
+In both examples, the actual filter used by the router the value defined by `RUST_LOG`.
 
 For more information about specifying filters for more granular control over Apollo Router logging, see the [Env Logger documentation](https://docs.rs/env_logger/latest/env_logger/).
 

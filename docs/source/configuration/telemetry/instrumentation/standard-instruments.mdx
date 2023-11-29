@@ -1,13 +1,13 @@
 ---
 title: Apollo Router instruments
-subtitle: Attach standard attributes to router telemetry
-description: Instruments that are to Apollo Router
+subtitle: Standard metric instruments for the router's request lifecycle
+description: Reference of standard metric instruments for the Apollo Router's request lifecycle. Consumable via the router's metrics exporters. 
 ---
 
+## Standard metric instruments
 
-## Standard instruments
+The Apollo Router provides a set of non-configurable metric instruments that expose detailed information about the Router's request lifecycle.
 
-The Apollo Router provides a set of non-configurable instruments that expose detailed information about the Router's request lifecycle.
 These instruments can be consumed by configuring a [metrics exporter](../exporters/metrics/overview).
 
 ### HTTP
@@ -64,6 +64,7 @@ The coprocessor operations metric has the following attributes:
 [Learn more about Apollo Uplink.](/federation/managed-federation/uplink/)
 
 </Tip>
+
 - `apollo_router_uplink_fetch_duration_seconds_bucket` - Uplink request duration, attributes:
 
 - `url`: The Uplink URL that was polled
@@ -89,6 +90,7 @@ The initial call to Uplink during router startup is not reflected in metrics.
 [Learn more about subscriptions.](../executing-operations/subscription-support/)
 
 </Tip>
+
 - `apollo_router_opened_subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated)
 - `apollo_router_deduplicated_subscriptions_total` - Number of subscriptions that has been deduplicated
 - `apollo_router_skipped_event_count` - Number of subscription events that has been skipped because too many events have been received from the subgraph but not yet sent to the client.
