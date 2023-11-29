@@ -14,6 +14,7 @@ use sha2::Sha256;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower_service::Service;
 use tracing::Level;
 
 use super::cache_control::CacheControl;
@@ -27,7 +28,6 @@ use crate::graphql::Error;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
-use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -120,8 +120,7 @@ impl Plugin for EntityCache {
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        let cache = self.storage.clone();
-        let cache2 = self.storage.clone();
+        let storage = self.storage.clone();
 
         let (subgraph_ttl, subgraph_enabled) = if let Some(config) = self.subgraphs.get(name) {
             (
@@ -138,47 +137,115 @@ impl Plugin for EntityCache {
         let name = name.to_string();
 
         if subgraph_enabled {
-            ServiceBuilder::new()
-            .oneshot_checkpoint_async(move |request: subgraph::Request| {
-                let name = name.clone();
-                let cache = cache.clone();
-
-                async move {
-                    if !request
-                        .subgraph_request
-                        .body()
-                        .variables
-                        .contains_key(REPRESENTATIONS)
-                    {
-                        if request.operation_kind == OperationKind::Query {
-                            cache_lookup_root(name, cache, request).await
-                        } else {
-                            Ok(ControlFlow::Continue(request))
-                        }
-                    } else {
-                        cache_lookup_entities(name, cache, request).await
-                    }
-                }
-            })
-            .map_future(move |response| {
-                let cache = cache2.clone();
-                async move { cache_store_from_response(cache, subgraph_ttl, response.await?).await }
-            })
-            .service(service)
-            .boxed()
+            tower::util::BoxService::new(CacheService(Some(InnerCacheService {
+                service,
+                name: name.to_string(),
+                storage: storage,
+                subgraph_ttl,
+            })))
         } else {
             service
         }
     }
 }
 
-struct RootCacheKey(String);
+struct CacheService(Option<InnerCacheService>);
+struct InnerCacheService {
+    service: subgraph::BoxService,
+    name: String,
+    storage: RedisCacheStorage,
+    subgraph_ttl: Option<Duration>,
+}
+
+impl Service<subgraph::Request> for CacheService {
+    type Response = subgraph::Response;
+    type Error = BoxError;
+    type Future = <subgraph::BoxService as Service<subgraph::Request>>::Future;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        match &mut self.0 {
+            Some(s) => s.service.poll_ready(cx),
+            None => panic!("service should have been called only once"),
+        }
+    }
+
+    fn call(&mut self, request: subgraph::Request) -> Self::Future {
+        match self.0.take() {
+            None => panic!("service should have been called only once"),
+            Some(s) => Box::pin(s.call_inner(request)),
+        }
+    }
+}
+
+impl InnerCacheService {
+    async fn call_inner(
+        mut self,
+        request: subgraph::Request,
+    ) -> Result<subgraph::Response, BoxError> {
+        if !request
+            .subgraph_request
+            .body()
+            .variables
+            .contains_key(REPRESENTATIONS)
+        {
+            if request.operation_kind == OperationKind::Query {
+                match cache_lookup_root(self.name, self.storage.clone(), request).await? {
+                    ControlFlow::Break(response) => return Ok(response),
+                    ControlFlow::Continue((request, root_cache_key)) => {
+                        let response = self.service.call(request).await?;
+
+                        let cache_control =
+                            CacheControl::new(response.response.headers(), self.storage.ttl)?;
+                        update_cache_control(&response.context, &cache_control);
+
+                        cache_store_root_from_response(
+                            self.storage,
+                            self.subgraph_ttl,
+                            &response,
+                            cache_control,
+                            root_cache_key,
+                        )
+                        .await?;
+
+                        Ok(response)
+                    }
+                }
+            } else {
+                self.service.call(request).await
+            }
+        } else {
+            match cache_lookup_entities(self.name, self.storage.clone(), request).await? {
+                ControlFlow::Break(response) => return Ok(response),
+                ControlFlow::Continue((request, cache_result)) => {
+                    let mut response = self.service.call(request).await?;
+
+                    let cache_control =
+                        CacheControl::new(response.response.headers(), self.storage.ttl)?;
+                    update_cache_control(&response.context, &cache_control);
+
+                    cache_store_entities_from_response(
+                        self.storage,
+                        self.subgraph_ttl,
+                        &mut response,
+                        cache_control,
+                        cache_result.0,
+                    )
+                    .await?;
+                    Ok(response)
+                }
+            }
+        }
+    }
+}
 
 async fn cache_lookup_root(
     name: String,
     cache: RedisCacheStorage,
     mut request: subgraph::Request,
-) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError> {
+) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String)>, BoxError> {
     let body = request.subgraph_request.body_mut();
 
     let key = extract_cache_key_root(
@@ -207,15 +274,7 @@ async fn cache_lookup_root(
                     .build(),
             ))
         }
-        None => {
-            request
-                .context
-                .private_entries
-                .lock()
-                .insert(RootCacheKey(key));
-
-            Ok(ControlFlow::Continue(request))
-        }
+        None => Ok(ControlFlow::Continue((request, key))),
     }
 }
 
@@ -225,7 +284,7 @@ async fn cache_lookup_entities(
     name: String,
     cache: RedisCacheStorage,
     mut request: subgraph::Request,
-) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError> {
+) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, EntityCacheResults)>, BoxError> {
     let body = request.subgraph_request.body_mut();
 
     let keys = extract_cache_keys(
@@ -259,13 +318,10 @@ async fn cache_lookup_entities(
         body.variables
             .insert(REPRESENTATIONS, new_representations.into());
 
-        request
-            .context
-            .private_entries
-            .lock()
-            .insert(EntityCacheResults(cache_result));
-
-        Ok(ControlFlow::Continue(request))
+        Ok(ControlFlow::Continue((
+            request,
+            EntityCacheResults(cache_result),
+        )))
     } else {
         let entities = cache_result
             .into_iter()
@@ -292,41 +348,6 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
     }
     //FIXME: race condition. We need an Entry API for private entries
     context.private_entries.lock().insert(cache_control.clone());
-}
-
-async fn cache_store_from_response(
-    cache: RedisCacheStorage,
-    subgraph_ttl: Option<Duration>,
-    mut response: subgraph::Response,
-) -> Result<subgraph::Response, BoxError> {
-    let (opt_root_cache_key, opt_entities_results) = {
-        let mut entries = response.context.private_entries.lock();
-        let opt_root_cache_key = entries.remove::<RootCacheKey>().map(|v| v.0);
-        let opt_entities_results = entries.remove::<EntityCacheResults>().map(|v| v.0);
-
-        drop(entries);
-
-        (opt_root_cache_key, opt_entities_results)
-    };
-
-    let cache_control = CacheControl::new(response.response.headers(), cache.ttl)?;
-    update_cache_control(&response.context, &cache_control);
-
-    if let Some(cache_key) = opt_root_cache_key {
-        cache_store_root_from_response(cache, subgraph_ttl, &response, cache_control, cache_key)
-            .await?;
-    } else if let Some(result_from_cache) = opt_entities_results {
-        cache_store_entities_from_response(
-            cache,
-            subgraph_ttl,
-            &mut response,
-            cache_control,
-            result_from_cache,
-        )
-        .await?;
-    }
-
-    Ok(response)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
