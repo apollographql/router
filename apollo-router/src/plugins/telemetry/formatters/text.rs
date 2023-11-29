@@ -229,7 +229,7 @@ impl Text {
         {
             let mut attrs = otel_attributes
                 .iter()
-                .filter(|(key, value)| {
+                .filter(|(key, _value)| {
                     let key_name = key.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
                         && !self.excluded_attributes.contains(&key_name)

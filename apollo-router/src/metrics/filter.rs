@@ -71,7 +71,7 @@ impl FilterMeterProvider {
 
     #[allow(dead_code)]
     pub(crate) fn force_flush(&self, cx: &Context) -> opentelemetry::metrics::Result<()> {
-        self.delegate.force_flush(&cx)
+        self.delegate.force_flush(cx)
     }
 }
 
