@@ -489,7 +489,7 @@ fn extract_cache_key_root(
     // - query hash: invalidate the entry for a specific query and operation name
     // - additional data: separate cache entries depending on info like authorization status
     format!(
-        "subgraph:{}:{}:{}",
+        "subgraph:{}:Query:{}:{}",
         subgraph_name, query_hash, additional_data_hash
     )
 }

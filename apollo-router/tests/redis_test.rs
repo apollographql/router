@@ -309,7 +309,7 @@ mod test {
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-          .get("subgraph:products:530d594c46b838e725b87d64fd6384b82f6ff14bd902b57bba9dcc34ce684b76:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("subgraph:products:Query:530d594c46b838e725b87d64fd6384b82f6ff14bd902b57bba9dcc34ce684b76:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
@@ -623,7 +623,7 @@ mod test {
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-          .get("subgraph:products:530d594c46b838e725b87d64fd6384b82f6ff14bd902b57bba9dcc34ce684b76:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("subgraph:products:Query:530d594c46b838e725b87d64fd6384b82f6ff14bd902b57bba9dcc34ce684b76:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
