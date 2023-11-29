@@ -1021,7 +1021,7 @@ Subsequent response chunks omit the `headers` and `statusCode` fields:
 
 ## Adding authorization claims via coprocessor
 
-To use the [authorization directives](../configuration/authorization#authorization-directives), a request needs to include **claims**—the details of its authentication and scope. The most straightforward way to add claims is with [JWT authentication](../configuration/./authn-jwt). You can also add claims with a [`RouterService` or `SupergraphService` coprocessor](#how-it-works) since it hooks into the request lifecycle before the router applies authorization logic.
+To use the [authorization directives](../configuration/authorization#authorization-directives), a request needs to include **claims**—the details of its authentication and scope. The most straightforward way to add claims is with [JWT authentication](../configuration/./authn-jwt). You can also add claims with a [`RouterService` or `SupergraphService` coprocessor](#how-it-works) since they hook into the request lifecycle before the router applies authorization logic.
 
 The router configuration necessary to call the coprocessor for authorization claims looks like this:
 
