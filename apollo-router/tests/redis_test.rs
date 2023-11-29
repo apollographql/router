@@ -209,7 +209,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn entity_cache() -> Result<(), BoxError> {
         let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
-        let client = RedisClient::new(config, None, None);
+        let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
         client.wait_for_connect().await?;
 
@@ -309,14 +309,14 @@ mod test {
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-          .get("subgraph.products|530d594c46b838e725b87d64fd6384b82f6ff14bd902b57bba9dcc34ce684b76|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("subgraph:products:530d594c46b838e725b87d64fd6384b82f6ff14bd902b57bba9dcc34ce684b76:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
         insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
         let s:String = client
-        .get("subgraph.reviews|Product|4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66|98424704ece0e377929efa619bce2cbd5246281199c72a0902da863270f5839c|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:98424704ece0e377929efa619bce2cbd5246281199c72a0902da863270f5839c:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
@@ -413,7 +413,7 @@ mod test {
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-        .get("subgraph.reviews|Product|d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d|98424704ece0e377929efa619bce2cbd5246281199c72a0902da863270f5839c|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("subgraph:reviews:Product:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:98424704ece0e377929efa619bce2cbd5246281199c72a0902da863270f5839c:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
@@ -428,7 +428,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn entity_cache_authorization() -> Result<(), BoxError> {
         let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
-        let client = RedisClient::new(config, None, None);
+        let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
         client.wait_for_connect().await?;
 
@@ -623,7 +623,7 @@ mod test {
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-          .get("subgraph.products|530d594c46b838e725b87d64fd6384b82f6ff14bd902b57bba9dcc34ce684b76|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("subgraph:products:530d594c46b838e725b87d64fd6384b82f6ff14bd902b57bba9dcc34ce684b76:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
@@ -644,7 +644,7 @@ mod test {
         );
 
         let s: String = client
-        .get("subgraph.reviews|Product|4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66|98424704ece0e377929efa619bce2cbd5246281199c72a0902da863270f5839c|d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:98424704ece0e377929efa619bce2cbd5246281199c72a0902da863270f5839c:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
@@ -688,7 +688,7 @@ mod test {
         insta::assert_json_snapshot!(response);
 
         let s:String = client
-          .get("subgraph.reviews|Product|4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66|dc8e1fb584d7ad114b3e836a5fe4f642732b82eb39bb8d6dff000d844d0e3baf|f1d914240cfd0c60d5388f3f2d2ae00b5f1e2400ef2c9320252439f354515ce9")
+          .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:dc8e1fb584d7ad114b3e836a5fe4f642732b82eb39bb8d6dff000d844d0e3baf:f1d914240cfd0c60d5388f3f2d2ae00b5f1e2400ef2c9320252439f354515ce9")
           .await
           .unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
