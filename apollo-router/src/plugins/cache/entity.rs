@@ -32,6 +32,7 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::QueryHash;
+use crate::query_planner::OperationKind;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::TYPENAME;
@@ -149,7 +150,11 @@ impl Plugin for EntityCache {
                         .variables
                         .contains_key(REPRESENTATIONS)
                     {
-                        cache_lookup_root(name, cache, request).await
+                        if request.operation_kind == OperationKind::Query {
+                            cache_lookup_root(name, cache, request).await
+                        } else {
+                            Ok(ControlFlow::Continue(request))
+                        }
                     } else {
                         cache_lookup_entities(name, cache, request).await
                     }
