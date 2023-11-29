@@ -91,7 +91,7 @@ diff = "0.1.13"
 directories = "5.0.1"
 displaydoc = "0.2"
 flate2 = "1.0.28"
-fred = { version = "6.3.2", features = ["enable-rustls", "no-client-setname"] }
+fred = { version = "7.0.0", features = ["enable-rustls"] }
 futures = { version = "0.3.29", features = ["thread-pool"] }
 graphql_client = "0.13.0"
 hex = { version = "0.4.3", features = ["serde"] }
@@ -184,7 +184,7 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "stream",
 ] }
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.5.8+v2.5.7"
+router-bridge = "=0.5.10+v2.6.1"
 rust-embed = "8.0.0"
 rustls = "0.21.9"
 rustls-pemfile = "1.0.4"
@@ -248,8 +248,8 @@ hmac = "0.12.1"
 parking_lot = "0.12.1"
 memchr = "2.6.4"
 brotli = "3.4.0"
-zstd = "0.12.4"
-zstd-safe = "6.0.6"
+zstd = "0.13.0"
+zstd-safe = "7.0.0"
 # note: AWS dependencies should always use the same version
 aws-sigv4 = "0.56.1"
 aws-credential-types = "0.56.1"
@@ -276,7 +276,6 @@ axum = { version = "0.6.20", features = [
     "ws",
 ] }
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
-fred = { version = "6.3.2", features = ["enable-rustls", "no-client-setname"] }
 futures-test = "0.3.29"
 insta = { version = "1.34.0", features = ["json", "redactions", "yaml"] }
 maplit = "1.0.2"

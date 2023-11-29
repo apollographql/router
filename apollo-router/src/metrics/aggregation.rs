@@ -64,6 +64,7 @@ pub(crate) enum InstrumentWrapper {
     I64Histogram(Arc<Histogram<i64>>),
     U64Histogram(Arc<Histogram<u64>>),
     F64Histogram(Arc<Histogram<f64>>),
+    U64Gauge(Arc<ObservableGauge<u64>>),
 }
 
 #[derive(Eq, PartialEq, Hash)]

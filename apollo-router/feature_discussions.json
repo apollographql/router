@@ -7,6 +7,5 @@
     "experimental_batching": "https://github.com/apollographql/router/discussions/3840"
   },
   "preview": {
-    "preview_directives": "https://github.com/apollographql/router/discussions/3754"
   }
 }
