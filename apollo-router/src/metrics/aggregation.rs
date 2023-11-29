@@ -8,25 +8,25 @@ use std::sync::Mutex;
 
 use derive_more::From;
 use itertools::Itertools;
-use opentelemetry::metrics::AsyncInstrument;
 use opentelemetry::metrics::Callback;
-use opentelemetry::metrics::CallbackRegistration;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::InstrumentProvider;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry::metrics::MetricsError;
 use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
-use opentelemetry::metrics::Observer;
 use opentelemetry::metrics::SyncCounter;
 use opentelemetry::metrics::SyncHistogram;
 use opentelemetry::metrics::SyncUpDownCounter;
 use opentelemetry::metrics::Unit;
 use opentelemetry::metrics::UpDownCounter;
 use opentelemetry::KeyValue;
+use opentelemetry_api::metrics::AsyncInstrument;
+use opentelemetry_api::metrics::CallbackRegistration;
+use opentelemetry_api::metrics::MetricsError;
+use opentelemetry_api::metrics::Observer;
 
 use crate::metrics::filter::FilterMeterProvider;
 
@@ -64,6 +64,7 @@ pub(crate) enum InstrumentWrapper {
     I64Histogram(Arc<Histogram<i64>>),
     U64Histogram(Arc<Histogram<u64>>),
     F64Histogram(Arc<Histogram<f64>>),
+    U64Gauge(Arc<ObservableGauge<u64>>),
 }
 
 #[derive(Eq, PartialEq, Hash)]
@@ -415,7 +416,7 @@ impl InstrumentProvider for AggregateInstrumentProvider {
         &self,
         instruments: &[Arc<dyn Any>],
         callbacks: Box<dyn Fn(&dyn Observer) + Send + Sync>,
-    ) -> opentelemetry::metrics::Result<Box<dyn CallbackRegistration>> {
+    ) -> opentelemetry_api::metrics::Result<Box<dyn CallbackRegistration>> {
         // The reason that this is OK is that calling observe outside of a callback is a no-op.
         // So the callback is called, an observable is updated, but only the observable associated with the correct meter will take effect
 
@@ -434,7 +435,7 @@ impl InstrumentProvider for AggregateInstrumentProvider {
 
 struct AggregatedCallbackRegistrations(Vec<Box<dyn CallbackRegistration>>);
 impl CallbackRegistration for AggregatedCallbackRegistrations {
-    fn unregister(&mut self) -> opentelemetry::metrics::Result<()> {
+    fn unregister(&mut self) -> opentelemetry_api::metrics::Result<()> {
         let mut errors = vec![];
         for mut registration in mem::take(&mut self.0) {
             if let Err(err) = registration.unregister() {
