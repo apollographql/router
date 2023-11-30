@@ -370,6 +370,15 @@ impl FieldDefinitionPosition {
     }
 }
 
+impl From<ObjectOrInterfaceFieldDefinitionPosition> for FieldDefinitionPosition {
+    fn from(value: ObjectOrInterfaceFieldDefinitionPosition) -> Self {
+        match value {
+            ObjectOrInterfaceFieldDefinitionPosition::Object(value) => value.into(),
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(value) => value.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum ObjectOrInterfaceFieldDefinitionPosition {
     Object(ObjectFieldDefinitionPosition),
@@ -6164,7 +6173,7 @@ fn validate_arguments(arguments: &[Node<InputValueDefinition>]) -> Result<(), Fe
 }
 
 impl FederationSchema {
-    pub(crate) fn new(schema: Schema) -> Result<FederationSchema, FederationError> {
+    pub fn new(schema: Schema) -> Result<FederationSchema, FederationError> {
         let metadata = links_metadata(&schema)?;
         let mut referencers: Referencers = Default::default();
 

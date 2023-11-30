@@ -63,6 +63,28 @@ pub fn build_federated_query_graph(
     query_graph = federated_builder.build()?;
     Ok(query_graph)
 }
+
+/// Builds a query graph based on the provided schema (usually an API schema outside of testing).
+///
+/// Assumes the given schemas have been validated.
+pub fn build_query_graph(
+    name: NodeStr,
+    schema: FederationSchema,
+) -> Result<QueryGraph, FederationError> {
+    let mut query_graph = QueryGraph {
+        // Note this name is a dummy initial name that gets overridden as we build the query graph.
+        current_source: NodeStr::new(""),
+        graph: Default::default(),
+        sources: Default::default(),
+        types_to_nodes_by_source: Default::default(),
+        root_kinds_to_nodes_by_source: Default::default(),
+        non_trivial_followup_edges: Default::default(),
+    };
+    let builder = SchemaQueryGraphBuilder::new(query_graph, name, schema, None, false)?;
+    query_graph = builder.build()?;
+    Ok(query_graph)
+}
+
 struct BaseQueryGraphBuilder {
     query_graph: QueryGraph,
 }
@@ -1999,4 +2021,287 @@ fn resolvable_key_applications(
         applications.push(key_directive_application);
     }
     Ok(applications)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::error::FederationError;
+    use crate::query_graph::build_query_graph::build_query_graph;
+    use crate::query_graph::{
+        QueryGraph, QueryGraphEdgeTransition, QueryGraphNode, QueryGraphNodeType,
+    };
+    use crate::schema::position::{
+        ObjectOrInterfaceTypeDefinitionPosition, ObjectTypeDefinitionPosition,
+        OutputTypeDefinitionPosition, ScalarTypeDefinitionPosition, SchemaRootDefinitionKind,
+    };
+    use crate::schema::FederationSchema;
+    use apollo_compiler::schema::Name;
+    use apollo_compiler::{name, NodeStr, Schema};
+    use indexmap::{IndexMap, IndexSet};
+    use petgraph::graph::NodeIndex;
+    use petgraph::visit::EdgeRef;
+    use petgraph::Direction;
+
+    const SCHEMA_NAME: NodeStr = NodeStr::from_static(&"test");
+
+    fn test_query_graph_from_schema_sdl(sdl: &str) -> Result<QueryGraph, FederationError> {
+        let schema = FederationSchema::new(Schema::parse(sdl, "schema.graphql"))?;
+        build_query_graph(SCHEMA_NAME, schema)
+    }
+
+    fn assert_node_type(
+        query_graph: &QueryGraph,
+        node: NodeIndex,
+        output_type_definition_position: OutputTypeDefinitionPosition,
+        root_kind: Option<SchemaRootDefinitionKind>,
+    ) -> Result<(), FederationError> {
+        assert_eq!(
+            *query_graph.node_weight(node)?,
+            QueryGraphNode {
+                type_: QueryGraphNodeType::SchemaType(output_type_definition_position),
+                source: SCHEMA_NAME,
+                has_reachable_cross_subgraph_edges: false,
+                provide_id: None,
+                root_kind,
+            },
+        );
+        Ok(())
+    }
+
+    fn named_edges(
+        query_graph: &QueryGraph,
+        head: NodeIndex,
+        field_names: IndexSet<Name>,
+    ) -> Result<IndexMap<Name, NodeIndex>, FederationError> {
+        let mut result = IndexMap::new();
+        for field_name in field_names {
+            // PORT_NOTE: In the JS codebase, there were a lot of asserts here, but they were all
+            // duplicated with single_edge() (or they tested the JS codebase's graph representation,
+            // which we don't need to do since we're using petgraph), so they're all removed here.
+            let tail = single_edge(query_graph, head, field_name.clone())?;
+            result.insert(field_name, tail);
+        }
+        Ok(result)
+    }
+
+    fn single_edge(
+        query_graph: &QueryGraph,
+        head: NodeIndex,
+        field_name: Name,
+    ) -> Result<NodeIndex, FederationError> {
+        let head_weight = query_graph.node_weight(head)?;
+        let QueryGraphNodeType::SchemaType(type_pos) = &head_weight.type_ else {
+            panic!("Unexpectedly found federated root type");
+        };
+        let type_pos: ObjectOrInterfaceTypeDefinitionPosition = type_pos.clone().try_into()?;
+        let field_pos = type_pos.field(field_name);
+        let schema = query_graph.schema()?;
+        field_pos.get(schema.schema())?;
+        let expected_field_transition = QueryGraphEdgeTransition::FieldCollection {
+            source: SCHEMA_NAME,
+            field_definition_position: field_pos.clone().into(),
+            is_part_of_provides: false,
+        };
+        let mut tails = query_graph
+            .graph
+            .edges_directed(head, Direction::Outgoing)
+            .filter_map(|edge_ref| {
+                let edge_weight = edge_ref.weight();
+                if edge_weight.transition == expected_field_transition {
+                    assert_eq!(edge_weight.conditions, None);
+                    Some(edge_ref.target())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(tails.len(), 1);
+        Ok(tails.pop().unwrap())
+    }
+
+    #[test]
+    fn building_query_graphs_from_schema_handles_object_types() -> Result<(), FederationError> {
+        let query_graph = test_query_graph_from_schema_sdl(
+            r#"
+            type Query {
+              t1: T1
+            }
+
+            type T1 {
+              f1: Int
+              f2: String
+              f3: T2
+            }
+
+            type T2 {
+              t: T1
+            }
+            "#,
+        )?;
+
+        // We have 3 object types and 2 scalars (Int and String)
+        assert_eq!(query_graph.graph.node_count(), 5);
+        assert_eq!(
+            query_graph
+                .root_kinds_to_nodes()?
+                .keys()
+                .cloned()
+                .collect::<IndexSet<_>>(),
+            IndexSet::from([SchemaRootDefinitionKind::Query])
+        );
+
+        let root_node = query_graph
+            .root_kinds_to_nodes()?
+            .get(&SchemaRootDefinitionKind::Query)
+            .unwrap();
+        assert_node_type(
+            &query_graph,
+            *root_node,
+            ObjectTypeDefinitionPosition {
+                type_name: name!("Query"),
+            }
+            .into(),
+            Some(SchemaRootDefinitionKind::Query),
+        )?;
+        assert_eq!(
+            query_graph
+                .graph
+                .edges_directed(*root_node, Direction::Outgoing)
+                .count(),
+            2
+        );
+        let root_fields = named_edges(
+            &query_graph,
+            *root_node,
+            IndexSet::from([name!("__typename"), name!("t1")]),
+        )?;
+
+        let root_typename_tail = root_fields.get("__typename").unwrap();
+        assert_node_type(
+            &query_graph,
+            *root_typename_tail,
+            ScalarTypeDefinitionPosition {
+                type_name: name!("String"),
+            }
+            .into(),
+            None,
+        )?;
+
+        let t1_node = root_fields.get("t1").unwrap();
+        assert_node_type(
+            &query_graph,
+            *t1_node,
+            ObjectTypeDefinitionPosition {
+                type_name: name!("T1"),
+            }
+            .into(),
+            None,
+        )?;
+        assert_eq!(
+            query_graph
+                .graph
+                .edges_directed(*t1_node, Direction::Outgoing)
+                .count(),
+            4
+        );
+        let t1_fields = named_edges(
+            &query_graph,
+            *t1_node,
+            IndexSet::from([name!("__typename"), name!("f1"), name!("f2"), name!("f3")]),
+        )?;
+
+        let t1_typename_tail = t1_fields.get("__typename").unwrap();
+        assert_node_type(
+            &query_graph,
+            *t1_typename_tail,
+            ScalarTypeDefinitionPosition {
+                type_name: name!("String"),
+            }
+            .into(),
+            None,
+        )?;
+
+        let t1_f1_tail = t1_fields.get("f1").unwrap();
+        assert_node_type(
+            &query_graph,
+            *t1_f1_tail,
+            ScalarTypeDefinitionPosition {
+                type_name: name!("Int"),
+            }
+            .into(),
+            None,
+        )?;
+        assert_eq!(
+            query_graph
+                .graph
+                .edges_directed(*t1_f1_tail, Direction::Outgoing)
+                .count(),
+            0
+        );
+
+        let t1_f2_tail = t1_fields.get("f2").unwrap();
+        assert_node_type(
+            &query_graph,
+            *t1_f2_tail,
+            ScalarTypeDefinitionPosition {
+                type_name: name!("String"),
+            }
+            .into(),
+            None,
+        )?;
+        assert_eq!(
+            query_graph
+                .graph
+                .edges_directed(*t1_f2_tail, Direction::Outgoing)
+                .count(),
+            0
+        );
+
+        let t2_node = t1_fields.get("f3").unwrap();
+        assert_node_type(
+            &query_graph,
+            *t2_node,
+            ObjectTypeDefinitionPosition {
+                type_name: name!("T2"),
+            }
+            .into(),
+            None,
+        )?;
+        assert_eq!(
+            query_graph
+                .graph
+                .edges_directed(*t2_node, Direction::Outgoing)
+                .count(),
+            2
+        );
+        let t2_fields = named_edges(
+            &query_graph,
+            *t2_node,
+            IndexSet::from([name!("__typename"), name!("t")]),
+        )?;
+
+        let t2_typename_tail = t2_fields.get("__typename").unwrap();
+        assert_node_type(
+            &query_graph,
+            *t2_typename_tail,
+            ScalarTypeDefinitionPosition {
+                type_name: name!("String"),
+            }
+            .into(),
+            None,
+        )?;
+
+        let t2_t_tail = t2_fields.get("t").unwrap();
+        assert_node_type(
+            &query_graph,
+            *t2_t_tail,
+            ObjectTypeDefinitionPosition {
+                type_name: name!("T1"),
+            }
+            .into(),
+            None,
+        )?;
+
+        Ok(())
+    }
 }

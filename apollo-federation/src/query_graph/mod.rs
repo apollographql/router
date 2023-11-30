@@ -12,11 +12,11 @@ use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 
-pub(crate) mod build_query_graph;
+pub mod build_query_graph;
 pub(crate) mod extract_subgraphs_from_supergraph;
 mod field_set;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct QueryGraphNode {
     /// The GraphQL type this node points to.
     pub(crate) type_: QueryGraphNodeType,
@@ -112,7 +112,7 @@ impl Display for QueryGraphEdge {
 /// The type of query graph edge "transition".
 ///
 /// An edge transition encodes what the edge corresponds to, in the underlying GraphQL schema.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum QueryGraphEdgeTransition {
     /// A field edge, going from (a node for) the field parent type to the field's (base) type.
     FieldCollection {
