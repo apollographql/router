@@ -1,8 +1,10 @@
-### feat(subscription): add configurable heartbeat for subscription callback protocol ([Issue #4115](https://github.com/apollographql/router/issues/4115))
+### feat(subscription): Support configurable heartbeat for subscription callback protocol ([Issue #4115](https://github.com/apollographql/router/issues/4115))
 
-Add the ability to disable heartbeat for certain platforms; lambdas for example
+The heartbeat interval that the Apollo Router uses for the subscription callback protocol is now configurable.
 
-Example of configuration:
+The heartbeat can even be disabled for certain platforms.
+
+An example configuration:
 
 ```yaml
 subscription:
