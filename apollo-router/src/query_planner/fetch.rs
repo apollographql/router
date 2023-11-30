@@ -11,7 +11,7 @@ use tracing::Instrument;
 
 use super::execution::ExecutionParameters;
 use super::rewrites;
-use super::selection::select_object;
+use super::selection::execute_selection_set;
 use super::selection::Selection;
 use crate::error::Error;
 use crate::error::FetchError;
@@ -153,18 +153,17 @@ impl Variables {
             let mut values: IndexSet<Value> = IndexSet::new();
 
             data.select_values_and_paths(schema, current_dir, |path, value| {
-                if let Value::Object(content) = value {
-                    if let Ok(Some(mut value)) = select_object(content, requires, schema) {
-                        rewrites::apply_rewrites(schema, &mut value, input_rewrites);
-                        match values.get_index_of(&value) {
-                            Some(index) => {
-                                inverted_paths[index].push(path.clone());
-                            }
-                            None => {
-                                inverted_paths.push(vec![path.clone()]);
-                                values.insert(value);
-                                debug_assert!(inverted_paths.len() == values.len());
-                            }
+                let mut value = execute_selection_set(value, requires, schema, None);
+                if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
+                    rewrites::apply_rewrites(schema, &mut value, input_rewrites);
+                    match values.get_index_of(&value) {
+                        Some(index) => {
+                            inverted_paths[index].push(path.clone());
+                        }
+                        None => {
+                            inverted_paths.push(vec![path.clone()]);
+                            values.insert(value);
+                            debug_assert!(inverted_paths.len() == values.len());
                         }
                     }
                 }
