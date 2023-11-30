@@ -140,7 +140,7 @@ impl Plugin for EntityCache {
             tower::util::BoxService::new(CacheService(Some(InnerCacheService {
                 service,
                 name: name.to_string(),
-                storage: storage,
+                storage,
                 subgraph_ttl,
             })))
         } else {
@@ -193,7 +193,7 @@ impl InnerCacheService {
         {
             if request.operation_kind == OperationKind::Query {
                 match cache_lookup_root(self.name, self.storage.clone(), request).await? {
-                    ControlFlow::Break(response) => return Ok(response),
+                    ControlFlow::Break(response) => Ok(response),
                     ControlFlow::Continue((request, root_cache_key)) => {
                         let response = self.service.call(request).await?;
 
@@ -218,7 +218,7 @@ impl InnerCacheService {
             }
         } else {
             match cache_lookup_entities(self.name, self.storage.clone(), request).await? {
-                ControlFlow::Break(response) => return Ok(response),
+                ControlFlow::Break(response) => Ok(response),
                 ControlFlow::Continue((request, cache_result)) => {
                     let mut response = self.service.call(request).await?;
 
