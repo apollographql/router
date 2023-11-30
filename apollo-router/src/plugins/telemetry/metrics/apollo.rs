@@ -4,12 +4,12 @@ use std::sync::atomic::Ordering;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use opentelemetry::KeyValue;
+use opentelemetry::runtime;
+use opentelemetry::sdk::metrics::PeriodicReader;
+use opentelemetry::sdk::Resource;
+use opentelemetry_api::KeyValue;
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::metrics::PeriodicReader;
-use opentelemetry_sdk::runtime;
-use opentelemetry_sdk::Resource;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tower::BoxError;
@@ -118,7 +118,7 @@ impl Config {
         )
         .build_metrics_exporter(
             Box::new(CustomTemporalitySelector(
-                opentelemetry_sdk::metrics::data::Temporality::Delta,
+                opentelemetry::sdk::metrics::data::Temporality::Delta,
             )),
             Box::new(
                 CustomAggregationSelector::builder()
