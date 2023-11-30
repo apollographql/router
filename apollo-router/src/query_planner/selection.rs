@@ -226,13 +226,12 @@ mod tests {
                 values.push(value);
             });
 
-        let res = Ok(Value::Array(
+        Ok(Value::Array(
             values
                 .into_iter()
                 .map(|value| execute_selection_set(value, selections, schema, None))
                 .collect::<Vec<_>>(),
-        ));
-        res
+        ))
     }
 
     macro_rules! select {
