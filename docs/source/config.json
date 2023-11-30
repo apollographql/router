@@ -108,7 +108,7 @@
         "Configuration": "/configuration/telemetry/exporters/metrics/overview",
         "Datadog": "/configuration/telemetry/exporters/metrics/datadog",
         "New Relic": "/configuration/telemetry/exporters/metrics/new-relic",
-        "OpenTelemetry": "/configuration/telemetry/exporters/metrics/opentelemetry",
+        "OTLP": "/configuration/telemetry/exporters/metrics/otlp",
         "Prometheus": "/configuration/telemetry/exporters/metrics/prometheus"
       },
       "Trace exporters": {
@@ -116,7 +116,7 @@
         "Datadog": "/configuration/telemetry/exporters/tracing/datadog",
         "Jaeger": "/configuration/telemetry/exporters/tracing/jaeger",
         "New Relic": "/configuration/telemetry/exporters/tracing/new-relic",
-        "OpenTelemetry": "/configuration/telemetry/exporters/tracing/opentelemetry",
+        "OTLP": "/configuration/telemetry/exporters/tracing/otlp",
         "Zipkin": "/configuration/telemetry/exporters/tracing/zipkin"
       },
       "Instrumentation": {
