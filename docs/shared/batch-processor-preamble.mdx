@@ -1,0 +1,9 @@
+All exporters support configuration of a batch span processor with `batch_processor`. 
+
+You must tune your `batch_processor` configuration if you see any of the following messages in your logs:
+
+* `OpenTelemetry trace error occurred: cannot send span to the batch span processor because the channel is full`
+
+* `OpenTelemetry metrics error occurred: cannot send span to the batch span processor because the channel is full`
+
+The exact settings depend on the bandwidth available for you to send data to your application peformance monitor (APM) and the bandwidth configuration of your APM. Expect to tune these settings over time as your application changes.
