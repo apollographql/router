@@ -5,7 +5,7 @@ pub(crate) mod text;
 use std::collections::LinkedList;
 use std::fmt;
 
-use opentelemetry_sdk::Resource;
+use opentelemetry::sdk::Resource;
 use serde_json::Number;
 use tracing::Subscriber;
 use tracing_subscriber::fmt::format::Writer;

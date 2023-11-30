@@ -2,14 +2,15 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::time::Duration;
 
+use opentelemetry::sdk::export::trace::SpanData;
+use opentelemetry::sdk::trace::BatchConfig;
+use opentelemetry::sdk::trace::Builder;
+use opentelemetry::sdk::trace::EvictedHashMap;
+use opentelemetry::sdk::trace::Span;
+use opentelemetry::sdk::trace::SpanProcessor;
 use opentelemetry::trace::TraceResult;
 use opentelemetry::Context;
 use opentelemetry::KeyValue;
-use opentelemetry_sdk::export::trace::SpanData;
-use opentelemetry_sdk::trace::BatchConfig;
-use opentelemetry_sdk::trace::Builder;
-use opentelemetry_sdk::trace::Span;
-use opentelemetry_sdk::trace::SpanProcessor;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -51,18 +52,21 @@ impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
         if span
             .attributes
             .iter()
-            .any(|kv| kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
+            .any(|(key, _)| key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
         {
             let attributes_len = span.attributes.len();
             let span = SpanData {
                 attributes: span
                     .attributes
                     .into_iter()
-                    .filter(|kv| !kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
-                    .fold(Vec::with_capacity(attributes_len), |mut m, kv| {
-                        m.push(KeyValue::new(kv.key, kv.value));
-                        m
-                    }),
+                    .filter(|(k, _)| !k.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
+                    .fold(
+                        EvictedHashMap::new(attributes_len as u32, attributes_len),
+                        |mut m, (k, v)| {
+                            m.insert(KeyValue::new(k, v));
+                            m
+                        },
+                    ),
                 ..span
             };
 
