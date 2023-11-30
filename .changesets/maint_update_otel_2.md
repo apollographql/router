@@ -1,7 +1,7 @@
-### Update opentelemetry to version 0.21 ([PR #4248](https://github.com/apollographql/router/pull/4248))
+### Update OpenTelemetry to version 0.21 ([PR #4248](https://github.com/apollographql/router/pull/4248))
 
-Updates the other otel ecosystem crates as well.
+Update OpenTelemetry in the Apollo Router to version 0.21, including updates to other OTEL ecosystem crates.
 
-Thanks to: https://github.com/jtescher for this contribution.
+Thanks to [@jtsecher](https://github.com/jtescher) for this contribution.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4248

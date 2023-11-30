@@ -1,5 +1,7 @@
-### Add missing schemas for redis connections ([Issue #4173](https://github.com/apollographql/router/issues/4173))
+### Add missing schemas for Redis connections ([Issue #4173](https://github.com/apollographql/router/issues/4173))
 
-We have supported additional schemas in our redis configuration since we fixed: https://github.com/apollographql/router/issues/3534, but we never updated our redis connection logic to process the new schema options. This is now fixed.
+Previously, support for additional schemas for the Redis client used in the Apollo Router were [added](https://github.com/apollographql/router/issues/3534). However, the router's Redis connection logic wasn't updated to process the new schema options. 
+
+The Redis connection logic has been updated in this release.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4174
