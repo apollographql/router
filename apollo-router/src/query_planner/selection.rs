@@ -229,19 +229,9 @@ mod tests {
         let res = Ok(Value::Array(
             values
                 .into_iter()
-                .map(|value| {
-                    execute_selection_set(value, selections, schema, None)
-                    /*match (value, selections) {
-                    (Value::Object(content), requires) => {
-                        select_object(content, requires, schema) //.transpose()
-                    }
-                    (_, _) => Err(FetchError::ExecutionInvalidContent {
-                        reason: "not an object".to_string(),
-                    }),*/
-                })
+                .map(|value| execute_selection_set(value, selections, schema, None))
                 .collect::<Vec<_>>(),
         ));
-        println!("select res: {res:?}");
         res
     }
 
