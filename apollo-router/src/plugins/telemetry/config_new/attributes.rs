@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::LinkedList;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 
@@ -8,7 +8,7 @@ use http::header::USER_AGENT;
 use http::StatusCode;
 use http::Uri;
 use opentelemetry::Key;
-use opentelemetry::Value;
+use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::CLIENT_ADDRESS;
 use opentelemetry_semantic_conventions::trace::CLIENT_PORT;
 use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
@@ -526,36 +526,36 @@ impl Selectors for RouterAttributes {
     type Request = router::Request;
     type Response = router::Response;
 
-    fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
+    fn on_request(&self, request: &router::Request) -> LinkedList<KeyValue> {
         let mut attrs = self.common.on_request(request);
         attrs.extend(self.server.on_request(request));
         if let Some(true) = &self.trace_id {
             if let Some(trace_id) = trace_id() {
-                attrs.insert(
+                attrs.push_back(KeyValue::new(
                     Key::from_static_str("trace_id"),
-                    trace_id.to_string().into(),
-                );
+                    trace_id.to_string(),
+                ));
             }
         }
         if let Some(true) = &self.datadog_trace_id {
             if let Some(trace_id) = trace_id() {
-                attrs.insert(
+                attrs.push_back(KeyValue::new(
                     Key::from_static_str("dd.trace_id"),
-                    trace_id.to_datadog().into(),
-                );
+                    trace_id.to_datadog(),
+                ));
             }
         }
 
         attrs
     }
 
-    fn on_response(&self, response: &router::Response) -> HashMap<Key, opentelemetry::Value> {
+    fn on_response(&self, response: &router::Response) -> LinkedList<KeyValue> {
         let mut attrs = self.common.on_response(response);
         attrs.extend(self.server.on_response(response));
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
+    fn on_error(&self, error: &BoxError) -> LinkedList<KeyValue> {
         let mut attrs = self.common.on_error(error);
         attrs.extend(self.server.on_error(error));
         attrs
@@ -566,13 +566,13 @@ impl Selectors for HttpCommonAttributes {
     type Request = router::Request;
     type Response = router::Response;
 
-    fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
-        let mut attrs = HashMap::new();
+    fn on_request(&self, request: &router::Request) -> LinkedList<KeyValue> {
+        let mut attrs = LinkedList::new();
         if let Some(true) = &self.http_request_method {
-            attrs.insert(
+            attrs.push_back(KeyValue::new(
                 HTTP_REQUEST_METHOD,
-                request.router_request.method().as_str().to_string().into(),
-            );
+                request.router_request.method().as_str().to_string(),
+            ));
         }
 
         if let Some(true) = &self.http_request_body_size {
@@ -582,22 +582,25 @@ impl Selectors for HttpCommonAttributes {
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.insert(HTTP_REQUEST_BODY_SIZE, content_length.to_string().into());
+                attrs.push_back(KeyValue::new(
+                    HTTP_REQUEST_BODY_SIZE,
+                    content_length.to_string(),
+                ));
             }
         }
         if let Some(true) = &self.network_protocol_name {
             if let Some(scheme) = request.router_request.uri().scheme() {
-                attrs.insert(NETWORK_PROTOCOL_NAME, scheme.to_string().into());
+                attrs.push_back(KeyValue::new(NETWORK_PROTOCOL_NAME, scheme.to_string()));
             }
         }
         if let Some(true) = &self.network_protocol_version {
-            attrs.insert(
+            attrs.push_back(KeyValue::new(
                 NETWORK_PROTOCOL_VERSION,
-                format!("{:?}", request.router_request.version()).into(),
-            );
+                format!("{:?}", request.router_request.version()),
+            ));
         }
         if let Some(true) = &self.network_transport {
-            attrs.insert(NETWORK_TRANSPORT, "tcp".to_string().into());
+            attrs.push_back(KeyValue::new(NETWORK_TRANSPORT, "tcp".to_string()));
         }
         if let Some(true) = &self.network_type {
             if let Some(connection_info) =
@@ -605,9 +608,9 @@ impl Selectors for HttpCommonAttributes {
             {
                 if let Some(socket) = connection_info.server_address {
                     if socket.is_ipv4() {
-                        attrs.insert(NETWORK_TYPE, "ipv4".to_string().into());
+                        attrs.push_back(KeyValue::new(NETWORK_TYPE, "ipv4".to_string()));
                     } else if socket.is_ipv6() {
-                        attrs.insert(NETWORK_TYPE, "ipv6".to_string().into());
+                        attrs.push_back(KeyValue::new(NETWORK_TYPE, "ipv6".to_string()));
                     }
                 }
             }
@@ -616,8 +619,8 @@ impl Selectors for HttpCommonAttributes {
         attrs
     }
 
-    fn on_response(&self, response: &router::Response) -> HashMap<Key, opentelemetry::Value> {
-        let mut attrs = HashMap::new();
+    fn on_response(&self, response: &router::Response) -> LinkedList<KeyValue> {
+        let mut attrs = LinkedList::new();
         if let Some(true) = &self.http_response_body_size {
             if let Some(content_length) = response
                 .response
@@ -625,49 +628,50 @@ impl Selectors for HttpCommonAttributes {
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.insert(HTTP_RESPONSE_BODY_SIZE, content_length.to_string().into());
+                attrs.push_back(KeyValue::new(
+                    HTTP_RESPONSE_BODY_SIZE,
+                    content_length.to_string(),
+                ));
             }
         }
         if let Some(true) = &self.http_response_status_code {
-            attrs.insert(
+            attrs.push_back(KeyValue::new(
                 HTTP_RESPONSE_STATUS_CODE,
-                (response.response.status().as_u16() as i64).into(),
-            );
+                response.response.status().as_u16() as i64,
+            ));
         }
 
         if let Some(true) = &self.error_type {
             if !response.response.status().is_success() {
-                attrs.insert(
+                attrs.push_back(KeyValue::new(
                     ERROR_TYPE,
                     response
                         .response
                         .status()
                         .canonical_reason()
-                        .unwrap_or("unknown")
-                        .into(),
-                );
+                        .unwrap_or("unknown"),
+                ));
             }
         }
 
         attrs
     }
 
-    fn on_error(&self, _error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
-        let mut attrs = HashMap::new();
+    fn on_error(&self, _error: &BoxError) -> LinkedList<KeyValue> {
+        let mut attrs = LinkedList::new();
         if let Some(true) = &self.error_type {
-            attrs.insert(
+            attrs.push_back(KeyValue::new(
                 ERROR_TYPE,
                 StatusCode::INTERNAL_SERVER_ERROR
                     .canonical_reason()
-                    .unwrap_or("unknown")
-                    .into(),
-            );
+                    .unwrap_or("unknown"),
+            ));
         }
         if let Some(true) = &self.http_response_status_code {
-            attrs.insert(
+            attrs.push_back(KeyValue::new(
                 HTTP_RESPONSE_STATUS_CODE,
-                (StatusCode::INTERNAL_SERVER_ERROR.as_u16() as i64).into(),
-            );
+                StatusCode::INTERNAL_SERVER_ERROR.as_u16() as i64,
+            ));
         }
 
         attrs
@@ -678,33 +682,33 @@ impl Selectors for HttpServerAttributes {
     type Request = router::Request;
     type Response = router::Response;
 
-    fn on_request(&self, request: &router::Request) -> HashMap<Key, opentelemetry::Value> {
-        let mut attrs: HashMap<Key, Value> = HashMap::new();
+    fn on_request(&self, request: &router::Request) -> LinkedList<KeyValue> {
+        let mut attrs = LinkedList::new();
         if let Some(true) = &self.http_route {
-            attrs.insert(
+            attrs.push_back(KeyValue::new(
                 HTTP_ROUTE,
-                request.router_request.uri().path().to_string().into(),
-            );
+                request.router_request.uri().path().to_string(),
+            ));
         }
         if let Some(true) = &self.client_address {
             if let Some(forwarded) = Self::forwarded_for(request) {
-                attrs.insert(CLIENT_ADDRESS, forwarded.ip().to_string().into());
+                attrs.push_back(KeyValue::new(CLIENT_ADDRESS, forwarded.ip().to_string()));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.peer_address {
-                    attrs.insert(CLIENT_ADDRESS, socket.ip().to_string().into());
+                    attrs.push_back(KeyValue::new(CLIENT_ADDRESS, socket.ip().to_string()));
                 }
             }
         }
         if let Some(true) = &self.client_port {
             if let Some(forwarded) = Self::forwarded_for(request) {
-                attrs.insert(CLIENT_PORT, (forwarded.port() as i64).into());
+                attrs.push_back(KeyValue::new(CLIENT_PORT, forwarded.port() as i64));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.peer_address {
-                    attrs.insert(CLIENT_PORT, (socket.port() as i64).into());
+                    attrs.push_back(KeyValue::new(CLIENT_PORT, socket.port() as i64));
                 }
             }
         }
@@ -713,23 +717,23 @@ impl Selectors for HttpServerAttributes {
             if let Some(forwarded) =
                 Self::forwarded_host(request).and_then(|h| h.host().map(|h| h.to_string()))
             {
-                attrs.insert(SERVER_ADDRESS, forwarded.into());
+                attrs.push_back(KeyValue::new(SERVER_ADDRESS, forwarded));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.server_address {
-                    attrs.insert(SERVER_ADDRESS, socket.ip().to_string().into());
+                    attrs.push_back(KeyValue::new(SERVER_ADDRESS, socket.ip().to_string()));
                 }
             }
         }
         if let Some(true) = &self.server_port {
             if let Some(forwarded) = Self::forwarded_host(request).and_then(|h| h.port_u16()) {
-                attrs.insert(SERVER_PORT, (forwarded as i64).into());
+                attrs.push_back(KeyValue::new(SERVER_PORT, forwarded as i64));
             } else if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.server_address {
-                    attrs.insert(SERVER_PORT, (socket.port() as i64).into());
+                    attrs.push_back(KeyValue::new(SERVER_PORT, socket.port() as i64));
                 }
             }
         }
@@ -739,7 +743,10 @@ impl Selectors for HttpServerAttributes {
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.server_address {
-                    attrs.insert(NETWORK_LOCAL_ADDRESS, socket.ip().to_string().into());
+                    attrs.push_back(KeyValue::new(
+                        NETWORK_LOCAL_ADDRESS,
+                        socket.ip().to_string(),
+                    ));
                 }
             }
         }
@@ -748,7 +755,7 @@ impl Selectors for HttpServerAttributes {
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.server_address {
-                    attrs.insert(NETWORK_LOCAL_PORT, (socket.port() as i64).into());
+                    attrs.push_back(KeyValue::new(NETWORK_LOCAL_PORT, socket.port() as i64));
                 }
             }
         }
@@ -758,7 +765,7 @@ impl Selectors for HttpServerAttributes {
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.peer_address {
-                    attrs.insert(NETWORK_PEER_ADDRESS, socket.ip().to_string().into());
+                    attrs.push_back(KeyValue::new(NETWORK_PEER_ADDRESS, socket.ip().to_string()));
                 }
             }
         }
@@ -767,23 +774,23 @@ impl Selectors for HttpServerAttributes {
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
                 if let Some(socket) = connection_info.peer_address {
-                    attrs.insert(NETWORK_PEER_PORT, (socket.port() as i64).into());
+                    attrs.push_back(KeyValue::new(NETWORK_PEER_PORT, socket.port() as i64));
                 }
             }
         }
 
         let router_uri = request.router_request.uri();
         if let Some(true) = &self.url_path {
-            attrs.insert(URL_PATH, router_uri.path().to_string().into());
+            attrs.push_back(KeyValue::new(URL_PATH, router_uri.path().to_string()));
         }
         if let Some(true) = &self.url_query {
             if let Some(query) = router_uri.query() {
-                attrs.insert(URL_QUERY, query.to_string().into());
+                attrs.push_back(KeyValue::new(URL_QUERY, query.to_string()));
             }
         }
         if let Some(true) = &self.url_scheme {
             if let Some(scheme) = router_uri.scheme_str() {
-                attrs.insert(URL_SCHEME, scheme.to_string().into());
+                attrs.push_back(KeyValue::new(URL_SCHEME, scheme.to_string()));
             }
         }
         if let Some(true) = &self.user_agent_original {
@@ -793,19 +800,19 @@ impl Selectors for HttpServerAttributes {
                 .get(&USER_AGENT)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.insert(USER_AGENT_ORIGINAL, user_agent.to_string().into());
+                attrs.push_back(KeyValue::new(USER_AGENT_ORIGINAL, user_agent.to_string()));
             }
         }
 
         attrs
     }
 
-    fn on_response(&self, _response: &router::Response) -> HashMap<Key, opentelemetry::Value> {
-        HashMap::with_capacity(0)
+    fn on_response(&self, _response: &router::Response) -> LinkedList<KeyValue> {
+        LinkedList::default()
     }
 
-    fn on_error(&self, _error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
-        HashMap::with_capacity(0)
+    fn on_error(&self, _error: &BoxError) -> LinkedList<KeyValue> {
+        LinkedList::default()
     }
 }
 
@@ -851,11 +858,11 @@ impl Selectors for SupergraphAttributes {
     type Request = supergraph::Request;
     type Response = supergraph::Response;
 
-    fn on_request(&self, request: &supergraph::Request) -> HashMap<Key, opentelemetry::Value> {
-        let mut attrs = HashMap::new();
+    fn on_request(&self, request: &supergraph::Request) -> LinkedList<KeyValue> {
+        let mut attrs = LinkedList::new();
         if let Some(true) = &self.graphql_document {
             if let Some(query) = &request.supergraph_request.body().query {
-                attrs.insert(GRAPHQL_DOCUMENT, query.clone().into());
+                attrs.push_back(KeyValue::new(GRAPHQL_DOCUMENT, query.clone()));
             }
         }
         if let Some(true) = &self.graphql_operation_name {
@@ -864,7 +871,10 @@ impl Selectors for SupergraphAttributes {
                 .get::<_, String>(OPERATION_NAME)
                 .unwrap_or_default()
             {
-                attrs.insert(GRAPHQL_OPERATION_NAME, operation_name.clone().into());
+                attrs.push_back(KeyValue::new(
+                    GRAPHQL_OPERATION_NAME,
+                    operation_name.clone(),
+                ));
             }
         }
         if let Some(true) = &self.graphql_operation_type {
@@ -873,19 +883,22 @@ impl Selectors for SupergraphAttributes {
                 .get::<_, String>(OPERATION_KIND)
                 .unwrap_or_default()
             {
-                attrs.insert(GRAPHQL_OPERATION_TYPE, operation_type.clone().into());
+                attrs.push_back(KeyValue::new(
+                    GRAPHQL_OPERATION_TYPE,
+                    operation_type.clone(),
+                ));
             }
         }
 
         attrs
     }
 
-    fn on_response(&self, _response: &supergraph::Response) -> HashMap<Key, opentelemetry::Value> {
-        HashMap::with_capacity(0)
+    fn on_response(&self, _response: &supergraph::Response) -> LinkedList<KeyValue> {
+        LinkedList::default()
     }
 
-    fn on_error(&self, _error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
-        HashMap::with_capacity(0)
+    fn on_error(&self, _error: &BoxError) -> LinkedList<KeyValue> {
+        LinkedList::default()
     }
 }
 
@@ -893,16 +906,19 @@ impl Selectors for SubgraphAttributes {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
 
-    fn on_request(&self, request: &subgraph::Request) -> HashMap<Key, opentelemetry::Value> {
-        let mut attrs = HashMap::new();
+    fn on_request(&self, request: &subgraph::Request) -> LinkedList<KeyValue> {
+        let mut attrs = LinkedList::new();
         if let Some(true) = &self.graphql_document {
             if let Some(query) = &request.subgraph_request.body().query {
-                attrs.insert(SUBGRAPH_GRAPHQL_DOCUMENT, query.clone().into());
+                attrs.push_back(KeyValue::new(SUBGRAPH_GRAPHQL_DOCUMENT, query.clone()));
             }
         }
         if let Some(true) = &self.graphql_operation_name {
             if let Some(op_name) = &request.subgraph_request.body().operation_name {
-                attrs.insert(SUBGRAPH_GRAPHQL_OPERATION_NAME, op_name.clone().into());
+                attrs.push_back(KeyValue::new(
+                    SUBGRAPH_GRAPHQL_OPERATION_NAME,
+                    op_name.clone(),
+                ));
             }
         }
         if let Some(true) = &self.graphql_operation_type {
@@ -912,27 +928,27 @@ impl Selectors for SubgraphAttributes {
                 .get::<_, String>(OPERATION_KIND)
                 .unwrap_or_default()
             {
-                attrs.insert(
+                attrs.push_back(KeyValue::new(
                     SUBGRAPH_GRAPHQL_OPERATION_TYPE,
-                    operation_type.clone().into(),
-                );
+                    operation_type.clone(),
+                ));
             }
         }
         if let Some(true) = &self.subgraph_name {
             if let Some(subgraph_name) = &request.subgraph_name {
-                attrs.insert(SUBGRAPH_NAME, subgraph_name.clone().into());
+                attrs.push_back(KeyValue::new(SUBGRAPH_NAME, subgraph_name.clone()));
             }
         }
 
         attrs
     }
 
-    fn on_response(&self, _response: &subgraph::Response) -> HashMap<Key, opentelemetry::Value> {
-        HashMap::with_capacity(0)
+    fn on_response(&self, _response: &subgraph::Response) -> LinkedList<KeyValue> {
+        LinkedList::default()
     }
 
-    fn on_error(&self, _error: &BoxError) -> HashMap<Key, opentelemetry::Value> {
-        HashMap::with_capacity(0)
+    fn on_error(&self, _error: &BoxError) -> LinkedList<KeyValue> {
+        LinkedList::default()
     }
 }
 
@@ -1027,11 +1043,19 @@ mod test {
             let attributes =
                 attributes.on_request(&router::Request::fake_builder().build().unwrap());
             assert_eq!(
-                attributes.get(&opentelemetry::Key::from_static_str("trace_id")),
+                attributes
+                    .iter()
+                    .find(|key_val| key_val.key == opentelemetry::Key::from_static_str("trace_id"))
+                    .map(|key_val| &key_val.value),
                 Some(&"0000000000000000000000000000002a".into())
             );
             assert_eq!(
-                attributes.get(&opentelemetry::Key::from_static_str("dd.trace_id")),
+                attributes
+                    .iter()
+                    .find(
+                        |key_val| key_val.key == opentelemetry::Key::from_static_str("dd.trace_id")
+                    )
+                    .map(|key_val| &key_val.value),
                 Some(&"42".into())
             );
         });
@@ -1050,7 +1074,10 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes.get(&GRAPHQL_DOCUMENT),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == GRAPHQL_DOCUMENT)
+                .map(|key_val| &key_val.value),
             Some(&"query { __typename }".into())
         );
     }
@@ -1070,7 +1097,10 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes.get(&GRAPHQL_OPERATION_NAME),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == GRAPHQL_OPERATION_NAME)
+                .map(|key_val| &key_val.value),
             Some(&"topProducts".into())
         );
     }
@@ -1090,7 +1120,10 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes.get(&GRAPHQL_OPERATION_TYPE),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == GRAPHQL_OPERATION_TYPE)
+                .map(|key_val| &key_val.value),
             Some(&"query".into())
         );
     }
@@ -1116,7 +1149,10 @@ mod test {
                 .build(),
         );
         assert_eq!(
-            attributes.get(&SUBGRAPH_GRAPHQL_DOCUMENT),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == SUBGRAPH_GRAPHQL_DOCUMENT)
+                .map(|key_val| &key_val.value),
             Some(&"query { __typename }".into())
         );
     }
@@ -1143,7 +1179,10 @@ mod test {
                 .build(),
         );
         assert_eq!(
-            attributes.get(&SUBGRAPH_GRAPHQL_OPERATION_NAME),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == SUBGRAPH_GRAPHQL_OPERATION_NAME)
+                .map(|key_val| &key_val.value),
             Some(&"topProducts".into())
         );
     }
@@ -1169,7 +1208,10 @@ mod test {
                 .build(),
         );
         assert_eq!(
-            attributes.get(&SUBGRAPH_GRAPHQL_OPERATION_TYPE),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == SUBGRAPH_GRAPHQL_OPERATION_TYPE)
+                .map(|key_val| &key_val.value),
             Some(&"query".into())
         );
     }
@@ -1192,7 +1234,13 @@ mod test {
                 )
                 .build(),
         );
-        assert_eq!(attributes.get(&SUBGRAPH_NAME), Some(&"products".into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == SUBGRAPH_NAME)
+                .map(|key_val| &key_val.value),
+            Some(&"products".into())
+        );
     }
 
     #[test]
@@ -1209,7 +1257,10 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes.get(&ERROR_TYPE),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == ERROR_TYPE)
+                .map(|key_val| &key_val.value),
             Some(
                 &StatusCode::BAD_REQUEST
                     .canonical_reason()
@@ -1220,7 +1271,10 @@ mod test {
 
         let attributes = common.on_error(&anyhow!("test error").into());
         assert_eq!(
-            attributes.get(&ERROR_TYPE),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == ERROR_TYPE)
+                .map(|key_val| &key_val.value),
             Some(
                 &StatusCode::INTERNAL_SERVER_ERROR
                     .canonical_reason()
@@ -1246,7 +1300,13 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert_eq!(attributes.get(&HTTP_REQUEST_BODY_SIZE), Some(&"256".into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == HTTP_REQUEST_BODY_SIZE)
+                .map(|key_val| &key_val.value),
+            Some(&"256".into())
+        );
     }
 
     #[test]
@@ -1266,7 +1326,10 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes.get(&HTTP_RESPONSE_BODY_SIZE),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == HTTP_RESPONSE_BODY_SIZE)
+                .map(|key_val| &key_val.value),
             Some(&"256".into())
         );
     }
@@ -1284,7 +1347,13 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert_eq!(attributes.get(&HTTP_REQUEST_METHOD), Some(&"POST".into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == HTTP_REQUEST_METHOD)
+                .map(|key_val| &key_val.value),
+            Some(&"POST".into())
+        );
     }
 
     #[test]
@@ -1301,13 +1370,19 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes.get(&HTTP_RESPONSE_STATUS_CODE),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == HTTP_RESPONSE_STATUS_CODE)
+                .map(|key_val| &key_val.value),
             Some(&(StatusCode::BAD_REQUEST.as_u16() as i64).into())
         );
 
         let attributes = common.on_error(&anyhow!("test error").into());
         assert_eq!(
-            attributes.get(&HTTP_RESPONSE_STATUS_CODE),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == HTTP_RESPONSE_STATUS_CODE)
+                .map(|key_val| &key_val.value),
             Some(&(StatusCode::INTERNAL_SERVER_ERROR.as_u16() as i64).into())
         );
     }
@@ -1326,7 +1401,10 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes.get(&NETWORK_PROTOCOL_NAME),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == NETWORK_PROTOCOL_NAME)
+                .map(|key_val| &key_val.value),
             Some(&"https".into())
         );
     }
@@ -1345,7 +1423,10 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes.get(&NETWORK_PROTOCOL_VERSION),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION)
+                .map(|key_val| &key_val.value),
             Some(&"HTTP/1.1".into())
         );
     }
@@ -1358,7 +1439,13 @@ mod test {
         };
 
         let attributes = common.on_request(&router::Request::fake_builder().build().unwrap());
-        assert_eq!(attributes.get(&NETWORK_TRANSPORT), Some(&"tcp".into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == NETWORK_TRANSPORT)
+                .map(|key_val| &key_val.value),
+            Some(&"tcp".into())
+        );
     }
 
     #[test]
@@ -1374,7 +1461,13 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = common.on_request(&req);
-        assert_eq!(attributes.get(&NETWORK_TYPE), Some(&"ipv4".into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == NETWORK_TYPE)
+                .map(|key_val| &key_val.value),
+            Some(&"ipv4".into())
+        );
     }
 
     #[test]
@@ -1390,7 +1483,13 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(attributes.get(&CLIENT_ADDRESS), Some(&"192.168.0.8".into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == CLIENT_ADDRESS)
+                .map(|key_val| &key_val.value),
+            Some(&"192.168.0.8".into())
+        );
 
         let mut req = router::Request::fake_builder()
             .header(FORWARDED, "for=2.4.6.8:8000")
@@ -1401,7 +1500,13 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(attributes.get(&CLIENT_ADDRESS), Some(&"2.4.6.8".into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == CLIENT_ADDRESS)
+                .map(|key_val| &key_val.value),
+            Some(&"2.4.6.8".into())
+        );
     }
 
     #[test]
@@ -1417,7 +1522,13 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(attributes.get(&CLIENT_PORT), Some(&6060.into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == CLIENT_PORT)
+                .map(|key_val| &key_val.value),
+            Some(&6060.into())
+        );
 
         let mut req = router::Request::fake_builder()
             .header(FORWARDED, "for=2.4.6.8:8000")
@@ -1428,7 +1539,13 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(attributes.get(&CLIENT_PORT), Some(&8000.into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == CLIENT_PORT)
+                .map(|key_val| &key_val.value),
+            Some(&8000.into())
+        );
     }
 
     #[test]
@@ -1447,7 +1564,13 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(attributes.get(&HTTP_ROUTE), Some(&"/graphql".into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == HTTP_ROUTE)
+                .map(|key_val| &key_val.value),
+            Some(&"/graphql".into())
+        );
     }
 
     #[test]
@@ -1467,7 +1590,10 @@ mod test {
         });
         let attributes = server.on_request(&req);
         assert_eq!(
-            attributes.get(&NETWORK_LOCAL_ADDRESS),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == NETWORK_LOCAL_ADDRESS)
+                .map(|key_val| &key_val.value),
             Some(&"192.168.0.1".into())
         );
     }
@@ -1488,7 +1614,13 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(attributes.get(&NETWORK_LOCAL_PORT), Some(&8080.into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == NETWORK_LOCAL_PORT)
+                .map(|key_val| &key_val.value),
+            Some(&8080.into())
+        );
     }
 
     #[test]
@@ -1508,7 +1640,10 @@ mod test {
         });
         let attributes = server.on_request(&req);
         assert_eq!(
-            attributes.get(&NETWORK_PEER_ADDRESS),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == NETWORK_PEER_ADDRESS)
+                .map(|key_val| &key_val.value),
             Some(&"192.168.0.8".into())
         );
     }
@@ -1529,7 +1664,13 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(attributes.get(&NETWORK_PEER_PORT), Some(&6060.into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == NETWORK_PEER_PORT)
+                .map(|key_val| &key_val.value),
+            Some(&6060.into())
+        );
     }
 
     #[test]
@@ -1545,7 +1686,13 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(attributes.get(&SERVER_ADDRESS), Some(&"192.168.0.1".into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == SERVER_ADDRESS)
+                .map(|key_val| &key_val.value),
+            Some(&"192.168.0.1".into())
+        );
 
         let mut req = router::Request::fake_builder()
             .header(FORWARDED, "host=2.4.6.8:8000")
@@ -1556,7 +1703,13 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(attributes.get(&SERVER_ADDRESS), Some(&"2.4.6.8".into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == SERVER_ADDRESS)
+                .map(|key_val| &key_val.value),
+            Some(&"2.4.6.8".into())
+        );
     }
 
     #[test]
@@ -1572,7 +1725,13 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(attributes.get(&SERVER_PORT), Some(&8080.into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == SERVER_PORT)
+                .map(|key_val| &key_val.value),
+            Some(&8080.into())
+        );
 
         let mut req = router::Request::fake_builder()
             .header(FORWARDED, "host=2.4.6.8:8000")
@@ -1583,7 +1742,13 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(attributes.get(&SERVER_PORT), Some(&8000.into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == SERVER_PORT)
+                .map(|key_val| &key_val.value),
+            Some(&8000.into())
+        );
     }
     #[test]
     fn test_http_server_url_path() {
@@ -1598,7 +1763,13 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert_eq!(attributes.get(&URL_PATH), Some(&"/graphql".into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == URL_PATH)
+                .map(|key_val| &key_val.value),
+            Some(&"/graphql".into())
+        );
     }
     #[test]
     fn test_http_server_query() {
@@ -1613,7 +1784,13 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert_eq!(attributes.get(&URL_QUERY), Some(&"hi=5".into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == URL_QUERY)
+                .map(|key_val| &key_val.value),
+            Some(&"hi=5".into())
+        );
     }
     #[test]
     fn test_http_server_scheme() {
@@ -1628,7 +1805,13 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert_eq!(attributes.get(&URL_SCHEME), Some(&"https".into()));
+        assert_eq!(
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == URL_SCHEME)
+                .map(|key_val| &key_val.value),
+            Some(&"https".into())
+        );
     }
 
     #[test]
@@ -1645,7 +1828,10 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes.get(&USER_AGENT_ORIGINAL),
+            attributes
+                .iter()
+                .find(|key_val| key_val.key == USER_AGENT_ORIGINAL)
+                .map(|key_val| &key_val.value),
             Some(&"my-agent".into())
         );
     }

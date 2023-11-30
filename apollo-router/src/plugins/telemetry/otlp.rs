@@ -2,14 +2,12 @@
 use std::collections::HashMap;
 
 use http::Uri;
-use indexmap::map::Entry;
-use indexmap::IndexMap;
 use lazy_static::lazy_static;
+use opentelemetry::sdk::metrics::reader::TemporalitySelector;
+use opentelemetry::sdk::metrics::InstrumentKind;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::metrics::reader::TemporalitySelector;
-use opentelemetry_sdk::metrics::InstrumentKind;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -79,7 +77,7 @@ impl Config {
                     .with(&grpc.try_from(&endpoint)?, |b, t| {
                         b.with_tls_config(t.clone())
                     })
-                    .with_metadata(self.grpc.metadata.clone())
+                    .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()))
                     .into();
                 Ok(exporter)
             }
@@ -122,12 +120,9 @@ pub(crate) struct GrpcExporter {
     pub(crate) key: Option<String>,
 
     /// gRPC metadata
-    #[serde(
-        deserialize_with = "metadata_map_serde::deserialize",
-        serialize_with = "metadata_map_serde::serialize"
-    )]
+    #[serde(with = "http_serde::header_map")]
     #[schemars(schema_with = "header_map", default)]
-    pub(crate) metadata: MetadataMap,
+    pub(crate) metadata: http::HeaderMap,
 }
 
 fn header_map(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
@@ -203,11 +198,11 @@ pub(crate) enum Temporality {
 }
 
 pub(crate) struct CustomTemporalitySelector(
-    pub(crate) opentelemetry_sdk::metrics::data::Temporality,
+    pub(crate) opentelemetry::sdk::metrics::data::Temporality,
 );
 
 impl TemporalitySelector for CustomTemporalitySelector {
-    fn temporality(&self, _kind: InstrumentKind) -> opentelemetry_sdk::metrics::data::Temporality {
+    fn temporality(&self, _kind: InstrumentKind) -> opentelemetry::sdk::metrics::data::Temporality {
         self.0
     }
 }
@@ -215,83 +210,13 @@ impl TemporalitySelector for CustomTemporalitySelector {
 impl From<&Temporality> for Box<dyn TemporalitySelector> {
     fn from(value: &Temporality) -> Self {
         Box::new(match value {
-            Temporality::Cumulative => {
-                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Cumulative)
-            }
+            Temporality::Cumulative => CustomTemporalitySelector(
+                opentelemetry::sdk::metrics::data::Temporality::Cumulative,
+            ),
             Temporality::Delta => {
-                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Delta)
+                CustomTemporalitySelector(opentelemetry::sdk::metrics::data::Temporality::Delta)
             }
         })
-    }
-}
-
-mod metadata_map_serde {
-    use tonic::metadata::KeyAndValueRef;
-    use tonic::metadata::MetadataKey;
-
-    use super::*;
-
-    pub(crate) fn serialize<S>(map: &MetadataMap, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        let mut serializable_format: IndexMap<&str, Vec<&str>> = IndexMap::new();
-
-        for key_and_value in map.iter() {
-            match key_and_value {
-                KeyAndValueRef::Ascii(key, value) => {
-                    match serializable_format.entry(key.as_str()) {
-                        Entry::Vacant(values) => {
-                            values.insert(vec![value.to_str().unwrap()]);
-                        }
-                        Entry::Occupied(mut values) => {
-                            values.get_mut().push(value.to_str().unwrap())
-                        }
-                    }
-                }
-                KeyAndValueRef::Binary(_, _) => todo!(),
-            };
-        }
-
-        serializable_format.serialize(serializer)
-    }
-
-    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<MetadataMap, D::Error>
-    where
-        D: serde::de::Deserializer<'de>,
-    {
-        let serializable_format: IndexMap<String, Vec<String>> =
-            Deserialize::deserialize(deserializer)?;
-
-        let mut map = MetadataMap::new();
-
-        for (key, values) in serializable_format.into_iter() {
-            let key = MetadataKey::from_bytes(key.as_bytes()).unwrap();
-            for value in values {
-                map.append(key.clone(), value.parse().unwrap());
-            }
-        }
-
-        Ok(map)
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn serialize_metadata_map() {
-            let mut map = MetadataMap::new();
-            map.append("foo", "bar".parse().unwrap());
-            map.append("foo", "baz".parse().unwrap());
-            map.append("bar", "foo".parse().unwrap());
-            let mut buffer = Vec::new();
-            let mut ser = serde_yaml::Serializer::new(&mut buffer);
-            serialize(&map, &mut ser).unwrap();
-            insta::assert_snapshot!(std::str::from_utf8(&buffer).unwrap());
-            let de = serde_yaml::Deserializer::from_slice(&buffer);
-            deserialize(de).unwrap();
-        }
     }
 }
 

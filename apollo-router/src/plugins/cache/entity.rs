@@ -14,6 +14,7 @@ use sha2::Sha256;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower_service::Service;
 use tracing::Level;
 
 use super::cache_control::CacheControl;
@@ -23,17 +24,21 @@ use crate::cache::redis::RedisValue;
 use crate::configuration::RedisCache;
 use crate::error::FetchError;
 use crate::graphql;
+use crate::graphql::Error;
 use crate::json_ext::Object;
-use crate::layers::ServiceBuilderExt;
+use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::query_planner::fetch::QueryHash;
+use crate::query_planner::OperationKind;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::TYPENAME;
 use crate::Context;
 
-const ENTITIES: &str = "_entities";
+pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
 
@@ -115,8 +120,7 @@ impl Plugin for EntityCache {
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        let cache = self.storage.clone();
-        let cache2 = self.storage.clone();
+        let storage = self.storage.clone();
 
         let (subgraph_ttl, subgraph_enabled) = if let Some(config) = self.subgraphs.get(name) {
             (
@@ -133,46 +137,124 @@ impl Plugin for EntityCache {
         let name = name.to_string();
 
         if subgraph_enabled {
-            ServiceBuilder::new()
-            .oneshot_checkpoint_async(move |request: subgraph::Request| {
-                let name = name.clone();
-                let cache = cache.clone();
-
-                async move {
-                    if !request
-                        .subgraph_request
-                        .body()
-                        .variables
-                        .contains_key(REPRESENTATIONS)
-                    {
-                        cache_lookup_root(name, cache, request).await
-                    } else {
-                        cache_lookup_entities(name, cache, request).await
-                    }
-                }
-            })
-            .map_future(move |response| {
-                let cache = cache2.clone();
-                async move { cache_store_from_response(cache, subgraph_ttl, response.await?).await }
-            })
-            .service(service)
-            .boxed()
+            tower::util::BoxService::new(CacheService(Some(InnerCacheService {
+                service,
+                name: name.to_string(),
+                storage,
+                subgraph_ttl,
+            })))
         } else {
             service
         }
     }
 }
 
-struct RootCacheKey(String);
+struct CacheService(Option<InnerCacheService>);
+struct InnerCacheService {
+    service: subgraph::BoxService,
+    name: String,
+    storage: RedisCacheStorage,
+    subgraph_ttl: Option<Duration>,
+}
+
+impl Service<subgraph::Request> for CacheService {
+    type Response = subgraph::Response;
+    type Error = BoxError;
+    type Future = <subgraph::BoxService as Service<subgraph::Request>>::Future;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        match &mut self.0 {
+            Some(s) => s.service.poll_ready(cx),
+            None => panic!("service should have been called only once"),
+        }
+    }
+
+    fn call(&mut self, request: subgraph::Request) -> Self::Future {
+        match self.0.take() {
+            None => panic!("service should have been called only once"),
+            Some(s) => Box::pin(s.call_inner(request)),
+        }
+    }
+}
+
+impl InnerCacheService {
+    async fn call_inner(
+        mut self,
+        request: subgraph::Request,
+    ) -> Result<subgraph::Response, BoxError> {
+        if !request
+            .subgraph_request
+            .body()
+            .variables
+            .contains_key(REPRESENTATIONS)
+        {
+            if request.operation_kind == OperationKind::Query {
+                match cache_lookup_root(self.name, self.storage.clone(), request).await? {
+                    ControlFlow::Break(response) => Ok(response),
+                    ControlFlow::Continue((request, root_cache_key)) => {
+                        let response = self.service.call(request).await?;
+
+                        let cache_control =
+                            CacheControl::new(response.response.headers(), self.storage.ttl)?;
+                        update_cache_control(&response.context, &cache_control);
+
+                        cache_store_root_from_response(
+                            self.storage,
+                            self.subgraph_ttl,
+                            &response,
+                            cache_control,
+                            root_cache_key,
+                        )
+                        .await?;
+
+                        Ok(response)
+                    }
+                }
+            } else {
+                self.service.call(request).await
+            }
+        } else {
+            match cache_lookup_entities(self.name, self.storage.clone(), request).await? {
+                ControlFlow::Break(response) => Ok(response),
+                ControlFlow::Continue((request, cache_result)) => {
+                    let mut response = self.service.call(request).await?;
+
+                    let cache_control =
+                        CacheControl::new(response.response.headers(), self.storage.ttl)?;
+                    update_cache_control(&response.context, &cache_control);
+
+                    cache_store_entities_from_response(
+                        self.storage,
+                        self.subgraph_ttl,
+                        &mut response,
+                        cache_control,
+                        cache_result.0,
+                    )
+                    .await?;
+                    Ok(response)
+                }
+            }
+        }
+    }
+}
 
 async fn cache_lookup_root(
     name: String,
     cache: RedisCacheStorage,
     mut request: subgraph::Request,
-) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError> {
+) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String)>, BoxError> {
     let body = request.subgraph_request.body_mut();
 
-    let key = extract_cache_key_root(&name, body, &request.context);
+    let key = extract_cache_key_root(
+        &name,
+        &request.query_hash,
+        body,
+        &request.context,
+        &request.authorization,
+    );
 
     let cache_result: Option<RedisValue<CacheEntry>> = cache.get(RedisKey(key.clone())).await;
 
@@ -192,15 +274,7 @@ async fn cache_lookup_root(
                     .build(),
             ))
         }
-        None => {
-            request
-                .context
-                .private_entries
-                .lock()
-                .insert(RootCacheKey(key));
-
-            Ok(ControlFlow::Continue(request))
-        }
+        None => Ok(ControlFlow::Continue((request, key))),
     }
 }
 
@@ -210,10 +284,16 @@ async fn cache_lookup_entities(
     name: String,
     cache: RedisCacheStorage,
     mut request: subgraph::Request,
-) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError> {
+) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, EntityCacheResults)>, BoxError> {
     let body = request.subgraph_request.body_mut();
 
-    let keys = extract_cache_keys(&name, body, &request.context)?;
+    let keys = extract_cache_keys(
+        &name,
+        &request.query_hash,
+        body,
+        &request.context,
+        &request.authorization,
+    )?;
 
     let cache_result: Vec<Option<CacheEntry>> = cache
         .get_multiple(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
@@ -238,13 +318,10 @@ async fn cache_lookup_entities(
         body.variables
             .insert(REPRESENTATIONS, new_representations.into());
 
-        request
-            .context
-            .private_entries
-            .lock()
-            .insert(EntityCacheResults(cache_result));
-
-        Ok(ControlFlow::Continue(request))
+        Ok(ControlFlow::Continue((
+            request,
+            EntityCacheResults(cache_result),
+        )))
     } else {
         let entities = cache_result
             .into_iter()
@@ -273,41 +350,6 @@ fn update_cache_control(context: &Context, cache_control: &CacheControl) {
     context.private_entries.lock().insert(cache_control.clone());
 }
 
-async fn cache_store_from_response(
-    cache: RedisCacheStorage,
-    subgraph_ttl: Option<Duration>,
-    mut response: subgraph::Response,
-) -> Result<subgraph::Response, BoxError> {
-    let (opt_root_cache_key, opt_entities_results) = {
-        let mut entries = response.context.private_entries.lock();
-        let opt_root_cache_key = entries.remove::<RootCacheKey>().map(|v| v.0);
-        let opt_entities_results = entries.remove::<EntityCacheResults>().map(|v| v.0);
-
-        drop(entries);
-
-        (opt_root_cache_key, opt_entities_results)
-    };
-
-    let cache_control = CacheControl::new(response.response.headers(), cache.ttl)?;
-    update_cache_control(&response.context, &cache_control);
-
-    if let Some(cache_key) = opt_root_cache_key {
-        cache_store_root_from_response(cache, subgraph_ttl, &response, cache_control, cache_key)
-            .await?;
-    } else if let Some(result_from_cache) = opt_entities_results {
-        cache_store_entities_from_response(
-            cache,
-            subgraph_ttl,
-            &mut response,
-            cache_control,
-            result_from_cache,
-        )
-        .await?;
-    }
-
-    Ok(response)
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct CacheEntry {
     control: CacheControl,
@@ -327,7 +369,7 @@ async fn cache_store_root_from_response(
             .map(|secs| Duration::from_secs(secs as u64))
             .or(subgraph_ttl);
 
-        if cache_control.should_store() {
+        if response.response.body().errors.is_empty() && cache_control.should_store() {
             cache
                 .insert(
                     RedisKey(cache_key),
@@ -360,12 +402,13 @@ async fn cache_store_entities_from_response(
         .and_then(|v| v.as_object_mut())
         .and_then(|o| o.remove(ENTITIES))
     {
-        let new_entities = insert_entities_in_result(
+        let (new_entities, new_errors) = insert_entities_in_result(
             entities
                 .as_array_mut()
                 .ok_or_else(|| FetchError::MalformedResponse {
                     reason: "expected an array of entities".to_string(),
                 })?,
+            &response.response.body().errors,
             &cache,
             subgraph_ttl,
             cache_control,
@@ -377,6 +420,7 @@ async fn cache_store_entities_from_response(
             .and_then(|v| v.as_object_mut())
             .map(|o| o.insert(ENTITIES, new_entities.into()));
         response.response.body_mut().data = data;
+        response.response.body_mut().errors = new_errors;
     }
 
     Ok(())
@@ -405,9 +449,9 @@ pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
     hex::encode(digest.finalize().as_slice())
 }
 
-pub(crate) fn hash_query(body: &graphql::Request) -> String {
+pub(crate) fn hash_query(query_hash: &QueryHash, body: &graphql::Request) -> String {
     let mut digest = Sha256::new();
-    digest.update(body.query.as_deref().unwrap_or("-").as_bytes());
+    digest.update(&query_hash.0);
     digest.update(&[0u8; 1][..]);
     digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);
@@ -415,7 +459,11 @@ pub(crate) fn hash_query(body: &graphql::Request) -> String {
     hex::encode(digest.finalize().as_slice())
 }
 
-pub(crate) fn hash_additional_data(body: &mut graphql::Request, context: &Context) -> String {
+pub(crate) fn hash_additional_data(
+    body: &mut graphql::Request,
+    context: &Context,
+    cache_key: &CacheKeyMetadata,
+) -> String {
     let mut digest = Sha256::new();
 
     let repr_key = ByteString::from(REPRESENTATIONS);
@@ -426,13 +474,7 @@ pub(crate) fn hash_additional_data(body: &mut graphql::Request, context: &Contex
         body.variables.insert(repr_key, representations);
     }
 
-    let cache_key = context
-        .private_entries
-        .lock()
-        .get::<CacheKeyMetadata>()
-        .cloned()
-        .unwrap_or_default();
-    digest.update(&serde_json::to_vec(&cache_key).unwrap());
+    digest.update(&serde_json::to_vec(cache_key).unwrap());
 
     if let Ok(Some(cache_data)) = context.get::<&str, Object>(CONTEXT_CACHE_KEY) {
         if let Some(v) = cache_data.get("all") {
@@ -453,20 +495,22 @@ pub(crate) fn hash_additional_data(body: &mut graphql::Request, context: &Contex
 // build a cache key for the root operation
 fn extract_cache_key_root(
     subgraph_name: &str,
+    query_hash: &QueryHash,
     body: &mut graphql::Request,
     context: &Context,
+    cache_key: &CacheKeyMetadata,
 ) -> String {
     // hash the query and operation name
-    let query_hash = hash_query(body);
+    let query_hash = hash_query(query_hash, body);
     // hash more data like variables and authorization status
-    let additional_data_hash = hash_additional_data(body, context);
+    let additional_data_hash = hash_additional_data(body, context, cache_key);
 
     // the cache key is written to easily find keys matching a prefix for deletion:
     // - subgraph name: caching is done per subgraph
     // - query hash: invalidate the entry for a specific query and operation name
     // - additional data: separate cache entries depending on info like authorization status
     format!(
-        "subgraph.{}|{}|{}",
+        "subgraph:{}:Query:{}:{}",
         subgraph_name, query_hash, additional_data_hash
     )
 }
@@ -474,13 +518,15 @@ fn extract_cache_key_root(
 // build a list of keys to get from the cache in one query
 fn extract_cache_keys(
     subgraph_name: &str,
+    query_hash: &QueryHash,
     body: &mut graphql::Request,
     context: &Context,
+    cache_key: &CacheKeyMetadata,
 ) -> Result<Vec<String>, BoxError> {
     // hash the query and operation name
-    let query_hash = hash_query(body);
+    let query_hash = hash_query(query_hash, body);
     // hash more data like variables and authorization status
-    let additional_data_hash = hash_additional_data(body, context);
+    let additional_data_hash = hash_additional_data(body, context, cache_key);
 
     let representations = body
         .variables
@@ -511,7 +557,7 @@ fn extract_cache_keys(
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
         let key = format!(
-            "subgraph.{}|{}|{}|{}|{}",
+            "subgraph:{}:{}:{}:{}:{}",
             subgraph_name, &typename, hashed_entity_key, query_hash, additional_data_hash
         );
 
@@ -614,49 +660,81 @@ fn filter_representations(
 // fill in the entities for the response
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
+    errors: &[Error],
     cache: &RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
     cache_control: CacheControl,
     result: &mut Vec<IntermediateResult>,
-) -> Result<Vec<Value>, BoxError> {
+) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
     let ttl: Option<Duration> = cache_control
         .ttl()
         .map(|secs| Duration::from_secs(secs as u64))
         .or(subgraph_ttl);
 
     let mut new_entities = Vec::new();
+    let mut new_errors = Vec::new();
 
     let mut inserted_types: HashMap<String, usize> = HashMap::new();
     let mut to_insert: Vec<_> = Vec::new();
-    let mut entities_it = entities.drain(..);
+    let mut entities_it = entities.drain(..).enumerate();
 
     // insert requested entities and cached entities in the same order as
     // they were requested
-    for IntermediateResult {
-        key,
-        typename,
-        cache_entry,
-    } in result.drain(..)
+    for (
+        new_entity_idx,
+        IntermediateResult {
+            key,
+            typename,
+            cache_entry,
+        },
+    ) in result.drain(..).enumerate()
     {
         match cache_entry {
-            Some(v) => new_entities.push(v.data),
+            Some(v) => {
+                new_entities.push(v.data);
+            }
             None => {
-                let value = entities_it
-                    .next()
-                    .ok_or_else(|| FetchError::MalformedResponse {
-                        reason: "invalid number of entities".to_string(),
-                    })?;
+                let (entity_idx, value) =
+                    entities_it
+                        .next()
+                        .ok_or_else(|| FetchError::MalformedResponse {
+                            reason: "invalid number of entities".to_string(),
+                        })?;
 
                 if cache_control.should_store() {
                     *inserted_types.entry(typename).or_default() += 1;
 
-                    to_insert.push((
-                        RedisKey(key),
-                        RedisValue(CacheEntry {
-                            control: cache_control.clone(),
-                            data: value.clone(),
-                        }),
-                    ));
+                    let mut has_errors = false;
+                    for error in errors.iter().filter(|e| {
+                        e.path
+                            .as_ref()
+                            .map(|path| {
+                                path.starts_with(&Path(vec![
+                                    PathElement::Key(ENTITIES.to_string()),
+                                    PathElement::Index(entity_idx),
+                                ]))
+                            })
+                            .unwrap_or(false)
+                    }) {
+                        // update the entity index, because it does not match with the original one
+                        let mut e = error.clone();
+                        if let Some(path) = e.path.as_mut() {
+                            path.0[1] = PathElement::Index(new_entity_idx);
+                        }
+
+                        new_errors.push(e);
+                        has_errors = true;
+                    }
+
+                    if !has_errors {
+                        to_insert.push((
+                            RedisKey(key),
+                            RedisValue(CacheEntry {
+                                control: cache_control.clone(),
+                                data: value.clone(),
+                            }),
+                        ));
+                    }
                 }
 
                 new_entities.push(value);
@@ -672,7 +750,7 @@ async fn insert_entities_in_result(
         tracing::event!(Level::INFO, entity_type = ty.as_str(), cache_insert = nb,);
     }
 
-    Ok(new_entities)
+    Ok((new_entities, new_errors))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

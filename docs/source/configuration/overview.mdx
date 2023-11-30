@@ -90,9 +90,11 @@ This reference lists and describes the options supported by the `router` binary.
 
 The absolute or relative path to the Apollo Router's [supergraph schema](/federation/federated-types/overview/#supergraph-schema).
 
+Setting this option disables polling from Apollo Uplink to fetch the latest supergraph schema.
+
 To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](/federation/quickstart/local-composition/).
 
-**Required** if you are _not_ using managed federation. If you _are_ using managed federation, do not provide this value.
+**Required** if you are _not_ using managed federation. If you _are_ using managed federation, you may need to set this option when following [advanced deployment workflows](/federation/managed-federation/deployment/#advanced-deployment-workflows).
 
 </td>
 </tr>
@@ -565,9 +567,38 @@ To configure subgraph authentication with AWS SigV4, see a [configuration exampl
 
 See [External coprocessing in the Apollo Router](../customizations/coprocessor/).
 
-### OpenTelemetry tracing
+### Telemetry and monitoring
+
+The Apollo Router supports standard and custom instrumentation to collect telemetry data from its request and response processing pipeline.
+
+#### Metrics
+
+To configure the metrics collected and exported by the Apollo Router, see [Router Metrics](./metrics).
+
+Supported metrics exporters:
+
+- [Prometheus](./exporters/prometheus)
+- [OpenTelemetry Protocol (OTLP)](./exporters/otlp)
+- [Datadog (OTLP)](./exporters/datadog-otlp)
+
+#### OpenTelemetry tracing
 
 See [Tracing in the Apollo Router](./tracing/).
+
+#### Logging
+
+To configure logging in the Apollo Router, see [Logging](./logging).
+
+#### Instrumentation
+
+To configure standard or custom instrumentation in the Apollo Router, see the following configuration guides:
+
+- [Instruments](./instruments)
+- [Events](./events)
+- [Conditions](./conditions)
+- [Spans](./spans)
+- [Selectors](./selectors)
+- [Standard attributes](./standard-attributes)
 
 ### TLS
 

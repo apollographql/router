@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 use std::env;
 use std::time::Duration;
 
+use opentelemetry::sdk::resource::EnvResourceDetector;
+use opentelemetry::sdk::resource::ResourceDetector;
+use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
-use opentelemetry_sdk::resource::EnvResourceDetector;
-use opentelemetry_sdk::resource::ResourceDetector;
-use opentelemetry_sdk::Resource;
 
 use crate::plugins::telemetry::config::AttributeValue;
 const UNKNOWN_SERVICE: &str = "unknown_service";
@@ -136,6 +136,7 @@ mod test {
     use std::env;
 
     use opentelemetry::Key;
+    use serial_test::serial;
 
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::resource::ConfigResource;
@@ -157,7 +158,11 @@ mod test {
         }
     }
 
+    // All of the tests in this module must execute serially wrt each other because they rely on
+    // env settings and one of the tests modifies the env for the duration of the test. We enforce
+    // this with the #[serial] derive.
     #[test]
+    #[serial]
     fn test_empty() {
         let test_config = TestConfig {
             service_name: None,
@@ -186,6 +191,7 @@ mod test {
     }
 
     #[test]
+    #[serial]
     fn test_config_resources() {
         let test_config = TestConfig {
             service_name: None,
@@ -221,6 +227,7 @@ mod test {
     }
 
     #[test]
+    #[serial]
     fn test_service_name_service_namespace() {
         let test_config = TestConfig {
             service_name: Some("override-service-name".to_string()),
@@ -239,6 +246,7 @@ mod test {
     }
 
     #[test]
+    #[serial]
     fn test_service_name_override() {
         // Order of precedence
         // OTEL_SERVICE_NAME env

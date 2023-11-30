@@ -1,13 +1,12 @@
 #[cfg(test)]
 use std::collections::BTreeMap;
-#[cfg(not(test))]
-use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::LinkedList;
 use std::fmt;
 
 use nu_ansi_term::Color;
 use nu_ansi_term::Style;
-use opentelemetry_sdk::Resource;
+use opentelemetry::sdk::Resource;
 use serde_json::Value;
 use tracing_core::Event;
 use tracing_core::Level;
@@ -28,16 +27,13 @@ use super::EventFormatter;
 use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config_new::logging::TextFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
-use crate::plugins::telemetry::formatters::to_map;
+use crate::plugins::telemetry::formatters::to_list;
 use crate::plugins::telemetry::tracing::APOLLO_PRIVATE_PREFIX;
 
 pub(crate) struct Text {
     #[allow(dead_code)]
     timer: SystemTime,
-    #[cfg(not(test))]
-    resource: HashMap<String, Value>,
-    #[cfg(test)]
-    resource: BTreeMap<String, Value>,
+    resource: LinkedList<(String, Value)>,
     config: TextFormat,
     excluded_attributes: HashSet<&'static str>,
 }
@@ -64,10 +60,7 @@ impl Text {
         Self {
             timer: Default::default(),
             config,
-            #[cfg(not(test))]
-            resource: to_map(resource),
-            #[cfg(test)]
-            resource: to_map(resource).into_iter().collect(),
+            resource: to_list(resource),
             excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
         }
     }
@@ -236,8 +229,8 @@ impl Text {
         {
             let mut attrs = otel_attributes
                 .iter()
-                .filter(|kv| {
-                    let key_name = kv.key.as_str();
+                .filter(|(key, _value)| {
+                    let key_name = key.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
                         && !self.excluded_attributes.contains(&key_name)
                 })
@@ -247,14 +240,8 @@ impl Text {
                 write!(writer, "{}{{", span.name())?;
             }
             #[cfg(test)]
-            let attrs: Vec<&opentelemetry::KeyValue> = {
-                let mut my_attrs: Vec<&opentelemetry::KeyValue> = attrs.collect();
-                my_attrs.sort_by_key(|kv| &kv.key);
-                my_attrs
-            };
-            for kv in attrs {
-                let key = &kv.key;
-                let value = &kv.value;
+            let attrs: BTreeMap<&opentelemetry::Key, &opentelemetry::Value> = attrs.collect();
+            for (key, value) in attrs {
                 write!(writer, "{key}={value},")?;
             }
         }
@@ -274,8 +261,7 @@ impl Text {
     pub(crate) fn format_resource(
         &self,
         writer: &mut Writer,
-        #[cfg(test)] resource: &BTreeMap<String, Value>,
-        #[cfg(not(test))] resource: &HashMap<String, Value>,
+        resource: &LinkedList<(String, Value)>,
     ) -> fmt::Result {
         if !resource.is_empty() {
             let style = Style::new().dimmed();

@@ -1,14 +1,11 @@
-#[cfg(test)]
-use std::collections::BTreeMap;
-#[cfg(not(test))]
-use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::LinkedList;
 use std::fmt;
 use std::io;
 
+use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
 use opentelemetry::Value;
-use opentelemetry_sdk::Resource;
 use serde::ser::SerializeMap;
 use serde::ser::Serializer as _;
 use serde_json::Serializer;
@@ -25,25 +22,19 @@ use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config_new::logging::JsonFormat;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
-use crate::plugins::telemetry::formatters::to_map;
+use crate::plugins::telemetry::formatters::to_list;
 
 #[derive(Debug)]
 pub(crate) struct Json {
     config: JsonFormat,
-    #[cfg(not(test))]
-    resource: HashMap<String, serde_json::Value>,
-    #[cfg(test)]
-    resource: BTreeMap<String, serde_json::Value>,
+    resource: LinkedList<(String, serde_json::Value)>,
     excluded_attributes: HashSet<&'static str>,
 }
 
 impl Json {
     pub(crate) fn new(resource: Resource, config: JsonFormat) -> Self {
         Self {
-            #[cfg(not(test))]
-            resource: to_map(resource),
-            #[cfg(test)]
-            resource: to_map(resource).into_iter().collect(),
+            resource: to_list(resource),
             config,
             excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
         }
@@ -57,6 +48,23 @@ impl Default for Json {
             resource: Default::default(),
             excluded_attributes: EXCLUDED_ATTRIBUTES.into(),
         }
+    }
+}
+
+struct SerializableResources<'a>(&'a LinkedList<(String, serde_json::Value)>);
+
+impl<'a> serde::ser::Serialize for SerializableResources<'a> {
+    fn serialize<Ser>(&self, serializer_o: Ser) -> Result<Ser::Ok, Ser::Error>
+    where
+        Ser: serde::ser::Serializer,
+    {
+        let mut serializer = serializer_o.serialize_map(Some(self.0.len()))?;
+
+        for (key, val) in self.0 {
+            serializer.serialize_entry(key, val)?;
+        }
+
+        serializer.end()
     }
 }
 
@@ -111,11 +119,11 @@ where
                 .get::<OtelData>()
                 .and_then(|otel_data| otel_data.builder.attributes.as_ref());
             if let Some(otel_attributes) = otel_attributes {
-                for kv in otel_attributes.iter().filter(|kv| {
-                    let key_name = kv.key.as_str();
+                for (key, value) in otel_attributes.iter().filter(|(key, _)| {
+                    let key_name = key.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX) && !self.1.contains(&key_name)
                 }) {
-                    serializer.serialize_entry(kv.key.as_str(), &kv.value.as_str())?;
+                    serializer.serialize_entry(key.as_str(), &value.as_str())?;
                 }
             }
         }
@@ -250,7 +258,7 @@ where
             }
 
             if self.config.display_resource {
-                serializer.serialize_entry("resource", &self.resource)?;
+                serializer.serialize_entry("resource", &SerializableResources(&self.resource))?;
             }
 
             serializer.end()

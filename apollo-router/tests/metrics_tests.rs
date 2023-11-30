@@ -54,9 +54,6 @@ async fn test_metrics_reloading() {
         .assert_metrics_contains(r#"apollo_router_session_count_total"#, None)
         .await;
     router
-        .assert_metrics_contains(r#"apollo_router_session_count_active"#, None)
-        .await;
-    router
         .assert_metrics_contains(r#"custom_header="test_custom""#, None)
         .await;
     router

@@ -60,6 +60,8 @@ use crate::services::router;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
+static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
+
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
 #[derive(Debug, Default)]
@@ -104,7 +106,7 @@ where
 
     if configuration.health_check.enabled {
         tracing::info!(
-            "Health check exposed at {}/{}",
+            "Health check exposed at {}{}",
             configuration.health_check.listen,
             configuration.health_check.path
         );
@@ -534,7 +536,8 @@ async fn handle_graphql(
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    tracing::info!(counter.apollo_router_session_count_active = 1i64,);
+    let session_count = ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Release) + 1;
+    tracing::info!(value.apollo_router_session_count_active = session_count,);
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();
@@ -552,7 +555,9 @@ async fn handle_graphql(
 
     match res {
         Err(e) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1i64,);
+            let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Release) - 1;
+            tracing::info!(value.apollo_router_session_count_active = session_count,);
+
             if let Some(source_err) = e.source() {
                 if source_err.is::<RateLimited>() {
                     return RateLimited::new().into_response();
@@ -575,7 +580,6 @@ async fn handle_graphql(
                 .into_response()
         }
         Ok(response) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1i64,);
             let (mut parts, body) = response.response.into_parts();
 
             let opt_compressor = accept_encoding
@@ -592,6 +596,10 @@ async fn handle_graphql(
                     Body::wrap_stream(compressor.process(body))
                 }
             };
+
+            // FIXME: we should instead reduce it after the response has been entirely written
+            let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Release) - 1;
+            tracing::info!(value.apollo_router_session_count_active = session_count,);
 
             http::Response::from_parts(parts, body).into_response()
         }
