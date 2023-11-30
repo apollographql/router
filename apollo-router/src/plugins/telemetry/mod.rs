@@ -262,7 +262,7 @@ impl Plugin for Telemetry {
         let (sampling_filter_ratio, tracer_provider) = Self::create_tracer_provider(&config)?;
 
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
-            ::tracing::warn!("telemetry.span.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
+            ::tracing::warn!("telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
         }
 
         Ok(Telemetry {
@@ -270,10 +270,12 @@ impl Plugin for Telemetry {
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
             field_level_instrumentation_ratio,
             tracer_provider: Some(tracer_provider),
-            public_meter_provider: Some(metrics_builder.public_meter_provider_builder.build())
-                .map(FilterMeterProvider::public_metrics),
-            private_meter_provider: Some(metrics_builder.apollo_meter_provider_builder.build())
-                .map(FilterMeterProvider::private_metrics),
+            public_meter_provider: Some(FilterMeterProvider::public_metrics(
+                metrics_builder.public_meter_provider_builder.build(),
+            )),
+            private_meter_provider: Some(FilterMeterProvider::private_metrics(
+                metrics_builder.apollo_meter_provider_builder.build(),
+            )),
             public_prometheus_meter_provider: metrics_builder
                 .prometheus_meter_provider
                 .map(FilterMeterProvider::public_metrics),
@@ -1557,6 +1559,7 @@ impl Telemetry {
             );
         }
     }
+
     fn reload_metrics(&mut self) {
         let meter_provider = meter_provider();
         commit_prometheus();
@@ -1754,10 +1757,13 @@ fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String
                 )
             })
         })
-        .fold(BTreeMap::new(), |mut acc, (name, value)| {
-            acc.entry(name).or_insert_with(Vec::new).push(value);
-            acc
-        });
+        .fold(
+            BTreeMap::new(),
+            |mut acc: BTreeMap<String, Vec<String>>, (name, value)| {
+                acc.entry(name).or_default().push(value);
+                acc
+            },
+        );
 
     match serde_json::to_string(&headers_map) {
         Ok(result) => result,
