@@ -1,0 +1,183 @@
+---
+title: Spans
+subtitle: Add router lifecycle context to traces
+description: Use spans to add contextual information from the Apollo Router to traces displayed by your application performance monitors (APM).
+---
+
+import RouterServices from '../../../../shared/router-lifecycle-services.mdx';
+
+A **span** captures contextual information about requests and responses as they're processed through the [router's request lifecycle (pipeline)](../customizations/overview/#the-request-lifecycle). The information from spans can be used when displaying traces in your application performance monitors (APM).
+
+## Spans configuration
+
+### Router request lifecycle services
+
+<RouterServices />
+
+The `router`, `supergraph` and `subgraph` sections are used to define custom span configuration for each service:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      router: # highlight-line
+        attributes: {}
+          # ...     
+      supergraph: # highlight-line
+        attributes: {}
+          # ...
+      subgraph: # highlight-line
+        attributes: {}
+          # ...      
+```
+
+### `attributes`
+
+Spans may have attributes attached to them from the Apollo Router pipeline. These attributes are used to filter and group spans in your APM.
+
+Attributes may be drawn from [standard attributes](./standard-attributes) or [selectors](./selectors). 
+
+<EnterpriseFeature>
+
+Custom attributes for spans via selector is an Enterprise Feature that requires a [GraphOS Enterprise plan](/graphos/enterprise/).
+
+</EnterpriseFeature>
+
+The attributes that are available depend on the service of the pipeline.
+
+```yaml title="desc.router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          # Standard attributes
+          http.response.status_code: true
+          # Custom attributes
+          "my_attribute":
+            response_header: "x-my-header"
+```
+
+### `default_attribute_requirement_level`
+
+The `default_attribute_requirement_level` option sets the default attributes to attach to spans, as defined by [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/otel/common/attribute-requirement-level/).
+
+Valid values:
+
+* `required` (default)
+* `recommended`
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      # Set the default requirement level
+      default_attribute_requirement_level: required #highlight-line
+```
+
+Attributes can be configured individually, so that `required` attributes can be overridden or disabled. For example, `http.response.status_code` is set individually to override the standard value:
+
+```yaml title="desc.router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      # Set the default requirement level
+      default_attribute_requirement_level: required
+      router:
+        attributes:
+          # Disable standard attribute
+          http.response.status_code: false
+```
+
+<Note>
+
+The attributes that the OpenTelemetry spec defines as `opt-in` must be configured individually.
+
+</Note>
+
+### `mode` 
+
+The `mode` option enables the router spans to either use legacy attributes in the router, or those defined in the OpenTelemetry specification.
+
+Valid values:
+
+* `spec_compliant` 
+* `deprecated` (default)
+
+#### `spec_compliant`
+This mode follows the OpenTelemetry spec. Attributes that were previously added to spans that did not follow conventions are now removed.
+
+You will likely gain a significant performance improvement by using this mode as it reduces the number of attributes that are added to spans.
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      mode: spec_compliant
+```
+
+For now this is not the default, however it will be in a future release.
+
+#### `deprecated`
+This mode is the default and follows the previous behavior if you have not configured the `mode` option to `spec_compliant`.
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      mode: deprecated
+```
+Attributes are added to spans that do not follow OpenTelemetry conventions.
+
+<Note>
+
+The `mode` option will be defaulted to `spec_compliant` in a future release, and eventually removed. 
+
+</Note>
+
+## Span configuration example
+
+An example configuration of `telemetry.spans` in `router.yaml` sets both standard and custom attributes for the router service:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      default_attribute_requirement_level: required
+      mode: spec_compliant
+      router:
+        attributes:
+          # Standard attributes (http)
+          dd.trace_id: false
+          http.request.body.size: false
+          http.response.body.size: false
+          http.request.method: false
+          # ...
+  
+          # Custom attributes
+          "acme.custom_1":
+            trace_id: datadog
+          "acme.custom_2":
+            response_header: "X-CUSTOM2"
+            default: "unknown"
+          "acme.custom_3":
+            env: "ENV_VAR"
+            # ...
+          
+      supergraph:
+        attributes: {}
+          # ...
+      subgraph:
+        attributes: {}
+          # ...      
+```
+
+## Spans configuration reference
+
+| Option                                | Values                                                                    | Default                        | Description                              |
+|---------------------------------------|---------------------------------------------------------------------------|--------------------------------|------------------------------------------|
+| `<attribute-name>`                    |                                                                           |                                | The name of the custom attribute.        |
+| `attributes`                          | [standard attributes](./standard-attributes)\|[selectors](./selectors)    |                                | The attributes of the span.              |
+| `default_attribute_requirement_level` | `required`\|`recommended`                                                 | `required`                     | The default attribute requirement level. |
+| `legacy_request_span`                 | `true`\|`false`                                                           |                                | Include the `request` span in traces.    |
+| `mode`                                | `spec_compliant` \| `deprecated`                                          | `deprecated`                   | The attributes of the span.              |
+

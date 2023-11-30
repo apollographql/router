@@ -5,9 +5,9 @@ use std::sync::atomic::Ordering;
 use anyhow::anyhow;
 use anyhow::Result;
 use once_cell::sync::OnceCell;
+use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_sdk::trace::Tracer;
 use rand::thread_rng;
 use rand::Rng;
 use tower::BoxError;
@@ -54,7 +54,7 @@ pub(super) type LayeredTracer = Layered<
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
 // generic types in the layer definition.
 pub(super) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
-    ReloadTracer<opentelemetry_sdk::trace::Tracer>,
+    ReloadTracer<opentelemetry::sdk::trace::Tracer>,
 > = OnceCell::new();
 
 static FMT_LAYER_HANDLE: OnceCell<
@@ -70,7 +70,7 @@ pub(crate) fn metrics_layer() -> &'static MetricsLayer {
 
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = ReloadTracer::new(
-        opentelemetry_sdk::trace::TracerProvider::default().versioned_tracer(
+        opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer(
             "noop",
             None::<String>,
             None::<String>,
