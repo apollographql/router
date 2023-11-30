@@ -98,6 +98,9 @@ where
                     )
                 })
             }
+            fred::types::RedisValue::Null => {
+                Err(RedisError::new(RedisErrorKind::NotFound, "not found"))
+            }
             _res => Err(RedisError::new(
                 RedisErrorKind::Parse,
                 "the data is the wrong type",
@@ -271,28 +274,18 @@ impl RedisCacheStorage {
         &self,
         key: RedisKey<K>,
     ) -> Option<RedisValue<V>> {
-        tracing::trace!("getting from redis: {:?}", key);
-
-        let result: RedisResult<String> = self.inner.get(key.to_string()).await;
-        match result.as_ref().map(|s| s.as_str()) {
-            // Fred returns nil rather than an error with not_found
-            // See `RedisErrorKind::NotFound` for why this should work
-            // To work around this we first read the value as a string and then deal with the value explicitly
-            Ok("nil") => None,
-            Ok(value) => serde_json::from_str(value)
-                .map(RedisValue)
-                .map_err(|e| {
-                    tracing::error!("couldn't deserialize value from redis: {}", e);
-                    e
-                })
-                .ok(),
-            Err(e) => {
+        let res = self
+            .inner
+            .get::<RedisValue<V>, _>(key.to_string())
+            .await
+            .map_err(|e| {
                 if !e.is_not_found() {
-                    tracing::error!("mget error: {}", e);
+                    tracing::error!("get error: {}", e);
                 }
-                None
-            }
-        }
+                e
+            })
+            .ok();
+        res
     }
 
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
@@ -307,7 +300,9 @@ impl RedisCacheStorage {
                 .get::<RedisValue<V>, _>(keys.first().unwrap().to_string())
                 .await
                 .map_err(|e| {
-                    tracing::error!("mget error: {}", e);
+                    if !e.is_not_found() {
+                        tracing::error!("get error: {}", e);
+                    }
                     e
                 })
                 .ok();
@@ -323,7 +318,9 @@ impl RedisCacheStorage {
                 )
                 .await
                 .map_err(|e| {
-                    tracing::error!("mget error: {}", e);
+                    if !e.is_not_found() {
+                        tracing::error!("get error: {}", e);
+                    }
                     e
                 })
                 .ok()
