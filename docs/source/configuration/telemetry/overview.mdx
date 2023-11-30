@@ -26,19 +26,19 @@ flowchart LR
     metrics_exporter-->prometheus
     end
 
-    otlp_apm["OTLP enabled APM (e.g. New Relic)"]
+    otlp_apm["OTLP-enabled APM<br/>(e.g. New Relic)"]
     zipkin[Zipkin]
     datadog[Datadog agent]
     apm1[APM]
     collector("OpenTelemetry<br/>Collector")
-    jaeger("Jaeger (agent or collector)")
+    jaeger("Jaeger<br/>(agent or collector)")
 
 
     metrics_exporter--"OTLP"--->otlp_apm
     metrics_exporter--"OTLP"--->collector
     metrics_exporter--"OTLP"--->datadog
     traces_exporter--"OTLP"--->jaeger
-    traces_exporter--"native or OTLP"-->datadog
+    traces_exporter--"native or<br/>OTLP"-->datadog
     traces_exporter--"native"-->jaeger
     traces_exporter--"native"--->zipkin
     prometheus<--"scrapes"-->apm1
