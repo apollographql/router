@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fred::interfaces::EventInterface;
-use fred::interfaces::RedisResult;
 use fred::prelude::ClientLike;
 use fred::prelude::KeysInterface;
 use fred::prelude::RedisClient;
