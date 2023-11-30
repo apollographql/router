@@ -222,7 +222,7 @@ version = "1.0.0-beta.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ae76a91725ab7ecd35d552db3fb3d3b3f534a4520330920a58a39892174b7ae"
 dependencies = [
- "apollo-parser 0.7.3",
+ "apollo-parser 0.7.4",
  "ariadne",
  "indexmap 2.1.0",
  "rowan",
@@ -273,9 +273,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-parser"
-version = "0.7.3"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bb81e4793effa1744cc96f49542aec487696e595e0faeabbd9f8a83e5c83036"
+checksum = "db2953239e146be68f42333c2eaff528884fd300d0d1ed306b374f2a619a7d85"
 dependencies = [
  "memchr",
  "rowan",
