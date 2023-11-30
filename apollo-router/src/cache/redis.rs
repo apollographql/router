@@ -273,8 +273,7 @@ impl RedisCacheStorage {
         &self,
         key: RedisKey<K>,
     ) -> Option<RedisValue<V>> {
-        let res = self
-            .inner
+        self.inner
             .get::<RedisValue<V>, _>(key.to_string())
             .await
             .map_err(|e| {
@@ -283,8 +282,7 @@ impl RedisCacheStorage {
                 }
                 e
             })
-            .ok();
-        res
+            .ok()
     }
 
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
