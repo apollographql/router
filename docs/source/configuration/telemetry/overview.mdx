@@ -13,20 +13,39 @@ Collect data about the inner workings of your router, and export logs, metrics, 
 flowchart LR
     subgraph Apollo Router
     lifecycle("Request Lifecycle<br/>(telemetry sources)")
-    collector("OpenTelemetry<br/>Collector")
-    prometheus(Prometheus<br/>Exporter)
-    otlp("OTLP<br/>Exporter")
-    lifecycle--"metrics,<br/>traces"-->collector
-    collector--"metrics"-->prometheus
-    collector--"metrics,<br/>traces"-->otlp
+    
+    prometheus_exporter(Prometheus<br/>Exporter)
+    otlp_exporter("OTLP<br/>Exporter")
+    datadog_exporter("Datadog<br/>Exporter")
+    jaeger_exporter("Jaeger<br/>Exporter")
+    zipkin_exporter("Zipkin<br/>Exporter")
+    terminal(stdout)
+    
+    lifecycle--"metrics"--->prometheus_exporter
+    lifecycle--"metrics,<br/>traces"--->otlp_exporter
+    lifecycle--"traces"--->zipkin_exporter
+    lifecycle--"traces"--->jaeger_exporter
+    lifecycle--"traces"--->datadog_exporter
+    lifecycle--"logs"--->terminal
     end
 
+    otlp_apm["OTLP enabled APM (e.g. New Relic)"]
+    zipkin[Zipkin]
+    datadog[Datadog agent]
     apm1[APM]
-    apm2[APM]
-    terminal(stdout)
-    prometheus--"HTTP"-->apm1
-    otlp--"gRPC or HTTP"-->apm2
-    lifecycle--"logs"---->terminal
+    collector("OpenTelemetry<br/>Collector")
+    jaeger("Jaeger (agent or collector)")
+
+    
+    otlp_exporter--"OTLP"-->otlp_apm
+    otlp_exporter--"OTLP"-->collector
+    otlp_exporter--"OTLP"-->datadog
+    otlp_exporter--"OTLP"-->jaeger
+    datadog_exporter--"native"-->datadog
+    jaeger_exporter--"native"-->jaeger
+    zipkin_exporter--"native"-->zipkin
+    prometheus_exporter<--"scrapes"-->apm1
+
 ```
 
 ## Observability to maintain health and performance
