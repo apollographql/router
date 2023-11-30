@@ -102,6 +102,7 @@ impl HttpServerHandle {
     }
 
     pub(crate) async fn shutdown(mut self) -> Result<(), ApolloRouterError> {
+        #[cfg(unix)]
         let listen_addresses = std::mem::take(&mut self.listen_addresses);
 
         let (_main_listener, _extra_listener) = self.wait_for_servers().await?;

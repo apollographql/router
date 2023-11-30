@@ -10,13 +10,15 @@ The Apollo Router uses an in-memory LRU cache to store the following data:
 
 You can configure certain caching behaviors for generated query plans and APQ (but not introspection responses).
 
-> **If you have a GraphOS Enterprise plan,** you can also configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/)
+<Tip>
+
+If you have a GraphOS Enterprise plan, you can also configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/).
+
+</Tip>
 
 ## Caching query plans
 
-Whenever your router receives an incoming GraphQL operation, it generates a **query plan** to determine which subgraphs it needs to query to resolve that operation.
-
->[Learn more about query plans.](/federation/query-plans/)
+Whenever your router receives an incoming GraphQL operation, it generates a [query plan](/federation/query-plans/) to determine which subgraphs it needs to query to resolve that operation.
 
 By caching previously generated query plans, your router can _skip_ generating them _again_ if a client later sends the exact same operation. This improves your router's responsiveness.
 
@@ -61,9 +63,8 @@ supergraph:
     warmed_up_queries: 100
 ```
 
-To get more information on the planning and warm-up process use the following metrics:
+To get more information on the planning and warm-up process use the following metrics (where `<storage>` can be `redis` for distributed cache or `memory`):
 
-(`<storage>` can be `redis` for distributed cache or `memory`)
 * counters:
   * `apollo_router_cache_size{kind="query planner", storage="<storage>}`: current size of the cache (only for in-memory cache)
   * `apollo_router_cache_hit_count{kind="query planner", storage="<storage>}`
@@ -83,9 +84,7 @@ then look at `apollo_router_schema_loading_time` and `apollo_router_query_planni
 If the Router is using distributed caching for query plans, the warm-up phase will also store the new query plans in Redis. Since all Router instances might have the same distributions of queries in their in-memory cache, the list of queries is shuffled before warm-up, so each Router instance can plan queries in a different order and share their results through the cache.
 ## Caching automatic persisted queries (APQ)
 
-**Automatic Persisted Queries** (**APQ**) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ sending the query string itself. When query strings are very large, this can significantly reduce network usage.
-
-> [Learn more about APQ](/apollo-server/performance/apq/).
+[Automatic Persisted Queries (**APQ**)](/apollo-server/performance/apq/) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ sending the query string itself. When query strings are very large, this can significantly reduce network usage.
 
 The Apollo Router supports using APQ in its communications with both clients _and_ subgraphs:
 

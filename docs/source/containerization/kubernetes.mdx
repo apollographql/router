@@ -40,7 +40,11 @@ The following guides provide the steps to:
 
 [Helm](https://helm.sh) is a package manager for Kubernetes (k8s). Apollo provides an application Helm chart with each release of Apollo Router in GitHub. Since the router version 0.14.0, Apollo has released the router Helm chart as an [Open Container Initiative (OCI)](https://helm.sh/docs/topics/registries/) image in our GitHub container registry.
 
-> The path to the OCI router chart is `oci://ghcr.io/apollographql/helm-charts/router`.
+<Note>
+
+The path to the OCI router chart is `oci://ghcr.io/apollographql/helm-charts/router`.
+
+</Note>
 
 You customize a deployed router with the same [command-line options and YAML configuration](../../configuration/overview) but under different Helm CLI options and YAML keys.  
 
@@ -70,7 +74,11 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 
 1. Install [Helm](https://helm.sh/docs/intro/install/) **version 3.x**. The Apollo Router's Helm chart requires Helm v3.x.
 
-    > ⚠️ Your Kubernetes version must be compatible with Helm v3. For details, see [Helm Version Support Policy](https://helm.sh/docs/topics/version_skew/#supported-version-skew).
+    <Note>
+
+    Your Kubernetes version must be compatible with Helm v3. For details, see [Helm Version Support Policy](https://helm.sh/docs/topics/version_skew/#supported-version-skew).
+
+    </Note>
 
 1. Log in with Helm to the Apollo container registry in GitHub.
   
@@ -150,7 +158,11 @@ To enable metrics endpoints in your deployed router through a YAML configuration
               endpoint: <otlp-endpoint-addr>
     ```
 
-    > ⚠️ **Note**: Although this example enables both Prometheus and OTLP, in practice it's common to enable only one endpoint.
+    <Note>
+
+    Although this example enables both Prometheus and OTLP, in practice it's common to enable only one endpoint.
+
+    </Note>
 
     * `router.configuration.telemetry.metrics.prometheus` was already configured but disabled (`enabled: false`) by default. This configuration sets `enabled: true`.
     * `router.configuration.telemetry.metrics.otlp` is enabled by inclusion.

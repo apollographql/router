@@ -177,14 +177,16 @@ mod test {
     use std::future::Future;
     use std::time::Duration;
 
-    use futures::stream::StreamExt;
     use http::header::HeaderName;
+    use tokio_stream::wrappers::ReceiverStream;
+    use tokio_stream::StreamExt;
     use tower::ServiceExt;
     use url::Url;
 
     use super::super::super::config;
     use super::studio::SingleStatsReport;
     use super::*;
+    use crate::context::OPERATION_KIND;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::plugins::subscription;
@@ -193,7 +195,6 @@ mod test {
     use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::plugins::telemetry::Telemetry;
-    use crate::plugins::telemetry::OPERATION_KIND;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
     use crate::query_planner::OperationKind;
     use crate::services::SupergraphRequest;
@@ -347,7 +348,7 @@ mod test {
         let _ = tracing_subscriber::fmt::try_init();
         let mut plugin = create_plugin().await?;
         // Replace the apollo metrics sender so we can test metrics collection.
-        let (tx, rx) = futures::channel::mpsc::channel(100);
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
         plugin.apollo_metrics_sender = Sender::Apollo(tx);
         let mut request_builder = SupergraphRequest::fake_builder()
             .header("name_header", "test_client")
@@ -375,7 +376,7 @@ mod test {
             .unwrap();
 
         let default_latency = Duration::from_millis(100);
-        let results = rx
+        let results = ReceiverStream::new(rx)
             .collect::<Vec<_>>()
             .await
             .into_iter()

@@ -400,6 +400,7 @@ fn validate_project_config_files() {
     std::env::set_var("ZIPKIN_HOST", "http://example.com");
     std::env::set_var("TEST_CONFIG_ENDPOINT", "http://example.com");
     std::env::set_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com");
+    std::env::set_var("PARSER_MAX_RECURSION", "500");
 
     #[cfg(not(unix))]
     let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
@@ -426,6 +427,10 @@ fn validate_project_config_files() {
             .with_file_name(".skipconfigvalidation")
             .exists()
         {
+            continue;
+        }
+        #[cfg(not(telemetry_next))]
+        if entry.path().to_string_lossy().contains("telemetry_next") {
             continue;
         }
 
@@ -679,6 +684,10 @@ fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
             for (k, v) in o {
                 if k.as_str() == "properties" {
                     let properties = v.as_object().expect("properties must be an object");
+                    if properties.len() == 1 {
+                        // This is probably an enum property
+                        continue;
+                    }
                     for (k, v) in properties {
                         let path = format!("{path}.{k}");
                         if v.as_object().and_then(|o| o.get("description")).is_none() {
@@ -924,6 +933,39 @@ fn test_deserialize_derive_default() {
     if !errors.is_empty() {
         panic!("Serde errors found:\n{}", errors.join("\n"));
     }
+}
+
+#[test]
+fn it_defaults_health_check_configuration() {
+    let conf = Configuration::default();
+    let addr: ListenAddr = SocketAddr::from_str("127.0.0.1:8088").unwrap().into();
+
+    assert_eq!(conf.health_check.listen, addr);
+    assert_eq!(&conf.health_check.path, "/health");
+
+    // Defaults to enabled: true
+    assert!(conf.health_check.enabled);
+}
+
+#[test]
+fn it_sets_custom_health_check_path() {
+    let conf = Configuration::builder()
+        .health_check(HealthCheck::new(None, None, Some("/healthz".to_string())))
+        .build()
+        .unwrap();
+
+    assert_eq!(&conf.health_check.path, "/healthz");
+}
+
+#[test]
+fn it_adds_slash_to_custom_health_check_path_if_missing() {
+    let conf = Configuration::builder()
+        // NB the missing `/`
+        .health_check(HealthCheck::new(None, None, Some("healthz".to_string())))
+        .build()
+        .unwrap();
+
+    assert_eq!(&conf.health_check.path, "/healthz");
 }
 
 fn has_field_level_serde_defaults(lines: &[&str], line_number: usize) -> bool {

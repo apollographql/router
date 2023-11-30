@@ -167,7 +167,7 @@ impl InstrumentProvider for FilteredInstrumentProvider {
         &self,
         instruments: &[Arc<dyn Any>],
         callbacks: Box<dyn Fn(&dyn Observer) + Send + Sync>,
-    ) -> opentelemetry_api::metrics::Result<Box<dyn CallbackRegistration>> {
+    ) -> opentelemetry::metrics::Result<Box<dyn CallbackRegistration>> {
         self.delegate.register_callback(instruments, callbacks)
     }
 }

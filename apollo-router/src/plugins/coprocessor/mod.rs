@@ -44,6 +44,8 @@ use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::router;
 use crate::services::subgraph;
+use crate::services::trust_dns_connector::new_async_http_connector;
+use crate::services::trust_dns_connector::AsyncHyperResolver;
 
 #[cfg(test)]
 mod test;
@@ -55,14 +57,15 @@ const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5)
 const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
 const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
-type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
+type HTTPClientService =
+    tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>;
 
 #[async_trait::async_trait]
 impl Plugin for CoprocessorPlugin<HTTPClientService> {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let mut http_connector = HttpConnector::new();
+        let mut http_connector = new_async_http_connector()?;
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);

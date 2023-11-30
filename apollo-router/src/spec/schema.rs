@@ -146,6 +146,12 @@ impl Schema {
         })
     }
 
+    pub(crate) fn create_api_schema(&self) -> String {
+        apollo_federation::Supergraph::from(self.definitions.clone())
+            .to_api_schema()
+            .to_string()
+    }
+
     pub(crate) fn with_api_schema(mut self, api_schema: Schema) -> Self {
         self.api_schema = Some(Box::new(api_schema));
         self

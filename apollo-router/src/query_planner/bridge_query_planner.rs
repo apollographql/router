@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::fmt::Write;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -28,6 +29,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -121,8 +123,62 @@ impl BridgeQueryPlanner {
 
         let planner = Arc::new(planner);
 
-        let api_schema = planner.api_schema().await?;
-        let api_schema = Schema::parse(&api_schema.schema, &configuration)?;
+        let api_schema_string = match configuration.experimental_api_schema_generation_mode {
+            crate::configuration::ApiSchemaMode::Legacy => {
+                let api_schema = planner.api_schema().await?;
+                api_schema.schema
+            }
+            crate::configuration::ApiSchemaMode::New => schema.create_api_schema(),
+
+            crate::configuration::ApiSchemaMode::Both => {
+                let api_schema = planner.api_schema().await?;
+                let new_api_schema = schema.create_api_schema();
+
+                if api_schema.schema != new_api_schema {
+                    tracing::warn!(
+                        monotonic_counter.apollo.router.api_schema = 1u64,
+                        generation.result = "failed",
+                        "API schema generation mismatch: apollo-federation and router-bridge write different schema"
+                    );
+
+                    let differences = diff::lines(&api_schema.schema, &new_api_schema);
+                    let mut output = String::new();
+                    for diff_line in differences {
+                        match diff_line {
+                            diff::Result::Left(l) => {
+                                let trimmed = l.trim();
+                                if !trimmed.starts_with('#') && !trimmed.is_empty() {
+                                    writeln!(&mut output, "-{l}").expect("write will never fail");
+                                } else {
+                                    writeln!(&mut output, " {l}").expect("write will never fail");
+                                }
+                            }
+                            diff::Result::Both(l, _) => {
+                                writeln!(&mut output, " {l}").expect("write will never fail");
+                            }
+                            diff::Result::Right(r) => {
+                                let trimmed = r.trim();
+                                if trimmed != "---" && !trimmed.is_empty() {
+                                    writeln!(&mut output, "+{r}").expect("write will never fail");
+                                }
+                            }
+                        }
+                    }
+                    tracing::debug!(
+                        "different API schema between apollo-federation and router-bridge:\n{}",
+                        output
+                    );
+                } else {
+                    tracing::warn!(
+                        monotonic_counter.apollo.router.api_schema = 1u64,
+                        generation.result = VALIDATION_MATCH,
+                    );
+                }
+                api_schema.schema
+            }
+        };
+        let api_schema = Schema::parse(&api_schema_string, &configuration)?;
+
         let schema = Arc::new(schema.with_api_schema(api_schema));
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await))
@@ -231,7 +287,10 @@ impl BridgeQueryPlanner {
             fragments,
             operations,
             filtered_query: None,
-            unauthorized_paths: vec![],
+            unauthorized: UnauthorizedPaths {
+                paths: vec![],
+                errors: AuthorizationPlugin::log_errors(&self.configuration),
+            },
             subselections,
             defer_stats,
             is_original: true,
@@ -260,6 +319,7 @@ impl BridgeQueryPlanner {
         original_query: String,
         filtered_query: String,
         operation: Option<String>,
+        key: CacheKeyMetadata,
         selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         fn is_validation_error(errors: &router_bridge::planner::PlanErrors) -> bool {
@@ -318,7 +378,12 @@ impl BridgeQueryPlanner {
             .map_err(QueryPlannerError::RouterBridgeError)?
             .into_result()
         {
-            Ok(plan) => plan,
+            Ok(mut plan) => {
+                if let Some(node) = plan.data.query_plan.node.as_mut() {
+                    node.extract_authorization_metadata(&self.schema.definitions, &key);
+                }
+                plan
+            }
             Err(err) => {
                 if matches!(
                     self.configuration.experimental_graphql_validation_mode,
@@ -506,7 +571,7 @@ impl BridgeQueryPlanner {
         mut doc: ParsedDocument,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let filter_res = if self.enable_authorization_directives {
-            match AuthorizationPlugin::filter_query(&key, &self.schema) {
+            match AuthorizationPlugin::filter_query(&self.configuration, &key, &self.schema) {
                 Err(QueryPlannerError::Unauthorized(unauthorized_paths)) => {
                     let response = graphql::Response::builder()
                         .data(Object::new())
@@ -547,7 +612,7 @@ impl BridgeQueryPlanner {
                 executable: new_doc.to_executable(&self.schema.api_schema().definitions),
                 ast: new_doc,
             });
-            selections.unauthorized_paths = unauthorized_paths;
+            selections.unauthorized.paths = unauthorized_paths;
         }
 
         if selections.contains_introspection() {
@@ -589,6 +654,7 @@ impl BridgeQueryPlanner {
             key.original_query,
             key.filtered_query,
             key.operation_name,
+            key.metadata,
             selections,
         )
         .await
@@ -700,6 +766,7 @@ mod tests {
                 include_str!("testdata/unknown_introspection_query.graphql").to_string(),
                 include_str!("testdata/unknown_introspection_query.graphql").to_string(),
                 None,
+                CacheKeyMetadata::default(),
                 selections,
             )
             .await

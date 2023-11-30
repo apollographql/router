@@ -357,6 +357,13 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub fn execute_huge_query(
+        &self,
+    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+        self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None)
+    }
+
+    #[allow(dead_code)]
     pub fn execute_bad_content_encoding(
         &self,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
@@ -387,6 +394,7 @@ impl IntegrationTest {
                     .header(CONTENT_ENCODING, content_encoding.unwrap_or("identity"))
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
+                    .header("x-my-header", "test")
                     .json(&query)
                     .build()
                     .unwrap();
