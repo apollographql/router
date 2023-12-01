@@ -10,7 +10,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ### Federation v2.6.1
 
-This updates the Apoloo Federation version to v2.6.1.
+This updates the Apollo Federation version to v2.6.1.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4296
 
