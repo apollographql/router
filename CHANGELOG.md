@@ -37,6 +37,24 @@ subscription:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4246
 
+### Enhanced telemetry ([Issue #3226](https://github.com/apollographql/router/issues/3226))
+
+Telemetry functionality has been enhanced. The enhancements include:
+* Allowing fine-grained configuration of attributes on router, supergraph and subgraph spans.
+* Allowing coarse-grained control over attributes using OpenTelemetry requirement levels.
+* Bringing attributes into alignment with OpenTelemetry semantic conventions, with many new attributes now being configurable.
+* Allowing custom attributes to be easily declared in YAML.
+
+The enhanced telemetry enables new benefits. They include:
+* Easily including trace IDs in your log statements for correlation.
+* Extracting domain-specific data from the router's execution pipeline for example custom trace IDs.
+* Diagnosing network related issues with standard [Open Telemetry HTTP attributes](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/).
+* Improving performance by avoiding the use of large attributes on spans such as `graphql.document`.
+
+See the updated [telemetry documentation](configuration/telemetry/overview) for details on the new enhancements. 
+
+By [@bnjjj](https://github.com/bnjjj), [@bryncooke](https://github.com/bryncooke) and [Edward Huang](https://github.com/shorgi) in https://github.com/apollographql/router/pull/4102 and https://github.com/apollographql/router/pull/4129
+
 ## 🐛 Fixes
 
 ### Improved query deduplication with extracted authorization information from subgraph queries ([PR #4208](https://github.com/apollographql/router/pull/4208))
