@@ -202,11 +202,17 @@ subscription:
         - accounts
 ```
 
-> You can disable the heartbeat if you're running in callback mode in an infrastructure based on lamba functions for example. To not heartbeat or keep a lambda awake just to heartbeat subscriptions. To disable it you just have to set `heartbeat_interval_ms: disabled`.
-> But you have to be careful, once you disabled the heartbeat it means you'll heave to handle by yourself the way subscription has to be closed server side. For example if something crashed on your side for a specific subscription on specific events
-> and you don't close the subscription by yourself, you will end up with a subscription still opened on the client but without any events and you won't know at the client side that the subscription crashed.
-> Be sure to also store subscription's payload coming from the request (including extensions data with callback url and verifier) to be able to send the right events on the right callback url when you start your lambda function triggered by an event.
+You can disable the heartbeat by setting `heartbeat_interval_ms: disabled`. This is useful for example if you're running in callback mode in an infrastructure based on lambda functions, where you prefer neither to send heartbeats nor to keep a lambda awake just to send heartbeats to subscriptions.
 
+<Caution>
+
+Once the heartbeat is disabled, you must manage how a subscription is closed from the server side. 
+
+If something crashes on your side for a specific subscription on specific events, but you don't manage closing the subscription, you can end up with a subscription still opened on the client but without any events to notify you on the client side that the subscription has crashed.
+
+Also, when handling subscriptions with heartbeats disabled, make sure to store a subscription's request payload (including extensions data with callback URL and verifier) to be able to send the right events on the right callback URL when you start your lambda function triggered by an event.
+
+</Caution>
 ### Using a combination of modes
 
 If some of your subgraphs require [passthrough mode](#websocket-setup) and others require [callback mode](#http-callback-setup) for subscriptions, you can apply different modes to different subgraphs in your configuration:
