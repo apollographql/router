@@ -8,7 +8,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### feat(subscription): Support configurable heartbeat for subscription callback protocol ([Issue #4115](https://github.com/apollographql/router/issues/4115))
+### Support configurable heartbeat for subscription callback protocol ([Issue #4115](https://github.com/apollographql/router/issues/4115))
 
 The heartbeat interval that the Apollo Router uses for the subscription callback protocol is now configurable.
 
@@ -35,7 +35,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Improved query deduplication with extracted authorization information from subgraph queries ([PR #4208](https://github.com/apollographql/router/pull/4208))
 
-Query deduplication has been improved with authorization information extracted from subgraph queries. 
+Query deduplication has been improved with authorization information extracted from subgraph queries.
 
 Previously, query deduplication was already taking authorization information into account in its key, but that was for the global authorization context (the intersection of what the query authorization requires and what the request token provides).
 This was very coarse grained, leading to some subgraph queries with different authorization requirements or even no authorization requirements.
@@ -46,7 +46,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Add missing schemas for Redis connections ([Issue #4173](https://github.com/apollographql/router/issues/4173))
 
-Previously, support for additional schemas for the Redis client used in the Apollo Router were [added](https://github.com/apollographql/router/issues/3534). However, the router's Redis connection logic wasn't updated to process the new schema options. 
+Previously, support for additional schemas for the Redis client used in the Apollo Router were [added](https://github.com/apollographql/router/issues/3534). However, the router's Redis connection logic wasn't updated to process the new schema options.
 
 The Redis connection logic has been updated in this release.
 
@@ -58,7 +58,7 @@ Previously in the Apollo Router's logic for validating JWT with a corresponding 
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4234
 
-### Fix session count metrics ([Issue #3485](https://github.com/apollographql/router/issues/3485))
+### Session count metrics no longer go negative ([Issue #3485](https://github.com/apollographql/router/issues/3485))
 
 Previously, the `apollo_router_session_count_total` and `apollo_router_session_count_active` metrics were using counters that could become negative unexpectedly.
 
@@ -113,18 +113,17 @@ telemetry:
 
 By [@bryncooke](https://github.com/AUTHOR) in https://github.com/apollographql/router/pull/4285
 
-### Rename apollo.router.telemetry.studio.reports type attribute ([Issue #4300](https://github.com/apollographql/router/issues/4300))
+### Rename `apollo.router.telemetry.studio.reports`' `type` attribute ([Issue #4300](https://github.com/apollographql/router/issues/4300))
 
-To better comply with OpenTelemetry naming conventions, for `apollo.router.telemetry.studio.reports` the `type` attribute has been renamed to `report.type`. 
+To better comply with OpenTelemetry naming conventions, for `apollo.router.telemetry.studio.reports` the `type` attribute has been renamed to `report.type`.
 
 **Please update your dashboards if you are monitoring this metric.**
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4302
 
-### fix(telemetry): Fix incomplete traces for apollo_telemetry when combined with a rhai script ([PR #4228](https://github.com/apollographql/router/pull/4228))
+### Rhai scripts no longer preventing traces from appearing in Apollo Studio ([PR #4228](https://github.com/apollographql/router/pull/4228))
 
 Previously, the trace report for the Apollo Router when configured with a Rhai script may have been incomplete. That issue has been resolved in this release.
-
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4228
 
@@ -174,8 +173,6 @@ By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/ro
 The OpenTelemetry shutdown procedures within the Apollo Router have been improved by centralizing the cleanup logic.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4148
-
-
 
 # [1.34.1] - 2023-11-21
 
@@ -333,7 +330,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 > The `@policy` directive requires using a federation version not yet available at the time of router release `1.34.0`.
 
-We introduce a new GraphOS authorization directive called `@policy` that is designed to offload authorization policy execution to a coprocessor or Rhai script. 
+We introduce a new GraphOS authorization directive called `@policy` that is designed to offload authorization policy execution to a coprocessor or Rhai script.
 
 When executing an operation, the relevant policy will be determined based on `@policy` directives in the schema. The coprocessor or Rhai script then indicates which of those policies requirements are not met.  Finally, the router filters out fields which are unauthorized in the same way it does when using `@authenticated` or `@requiresScopes` before executing the operation.
 
