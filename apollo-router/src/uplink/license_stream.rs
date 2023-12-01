@@ -229,7 +229,6 @@ mod test {
     use std::time::Instant;
     use std::time::SystemTime;
 
-    use futures::SinkExt;
     use futures::StreamExt;
     use futures_test::stream::StreamTestExt;
 
@@ -384,8 +383,9 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn license_expander_claim_pause_claim() {
-        let (mut tx, rx) = futures::channel::mpsc::channel(10);
-        let events_stream = rx.expand_licenses().map(SimpleEvent::from);
+        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        let rx_stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+        let events_stream = rx_stream.expand_licenses().map(SimpleEvent::from);
 
         tokio::task::spawn(async move {
             // This simulates a new claim coming in before in between the warning and halt

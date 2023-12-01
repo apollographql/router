@@ -19,12 +19,14 @@ use crate::json_ext::PathElement;
 use crate::spec::query::transform;
 use crate::spec::query::traverse;
 use crate::spec::Schema;
+use crate::spec::TYPENAME;
 
 pub(crate) struct PolicyExtractionVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
     pub(crate) extracted_policies: HashSet<String>,
     policy_directive_name: String,
+    entity_query: bool,
 }
 
 pub(crate) const POLICY_DIRECTIVE_NAME: &str = "policy";
@@ -32,9 +34,14 @@ pub(crate) const POLICY_SPEC_URL: &str = "https://specs.apollo.dev/policy/v0.1";
 
 impl<'a> PolicyExtractionVisitor<'a> {
     #[allow(dead_code)]
-    pub(crate) fn new(schema: &'a schema::Schema, executable: &'a ast::Document) -> Option<Self> {
+    pub(crate) fn new(
+        schema: &'a schema::Schema,
+        executable: &'a ast::Document,
+        entity_query: bool,
+    ) -> Option<Self> {
         Some(Self {
             schema,
+            entity_query,
             fragments: transform::collect_fragments(executable),
             extracted_policies: HashSet::new(),
             policy_directive_name: Schema::directive_name(
@@ -59,6 +66,38 @@ impl<'a> PolicyExtractionVisitor<'a> {
         self.extracted_policies.extend(policy_argument(
             ty.directives().get(&self.policy_directive_name),
         ));
+    }
+
+    fn entities_operation(&mut self, node: &ast::OperationDefinition) -> Result<(), BoxError> {
+        use crate::spec::query::traverse::Visitor;
+
+        if node.selection_set.len() != 1 {
+            return Err("invalid number of selections for _entities query".into());
+        }
+
+        match node.selection_set.first() {
+            Some(ast::Selection::Field(field)) => {
+                if field.name.as_str() != "_entities" {
+                    return Err("expected _entities field".into());
+                }
+
+                for selection in &field.selection_set {
+                    match selection {
+                        ast::Selection::InlineFragment(f) => {
+                            match f.type_condition.as_ref() {
+                                None => {
+                                    return Err("expected type condition".into());
+                                }
+                                Some(condition) => self.inline_fragment(condition.as_str(), f)?,
+                            };
+                        }
+                        _ => return Err("expected inline fragment".into()),
+                    }
+                }
+                Ok(())
+            }
+            _ => Err("expected _entities field".into()),
+        }
     }
 }
 
@@ -89,7 +128,11 @@ impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
             ));
         }
 
-        traverse::operation(self, root_type, node)
+        if !self.entity_query {
+            traverse::operation(self, root_type, node)
+        } else {
+            self.entities_operation(node)
+        }
     }
 
     fn field(
@@ -149,6 +192,9 @@ pub(crate) struct PolicyFilteringVisitor<'a> {
     request_policies: HashSet<String>,
     pub(crate) query_requires_policies: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
+    // store the error paths from fragments so we can  add them at
+    // the point of application
+    fragments_unauthorized_paths: HashMap<&'a ast::Name, Vec<Path>>,
     current_path: Path,
     policy_directive_name: String,
 }
@@ -188,6 +234,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
             request_policies: successful_policies,
             query_requires_policies: false,
             unauthorized_paths: vec![],
+            fragments_unauthorized_paths: HashMap::new(),
             current_path: Path::default(),
             policy_directive_name: Schema::directive_name(
                 schema,
@@ -246,13 +293,16 @@ impl<'a> PolicyFilteringVisitor<'a> {
         field_def: &ast::FieldDefinition,
         node: &ast::Field,
     ) -> bool {
-        // if all selections under the interface field are fragments with type conditions
+        // we can request __typename outside of fragments even if the types have different
+        // authorization requirements
+        if node.name.as_str() == TYPENAME {
+            return false;
+        }
+        // if all selections under the interface field are __typename or fragments with type conditions
         // then we don't need to check that they have the same authorization requirements
-        if node.selection_set.iter().all(|sel| {
-            matches!(
-                sel,
-                ast::Selection::FragmentSpread(_) | ast::Selection::InlineFragment(_)
-            )
+        if node.selection_set.iter().all(|sel| match sel {
+            ast::Selection::Field(f) => f.name == TYPENAME,
+            ast::Selection::FragmentSpread(_) | ast::Selection::InlineFragment(_) => true,
         }) {
             return false;
         }
@@ -459,22 +509,51 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
             .get(&node.type_condition)
             .is_some_and(|ty| self.is_type_authorized(ty));
 
-        if fragment_is_authorized || self.dry_run {
+        let current_unauthorized_paths_index = self.unauthorized_paths.len();
+
+        let res = if fragment_is_authorized || self.dry_run {
             transform::fragment_definition(self, node)
         } else {
+            self.unauthorized_paths.push(self.current_path.clone());
             Ok(None)
+        };
+
+        if self.unauthorized_paths.len() > current_unauthorized_paths_index {
+            if let Some((name, _)) = self.fragments.get_key_value(&node.name) {
+                self.fragments_unauthorized_paths.insert(
+                    name,
+                    self.unauthorized_paths
+                        .split_off(current_unauthorized_paths_index),
+                );
+            }
         }
+
+        if let Ok(None) = res {
+            self.fragments.remove(&node.name);
+        }
+
+        res
     }
 
     fn fragment_spread(
         &mut self,
         node: &ast::FragmentSpread,
     ) -> Result<Option<ast::FragmentSpread>, BoxError> {
-        let condition = &self
-            .fragments
-            .get(&node.fragment_name)
-            .ok_or("MissingFragment")?
-            .type_condition;
+        // record the fragment errors at the point of application
+        if let Some(paths) = self.fragments_unauthorized_paths.get(&node.fragment_name) {
+            for path in paths {
+                let path = self.current_path.join(path);
+                self.unauthorized_paths.push(path);
+            }
+        }
+
+        let fragment = match self.fragments.get(&node.fragment_name) {
+            Some(fragment) => fragment,
+            None => return Ok(None),
+        };
+
+        let condition = &fragment.type_condition;
+
         self.current_path
             .push(PathElement::Fragment(condition.as_str().into()));
 
@@ -629,7 +708,7 @@ mod tests {
         let doc = ast::Document::parse(query, "query.graphql");
         schema.validate().unwrap();
         doc.to_executable(&schema).validate(&schema).unwrap();
-        let mut visitor = PolicyExtractionVisitor::new(&schema, &doc).unwrap();
+        let mut visitor = PolicyExtractionVisitor::new(&schema, &doc, false).unwrap();
         traverse::document(&mut visitor, &doc).unwrap();
 
         visitor.extracted_policies.into_iter().collect()
@@ -976,6 +1055,35 @@ mod tests {
             successful_policies: ["read user".to_string(), "read username".to_string()]
                 .into_iter()
                 .collect(),
+            result: doc,
+            paths
+        });
+    }
+
+    #[test]
+    fn fragment_fields() {
+        static QUERY: &str = r#"
+        query {
+            topProducts {
+                type
+                ...F
+            }
+        }
+
+        fragment F on Product {
+            reviews {
+                body
+            }
+        }
+        "#;
+
+        let extracted_policies = extract(BASIC_SCHEMA, QUERY);
+        let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(TestResult {
+            query: QUERY,
+            extracted_policies: &extracted_policies,
+            successful_policies: Vec::new(),
             result: doc,
             paths
         });
@@ -1414,5 +1522,97 @@ mod tests {
             result: doc,
             paths
         });
+    }
+
+    #[test]
+    fn interface_typename() {
+        static SCHEMA: &str = r#"
+        schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+        @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+      {
+        query: Query
+      }
+      directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+      directive @policy(policies: [String]) on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+      directive @defer on INLINE_FRAGMENT | FRAGMENT_SPREAD
+      scalar link__Import
+        enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+        type Query {
+            post(id: ID!): Post
+          }
+          
+          interface Post {
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+          }
+          
+          type Stats {
+            views: Int
+          }
+          
+          type PublicBlog implements Post {
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+            stats: Stats @policy(policies: ["a"])
+          }
+          
+          type PrivateBlog implements Post @policy(policies: ["b"]) {
+            id: ID!
+            author: String!
+            title: String!
+            content: String!
+            publishAt: String
+          }
+        "#;
+
+        static QUERY: &str = r#"
+        query Anonymous {
+            post(id: "1") {
+              ... on PublicBlog {
+                __typename
+                title
+              }
+            }
+          }
+        "#;
+
+        let (doc, paths) = filter(SCHEMA, QUERY, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
+
+        static QUERY2: &str = r#"
+        query Anonymous {
+            post(id: "1") {
+              __typename
+              ... on PublicBlog {
+                __typename
+                title
+              }
+            }
+          }
+        "#;
+
+        let (doc, paths) = filter(SCHEMA, QUERY2, HashSet::new());
+
+        insta::assert_display_snapshot!(doc);
+        insta::assert_debug_snapshot!(paths);
     }
 }

@@ -758,7 +758,7 @@ pub(crate) struct Limits {
     pub(crate) warn_only: bool,
 
     /// Limit recursion in the GraphQL parser to protect against stack overflow.
-    /// default: 4096
+    /// default: 500
     pub(crate) parser_max_recursion: usize,
 
     /// Limit the number of tokens the GraphQL parser processes before aborting.
@@ -783,8 +783,8 @@ impl Default for Limits {
 
             // This is `apollo-parser`’s default, which protects against stack overflow
             // but is still very high for "reasonable" queries.
-            // https://docs.rs/apollo-parser/0.2.8/src/apollo_parser/parser/mod.rs.html#368
-            parser_max_recursion: 4096,
+            // https://github.com/apollographql/apollo-rs/blob/apollo-parser%400.7.3/crates/apollo-parser/src/parser/mod.rs#L93-L104
+            parser_max_recursion: 500,
         }
     }
 }
@@ -894,6 +894,11 @@ pub(crate) struct RedisCache {
     #[schemars(with = "Option<String>", default)]
     /// Redis request timeout (default: 2ms)
     pub(crate) timeout: Option<Duration>,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    /// TTL for entries
+    pub(crate) ttl: Option<Duration>,
 }
 
 /// TLS related configuration options.
@@ -1161,25 +1166,43 @@ pub(crate) struct HealthCheck {
     /// Defaults to 127.0.0.1:8088
     pub(crate) listen: ListenAddr,
 
-    /// Set to false to disable the health check endpoint
+    /// Set to false to disable the health check
     pub(crate) enabled: bool,
+
+    /// Optionally set a custom healthcheck path
+    /// Defaults to /health
+    pub(crate) path: String,
 }
 
 fn default_health_check_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:8088").unwrap().into()
 }
 
-fn default_health_check() -> bool {
+fn default_health_check_enabled() -> bool {
     true
+}
+
+fn default_health_check_path() -> String {
+    "/health".to_string()
 }
 
 #[buildstructor::buildstructor]
 impl HealthCheck {
     #[builder]
-    pub(crate) fn new(listen: Option<ListenAddr>, enabled: Option<bool>) -> Self {
+    pub(crate) fn new(
+        listen: Option<ListenAddr>,
+        enabled: Option<bool>,
+        path: Option<String>,
+    ) -> Self {
+        let mut path = path.unwrap_or_else(default_health_check_path);
+        if !path.starts_with('/') {
+            path = format!("/{path}").to_string();
+        }
+
         Self {
             listen: listen.unwrap_or_else(default_health_check_listen),
-            enabled: enabled.unwrap_or_else(default_health_check),
+            enabled: enabled.unwrap_or_else(default_health_check_enabled),
+            path,
         }
     }
 }
@@ -1188,10 +1211,20 @@ impl HealthCheck {
 #[buildstructor::buildstructor]
 impl HealthCheck {
     #[builder]
-    pub(crate) fn fake_new(listen: Option<ListenAddr>, enabled: Option<bool>) -> Self {
+    pub(crate) fn fake_new(
+        listen: Option<ListenAddr>,
+        enabled: Option<bool>,
+        path: Option<String>,
+    ) -> Self {
+        let mut path = path.unwrap_or_else(default_health_check_path);
+        if !path.starts_with('/') {
+            path = format!("/{path}");
+        }
+
         Self {
             listen: listen.unwrap_or_else(test_listen),
-            enabled: enabled.unwrap_or_else(default_health_check),
+            enabled: enabled.unwrap_or_else(default_health_check_enabled),
+            path,
         }
     }
 }

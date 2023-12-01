@@ -394,6 +394,7 @@ impl IntegrationTest {
                     .header(CONTENT_ENCODING, content_encoding.unwrap_or("identity"))
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
+                    .header("x-my-header", "test")
                     .json(&query)
                     .build()
                     .unwrap();

@@ -96,6 +96,7 @@ supergraph:
       redis: #highlight-line
         urls: ["redis://..."] #highlight-line
         timeout: 5ms # Optional, by default: 2ms
+        ttl: 24h # Optional, by default no expiration
 ```
 
 The value of `urls` is a list of URLs for all Redis instances in your cluster.
@@ -113,6 +114,7 @@ apq:
       redis: #highlight-line
         urls: ["redis://..."] #highlight-line
         timeout: 5ms # Optional, by default: 2ms
+        ttl: 24h # Optional, by default no expiration
 ```
 
 The value of `urls` is a list of URLs for all Redis instances in your cluster.

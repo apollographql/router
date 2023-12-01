@@ -50,6 +50,7 @@ use crate::configuration::ListenAddr;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
+use crate::plugins::telemetry::SpanMode;
 use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
@@ -58,6 +59,8 @@ use crate::router_factory::RouterFactory;
 use crate::services::router;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
+
+static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -103,13 +106,14 @@ where
 
     if configuration.health_check.enabled {
         tracing::info!(
-            "Health check endpoint exposed at {}/health",
-            configuration.health_check.listen
+            "Health check exposed at {}{}",
+            configuration.health_check.listen,
+            configuration.health_check.path
         );
         endpoints.insert(
             configuration.health_check.listen.clone(),
             Endpoint::from_router_service(
-                "/health".to_string(),
+                configuration.health_check.path.clone(),
                 service_fn(move |req: router::Request| {
                     let mut status_code = StatusCode::OK;
                     let health = if let Some(query) = req.router_request.uri().query() {
@@ -383,6 +387,20 @@ impl HttpServerFactory for AxumHttpServerFactory {
     }
 }
 
+pub(crate) fn span_mode(configuration: &Configuration) -> SpanMode {
+    configuration
+        .apollo_plugins
+        .plugins
+        .iter()
+        .find(|(s, _)| s.as_str() == "telemetry")
+        .and_then(|(_, v)| v.get("spans").and_then(|v| v.as_object()))
+        .and_then(|v| {
+            v.get("mode")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+        })
+        .unwrap_or_default()
+}
+
 fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
@@ -395,6 +413,7 @@ where
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
+    let span_mode = span_mode(configuration);
 
     let main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
@@ -406,7 +425,9 @@ where
         .layer(cors)
         // Telemetry layers MUST be last. This means that they will be hit first during execution of the pipeline
         // Adding layers after telemetry will cause us to lose metrics and spans.
-        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license }))
+        .layer(
+            TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license, span_mode }),
+        )
         .layer(middleware::from_fn(metrics_handler));
 
     let route = endpoints_on_main_listener
@@ -515,7 +536,8 @@ async fn handle_graphql(
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    tracing::info!(counter.apollo_router_session_count_active = 1i64,);
+    let session_count = ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Release) + 1;
+    tracing::info!(value.apollo_router_session_count_active = session_count,);
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();
@@ -533,7 +555,9 @@ async fn handle_graphql(
 
     match res {
         Err(e) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1i64,);
+            let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Release) - 1;
+            tracing::info!(value.apollo_router_session_count_active = session_count,);
+
             if let Some(source_err) = e.source() {
                 if source_err.is::<RateLimited>() {
                     return RateLimited::new().into_response();
@@ -556,7 +580,6 @@ async fn handle_graphql(
                 .into_response()
         }
         Ok(response) => {
-            tracing::info!(counter.apollo_router_session_count_active = -1i64,);
             let (mut parts, body) = response.response.into_parts();
 
             let opt_compressor = accept_encoding
@@ -573,6 +596,10 @@ async fn handle_graphql(
                     Body::wrap_stream(compressor.process(body))
                 }
             };
+
+            // FIXME: we should instead reduce it after the response has been entirely written
+            let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Release) - 1;
+            tracing::info!(value.apollo_router_session_count_active = session_count,);
 
             http::Response::from_parts(parts, body).into_response()
         }

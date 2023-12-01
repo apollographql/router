@@ -149,7 +149,7 @@ fn dev_mode_defaults() -> Vec<Override> {
             .value_type(ValueType::Bool)
             .build(),
         Override::builder()
-            .config_path("telemetry.tracing.experimental_response_trace_id.enabled")
+            .config_path("telemetry.exporters.tracing.experimental_response_trace_id.enabled")
             .value(true)
             .value_type(ValueType::Bool)
             .build(),
