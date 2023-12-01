@@ -67,7 +67,12 @@ expression: "serde_json::to_value(response).unwrap()"
               "operationKind": "query",
               "id": null,
               "inputRewrites": null,
-              "outputRewrites": null
+              "outputRewrites": null,
+              "authorization": {
+                "is_authenticated": false,
+                "scopes": [],
+                "policies": []
+              }
             },
             {
               "kind": "Flatten",
@@ -100,7 +105,12 @@ expression: "serde_json::to_value(response).unwrap()"
                 "operationKind": "query",
                 "id": null,
                 "inputRewrites": null,
-                "outputRewrites": null
+                "outputRewrites": null,
+                "authorization": {
+                  "is_authenticated": false,
+                  "scopes": [],
+                  "policies": []
+                }
               }
             },
             {
@@ -140,7 +150,12 @@ expression: "serde_json::to_value(response).unwrap()"
                     "operationKind": "query",
                     "id": null,
                     "inputRewrites": null,
-                    "outputRewrites": null
+                    "outputRewrites": null,
+                    "authorization": {
+                      "is_authenticated": false,
+                      "scopes": [],
+                      "policies": []
+                    }
                   }
                 },
                 {
@@ -177,7 +192,12 @@ expression: "serde_json::to_value(response).unwrap()"
                     "operationKind": "query",
                     "id": null,
                     "inputRewrites": null,
-                    "outputRewrites": null
+                    "outputRewrites": null,
+                    "authorization": {
+                      "is_authenticated": false,
+                      "scopes": [],
+                      "policies": []
+                    }
                   }
                 }
               ]

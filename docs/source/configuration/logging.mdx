@@ -105,18 +105,16 @@ You can enable selective logging of these values via the `when_header` option:
 
 ```yaml title="router.yaml"
 telemetry:
-  experimental_logging:
-    format: json # By default it's "pretty" if you are in an interactive shell session
-    display_filename: true # Display filename where the log is coming from. Default: true
-    display_line_number: false # Display line number in the file where the log is coming from. Default: true
-    # If one of these headers matches we will log supergraph and subgraphs requests/responses
-    when_header:
-      - name: apollo-router-log-request
-        value: my_client
-        headers: true # default: false
-        body: true # default: false
-      # log request for all requests coming from Iphones
-      - name: user-agent
-        match: ^Mozilla/5.0 (iPhone*
-        headers: true
+  exporters:
+    logging:
+      # If one of these headers matches we will log supergraph and subgraphs requests/responses
+      experimental_when_header:
+        - name: apollo-router-log-request
+          value: my_client
+          headers: true # default: false
+          body: true # default: false
+        # log request for all requests coming from Iphones
+        - name: user-agent
+          match: ^Mozilla/5.0 (iPhone*
+          headers: true
 ```

@@ -15,7 +15,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn query_planner() -> Result<(), BoxError> {
         let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
-        let client = RedisClient::new(config, None, None);
+        let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
         client.wait_for_connect().await?;
 
@@ -81,7 +81,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apq() -> Result<(), BoxError> {
         let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
-        let client = RedisClient::new(config, None, None);
+        let client = RedisClient::new(config, None, None, None);
         let connection_task = client.connect();
         client.wait_for_connect().await?;
 

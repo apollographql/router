@@ -12,16 +12,16 @@ publish = false
 anyhow = "1"
 camino = "1"
 clap = { version = "4.4.8", features = ["derive"] }
-cargo_metadata = "0.17"
+cargo_metadata = "0.18.1"
 # Only use the `clock` features of `chrono` to avoid the `time` dependency
 # impacted by CVE-2020-26235.  https://github.com/chronotope/chrono/issues/602
 # and https://github.com/chronotope/chrono/issues/1073 will explain more.
 chrono = { version = "0.4.31", default-features = false, features = ["clock"] }
 console = "0.15.7"
-dialoguer = "0.10.4"
+dialoguer = "0.11.0"
 flate2 = "1"
 graphql_client = { version = "0.13.0", features = ["reqwest-rustls"] }
-itertools = "0.11.0"
+itertools = "0.12.0"
 libc = "0.2"
 memorable-wordlist = "0.1.7"
 nu-ansi-term = "0.49"
@@ -32,13 +32,13 @@ reqwest = { version = "0.11", default-features = false, features = [
     "rustls-tls",
     "rustls-tls-native-roots",
 ] }
-serde = { version = "1.0.192", features = ["derive"] }
+serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1"
 tar = "0.4"
 tempfile = "3"
 tinytemplate = "1.2.1"
 tokio = "1.34.0"
-which = "4"
+which = "5.0.0"
 walkdir = "2.4.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]

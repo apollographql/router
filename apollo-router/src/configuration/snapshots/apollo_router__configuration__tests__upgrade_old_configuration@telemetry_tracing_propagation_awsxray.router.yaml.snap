@@ -4,7 +4,8 @@ expression: new_config
 ---
 ---
 telemetry:
-  tracing:
-    propagation:
-      aws_xray: true
+  exporters:
+    tracing:
+      propagation:
+        aws_xray: true
 

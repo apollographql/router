@@ -10,10 +10,11 @@ The Apollo Router provides built-in support for metrics collection via [Promethe
 
 ```yaml title="router.yaml"
 telemetry:
-  metrics:
-    common:
-      # (Optional) Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
-      service_name: "router"
+  exporters:
+    metrics:
+      common:
+        # (Optional) Set the service name to easily find metrics related to the apollo-router in your metrics dashboards
+        service_name: "router"
 ```
 
 Service name discovery is handled in the following order:
@@ -30,11 +31,12 @@ A Resource is a set of key-value pairs that provide additional information to an
 
 ```yaml title="router.yaml"
 telemetry:
-  metrics:
-    common:
-      resource:
-        "environment.name": "production"
-        "environment.namespace": "{env.MY_K8_NAMESPACE_ENV_VARIABLE}"
+  exporters:
+    metrics:
+      common:
+        resource:
+          "environment.name": "production"
+          "environment.namespace": "{env.MY_K8_NAMESPACE_ENV_VARIABLE}"
 ```
 
 > [See OpenTelemetry conventions for resources.](https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/README.md)
@@ -45,13 +47,14 @@ You can use [Prometheus and Grafana](https://prometheus.io/docs/visualization/gr
 
 ```yaml title="router.yaml"
 telemetry:
-  metrics:
-    prometheus:
-      # By setting this endpoint you enable the Prometheus exporter
-      # All our endpoints exposed by plugins are namespaced by the name of the plugin
-      enabled: true
-      listen: 127.0.0.1:9090
-      path: /metrics
+  exporters:
+    metrics:
+      prometheus:
+        # By setting this endpoint you enable the Prometheus exporter
+        # All our endpoints exposed by plugins are namespaced by the name of the plugin
+        enabled: true
+        listen: 127.0.0.1:9090
+        path: /metrics
 ```
 
 ### Using in a containers environment
@@ -63,12 +66,13 @@ You can change this by setting:
 
 ```yaml title="router.yaml"
 telemetry:
-  metrics:
-    prometheus:
-      # By setting this endpoint you enable other containers and pods to access the Prometheus endpoint
-      enabled: true
-      listen: 0.0.0.0:9090
-      path: /metrics
+  exporters:
+    metrics:
+      prometheus:
+        # By setting this endpoint you enable other containers and pods to access the Prometheus endpoint
+        enabled: true
+        listen: 0.0.0.0:9090
+        path: /metrics
 ```
 
 Assuming you're running locally:
@@ -102,13 +106,14 @@ The router must also be configured to send traces to the Datadog agent:
 
 ```yaml title="router.yaml"
 telemetry:
-  metrics:
-    otlp:
-      enabled: true
-      # Temporality MUST be set to delta. Failure to do this will result in incorrect metrics.
-      temporality: delta
-      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
-      endpoint: "${env.DATADOG_AGENT_HOST}:4317"
+  exporters:
+    metrics:
+      otlp:
+        enabled: true
+        # Temporality MUST be set to delta. Failure to do this will result in incorrect metrics.
+        temporality: delta
+        # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317)
+        endpoint: "${env.DATADOG_AGENT_HOST}:4317"
 ```
 
 See [Datadog Agent configuration](https://docs.datadoghq.com/opentelemetry/otlp_ingest_in_the_agent/?tab=host) for more details
@@ -193,7 +198,7 @@ Note that the initial call to uplink during router startup will not be reflected
 #### Studio
 
 - `apollo.router.telemetry.studio.reports` - The number of reports submitted to Studio by the Router.
-  - `type`: The type of report submitted: "traces" or "metrics"
+  - `report.type`: The type of report submitted: "traces" or "metrics"
 
 ## Using OpenTelemetry Collector
 
@@ -201,34 +206,35 @@ You can send metrics to [OpenTelemetry Collector](https://opentelemetry.io/docs/
 
 ```yaml title="router.yaml"
 telemetry:
-  metrics:
-    otlp:
-      # Enable the OpenTelemetry exporter
-      enabled: true
-
-      # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317 for gRPC and http://127.0.0.1:4318 for HTTP)
-      endpoint: default
-
-      # Optional protocol. Only grpc is supported currently.
-      # Setting to http will result in configuration failure.
-      protocol: grpc
-
-      # Optional Grpc configuration
-      grpc:
-        domain_name: "my.domain"
-        key: ""
-        ca: ""
-        cert: ""
-        metadata:
-          foo: bar
-
-      # Optional batch_processor configuration
-      batch_processor:
-        scheduled_delay: 100ms
-        max_concurrent_exports: 1000
-        max_export_batch_size: 10000
-        max_export_timeout: 100s
-        max_queue_size: 10000
+  exporters:
+    metrics:
+      otlp:
+        # Enable the OpenTelemetry exporter
+        enabled: true
+  
+        # Optional endpoint, either 'default' or a URL (Defaults to http://127.0.0.1:4317 for gRPC and http://127.0.0.1:4318 for HTTP)
+        endpoint: default
+  
+        # Optional protocol. Only grpc is supported currently.
+        # Setting to http will result in configuration failure.
+        protocol: grpc
+  
+        # Optional Grpc configuration
+        grpc:
+          domain_name: "my.domain"
+          key: ""
+          ca: ""
+          cert: ""
+          metadata:
+            foo: bar
+  
+        # Optional batch_processor configuration
+        batch_processor:
+          scheduled_delay: 100ms
+          max_concurrent_exports: 1000
+          max_export_batch_size: 10000
+          max_export_timeout: 100s
+          max_queue_size: 10000
 ```
 
 Remember that `file.` and `env.` prefixes can be used for expansion in config yaml. e.g. `${file.ca.txt}`.
@@ -246,54 +252,55 @@ Examples of all of these are shown in the file below:
 
 ```yaml title="router.yaml"
 telemetry:
-  metrics:
-    common:
-      attributes:
-        supergraph: # Attribute configuration for requests to/responses from the router
-          static:
-            - name: "version"
-              value: "v1.0.0"
-          request:
-            header:
-              - named: "content-type"
-                rename: "payload_type"
-                default: "application/json"
-              - named: "x-custom-header-to-add"
-          response:
-            body:
-              # Apply the value of the provided path of the router's response body as an attribute
-              - path: .errors[0].extensions.http.status
-                name: error_from_body
-              # Use the unique extension code to identify the kind of error
-              - path: .errors[0].extensions.code
-                name: error_code
-          context:
-            # Apply the indicated element from the plugin chain's context as an attribute
-            - named: my_key
-        subgraph: # Attribute configuration for requests to/responses from subgraphs
-          all:
+  exporters:
+    metrics:
+      common:
+        attributes:
+          supergraph: # Attribute configuration for requests to/responses from the router
             static:
-              # Always apply this attribute to all metrics for all subgraphs
-              - name: kind
-                value: subgraph_request
-            errors: # Only work if it's a valid GraphQL error (for example if the subgraph returns an http error or if the router can't reach the subgraph)
-              include_messages: true # Will include the error message in a message attribute
-              extensions: # Include extensions data
-                - name: subgraph_error_extended_type # Name of the attribute
-                  path: .type # JSON query path to fetch data from extensions
-                - name: message
-                  path: .reason
-            # Will create this kind of metric for example apollo_router_http_requests_error_total{message="cannot contact the subgraph",subgraph="my_subgraph_name",subgraph_error_extended_type="SubrequestHttpError"}
-          subgraphs:
-            my_subgraph_name: # Apply these rules only for the subgraph named `my_subgraph_name`
-              request:
-                header:
-                  - named: "x-custom-header"
-                body:
-                  # Apply the value of the provided path of the router's request body as an attribute (here it's the query)
-                  - path: .query
-                    name: query
-                    default: UNKNOWN
+              - name: "version"
+                value: "v1.0.0"
+            request:
+              header:
+                - named: "content-type"
+                  rename: "payload_type"
+                  default: "application/json"
+                - named: "x-custom-header-to-add"
+            response:
+              body:
+                # Apply the value of the provided path of the router's response body as an attribute
+                - path: .errors[0].extensions.http.status
+                  name: error_from_body
+                # Use the unique extension code to identify the kind of error
+                - path: .errors[0].extensions.code
+                  name: error_code
+            context:
+              # Apply the indicated element from the plugin chain's context as an attribute
+              - named: my_key
+          subgraph: # Attribute configuration for requests to/responses from subgraphs
+            all:
+              static:
+                # Always apply this attribute to all metrics for all subgraphs
+                - name: kind
+                  value: subgraph_request
+              errors: # Only work if it's a valid GraphQL error (for example if the subgraph returns an http error or if the router can't reach the subgraph)
+                include_messages: true # Will include the error message in a message attribute
+                extensions: # Include extensions data
+                  - name: subgraph_error_extended_type # Name of the attribute
+                    path: .type # JSON query path to fetch data from extensions
+                  - name: message
+                    path: .reason
+              # Will create this kind of metric for example apollo_router_http_requests_error_total{message="cannot contact the subgraph",subgraph="my_subgraph_name",subgraph_error_extended_type="SubrequestHttpError"}
+            subgraphs:
+              my_subgraph_name: # Apply these rules only for the subgraph named `my_subgraph_name`
+                request:
+                  header:
+                    - named: "x-custom-header"
+                  body:
+                    # Apply the value of the provided path of the router's request body as an attribute (here it's the query)
+                    - path: .query
+                      name: query
+                      default: UNKNOWN
 ```
 
 ### Example JSON path queries
@@ -327,17 +334,18 @@ You can customize the buckets for all generated histograms:
 
 ```yaml title="router.yaml"
 telemetry:
-  metrics:
-    common:
-      buckets:
-        - 0.05
-        - 0.10
-        - 0.25
-        - 0.50
-        - 1.00
-        - 2.50
-        - 5.00
-        - 10.00
-        - 20.00
+  exporters:
+    metrics:
+      common:
+        buckets:
+          - 0.05
+          - 0.10
+          - 0.25
+          - 0.50
+          - 1.00
+          - 2.50
+          - 5.00
+          - 10.00
+          - 20.00
 ```
 
