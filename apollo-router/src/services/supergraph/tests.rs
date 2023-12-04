@@ -2902,29 +2902,7 @@ async fn interface_object_typename2() {
                             }
                         ]
                     } }}
-                ) /*.with_json(
-                        serde_json::json!{{"query":"{searchContacts(name:\"max\"){__typename displayName ...on Person{__typename id}}}"}},
-                        serde_json::json!{{"data": {
-                            "searchContacts": [
-                                {
-                                    "__typename": "Person",
-                                    "displayName": "Max",
-                                    "id": "0"
-                                }
-                            ]
-                        } }}
-                    ).with_json(
-                        serde_json::json!{{"query":"{searchContacts(name:\"max\"){__typename ...on Person{__typename id}}}"}},
-                        serde_json::json!{{"data": {
-                            "searchContacts": [
-                                {
-                                    "__typename": "Person",
-                                    "id": "0"
-                                }
-                            ]
-                        } }}
-                    )*/
-                    .build(),
+                ).build(),
             ),
             (
                 "B",
@@ -2946,23 +2924,7 @@ async fn interface_object_typename2() {
                                 "country": "Fr"
                             }]
                          } }}
-                    )/*.with_json(
-                        serde_json::json!{{
-                            "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Contact{__typename country}}}",
-                            "variables": {
-                                "representations": [
-                                    {"__typename":"Contact","id":"0"}
-                                ]
-                            }
-                        }},
-                        serde_json::json!{{"data": {
-                            "_entities": [{
-                                "__typename": "Person",
-                                "country": "A"
-                            }]
-                        } }}
-                    )*/
-                    .build(),
+                    ).build(),
             ),
         ]
         .into_iter()
