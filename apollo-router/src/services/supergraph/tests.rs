@@ -2912,7 +2912,7 @@ async fn interface_object_typename2() {
             ),
             (
                 "B",
-                MockSubgraph::builder() .with_json(
+                MockSubgraph::builder().with_json(
                         serde_json::json!{{
                             "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Contact{__typename country}}}",
                             "variables": {
@@ -2928,6 +2928,24 @@ async fn interface_object_typename2() {
                         serde_json::json!{{"data": {
                             "_entities": [{
                                 "__typename":"Contact",
+                                "country": "Fr"
+                            }]
+                         } }}
+                    ).with_json(
+                        serde_json::json!{{
+                            "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Contact{country}}}",
+                            "variables": {
+                                "representations": [
+                                    {
+                                        "__typename":"Contact",
+                                        "id":"0",
+                                        "displayName": "Max",
+                                    }
+                                ]
+                            }
+                        }},
+                        serde_json::json!{{"data": {
+                            "_entities": [{
                                 "country": "Fr"
                             }]
                          } }}
@@ -2952,21 +2970,34 @@ async fn interface_object_typename2() {
         .query(
             // this works
             /*r#"{
+                    searchContacts(name: "max") {
+                        inner {
+                          __typename
+                          ...on Contact {
+                              __typename
+                              country
+                          }
+                        }
+                    }
+                  }"#,*/
+                  // this works too
+                  /*
+                  r#"{
               searchContacts(name: "max") {
                   inner {
-                    __typename
-                    ...on Contact {
-                        __typename
-                        country
-                    }
+                    ...F
                   }
               }
-            }"#,*/
+            }
+            fragment F on Contact {
+              country
+            }"#,
+                   */
             // this does not
             r#"{
         searchContacts(name: "max") {
             inner {
-              __typename
+            __typename
               ...F
             }
         }
