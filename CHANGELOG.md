@@ -57,9 +57,9 @@ By [@bnjjj](https://github.com/bnjjj), [@bryncooke](https://github.com/bryncooke
 
 ## 🐛 Fixes
 
-### Remove surplus '/' from health check in logs ([Issue #4270](https://github.com/apollographql/router/issues/4270))
+### Remove doubled slash (`//`) in logs for health check URL ([Issue #4270](https://github.com/apollographql/router/issues/4270))
 
-Adding the ability to specify the path of the health endpoint introduced an error in the logging. An extra '/' was added before the specified path. This is now fixed.
+Adding the ability to specify the path of the health endpoint introduced an error in the logging. An extra `/` was added before the specified path resulting in an unintended double-slash (`//`) in the rendered URL.  It did not affect the actual health check endpoint. This is now fixed.
 
 By [@juancarlosjr97](https://github.com/juancarlosjr97) in https://github.com/apollographql/router/pull/4278
 
