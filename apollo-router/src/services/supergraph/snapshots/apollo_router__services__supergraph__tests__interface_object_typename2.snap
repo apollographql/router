@@ -6,8 +6,10 @@ expression: stream.next_response().await.unwrap()
   "data": {
     "searchContacts": [
       {
-        "__typename": "Person",
-        "country": "Fr"
+        "inner": {
+          "__typename": "Person",
+          "country": "Fr"
+        }
       }
     ]
   }

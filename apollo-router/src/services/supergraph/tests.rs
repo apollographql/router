@@ -2862,6 +2862,10 @@ async fn interface_object_typename2() {
     EXECUTION
   }
   
+  type ContactWrapper @join__type(graph: A) {
+    inner: Contact!
+  }
+
   interface Contact
     @join__type(graph: A)
     @join__type(graph: B, key: "id displayName", isInterfaceObject: true)
@@ -2883,7 +2887,7 @@ async fn interface_object_typename2() {
   type Query
     @join__type(graph: A)
   {
-    searchContacts(name: String): [Contact!]! @join__field(graph: A)
+    searchContacts(name: String): [ContactWrapper!]! @join__field(graph: A)
   }
       "#;
 
@@ -2892,13 +2896,15 @@ async fn interface_object_typename2() {
             (
                 "A",
                 MockSubgraph::builder().with_json(
-                    serde_json::json!{{"query":"{searchContacts(name:\"max\"){__typename id displayName}}"}},
+                    serde_json::json!{{"query":"{searchContacts(name:\"max\"){inner{__typename id displayName}}}"}},
                     serde_json::json!{{"data": {
                         "searchContacts": [
                             {
-                                "__typename": "Person",
-                                "displayName": "Max",
-                                "id": "0"
+                                "inner": {
+                                    "__typename": "Person",
+                                    "displayName": "Max",
+                                    "id": "0"
+                                }
                             }
                         ]
                     } }}
@@ -2945,9 +2951,12 @@ async fn interface_object_typename2() {
         .query(
             r#"{
       searchContacts(name: "max") {
-          ...on Contact {
-              __typename
-              country
+          inner {
+            __typename
+            ...on Contact {
+                __typename
+                country
+            }
           }
       }
     }"#,
