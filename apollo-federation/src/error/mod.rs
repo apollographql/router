@@ -1,5 +1,6 @@
-use apollo_compiler::ast::InvalidNameError;
-use apollo_compiler::DiagnosticList;
+use crate::subgraph::spec::FederationSpecError;
+use apollo_compiler::validation::DiagnosticList;
+use apollo_compiler::{ast::InvalidNameError, validation::WithErrors};
 use lazy_static::lazy_static;
 use std::fmt::{Display, Formatter, Write};
 
@@ -367,6 +368,14 @@ impl From<InvalidNameError> for FederationError {
     }
 }
 
+impl From<FederationSpecError> for FederationError {
+    fn from(_err: FederationSpecError) -> Self {
+        // TODO: When we get around to finishing the composition port, we should really switch it to
+        // using FederationError instead of FederationSpecError.
+        todo!()
+    }
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub struct MultipleFederationErrors {
     pub errors: Vec<SingleFederationError>,
@@ -460,6 +469,12 @@ impl From<DiagnosticList> for FederationError {
     fn from(value: DiagnosticList) -> Self {
         let value: MultipleFederationErrors = value.into();
         value.into()
+    }
+}
+
+impl<T> From<WithErrors<T>> for FederationError {
+    fn from(value: WithErrors<T>) -> Self {
+        value.errors.into()
     }
 }
 

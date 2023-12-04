@@ -1,16 +1,16 @@
 [package]
 name = "apollo-federation"
-version = "0.0.4"
+version = "0.0.5"
 authors = ["The Apollo GraphQL Contributors"]
 edition = "2021"
 description = "Apollo Federation"
 documentation = "https://docs.rs/apollo-federation"
 repository = "https://github.com/apollographql/federation-next"
 license = "Elastic-2.0"
-autotests = false # Integration tests are modules of tests/main.rs
+autotests = false                                               # Integration tests are modules of tests/main.rs
 
 [dependencies]
-apollo-compiler = "=1.0.0-beta.7"
+apollo-compiler = "=1.0.0-beta.10"
 derive_more = "0.99.17"
 salsa = "0.16.1"
 indexmap = "2.0.2"

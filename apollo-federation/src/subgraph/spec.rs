@@ -219,6 +219,8 @@ impl FederationSpecDefinitions {
         }
     }
 
+    // The Default trait doesn't allow for returning Results, so we ignore the clippy warning here.
+    #[allow(clippy::should_implement_trait)]
     pub fn default() -> Result<Self, FederationSpecError> {
         Self::from_link(Link {
             url: Url {
@@ -591,23 +593,6 @@ impl LinkSpecDefinitions {
         }
     }
 
-    pub fn default() -> Self {
-        let link = Link {
-            url: Url {
-                identity: Identity::link_identity(),
-                version: Version { major: 1, minor: 0 },
-            },
-            imports: vec![Arc::new(Import {
-                element: "Import".to_owned(),
-                is_directive: false,
-                alias: None,
-            })],
-            purpose: None,
-            spec_alias: None,
-        };
-        Self::new(link)
-    }
-
     ///   scalar Import
     pub fn import_scalar_definition(&self, name: Name) -> ScalarType {
         ScalarType {
@@ -695,6 +680,25 @@ impl LinkSpecDefinitions {
             repeatable: true,
             locations: vec![DirectiveLocation::Schema],
         })
+    }
+}
+
+impl Default for LinkSpecDefinitions {
+    fn default() -> Self {
+        let link = Link {
+            url: Url {
+                identity: Identity::link_identity(),
+                version: Version { major: 1, minor: 0 },
+            },
+            imports: vec![Arc::new(Import {
+                element: "Import".to_owned(),
+                is_directive: false,
+                alias: None,
+            })],
+            purpose: None,
+            spec_alias: None,
+        };
+        Self::new(link)
     }
 }
 

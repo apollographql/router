@@ -14,9 +14,10 @@ use crate::schema::position::{
     OutputTypeDefinitionPosition, SchemaRootDefinitionKind, SchemaRootDefinitionPosition,
     TypeDefinitionPosition, UnionTypeDefinitionPosition,
 };
-use crate::schema::FederationSchema;
+use crate::schema::ValidFederationSchema;
 use apollo_compiler::executable::{Selection, SelectionSet};
 use apollo_compiler::schema::{DirectiveList as ComponentDirectiveList, ExtendedType, Name};
+use apollo_compiler::validation::Valid;
 use apollo_compiler::{Node, NodeStr, Schema};
 use indexmap::{IndexMap, IndexSet};
 use petgraph::graph::{EdgeIndex, NodeIndex};
@@ -32,8 +33,8 @@ use strum::IntoEnumIterator;
 ///
 /// Assumes the given schemas have been validated.
 pub fn build_federated_query_graph(
-    supergraph_schema: Arc<FederationSchema>,
-    api_schema: Arc<FederationSchema>,
+    supergraph_schema: Arc<ValidFederationSchema>,
+    api_schema: Arc<ValidFederationSchema>,
     validate_extracted_subgraphs: Option<bool>,
     for_query_planning: Option<bool>,
 ) -> Result<QueryGraph, FederationError> {
@@ -69,7 +70,7 @@ pub fn build_federated_query_graph(
 /// Assumes the given schemas have been validated.
 pub fn build_query_graph(
     name: NodeStr,
-    schema: FederationSchema,
+    schema: ValidFederationSchema,
 ) -> Result<QueryGraph, FederationError> {
     let mut query_graph = QueryGraph {
         // Note this name is a dummy initial name that gets overridden as we build the query graph.
@@ -90,7 +91,7 @@ struct BaseQueryGraphBuilder {
 }
 
 impl BaseQueryGraphBuilder {
-    fn new(mut query_graph: QueryGraph, source: NodeStr, schema: FederationSchema) -> Self {
+    fn new(mut query_graph: QueryGraph, source: NodeStr, schema: ValidFederationSchema) -> Self {
         query_graph.current_source = source.clone();
         query_graph.sources.insert(source.clone(), schema);
         query_graph
@@ -212,7 +213,7 @@ struct SchemaQueryGraphBuilder {
 
 struct SchemaQueryGraphBuilderSubgraphData {
     federation_spec_definition: &'static FederationSpecDefinition,
-    api_schema: Arc<FederationSchema>,
+    api_schema: Arc<ValidFederationSchema>,
 }
 
 impl SchemaQueryGraphBuilder {
@@ -221,8 +222,8 @@ impl SchemaQueryGraphBuilder {
     fn new(
         query_graph: QueryGraph,
         source: NodeStr,
-        schema: FederationSchema,
-        api_schema: Option<Arc<FederationSchema>>,
+        schema: ValidFederationSchema,
+        api_schema: Option<Arc<ValidFederationSchema>>,
         for_query_planning: bool,
     ) -> Result<Self, FederationError> {
         let subgraph = if let Some(api_schema) = api_schema {
@@ -939,19 +940,21 @@ struct AbstractTypeWithRuntimeTypes {
 
 struct FederatedQueryGraphBuilder {
     base: BaseQueryGraphBuilder,
-    supergraph_schema: Arc<FederationSchema>,
+    supergraph_schema: Arc<ValidFederationSchema>,
     subgraphs: FederatedQueryGraphBuilderSubgraphs,
 }
 
 impl FederatedQueryGraphBuilder {
     fn new(
         query_graph: QueryGraph,
-        supergraph_schema: Arc<FederationSchema>,
+        supergraph_schema: Arc<ValidFederationSchema>,
     ) -> Result<Self, FederationError> {
         let base = BaseQueryGraphBuilder::new(
             query_graph,
             NodeStr::new(FEDERATED_GRAPH_ROOT_SOURCE),
-            FederationSchema::new(Schema::new())?,
+            // This is a dummy schema that should never be used, so it's fine if we assume validity
+            // here (note that empty schemas have no Query type, making them invalid GraphQL).
+            ValidFederationSchema::new(Valid::assume_valid(Schema::new()))?,
         );
         let subgraphs = FederatedQueryGraphBuilderSubgraphs::new(&base)?;
         Ok(FederatedQueryGraphBuilder {
@@ -2034,7 +2037,7 @@ mod tests {
         ObjectOrInterfaceTypeDefinitionPosition, ObjectTypeDefinitionPosition,
         OutputTypeDefinitionPosition, ScalarTypeDefinitionPosition, SchemaRootDefinitionKind,
     };
-    use crate::schema::FederationSchema;
+    use crate::schema::ValidFederationSchema;
     use apollo_compiler::schema::Name;
     use apollo_compiler::{name, NodeStr, Schema};
     use indexmap::{IndexMap, IndexSet};
@@ -2045,7 +2048,8 @@ mod tests {
     const SCHEMA_NAME: NodeStr = NodeStr::from_static(&"test");
 
     fn test_query_graph_from_schema_sdl(sdl: &str) -> Result<QueryGraph, FederationError> {
-        let schema = FederationSchema::new(Schema::parse(sdl, "schema.graphql"))?;
+        let schema =
+            ValidFederationSchema::new(Schema::parse_and_validate(sdl, "schema.graphql")?)?;
         build_query_graph(SCHEMA_NAME, schema)
     }
 

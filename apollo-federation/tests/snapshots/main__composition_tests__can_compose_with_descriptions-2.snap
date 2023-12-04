@@ -1,25 +1,28 @@
 ---
-source: apollo-federation/tests/composition_tests.rs
+source: tests/composition_tests.rs
 expression: print_sdl(&supergraph.to_api_schema())
 ---
-"A cool schema"
+"""A cool schema"""
 schema {
   query: Query
 }
 
-"An enum"
+"""An enum"""
 enum E {
-  "The A value"
+  """The A value"""
   A
-  "The B value"
+  """The B value"""
   B
 }
 
-"Available queries\nNot much yet"
+"""
+Available queries
+Not much yet
+"""
 type Query {
-  "Returns tea"
+  """Returns tea"""
   t(
-    "An argument that is very important"
+    """An argument that is very important"""
     x: String!,
   ): String
 }

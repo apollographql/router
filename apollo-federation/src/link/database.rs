@@ -179,7 +179,7 @@ mod tests {
           directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
         "#;
 
-        let schema = Schema::parse(schema, "testSchema");
+        let schema = Schema::parse(schema, "testSchema").unwrap();
 
         let meta = links_metadata(&schema)
             // TODO: error handling?

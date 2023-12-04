@@ -2,64 +2,25 @@ use std::collections::BTreeMap;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-use apollo_compiler::ast::{InvalidNameError, Name};
+use apollo_compiler::ast::Name;
 use apollo_compiler::schema::{ComponentName, ExtendedType, ObjectType};
 use apollo_compiler::{name, Node, Schema};
 use indexmap::map::Entry;
 use indexmap::{IndexMap, IndexSet};
 
+use crate::error::FederationError;
 use crate::link::spec::Identity;
 use crate::link::LinkError;
 use crate::link::{Link, DEFAULT_LINK_NAME};
 use crate::subgraph::spec::{
-    AppliedFederationLink, FederationSpecDefinitions, FederationSpecError, LinkSpecDefinitions,
-    ANY_SCALAR_NAME, ENTITIES_QUERY, ENTITY_UNION_NAME, FEDERATION_V2_DIRECTIVE_NAMES,
-    KEY_DIRECTIVE_NAME, SERVICE_SDL_QUERY, SERVICE_TYPE,
+    AppliedFederationLink, FederationSpecDefinitions, LinkSpecDefinitions, ANY_SCALAR_NAME,
+    ENTITIES_QUERY, ENTITY_UNION_NAME, FEDERATION_V2_DIRECTIVE_NAMES, KEY_DIRECTIVE_NAME,
+    SERVICE_SDL_QUERY, SERVICE_TYPE,
 };
+use apollo_compiler::validation::Valid;
 
 mod database;
-mod spec;
-
-// TODO: we need a strategy for errors. All (or almost all) federation errors have a code in
-// particular (and the way we deal with this in typescript, having all errors declared in one place
-// with descriptions that allow to autogenerate doc is kind of useful (if not perfect)), so we
-// probably want some additional crate specific for errors and use that here.
-#[derive(Debug)]
-pub struct SubgraphError {
-    pub msg: String,
-}
-
-impl From<apollo_compiler::DiagnosticList> for SubgraphError {
-    fn from(value: apollo_compiler::DiagnosticList) -> Self {
-        SubgraphError {
-            msg: value.to_string_no_color(),
-        }
-    }
-}
-
-impl From<LinkError> for SubgraphError {
-    fn from(value: LinkError) -> Self {
-        SubgraphError {
-            msg: value.to_string(),
-        }
-    }
-}
-
-impl From<FederationSpecError> for SubgraphError {
-    fn from(value: FederationSpecError) -> Self {
-        SubgraphError {
-            msg: value.to_string(),
-        }
-    }
-}
-
-impl From<InvalidNameError> for SubgraphError {
-    fn from(err: InvalidNameError) -> Self {
-        SubgraphError {
-            msg: format!("Invalid GraphQL name \"{}\"", err.0),
-        }
-    }
-}
+pub mod spec;
 
 pub struct Subgraph {
     pub name: String,
@@ -68,33 +29,25 @@ pub struct Subgraph {
 }
 
 impl Subgraph {
-    pub fn new(name: &str, url: &str, schema_str: &str) -> Self {
-        let schema = Schema::parse(schema_str, name);
-
-        // TODO: ideally, we'd want Subgraph to always represent a valid subgraph: we don't want
-        // every possible method that receive a subgraph to have to worry if the underlying schema
-        // is actually not a subgraph at all: we want the type-system to help carry known
-        // guarantees. This imply we should run validation here (both graphQL ones, but also
-        // subgraph specific ones).
-        // This also mean we would ideally want `schema` to not export any mutable methods
-        // but not sure what that entail/how doable that is currently.
-
-        Self {
+    pub fn new(name: &str, url: &str, schema_str: &str) -> Result<Self, FederationError> {
+        let schema = Schema::parse(schema_str, name)?;
+        // TODO: federation-specific validation
+        Ok(Self {
             name: name.to_string(),
             url: url.to_string(),
             schema,
-        }
+        })
     }
 
     pub fn parse_and_expand(
         name: &str,
         url: &str,
         schema_str: &str,
-    ) -> Result<Self, SubgraphError> {
+    ) -> Result<ValidSubgraph, FederationError> {
         let mut schema = Schema::builder()
             .adopt_orphan_extensions()
             .parse(schema_str, name)
-            .build();
+            .build()?;
 
         let mut imported_federation_definitions: Option<FederationSpecDefinitions> = None;
         let mut imported_link_definitions: Option<LinkSpecDefinitions> = None;
@@ -108,7 +61,8 @@ impl Subgraph {
             let link_directive = Link::from_directive_application(directive)?;
             if link_directive.url.identity == Identity::federation_identity() {
                 if imported_federation_definitions.is_some() {
-                    return Err(SubgraphError { msg: "invalid graphql schema - multiple @link imports for the federation specification are not supported".to_owned() });
+                    let msg = "invalid graphql schema - multiple @link imports for the federation specification are not supported";
+                    return Err(LinkError::BootstrapError(msg.to_owned()).into());
                 }
 
                 imported_federation_definitions =
@@ -116,7 +70,8 @@ impl Subgraph {
             } else if link_directive.url.identity == Identity::link_identity() {
                 // user manually imported @link specification
                 if imported_link_definitions.is_some() {
-                    return Err(SubgraphError { msg: "invalid graphql schema - multiple @link imports for the link specification are not supported".to_owned() });
+                    let msg = "invalid graphql schema - multiple @link imports for the link specification are not supported";
+                    return Err(LinkError::BootstrapError(msg.to_owned()).into());
                 }
 
                 imported_link_definitions = Some(LinkSpecDefinitions::new(link_directive));
@@ -129,8 +84,8 @@ impl Subgraph {
             imported_federation_definitions,
             imported_link_definitions,
         )?;
-        schema.validate()?;
-        Ok(Self {
+        let schema = schema.validate()?;
+        Ok(ValidSubgraph {
             name: name.to_owned(),
             url: url.to_owned(),
             schema,
@@ -141,7 +96,7 @@ impl Subgraph {
         schema: &mut Schema,
         imported_federation_definitions: Option<FederationSpecDefinitions>,
         imported_link_definitions: Option<LinkSpecDefinitions>,
-    ) -> Result<(), SubgraphError> {
+    ) -> Result<(), FederationError> {
         // populate @link spec definitions
         let link_spec_definitions = match imported_link_definitions {
             Some(definitions) => definitions,
@@ -180,7 +135,7 @@ impl Subgraph {
     fn populate_missing_link_definitions(
         schema: &mut Schema,
         link_spec_definitions: LinkSpecDefinitions,
-    ) -> Result<(), SubgraphError> {
+    ) -> Result<(), FederationError> {
         let purpose_enum_name = Name::new(&link_spec_definitions.purpose_enum_name)?;
         schema
             .types
@@ -208,7 +163,7 @@ impl Subgraph {
     fn populate_missing_federation_directive_definitions(
         schema: &mut Schema,
         fed_definitions: &FederationSpecDefinitions,
-    ) -> Result<(), SubgraphError> {
+    ) -> Result<(), FederationError> {
         let fieldset_scalar_name = Name::new(&fed_definitions.fieldset_scalar_name)?;
         schema
             .types
@@ -239,7 +194,7 @@ impl Subgraph {
     fn populate_missing_federation_types(
         schema: &mut Schema,
         fed_definitions: &FederationSpecDefinitions,
-    ) -> Result<(), SubgraphError> {
+    ) -> Result<(), FederationError> {
         schema
             .types
             .entry(SERVICE_TYPE)
@@ -336,11 +291,9 @@ impl Subgraphs {
         }
     }
 
-    pub fn add(&mut self, subgraph: Subgraph) -> Result<(), SubgraphError> {
+    pub fn add(&mut self, subgraph: Subgraph) -> Result<(), String> {
         if self.subgraphs.contains_key(&subgraph.name) {
-            return Err(SubgraphError {
-                msg: format!("A subgraph named {} already exists", subgraph.name),
-            });
+            return Err(format!("A subgraph named {} already exists", subgraph.name));
         }
         self.subgraphs
             .insert(subgraph.name.clone(), Arc::new(subgraph));
@@ -349,6 +302,18 @@ impl Subgraphs {
 
     pub fn get(&self, name: &str) -> Option<Arc<Subgraph>> {
         self.subgraphs.get(name).cloned()
+    }
+}
+
+pub struct ValidSubgraph {
+    pub name: String,
+    pub url: String,
+    pub schema: Valid<Schema>,
+}
+
+impl std::fmt::Debug for ValidSubgraph {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, r#"name: {}, urL: {}"#, self.name, self.url)
     }
 }
 
@@ -390,7 +355,7 @@ mod tests {
           directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
         "#;
 
-        let subgraph = Subgraph::new("S1", "http://s1", schema);
+        let subgraph = Subgraph::new("S1", "http://s1", schema).unwrap();
         let keys = keys(&subgraph.schema, "T");
         assert_eq!(keys.len(), 1);
         assert_eq!(keys.get(0).unwrap().type_name, "T");

@@ -1,24 +1,24 @@
 use crate::error::FederationError;
 use apollo_compiler::executable::{FieldSet, SelectionSet};
 use apollo_compiler::schema::NamedType;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::{NodeStr, Schema};
 
 // TODO: In the JS codebase, this optionally runs an additional validation to forbid aliases, and
 // has some error-rewriting to help give the user better hints around non-existent fields.
 pub(super) fn parse_field_set(
-    schema: &Schema,
+    schema: &Valid<Schema>,
     parent_type_name: NamedType,
     value: NodeStr,
 ) -> Result<SelectionSet, FederationError> {
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
-    let field_set = FieldSet::parse(
+    let field_set = FieldSet::parse_and_validate(
         schema,
         parent_type_name,
         value.as_str(),
         "field_set.graphql",
-    );
-    field_set.validate(schema)?;
+    )?;
     merge_selection_sets(&[&field_set.selection_set])
 }
 

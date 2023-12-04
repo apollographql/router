@@ -18,7 +18,7 @@ use crate::schema::position::{
     ScalarTypeDefinitionPosition, SchemaRootDefinitionKind, SchemaRootDefinitionPosition,
     TypeDefinitionPosition, UnionTypeDefinitionPosition,
 };
-use crate::schema::FederationSchema;
+use crate::schema::{FederationSchema, ValidFederationSchema};
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::executable::{Field, Selection, SelectionSet};
 use apollo_compiler::schema::{
@@ -26,6 +26,7 @@ use apollo_compiler::schema::{
     DirectiveLocation, EnumType, EnumValueDefinition, ExtendedType, ExtensionId, InputObjectType,
     InputValueDefinition, InterfaceType, Name, NamedType, ObjectType, ScalarType, Type, UnionType,
 };
+use apollo_compiler::validation::Valid;
 use apollo_compiler::{name, Node, NodeStr, Schema};
 use indexmap::{IndexMap, IndexSet};
 use lazy_static::lazy_static;
@@ -39,7 +40,7 @@ use std::ops::Deref;
 pub(super) fn extract_subgraphs_from_supergraph(
     supergraph_schema: &FederationSchema,
     validate_extracted_subgraphs: Option<bool>,
-) -> Result<FederationSubgraphs, FederationError> {
+) -> Result<ValidFederationSubgraphs, FederationError> {
     let validate_extracted_subgraphs = validate_extracted_subgraphs.unwrap_or(true);
     let (link_spec_definition, join_spec_definition) = validate_supergraph(supergraph_schema)?;
     let is_fed_1 = *join_spec_definition.version() == Version { major: 0, minor: 1 };
@@ -82,29 +83,42 @@ pub(super) fn extract_subgraphs_from_supergraph(
                 message: "Subgraph unexpectedly does not use federation spec".to_owned(),
             })?;
         add_federation_operations(subgraph, federation_spec_definition)?;
-        if validate_extracted_subgraphs {
-            let Some(diagnostics) = subgraph.schema.schema().validate().err() else {
-                continue;
-            };
-            // TODO: Implement maybeDumpSubgraphSchema() for better error messaging
-            if is_fed_1 {
-                // See message above about Fed 1 supergraphs
-                todo!()
-            } else {
-                return Err(
-                    SingleFederationError::InvalidFederationSupergraph {
-                        message: format!(
-                            "Unexpected error extracting {} from the supergraph: this is either a bug, or the supergraph has been corrupted.\n\nDetails:\n{}",
-                            subgraph.name,
-                            diagnostics.to_string_no_color()
-                        ),
-                    }.into()
-                );
-            }
-        }
     }
 
-    Ok(subgraphs)
+    let mut valid_subgraphs = ValidFederationSubgraphs::new();
+    for (_, subgraph) in subgraphs {
+        let valid_subgraph_schema = if validate_extracted_subgraphs {
+            match subgraph.schema.validate() {
+                Ok(schema) => schema,
+                Err(error) => {
+                    // TODO: Implement maybeDumpSubgraphSchema() for better error messaging
+                    if is_fed_1 {
+                        // See message above about Fed 1 supergraphs
+                        todo!()
+                    } else {
+                        return Err(
+                            SingleFederationError::InvalidFederationSupergraph {
+                                message: format!(
+                                    "Unexpected error extracting {} from the supergraph: this is either a bug, or the supergraph has been corrupted.\n\nDetails:\n{}",
+                                    subgraph.name,
+                                    error,
+                                ),
+                            }.into()
+                        );
+                    }
+                }
+            }
+        } else {
+            ValidFederationSchema(Valid::assume_valid(subgraph.schema))
+        };
+        valid_subgraphs.add(ValidFederationSubgraph {
+            name: subgraph.name,
+            url: subgraph.url,
+            schema: valid_subgraph_schema,
+        })?;
+    }
+
+    Ok(valid_subgraphs)
 }
 
 type ValidateSupergraphOk = (&'static LinkSpecDefinition, &'static JoinSpecDefinition);
@@ -251,7 +265,7 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
     scalar federation__Scope
     "#,
         "subgraph.graphql",
-    ))
+    )?)
 }
 
 struct TypeInfo {
@@ -1414,24 +1428,24 @@ fn get_subgraph<'subgraph>(
     })
 }
 
-pub(crate) struct FederationSubgraph {
-    pub(crate) name: String,
-    pub(crate) url: String,
-    pub(crate) schema: FederationSchema,
+struct FederationSubgraph {
+    name: String,
+    url: String,
+    schema: FederationSchema,
 }
 
-pub(crate) struct FederationSubgraphs {
+struct FederationSubgraphs {
     subgraphs: BTreeMap<String, FederationSubgraph>,
 }
 
 impl FederationSubgraphs {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         FederationSubgraphs {
             subgraphs: BTreeMap::new(),
         }
     }
 
-    pub(crate) fn add(&mut self, subgraph: FederationSubgraph) -> Result<(), FederationError> {
+    fn add(&mut self, subgraph: FederationSubgraph) -> Result<(), FederationError> {
         if self.subgraphs.contains_key(&subgraph.name) {
             return Err(SingleFederationError::InvalidFederationSupergraph {
                 message: format!("A subgraph named \"{}\" already exists", subgraph.name),
@@ -1442,11 +1456,11 @@ impl FederationSubgraphs {
         Ok(())
     }
 
-    pub(crate) fn get(&self, name: &str) -> Option<&FederationSubgraph> {
+    fn get(&self, name: &str) -> Option<&FederationSubgraph> {
         self.subgraphs.get(name)
     }
 
-    pub(crate) fn get_mut(&mut self, name: &str) -> Option<&mut FederationSubgraph> {
+    fn get_mut(&mut self, name: &str) -> Option<&mut FederationSubgraph> {
         self.subgraphs.get_mut(name)
     }
 }
@@ -1454,6 +1468,48 @@ impl FederationSubgraphs {
 impl IntoIterator for FederationSubgraphs {
     type Item = <BTreeMap<String, FederationSubgraph> as IntoIterator>::Item;
     type IntoIter = <BTreeMap<String, FederationSubgraph> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.subgraphs.into_iter()
+    }
+}
+
+pub(crate) struct ValidFederationSubgraph {
+    pub(crate) name: String,
+    pub(crate) url: String,
+    pub(crate) schema: ValidFederationSchema,
+}
+
+pub(crate) struct ValidFederationSubgraphs {
+    subgraphs: BTreeMap<String, ValidFederationSubgraph>,
+}
+
+impl ValidFederationSubgraphs {
+    pub(crate) fn new() -> Self {
+        ValidFederationSubgraphs {
+            subgraphs: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) fn add(&mut self, subgraph: ValidFederationSubgraph) -> Result<(), FederationError> {
+        if self.subgraphs.contains_key(&subgraph.name) {
+            return Err(SingleFederationError::InvalidFederationSupergraph {
+                message: format!("A subgraph named \"{}\" already exists", subgraph.name),
+            }
+            .into());
+        }
+        self.subgraphs.insert(subgraph.name.clone(), subgraph);
+        Ok(())
+    }
+
+    pub(crate) fn get(&self, name: &str) -> Option<&ValidFederationSubgraph> {
+        self.subgraphs.get(name)
+    }
+}
+
+impl IntoIterator for ValidFederationSubgraphs {
+    type Item = <BTreeMap<String, ValidFederationSubgraph> as IntoIterator>::Item;
+    type IntoIter = <BTreeMap<String, ValidFederationSubgraph> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.subgraphs.into_iter()
@@ -1820,13 +1876,21 @@ fn remove_inactive_applications(
                 (fields, parent_type_pos)
             }
         };
+        // TODO: The assume_valid_ref() here is non-ideal, in the sense that the error messages we
+        // get back during field set parsing may not be user-friendly. We can't really validate the
+        // schema here since the schema may not be fully valid when this function is called within
+        // extract_subgraphs_from_supergraph() (it would also incur significant performance loss).
+        // At best, we could try to shift this computation to after the subgraph schema validation
+        // step, but its unclear at this time whether performing this shift affects correctness (and
+        // it takes time to determine that). So for now, we keep this here.
+        let valid_schema = Valid::assume_valid_ref(schema.schema());
         // TODO: In the JS codebase, this function ends up getting additionally used in the schema
         // upgrader, where parsing the field set may error. In such cases, we end up skipping those
         // directives instead of returning error here, as it pollutes the list of error messages
         // during composition (another site in composition will properly check for field set
         // validity and give better error messaging).
         let mut fields =
-            parse_field_set(schema.schema(), parent_type_pos.type_name().clone(), fields)?;
+            parse_field_set(valid_schema, parent_type_pos.type_name().clone(), fields)?;
         let is_modified = remove_non_external_leaf_fields(schema, &mut fields)?;
         if is_modified {
             let replacement_directive = if fields.selections.is_empty() {

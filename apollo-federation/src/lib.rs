@@ -3,8 +3,11 @@ use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Schema;
 
+use crate::error::FederationError;
 use crate::merge::merge_subgraphs;
-use crate::subgraph::Subgraph;
+use crate::merge::MergeFailure;
+use crate::subgraph::ValidSubgraph;
+use apollo_compiler::validation::Valid;
 
 pub mod database;
 pub mod error;
@@ -14,42 +17,25 @@ pub mod query_graph;
 pub mod schema;
 pub mod subgraph;
 
-type MergeError = &'static str;
-
-// TODO: Same remark as in other crates: we need to define this more cleanly, and probably need
-// some "federation errors" crate.
-#[derive(Debug)]
-pub struct SupergraphError {
-    pub msg: String,
-}
-
 pub struct Supergraph {
-    pub schema: Schema,
+    pub schema: Valid<Schema>,
 }
 
 impl Supergraph {
-    pub fn new(schema_str: &str) -> Self {
-        let schema = Schema::parse(schema_str, "schema.graphql");
-
-        // TODO: like for subgraphs, it would nice if `Supergraph` was always representing
-        // a valid supergraph (which is simpler than for subgraph, but still at least means
-        // that it's valid graphQL in the first place, and that it has the `join` spec).
-
-        Self { schema }
+    pub fn new(schema_str: &str) -> Result<Self, FederationError> {
+        let schema = Schema::parse_and_validate(schema_str, "schema.graphql")?;
+        // TODO: federation-specific validation
+        Ok(Self { schema })
     }
 
-    pub fn compose(subgraphs: Vec<&Subgraph>) -> Result<Self, MergeError> {
-        let merge_result = match merge_subgraphs(subgraphs) {
-            Ok(success) => Ok(Self::new(success.schema.to_string().as_str())),
-            // TODO handle errors
-            Err(_) => Err("failed to compose"),
-        };
-        merge_result
+    pub fn compose(subgraphs: Vec<&ValidSubgraph>) -> Result<Self, MergeFailure> {
+        let schema = merge_subgraphs(subgraphs)?.schema;
+        Ok(Self { schema })
     }
 
     /// Generates API schema from the supergraph schema.
     pub fn to_api_schema(&self) -> Schema {
-        let mut api_schema = self.schema.clone();
+        let mut api_schema = self.schema.clone().into_inner();
 
         // remove schema directives
         api_schema.schema_definition.make_mut().directives.clear();
@@ -130,8 +116,8 @@ impl Supergraph {
     }
 }
 
-impl From<Schema> for Supergraph {
-    fn from(schema: Schema) -> Self {
+impl From<Valid<Schema>> for Supergraph {
+    fn from(schema: Valid<Schema>) -> Self {
         Self { schema }
     }
 }
@@ -236,7 +222,7 @@ mod tests {
            = S | T
         "#;
 
-        let supergraph = Supergraph::new(schema);
+        let supergraph = Supergraph::new(schema).unwrap();
         let _subgraphs = database::extract_subgraphs(&supergraph)
             .expect("Should have been able to extract subgraphs");
         // TODO: actual assertions on the subgraph once it's actually implemented.

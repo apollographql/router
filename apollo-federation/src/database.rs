@@ -2,13 +2,12 @@ use std::sync::Arc;
 
 use apollo_compiler::Schema;
 
-use crate::link::{
-    database::links_metadata,
-    spec::{Identity, APOLLO_SPEC_DOMAIN},
-    Link,
-};
+use crate::error::FederationError;
+use crate::link::database::links_metadata;
+use crate::link::spec::{Identity, APOLLO_SPEC_DOMAIN};
+use crate::link::Link;
 use crate::subgraph::Subgraphs;
-use crate::{Supergraph, SupergraphError};
+use crate::Supergraph;
 
 // TODO: we should define this as part as some more generic "JoinSpec" definition, but need
 // to define the ground work for that in `apollo-at-link` first.
@@ -28,7 +27,7 @@ pub fn join_link(schema: &Schema) -> Arc<Link> {
         .expect("The presence of the join link should have been validated on construction")
 }
 
-pub fn extract_subgraphs(_supergraph: &Supergraph) -> Result<Subgraphs, SupergraphError> {
+pub fn extract_subgraphs(_supergraph: &Supergraph) -> Result<Subgraphs, FederationError> {
     // TODO
     Ok(Subgraphs::new())
 }

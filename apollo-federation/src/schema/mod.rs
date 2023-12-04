@@ -6,9 +6,11 @@ use crate::schema::position::{
     TypeDefinitionPosition, UnionTypeDefinitionPosition,
 };
 use apollo_compiler::schema::{ExtendedType, Name};
+use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use indexmap::IndexSet;
 use referencer::Referencers;
+use std::ops::Deref;
 
 pub(crate) mod position;
 pub(crate) mod referencer;
@@ -99,5 +101,37 @@ impl FederationSchema {
                 })
                 .collect::<IndexSet<_>>(),
         })
+    }
+
+    pub(crate) fn validate(self) -> Result<ValidFederationSchema, FederationError> {
+        let schema = self.schema.validate()?.into_inner();
+        Ok(ValidFederationSchema(Valid::assume_valid(
+            FederationSchema {
+                schema,
+                metadata: self.metadata,
+                referencers: self.referencers,
+            },
+        )))
+    }
+}
+
+pub struct ValidFederationSchema(pub(crate) Valid<FederationSchema>);
+
+impl ValidFederationSchema {
+    pub fn new(schema: Valid<Schema>) -> Result<ValidFederationSchema, FederationError> {
+        let schema = FederationSchema::new(schema.into_inner())?;
+        Ok(ValidFederationSchema(Valid::assume_valid(schema)))
+    }
+
+    pub(crate) fn schema(&self) -> &Valid<Schema> {
+        Valid::assume_valid_ref(&self.schema)
+    }
+}
+
+impl Deref for ValidFederationSchema {
+    type Target = FederationSchema;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }

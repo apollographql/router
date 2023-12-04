@@ -1,5 +1,5 @@
 ---
-source: apollo-federation/tests/composition_tests.rs
+source: tests/composition_tests.rs
 expression: print_sdl(&supergraph.schema)
 ---
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
@@ -39,9 +39,11 @@ enum join__Graph {
 scalar link__Import
 
 enum link__Purpose {
-  "SECURITY features provide metadata necessary to securely resolve fields."
+  """
+  SECURITY features provide metadata necessary to securely resolve fields.
+  """
   SECURITY
-  "EXECUTION features provide metadata necessary for operation execution."
+  """EXECUTION features provide metadata necessary for operation execution."""
   EXECUTION
 }
 
