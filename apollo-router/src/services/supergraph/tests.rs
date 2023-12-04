@@ -2812,3 +2812,187 @@ async fn interface_object_typename() {
     let mut stream = service.oneshot(request).await.unwrap();
     insta::assert_json_snapshot!(stream.next_response().await.unwrap());
 }
+
+#[tokio::test]
+async fn interface_object_typename2() {
+    let schema = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+  {
+    query: Query
+  }
+  
+  directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+  
+  directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+  
+  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+  
+  directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+  
+  directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+  
+  directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+  
+  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+  
+  directive @owner(
+    """Subgraph owner who owns this definition."""
+    subgraph: String!
+  ) on ARGUMENT_DEFINITION | ENUM | ENUM_VALUE | FIELD_DEFINITION | INPUT_OBJECT | INPUT_FIELD_DEFINITION | INTERFACE | OBJECT | SCALAR | UNION
+
+  scalar join__FieldSet
+  
+  enum join__Graph {
+    A @join__graph(name: "A", url: "https://localhost:4001")
+    B @join__graph(name: "B", url: "https://localhost:4002")
+  }
+  
+  scalar link__Import
+  
+  enum link__Purpose {
+    """
+    `SECURITY` features provide metadata necessary to securely resolve fields.
+    """
+    SECURITY
+  
+    """
+    `EXECUTION` features provide metadata necessary for operation execution.
+    """
+    EXECUTION
+  }
+  
+  interface Contact
+    @join__type(graph: A)
+    @join__type(graph: B, key: "id displayName", isInterfaceObject: true)
+  {
+    id: ID!
+    displayName: String! 
+    country: String @join__field(graph: B)
+  }
+
+  type Person implements Contact
+    @join__implements(graph: A, interface: "Contact")
+    @join__type(graph: A, key: "id")
+  {
+    id: ID!
+    displayName: String!
+    country: String @join__field
+  }
+  
+  type Query
+    @join__type(graph: A)
+  {
+    searchContacts(name: String): [Contact!]! @join__field(graph: A)
+  }
+      "#;
+
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "A",
+                MockSubgraph::builder().with_json(
+                    serde_json::json!{{"query":"{searchContacts(name:\"max\"){__typename id displayName}}"}},
+                    serde_json::json!{{"data": {
+                        "searchContacts": [
+                            {
+                                "__typename": "Person",
+                                "displayName": "Max",
+                                "id": "0"
+                            }
+                        ]
+                    } }}
+                ) /*.with_json(
+                        serde_json::json!{{"query":"{searchContacts(name:\"max\"){__typename displayName ...on Person{__typename id}}}"}},
+                        serde_json::json!{{"data": {
+                            "searchContacts": [
+                                {
+                                    "__typename": "Person",
+                                    "displayName": "Max",
+                                    "id": "0"
+                                }
+                            ]
+                        } }}
+                    ).with_json(
+                        serde_json::json!{{"query":"{searchContacts(name:\"max\"){__typename ...on Person{__typename id}}}"}},
+                        serde_json::json!{{"data": {
+                            "searchContacts": [
+                                {
+                                    "__typename": "Person",
+                                    "id": "0"
+                                }
+                            ]
+                        } }}
+                    )*/
+                    .build(),
+            ),
+            (
+                "B",
+                MockSubgraph::builder() .with_json(
+                        serde_json::json!{{
+                            "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Contact{country}}}",
+                            "variables": {
+                                "representations": [
+                                    {
+                                        "__typename":"Contact",
+                                        "id":"0",
+                                        "displayName": "Max",
+                                    }
+                                ]
+                            }
+                        }},
+                        serde_json::json!{{"data": {
+                            "_entities": [{
+                                "country": "Fr"
+                            }]
+                         } }}
+                    )/*.with_json(
+                        serde_json::json!{{
+                            "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Contact{__typename country}}}",
+                            "variables": {
+                                "representations": [
+                                    {"__typename":"Contact","id":"0"}
+                                ]
+                            }
+                        }},
+                        serde_json::json!{{"data": {
+                            "_entities": [{
+                                "__typename": "Person",
+                                "country": "A"
+                            }]
+                        } }}
+                    )*/
+                    .build(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(defer_context())
+        .query(
+            r#"{
+      searchContacts(name: "max") {
+          ...on Contact {
+              __typename
+              country
+          }
+      }
+    }"#,
+        )
+        .build()
+        .unwrap();
+
+    let mut stream = service.oneshot(request).await.unwrap();
+    insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+}
