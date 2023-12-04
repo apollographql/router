@@ -57,6 +57,12 @@ By [@bnjjj](https://github.com/bnjjj), [@bryncooke](https://github.com/bryncooke
 
 ## 🐛 Fixes
 
+### Remove doubled slash (`//`) in logs for health check URL ([Issue #4270](https://github.com/apollographql/router/issues/4270))
+
+Adding the ability to specify the path of the health endpoint introduced an error in the logging. An extra `/` was added before the specified path resulting in an unintended double-slash (`//`) in the rendered URL.  It did not affect the actual health check endpoint. This is now fixed.
+
+By [@juancarlosjr97](https://github.com/juancarlosjr97) in https://github.com/apollographql/router/pull/4278
+
 ### Improved query deduplication with extracted authorization information from subgraph queries ([PR #4208](https://github.com/apollographql/router/pull/4208))
 
 Query deduplication has been improved with authorization information extracted from subgraph queries.
