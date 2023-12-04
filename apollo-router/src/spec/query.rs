@@ -279,7 +279,6 @@ impl Query {
         Arc::new(ParsedDocumentInner { ast, executable })
     }
 
-    #[cfg(test)]
     pub(crate) fn parse(
         query: impl Into<String>,
         schema: &Schema,
@@ -594,6 +593,31 @@ impl Query {
                         continue;
                     }
 
+                    if name.as_str() == TYPENAME {
+                        let input_value = input
+                            .get(field_name.as_str())
+                            .cloned()
+                            .filter(|v| v.is_string())
+                            .unwrap_or_else(|| {
+                                Value::String(ByteString::from(
+                                    parent_type.inner_named_type().as_str().to_owned(),
+                                ))
+                            });
+
+                        if let Some(input_str) = input_value.as_str() {
+                            if parameters
+                                .schema
+                                .definitions
+                                .get_object(input_str)
+                                .is_some()
+                            {
+                                output.insert((*field_name).clone(), input_value);
+                            } else {
+                                return Err(InvalidValue);
+                            }
+                        }
+                        continue;
+                    }
                     if let Some(input_value) = input.get_mut(field_name.as_str()) {
                         // if there's already a value for that key in the output it means either:
                         // - the value is a scalar and was moved into output using take(), replacing
@@ -608,33 +632,19 @@ impl Query {
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
                             output.entry((*field_name).clone()).or_insert(Value::Null);
-                        if name.as_str() == TYPENAME {
-                            if let Some(input_str) = input_value.as_str() {
-                                if parameters
-                                    .schema
-                                    .definitions
-                                    .get_object(input_str)
-                                    .is_some()
-                                {
-                                    *output_value = input_value.clone();
-                                } else {
-                                    return Err(InvalidValue);
-                                }
-                            }
-                        } else {
-                            path.push(ResponsePathElement::Key(field_name.as_str()));
-                            let res = self.format_value(
-                                parameters,
-                                &field_type.0,
-                                input_value,
-                                output_value,
-                                path,
-                                parent_type,
-                                selection_set,
-                            );
-                            path.pop();
-                            res?
-                        }
+
+                        path.push(ResponsePathElement::Key(field_name.as_str()));
+                        let res = self.format_value(
+                            parameters,
+                            &field_type.0,
+                            input_value,
+                            output_value,
+                            path,
+                            parent_type,
+                            selection_set,
+                        );
+                        path.pop();
+                        res?
                     } else {
                         if !output.contains_key(field_name.as_str()) {
                             output.insert((*field_name).clone(), Value::Null);

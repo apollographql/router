@@ -5,7 +5,6 @@ use std::sync::Arc;
 use buildstructor::buildstructor;
 use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry::metrics::Callback;
-use opentelemetry::metrics::CallbackRegistration;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::InstrumentProvider;
@@ -14,15 +13,17 @@ use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
-use opentelemetry::metrics::Observer;
 use opentelemetry::metrics::Unit;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::KeyValue;
+use opentelemetry_api::metrics::CallbackRegistration;
+use opentelemetry_api::metrics::Observer;
+use opentelemetry_api::Context;
+use opentelemetry_api::KeyValue;
 use regex::Regex;
 
 #[derive(Clone)]
 pub(crate) struct FilterMeterProvider {
-    delegate: opentelemetry_sdk::metrics::MeterProvider,
+    delegate: opentelemetry::sdk::metrics::MeterProvider,
     deny: Option<Regex>,
     allow: Option<Regex>,
 }
@@ -31,7 +32,7 @@ pub(crate) struct FilterMeterProvider {
 impl FilterMeterProvider {
     #[builder]
     fn new(
-        delegate: opentelemetry_sdk::metrics::MeterProvider,
+        delegate: opentelemetry::sdk::metrics::MeterProvider,
         deny: Option<Regex>,
         allow: Option<Regex>,
     ) -> Self {
@@ -42,7 +43,7 @@ impl FilterMeterProvider {
         }
     }
 
-    pub(crate) fn private_metrics(delegate: opentelemetry_sdk::metrics::MeterProvider) -> Self {
+    pub(crate) fn private_metrics(delegate: opentelemetry::sdk::metrics::MeterProvider) -> Self {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .allow(
@@ -54,7 +55,7 @@ impl FilterMeterProvider {
             .build()
     }
 
-    pub(crate) fn public_metrics(delegate: opentelemetry_sdk::metrics::MeterProvider) -> Self {
+    pub(crate) fn public_metrics(delegate: opentelemetry::sdk::metrics::MeterProvider) -> Self {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .deny(
@@ -69,8 +70,8 @@ impl FilterMeterProvider {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
-        self.delegate.force_flush()
+    pub(crate) fn force_flush(&self, cx: &Context) -> opentelemetry::metrics::Result<()> {
+        self.delegate.force_flush(cx)
     }
 }
 
@@ -196,10 +197,11 @@ mod test {
 
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry::metrics::Unit;
-    use opentelemetry_sdk::metrics::MeterProviderBuilder;
-    use opentelemetry_sdk::metrics::PeriodicReader;
-    use opentelemetry_sdk::runtime;
-    use opentelemetry_sdk::testing::metrics::InMemoryMetricsExporter;
+    use opentelemetry::runtime;
+    use opentelemetry::sdk::metrics::MeterProviderBuilder;
+    use opentelemetry::sdk::metrics::PeriodicReader;
+    use opentelemetry::testing::metrics::InMemoryMetricsExporter;
+    use opentelemetry_api::Context;
 
     use crate::metrics::filter::FilterMeterProvider;
 
@@ -211,6 +213,7 @@ mod test {
                 .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
+        let cx = Context::default();
         let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
         filtered
             .u64_counter("apollo.router.operations")
@@ -228,7 +231,7 @@ mod test {
             .u64_counter("apollo.router.unknown.test")
             .init()
             .add(1, &[]);
-        meter_provider.force_flush().unwrap();
+        meter_provider.force_flush(&cx).unwrap();
 
         let metrics: Vec<_> = exporter
             .get_finished_metrics()
@@ -260,6 +263,7 @@ mod test {
                 .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
+        let cx = Context::default();
         let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
         filtered
             .u64_counter("apollo.router.config")
@@ -277,7 +281,7 @@ mod test {
             .u64_counter("apollo.router.entities.test")
             .init()
             .add(1, &[]);
-        meter_provider.force_flush().unwrap();
+        meter_provider.force_flush(&cx).unwrap();
 
         let metrics: Vec<_> = exporter
             .get_finished_metrics()
@@ -305,6 +309,7 @@ mod test {
                 .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
                 .build(),
         );
+        let cx = Context::default();
         let filtered = meter_provider.versioned_meter("filtered", "".into(), "".into(), None);
         filtered
             .u64_counter("apollo.router.operations")
@@ -312,7 +317,7 @@ mod test {
             .with_unit(Unit::new("ms"))
             .init()
             .add(1, &[]);
-        meter_provider.force_flush().unwrap();
+        meter_provider.force_flush(&cx).unwrap();
 
         let metrics: Vec<_> = exporter
             .get_finished_metrics()
