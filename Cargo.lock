@@ -419,6 +419,7 @@ dependencies = [
  "tracing-core",
  "tracing-futures",
  "tracing-opentelemetry",
+ "tracing-serde",
  "tracing-subscriber",
  "tracing-test",
  "trust-dns-resolver",
