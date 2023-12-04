@@ -2914,7 +2914,7 @@ async fn interface_object_typename2() {
                 "B",
                 MockSubgraph::builder() .with_json(
                         serde_json::json!{{
-                            "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Contact{country}}}",
+                            "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Contact{__typename country}}}",
                             "variables": {
                                 "representations": [
                                     {
@@ -2927,6 +2927,7 @@ async fn interface_object_typename2() {
                         }},
                         serde_json::json!{{"data": {
                             "_entities": [{
+                                "__typename":"Contact",
                                 "country": "Fr"
                             }]
                          } }}
@@ -2949,17 +2950,31 @@ async fn interface_object_typename2() {
     let request = supergraph::Request::fake_builder()
         .context(defer_context())
         .query(
+            // this works
+            /*r#"{
+              searchContacts(name: "max") {
+                  inner {
+                    __typename
+                    ...on Contact {
+                        __typename
+                        country
+                    }
+                  }
+              }
+            }"#,*/
+            // this does not
             r#"{
-      searchContacts(name: "max") {
-          inner {
-            __typename
-            ...on Contact {
-                __typename
-                country
+        searchContacts(name: "max") {
+            inner {
+              __typename
+              ...F
             }
-          }
+        }
       }
-    }"#,
+      fragment F on Contact {
+        __typename
+        country
+      }"#,
         )
         .build()
         .unwrap();
