@@ -15,6 +15,13 @@ build = "build/main.rs"
 [[bin]]
 name = "router"
 path = "src/main.rs"
+# Don’t recompile main.rs to run unit tests, there aren’t any there:
+test = false
+
+[lib]
+# Disabled as they are low value compared to the pathological amount of time and RAM
+# needed to link an executable for each individual doctest:
+doctest = false
 
 [features]
 default = ["global-allocator"]
@@ -136,10 +143,7 @@ once_cell = "1.18.0"
 # groups `^tracing` and `^opentelemetry*` dependencies together as of
 # https://github.com/apollographql/router/pull/1509.  A comment which exists
 # there (and on `tracing` packages below) should be updated should this change.
-opentelemetry = { version = "0.20.0", features = [
-    "trace",
-    "metrics",
-] }
+opentelemetry = { version = "0.20.0", features = ["trace", "metrics"] }
 opentelemetry_api = "0.20.0"
 opentelemetry-aws = "0.8.0"
 opentelemetry-datadog = { version = "0.8.0", features = ["reqwest-client"] }
@@ -282,9 +286,7 @@ mockall = "0.11.4"
 num-traits = "0.2.17"
 once_cell = "1.18.0"
 opentelemetry-stdout = { version = "0.1.0", features = ["trace"] }
-opentelemetry = { version = "0.20.0", features = [
-    "testing",
-] }
+opentelemetry = { version = "0.20.0", features = ["testing"] }
 p256 = "0.13.2"
 rand_core = "0.6.4"
 reqwest = { version = "0.11.22", default-features = false, features = [
