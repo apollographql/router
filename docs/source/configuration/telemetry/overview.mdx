@@ -1,9 +1,28 @@
 ---
 title: Apollo Router Telemetry
-subtitle: Collect data to observe and monitor the router's health and performance
-description: Observe and monitor the health and performance of the Apollo Router by collecting and exporting telemetry logs, metrics, and traces
+subtitle: Collect observable data to monitor your router and supergraph
+description: Observe and monitor the health and performance of the Apollo Router and the supergraph by collecting and exporting telemetry logs, metrics, and traces
 ---
-import RouterServices from '../../../shared/router-lifecycle-services.mdx';
+
+In this overview, learn about:
+- How Apollo Router telemetry enables supergraph observability and debuggability
+- What data is captured in the router's logs, metrics, and traces
+- What exporters are available to provide telemetry to your application performance monitoring (APM) tools
+
+```mermaid
+flowchart LR
+    subgraph Apollo Router
+    lifecycle("Request Lifecycle<br/>(telemetry sources)")
+    exporters("Logs, Metrics,<br/>Traces Exporters")
+    lifecycle-->exporters
+    end
+
+    apms["APM, agent,<br/>or collector"]
+    exporters--"native or<br/>OTLP"-->apms
+
+```
+
+## Observability through telemetry
 
 The health of your supergraph is only as good as the health of your router. Because the router is the single entry point to the supergraph, all client requests pass through the [router's request lifecycle](../../customizations/overview#the-request-lifecycle). Any issues with the router are likely to affect the handling of all requests to your supergraph.
 
@@ -122,8 +141,8 @@ Example attributes include:
 
 You can use [standard attributes](./instrumentation/standard-attributes) or [selectors](./instrumentation/selectors) as span attributes.
 
-<Note>
+<EnterpriseFeature>
 
-Support for custom attributes for events and metrics is under active development.
+[Custom attributes for spans](./instrumentation/spans/#attributes) is an Enterprise Feature that requires a [GraphOS Enterprise plan](/graphos/enterprise/).
 
-</Note>
+</EnterpriseFeature>
