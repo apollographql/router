@@ -63,13 +63,58 @@ Licenses are served via [Apollo Uplink](/federation/managed-federation/uplink/),
 
 A router instance's license is valid for the duration of your organization's current subscription billing period (plus a [grace period](#grace-period-for-expired-plans)), even if the router temporarily becomes disconnected from GraphOS.
 
+### Offline Enterprise license
+
+<Tip>
+
+Offline Enterprise license support for Apollo is available on an as-needed basis. It must be enabled on your Studio organization. For access, send a request to your Apollo contact.
+
+</Tip>
+
+Running your Apollo Router fleet while fully connected to GraphOS is the best choice for the majority of Apollo users. However, there are scenarios that can prevent your routers from connecting to GraphOS for an extended period of time, ranging from disasters that break connectivity to isolated sites operating with air-gapped networks. If you need to restart or rapidly scale your entire router fleet but you're unable to communicate with Apollo Uplink, new router instances won't be able to serve traffic.
+
+To support long-term disconnection scenarios, GraphOS supports **offline Enterprise licenses** for the Apollo Router. An offline license enables your routers to start and serve traffic without a persistent connection to GraphOS. The functionality available with an offline license is much of the same as being fully connected to GraphOS, including managed federation for supergraph CI (operation checks, schema linting, contracts, etc.).
+
+An offline license can be retrieved from GraphOS with the [`rover license fetch`](/rover/commands/license) command.
+
+With an offline license, a router can either be fully disconnected from GraphOS or configured to connect to GraphOS on a best-effort basis so that it can send graph usage metrics. Apollo recommends configuring your router to report graph usage metrics to GraphOS whenever possible. Since your router sends metrics in a best-effort fashion, it incurs no performance or uptime penalties while enabling several powerful features of GraphOS such as operation checks, field insights, operation traces, and contracts.
+
+<Note>
+
+A router using an offline license cannot use [safelisting with persisted queries](./configuration/persisted-queries), because the feature relies on Apollo Uplink to fetch persisted query manifests so it doesn't work as designed when the router is disconnected from Apollo Uplink.
+
+</Note>
+
+#### Set up offline license
+
+Follow these steps to configure an Apollo Router to use an offline Enterprise license:
+
+1. Fetch an offline license by running `rover fetch license` with the graph ref of the graph that you want to fetch a license for:
+
+    ```bash
+    rover fetch license <apollo-graph-ref>
+    ```
+
+1. Provide the offline license to your router on startup. The router accepts an offline license in a few different ways:
+
+    1. `--license <license_path>` CLI option
+    1. `APOLLO_ROUTER_LICENSE_PATH` environment variable
+    1. `APOLLO_ROUTER_LICENSE` environment variable
+
+    The router checks the CLI option and environment variables in the listed order, and it uses the value of the first set option or variable.
+
+1. Configure the router to use a local supergraph schema by setting either the [`--s/-supergraph` CLI option](./configuration/overview/#-s----supergraph) or the [`APOLLO_SUPERGRAPH_PATH` environment variable](). 
+
+1. (**Recommended**) Configure the router to report usage metrics to GraphOS in a best-effort basis by setting the 
+`APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables.
+
 ### Licenses with local development
 
-While building your supergraph, you might run an Apollo Router instance on your local machine (such as with the [`rover dev`](/graphos/graphs/local-development) command). It's likely that this router instance _doesn't_ currently connect to GraphOS, because it obtains its supergraph schema via another mechanism. For example, `rover dev` performs composition locally after introspecting your running subgraphs, which might change frequently as you develop.
+You might also need to run an Apollo Router instance on your local machine, such as with the [`rover dev`](/graphos/graphs/local-development) command. It's likely that your local router instance doesn't connect to GraphOS to get its supergraph schema from Uplink. For example, you can run `rover dev` to perform composition locally.
 
 **You _can_ use Enterprise router features with a locally composed supergraph schema!** To do so, your router must still connect to GraphOS to obtain its [license](#the-enterprise-license).
 
-#### Setup
+#### Set up local development
 
 These steps work both for running the router executable directly (`./router`) and for running it via `rover dev`:
 
