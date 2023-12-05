@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.34.1"
+version = "1.35.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -91,7 +91,7 @@ diff = "0.1.13"
 directories = "5.0.1"
 displaydoc = "0.2"
 flate2 = "1.0.28"
-fred = { version = "6.3.2", features = ["enable-rustls", "no-client-setname"] }
+fred = { version = "7.0.0", features = ["enable-rustls"] }
 futures = { version = "0.3.29", features = ["thread-pool"] }
 graphql_client = "0.13.0"
 hex = "0.4.3"
@@ -113,7 +113,7 @@ libc = "0.2.150"
 linkme = "0.3.17"
 lru = "0.12.1"
 maplit = "1.0.2"
-mediatype = "0.19.15"
+mediatype = "0.19.16"
 mockall = "0.11.4"
 mime = "0.3.17"
 multer = "2.1.0"
@@ -136,24 +136,20 @@ once_cell = "1.18.0"
 # groups `^tracing` and `^opentelemetry*` dependencies together as of
 # https://github.com/apollographql/router/pull/1509.  A comment which exists
 # there (and on `tracing` packages below) should be updated should this change.
-opentelemetry = { version = "0.21.0", features = [
+opentelemetry = { version = "0.20.0", features = [
     "trace",
     "metrics",
 ] }
-opentelemetry_sdk = { version = "0.21.0", features = [
-    "trace",
-    "metrics",
-    "rt-tokio",
-] }
-opentelemetry-aws = "0.9.0"
-opentelemetry-datadog = { version = "0.9.0", features = ["reqwest-client"] }
-opentelemetry-http = "0.10.0"
-opentelemetry-jaeger = { version = "0.20.0", features = [
+opentelemetry_api = "0.20.0"
+opentelemetry-aws = "0.8.0"
+opentelemetry-datadog = { version = "0.8.0", features = ["reqwest-client"] }
+opentelemetry-http = "0.9.0"
+opentelemetry-jaeger = { version = "0.19.0", features = [
     "collector_client",
     "reqwest_collector_client",
     "rt-tokio",
 ] }
-opentelemetry-otlp = { version = "0.14.0", default-features = false, features = [
+opentelemetry-otlp = { version = "0.13.0", default-features = false, features = [
     "grpc-tonic",
     "gzip-tonic",
     "tonic",
@@ -162,12 +158,12 @@ opentelemetry-otlp = { version = "0.14.0", default-features = false, features = 
     "metrics",
     "reqwest-client",
 ] }
-opentelemetry-semantic-conventions = "0.13.0"
-opentelemetry-zipkin = { version = "0.19.0", default-features = false, features = [
+opentelemetry-semantic-conventions = "0.12.0"
+opentelemetry-zipkin = { version = "0.18.0", default-features = false, features = [
     "reqwest-client",
     "reqwest-rustls",
 ] }
-opentelemetry-prometheus = "0.14.0"
+opentelemetry-prometheus = "0.13.0"
 paste = "1.0.14"
 pin-project-lite = "0.2.13"
 prometheus = "0.13"
@@ -184,7 +180,7 @@ reqwest = { version = "0.11.22", default-features = false, features = [
     "stream",
 ] }
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.5.8+v2.5.7"
+router-bridge = "=0.5.10+v2.6.1"
 rust-embed = "8.0.0"
 rustls = "0.21.9"
 rustls-pemfile = "1.0.4"
@@ -230,7 +226,7 @@ tower-service = "0.3.2"
 tracing = "0.1.37"
 tracing-core = "0.1.31"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
-tracing-opentelemetry = "0.22.0"
+tracing-opentelemetry = "0.21.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
 trust-dns-resolver = "0.23.2"
 url = { version = "2.5.0", features = ["serde"] }
@@ -248,8 +244,8 @@ hmac = "0.12.1"
 parking_lot = "0.12.1"
 memchr = "2.6.4"
 brotli = "3.4.0"
-zstd = "0.12.4"
-zstd-safe = "6.0.6"
+zstd = "0.13.0"
+zstd-safe = "7.0.0"
 # note: AWS dependencies should always use the same version
 aws-sigv4 = "0.56.1"
 aws-credential-types = "0.56.1"
@@ -258,6 +254,8 @@ aws-types = "0.56.1"
 sha1 = "0.10.6"
 tracing-serde = "0.1.3"
 time = { version = "0.3.30", features = ["serde"] }
+similar = { version = "2.3.0", features = ["inline"] }
+console = "0.15.7"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
@@ -276,7 +274,6 @@ axum = { version = "0.6.20", features = [
     "ws",
 ] }
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
-fred = { version = "6.3.2", features = ["enable-rustls", "no-client-setname"] }
 futures-test = "0.3.29"
 insta = { version = "1.34.0", features = ["json", "redactions", "yaml"] }
 maplit = "1.0.2"
@@ -284,8 +281,10 @@ memchr = { version = "2.6.4", default-features = false }
 mockall = "0.11.4"
 num-traits = "0.2.17"
 once_cell = "1.18.0"
-opentelemetry_sdk = { version = "0.21.0", features = ["testing"] }
-opentelemetry-stdout = { version = "0.2.0", features = ["trace"] }
+opentelemetry-stdout = { version = "0.1.0", features = ["trace"] }
+opentelemetry = { version = "0.20.0", features = [
+    "testing",
+] }
 p256 = "0.13.2"
 rand_core = "0.6.4"
 reqwest = { version = "0.11.22", default-features = false, features = [

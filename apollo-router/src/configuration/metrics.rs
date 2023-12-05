@@ -185,7 +185,7 @@ impl Metrics {
             opt.require_authentication,
             "$[?(@.require_authentication == true)]",
             opt.directives,
-            "$.preview_directives[?(@.enabled == true)]"
+            "$.directives[?(@.enabled == true)]"
         );
         log_usage_metrics!(
             value.apollo.router.config.coprocessor,

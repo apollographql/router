@@ -2,7 +2,7 @@
 
 [router](https://github.com/apollographql/router) Rust Graph Routing runtime for Apollo Federation
 
-![Version: 1.34.1](https://img.shields.io/badge/Version-1.34.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.34.1](https://img.shields.io/badge/AppVersion-v1.34.1-informational?style=flat-square)
+![Version: 1.35.0](https://img.shields.io/badge/Version-1.35.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.35.0](https://img.shields.io/badge/AppVersion-v1.35.0-informational?style=flat-square)
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@
 ## Get Repo Info
 
 ```console
-helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.34.1
+helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.35.0
 ```
 
 ## Install Chart
@@ -19,7 +19,7 @@ helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.34.1
 **Important:** only helm3 is supported
 
 ```console
-helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.34.1 --values my-values.yaml
+helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.35.0 --values my-values.yaml
 ```
 
 _See [configuration](#configuration) below._
@@ -42,7 +42,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | autoscaling.minReplicas | int | `1` |  |
 | autoscaling.targetCPUUtilizationPercentage | int | `80` |  |
 | containerPorts.health | int | `8088` | For exposing the health check endpoint |
-| containerPorts.http | int | `80` | If you override the port in `router.configuration.server.listen` then make sure to match the listen port here |
+| containerPorts.http | int | `4000` | If you override the port in `router.configuration.server.listen` then make sure to match the listen port here |
 | containerPorts.metrics | int | `9090` | For exposing the metrics port when running a serviceMonitor for example |
 | extraContainers | list | `[]` | An array of extra containers to include in the router pod Example: extraContainers:   - name: coprocessor     image: acme/coprocessor:1.0     ports:       - containerPort: 4001 |
 | extraEnvVars | list | `[]` |  |
@@ -78,7 +78,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | probes.readiness | object | `{"initialDelaySeconds":0}` | Configure readiness probe |
 | replicaCount | int | `1` |  |
 | resources | object | `{}` |  |
-| router | object | `{"args":["--hot-reload"],"configuration":{"health_check":{"listen":"0.0.0.0:8088"},"supergraph":{"listen":"0.0.0.0:80"},"telemetry":{"metrics":{"prometheus":{"enabled":false,"listen":"0.0.0.0:9090","path":"/metrics"}}}}}` | See https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file for yaml structure |
+| router | object | `{"args":["--hot-reload"],"configuration":{"health_check":{"listen":"0.0.0.0:8088"},"supergraph":{"listen":"0.0.0.0:4000"},"telemetry":{"metrics":{"prometheus":{"enabled":false,"listen":"0.0.0.0:9090","path":"/metrics"}}}}}` | See https://www.apollographql.com/docs/router/configuration/overview/#yaml-config-file for yaml structure |
 | securityContext | object | `{}` |  |
 | service.annotations | object | `{}` |  |
 | service.port | int | `80` |  |
