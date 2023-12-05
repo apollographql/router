@@ -4,10 +4,8 @@ use serde_json::json;
 
 use crate::common::IntegrationTest;
 
-mod common;
-
-const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
-const SUBGRAPH_AUTH_CONFIG: &str = include_str!("fixtures/subgraph_auth.router.yaml");
+const PROMETHEUS_CONFIG: &str = include_str!("../fixtures/prometheus.router.yaml");
+const SUBGRAPH_AUTH_CONFIG: &str = include_str!("../fixtures/subgraph_auth.router.yaml");
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_reloading() {
