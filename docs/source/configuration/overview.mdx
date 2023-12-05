@@ -567,9 +567,38 @@ To configure subgraph authentication with AWS SigV4, see a [configuration exampl
 
 See [External coprocessing in the Apollo Router](../customizations/coprocessor/).
 
-### OpenTelemetry tracing
+### Telemetry and monitoring
+
+The Apollo Router supports standard and custom instrumentation to collect telemetry data from its request and response processing pipeline.
+
+#### Metrics
+
+To configure the metrics collected and exported by the Apollo Router, see [Router Metrics](./metrics).
+
+Supported metrics exporters:
+
+- [Prometheus](./exporters/prometheus)
+- [OpenTelemetry Protocol (OTLP)](./exporters/otlp)
+- [Datadog (OTLP)](./exporters/datadog-otlp)
+
+#### OpenTelemetry tracing
 
 See [Tracing in the Apollo Router](./tracing/).
+
+#### Logging
+
+To configure logging in the Apollo Router, see [Logging](./logging).
+
+#### Instrumentation
+
+To configure standard or custom instrumentation in the Apollo Router, see the following configuration guides:
+
+- [Instruments](./instruments)
+- [Events](./events)
+- [Conditions](./conditions)
+- [Spans](./spans)
+- [Selectors](./selectors)
+- [Standard attributes](./standard-attributes)
 
 ### TLS
 

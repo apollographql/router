@@ -292,7 +292,7 @@ async fn authenticated_directive() {
             "all": true
         },
         "authorization": {
-            "preview_directives": {
+            "directives": {
                 "enabled": true
             }
         }}))
@@ -409,7 +409,7 @@ async fn authenticated_directive_reject_unauthorized() {
             "all": true
         },
         "authorization": {
-            "preview_directives": {
+            "directives": {
                 "enabled": true,
                 "reject_unauthorized": true
             }
@@ -494,7 +494,7 @@ async fn authenticated_directive_dry_run() {
             "all": true
         },
         "authorization": {
-            "preview_directives": {
+            "directives": {
                 "enabled": true,
                 "dry_run": true
             }
@@ -642,7 +642,7 @@ async fn scopes_directive() {
             "all": true
         },
         "authorization": {
-            "preview_directives": {
+            "directives": {
                 "enabled": true
             }
         }}))
@@ -813,7 +813,7 @@ async fn scopes_directive_reject_unauthorized() {
             "all": true
         },
         "authorization": {
-            "preview_directives": {
+            "directives": {
                 "enabled": true,
                 "reject_unauthorized": true,
             }
@@ -893,7 +893,7 @@ async fn scopes_directive_dry_run() {
             "all": true
         },
         "authorization": {
-            "preview_directives": {
+            "directives": {
                 "enabled": true,
                 "dry_run": true,
             }
@@ -973,7 +973,7 @@ async fn errors_in_extensions() {
             "all": true
         },
         "authorization": {
-            "preview_directives": {
+            "directives": {
                 "enabled": true,
                 "errors": {
                     "response": "extensions"

@@ -533,8 +533,8 @@ expression: "&schema"
       "description": "Authorization plugin",
       "type": "object",
       "properties": {
-        "preview_directives": {
-          "description": "`@authenticated` and `@requiresScopes` directives",
+        "directives": {
+          "description": "`@authenticated`, `@requiresScopes` and `@policy` directives",
           "type": "object",
           "properties": {
             "dry_run": {
@@ -1800,6 +1800,25 @@ expression: "&schema"
           "description": "Expose query plan",
           "type": "boolean"
         },
+        "experimental.record": {
+          "description": "Request recording configuration.",
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "The recording plugin is disabled by default.",
+              "type": "boolean"
+            },
+            "storage_path": {
+              "description": "The path to the directory where recordings will be stored. Defaults to the current working directory.",
+              "type": "string",
+              "nullable": true
+            }
+          },
+          "additionalProperties": false
+        },
         "experimental.restricted": {
           "description": "Restricted plugin (for testing purposes only)",
           "type": "object",
@@ -1970,6 +1989,18 @@ expression: "&schema"
                 "public_url"
               ],
               "properties": {
+                "heartbeat_interval": {
+                  "description": "Heartbeat interval for callback mode (default: 5secs)",
+                  "default": "5s",
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
                 "listen": {
                   "description": "Listen address on which the callback must listen (default: 127.0.0.1:4000)",
                   "writeOnly": true,

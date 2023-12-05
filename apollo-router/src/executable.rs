@@ -632,9 +632,21 @@ impl Executable {
             tracing::info!("Custom plugins are present. To see log messages from your plugins you must configure `RUST_LOG` or `APOLLO_ROUTER_LOG` environment variables. See the Router logging documentation for more details");
         }
 
+        let uplink_config = opt.uplink_config().ok();
+        if uplink_config
+            .clone()
+            .unwrap_or_default()
+            .endpoints
+            .unwrap_or_default()
+            .url_count()
+            == 1
+        {
+            tracing::warn!("Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists.");
+        }
+
         let router = RouterHttpServer::builder()
             .configuration(configuration)
-            .and_uplink(opt.uplink_config().ok())
+            .and_uplink(uplink_config)
             .schema(schema_source)
             .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
