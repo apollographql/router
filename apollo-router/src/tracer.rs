@@ -54,7 +54,7 @@ mod test {
     use std::sync::Mutex;
 
     use once_cell::sync::Lazy;
-    use opentelemetry_api::trace::TracerProvider;
+    use opentelemetry::trace::TracerProvider;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::Registry;
 

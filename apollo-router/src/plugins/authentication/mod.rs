@@ -212,12 +212,18 @@ fn search_jwks(
         // criteria)
         for mut key in jwks.keys.into_iter().filter(|key| {
             // We are only interested in keys which are used for signature verification
-            if let Some(purpose) = &key.common.public_key_use {
-                purpose == &PublicKeyUse::Signature
-            } else if let Some(purpose) = &key.common.key_operations {
-                purpose.contains(&KeyOperations::Verify)
-            } else {
-                false
+            match (&key.common.public_key_use, &key.common.key_operations) {
+                // "use" https://datatracker.ietf.org/doc/html/rfc7517#section-4.2 and
+                // "key_ops" https://datatracker.ietf.org/doc/html/rfc7517#section-4.3 are both optional
+                (None, None) => true,
+                (None, Some(purpose)) => purpose.contains(&KeyOperations::Verify),
+                (Some(key_use), None) => key_use == &PublicKeyUse::Signature,
+                // The "use" and "key_ops" JWK members SHOULD NOT be used together;
+                // however, if both are used, the information they convey MUST be
+                // consistent
+                (Some(key_use), Some(purpose)) => {
+                    key_use == &PublicKeyUse::Signature && purpose.contains(&KeyOperations::Verify)
+                }
             }
         }) {
             let mut key_score = 0;

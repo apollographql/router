@@ -1,54 +1,29 @@
 telemetry:
-  tracing:
-    common:
-      service_name: router
-      resource:
-        str: a
-        int: 1
-        float: 1
-        bool: true
-        str_arr:
-          - a
-          - b
-        int_arr:
-          - 1
-          - 2
-        float_arr:
-          - 1
-          - 2
-        bool_arr:
-          - true
-          - false
-  metrics:
-    common:
-      attributes:
-        supergraph:
-          static:
-            - name: myname
-              value: label_value
-          request:
-            header:
-              - named: test
-                default: default_value
-                rename: renamed_value
-            body:
-              - path: .data.test
-                name: my_new_name
-                default: default_value
-          response:
-            header:
-              - named: test
-                default: default_value
-                rename: renamed_value
-              - named: test
-                default: default_value
-                rename: renamed_value
-            body:
-              - path: .data.test
-                name: my_new_name
-                default: default_value
-        subgraph:
-          all:
+  exporters:
+    tracing:
+      common:
+        service_name: router
+        resource:
+          str: a
+          int: 1
+          float: 1
+          bool: true
+          str_arr:
+            - a
+            - b
+          int_arr:
+            - 1
+            - 2
+          float_arr:
+            - 1
+            - 2
+          bool_arr:
+            - true
+            - false
+    metrics:
+      common:
+        attributes:
+          supergraph:
             static:
               - name: myname
                 value: label_value
@@ -73,8 +48,8 @@ telemetry:
                 - path: .data.test
                   name: my_new_name
                   default: default_value
-          subgraphs:
-            subgraph_name_test:
+          subgraph:
+            all:
               static:
                 - name: myname
                   value: label_value
@@ -99,3 +74,29 @@ telemetry:
                   - path: .data.test
                     name: my_new_name
                     default: default_value
+            subgraphs:
+              subgraph_name_test:
+                static:
+                  - name: myname
+                    value: label_value
+                request:
+                  header:
+                    - named: test
+                      default: default_value
+                      rename: renamed_value
+                  body:
+                    - path: .data.test
+                      name: my_new_name
+                      default: default_value
+                response:
+                  header:
+                    - named: test
+                      default: default_value
+                      rename: renamed_value
+                    - named: test
+                      default: default_value
+                      rename: renamed_value
+                  body:
+                    - path: .data.test
+                      name: my_new_name
+                      default: default_value
