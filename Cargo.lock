@@ -64,9 +64,9 @@ dependencies = [
 
 [[package]]
 name = "aes-gcm"
-version = "0.10.2"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "209b47e8954a928e1d72e86eca7000ebb6655fe1436d33eefc2201cad027e237"
+checksum = "831010a0f742e1209b3bcea8fab6a8e149051ba6099432c8cb2cc117dec3ead1"
 dependencies = [
  "aead",
  "aes",
@@ -218,9 +218,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-compiler"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ae76a91725ab7ecd35d552db3fb3d3b3f534a4520330920a58a39892174b7ae"
+checksum = "e2f12a04dc5164646affc9ef40f519741321b59d3503d0ca06719ce750741594"
 dependencies = [
  "apollo-parser 0.7.4",
  "ariadne",
@@ -228,6 +228,7 @@ dependencies = [
  "rowan",
  "salsa",
  "serde",
+ "sptr",
  "thiserror",
  "triomphe",
  "uuid",
@@ -246,13 +247,15 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "0.0.3"
+version = "0.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6deb778a0fbd1448bffb6ebf8d33d8719ffda3f785482ddd7c26d0c72fc243d2"
+checksum = "1e1f1a447ab0e78b150b076fa53fd0ac0a58563a493c9e588f447db842c18486"
 dependencies = [
- "apollo-compiler 1.0.0-beta.5",
+ "apollo-compiler 1.0.0-beta.10",
+ "derive_more",
  "indexmap 2.1.0",
  "lazy_static",
+ "petgraph",
  "salsa",
  "strum",
  "strum_macros",
@@ -288,7 +291,7 @@ version = "1.35.0"
 dependencies = [
  "access-json",
  "anyhow",
- "apollo-compiler 1.0.0-beta.5",
+ "apollo-compiler 1.0.0-beta.10",
  "apollo-federation",
  "arc-swap",
  "askama",
@@ -306,6 +309,7 @@ dependencies = [
  "bytes",
  "ci_info",
  "clap 4.4.8",
+ "console 0.15.7",
  "console-subscriber",
  "dashmap",
  "derivative",
@@ -392,6 +396,7 @@ dependencies = [
  "sha1",
  "sha2",
  "shellexpand",
+ "similar",
  "static_assertions",
  "strum_macros",
  "sys-info",
@@ -6399,9 +6404,9 @@ dependencies = [
 
 [[package]]
 name = "similar"
-version = "2.2.1"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "420acb44afdae038210c99e69aae24109f32f15500aa708e81d46c9f29d55fcf"
+checksum = "2aeaf503862c419d66959f5d7ca015337d864e9c49485d771b732e2a20453597"
 
 [[package]]
 name = "simple_asn1"
@@ -6520,6 +6525,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sptr"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b9b39299b249ad65f3b7e96443bad61c02ca5cd3589f46cb6d610a0fd6c0d6a"
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6610,7 +6621,7 @@ name = "supergraph_sdl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-compiler 1.0.0-beta.5",
+ "apollo-compiler 1.0.0-beta.10",
  "apollo-router",
  "async-trait",
  "tower",

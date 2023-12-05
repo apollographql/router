@@ -340,7 +340,9 @@ impl AuthorizationPlugin {
         // generating a query plan
 
         // TODO: do we need to (re)parse here?
-        let doc = ast::Document::parse(&key.filtered_query, "filtered_query");
+        let doc = ast::Document::parse(&key.filtered_query, "filtered_query")
+            // Ignore parse errors: assume they’ve been handled elsewhere
+            .unwrap_or_else(|invalid| invalid.partial);
 
         let is_authenticated = key.metadata.is_authenticated;
         let scopes = &key.metadata.scopes;

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
 use apollo_router::plugin::Plugin;
@@ -13,7 +14,7 @@ use tower::ServiceExt;
 // Global state for our plugin would live here.
 // We keep our parsed supergraph schema in a reference-counted pointer
 struct SupergraphSDL {
-    schema: Arc<Schema>,
+    schema: Arc<Valid<Schema>>,
 }
 
 #[async_trait::async_trait]
@@ -23,7 +24,10 @@ impl Plugin for SupergraphSDL {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(SupergraphSDL {
-            schema: Arc::new(Schema::parse(&*init.supergraph_sdl, "schema.graphql")),
+            schema: Arc::new(
+                Schema::parse_and_validate(&*init.supergraph_sdl, "schema.graphql")
+                    .map_err(|invalid| invalid.errors.to_string_no_color())?,
+            ),
         })
     }
 
@@ -38,13 +42,15 @@ impl Plugin for SupergraphSDL {
                 // If we have a query
                 if let Some(query) = &req.supergraph_request.body().query {
                     // Parse our query against the schema
-                    let doc = ExecutableDocument::parse(&schema, query, "query.graphql");
-                    // Do we have any diagnostics we'd like to print?
-                    if let Err(diagnostics) = doc.validate(&schema) {
-                        let diagnostics = diagnostics.to_string_no_color();
-                        tracing::warn!(%diagnostics, "validation diagnostics");
+                    match ExecutableDocument::parse_and_validate(&schema, query, "query.graphql") {
+                        Err(invalid) => {
+                            let diagnostics = invalid.errors.to_string_no_color();
+                            tracing::warn!(%diagnostics, "validation diagnostics");
+                        }
+                        Ok(_doc) => {
+                            // TODO: Whatever else we want to do with our parsed schema and document
+                        }
                     }
-                    // TODO: Whatever else we want to do with our parsed schema and document
                 }
                 req
             })
