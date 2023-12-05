@@ -161,9 +161,9 @@ To better comply with OpenTelemetry naming conventions, for `apollo.router.telem
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/4302
 
-### Rhai scripts no longer preventing traces from appearing in Apollo Studio ([PR #4228](https://github.com/apollographql/router/pull/4228))
+### Rhai scripts or coprocessors no longer prevent traces from appearing in Apollo Studio ([PR #4228](https://github.com/apollographql/router/pull/4228))
 
-Previously, the trace report for the Apollo Router when configured with a Rhai script may have been incomplete. That issue has been resolved in this release.
+Previously, trace reports were not appearing in Apollo Studio's Operations view when the Router was configured with either coprocessors or Rhai script. That issue has been resolved in this release.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/4228
 
