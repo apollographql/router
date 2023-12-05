@@ -1,0 +1,6 @@
+description: log an error for subscription.mode.preview_callback configuration
+actions:
+  - type: log
+    level: error
+    path: subscription.mode.preview_callback
+    log: "'subscription.mode.preview_callback' configuration does no longer exist, it's now in GA and should be 'subscription.mode.callback' instead. The 'public_url' configuration must also include the configured 'path'.\n\n The new stable version of callback protocol is not backward compatible with the experimental one.\n\n Please ensure to upgrade your subgraph implementation. For more information: https://www.apollographql.com/docs/router/executing-operations/subscription-callback-protocol"

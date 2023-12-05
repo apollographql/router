@@ -147,7 +147,7 @@ pub(crate) enum SubscriptionMode {
 #[serde(deny_unknown_fields)]
 pub(crate) struct CallbackMode {
     #[schemars(with = "String")]
-    /// URL used to access this router instance
+    /// URL used to access this router instance, including the path configured on the Router
     pub(crate) public_url: url::Url,
 
     /// Heartbeat interval for callback mode (default: 5secs)
@@ -682,7 +682,7 @@ mod tests {
                 "enabled": true,
                 "mode": {
                     "callback": {
-                        "public_url": "http://localhost:4000",
+                        "public_url": "http://localhost:4000/subscription/callback",
                         "path": "/subscription/callback",
                         "subgraphs": ["test"]
                     }
@@ -820,7 +820,7 @@ mod tests {
                 "enabled": true,
                 "mode": {
                     "callback": {
-                        "public_url": "http://localhost:4000",
+                        "public_url": "http://localhost:4000/subscription/callback",
                         "path": "/subscription/callback",
                         "subgraphs": ["test"]
                     }
@@ -905,7 +905,7 @@ mod tests {
                 "enabled": true,
                 "mode": {
                     "callback": {
-                        "public_url": "http://localhost:4000",
+                        "public_url": "http://localhost:4000/subscription/callback",
                         "path": "/subscription/callback",
                         "subgraphs": ["test"]
                     }
@@ -1106,7 +1106,7 @@ mod tests {
             "enabled": true,
             "mode": {
                 "callback": {
-                    "public_url": "http://localhost:4000",
+                    "public_url": "http://localhost:4000/subscription/callback",
                     "path": "/subscription/callback",
                     "subgraphs": ["test"]
                 }
@@ -1119,7 +1119,7 @@ mod tests {
             subgraph_cfg,
             Some(SubscriptionMode::Callback(
                 serde_json::from_value::<CallbackMode>(serde_json::json!({
-                    "public_url": "http://localhost:4000",
+                    "public_url": "http://localhost:4000/subscription/callback",
                     "path": "/subscription/callback",
                     "subgraphs": []
                 }))
@@ -1132,7 +1132,7 @@ mod tests {
                 "enabled": true,
                 "mode": {
                     "callback": {
-                        "public_url": "http://localhost:4000",
+                        "public_url": "http://localhost:4000/subscription/callback",
                         "path": "/subscription/callback",
                     }
                 }
@@ -1146,7 +1146,7 @@ mod tests {
             subgraph_cfg,
             Some(SubscriptionMode::Callback(
                 serde_json::from_value::<CallbackMode>(serde_json::json!({
-                    "public_url": "http://localhost:4000",
+                    "public_url": "http://localhost:4000/subscription/callback",
                     "path": "/subscription/callback",
                     "subgraphs": []
                 }))
@@ -1248,7 +1248,7 @@ mod tests {
             "enabled": true,
             "mode": {
                 "callback": {
-                    "public_url": "http://localhost:4000",
+                    "public_url": "http://localhost:4000/subscription/callback",
                     "path": "/subscription/callback",
                 },
                 "passthrough": {
@@ -1267,7 +1267,7 @@ mod tests {
             subgraph_cfg,
             Some(SubscriptionMode::Callback(
                 serde_json::from_value::<CallbackMode>(serde_json::json!({
-                    "public_url": "http://localhost:4000",
+                    "public_url": "http://localhost:4000/subscription/callback",
                     "path": "/subscription/callback",
                 }))
                 .unwrap()
@@ -1279,7 +1279,7 @@ mod tests {
                 "enabled": true,
                 "mode": {
                     "callback": {
-                        "public_url": "http://localhost:4000",
+                        "public_url": "http://localhost:4000/subscription/callback",
                         "path": "/subscription/callback",
                     },
                     "passthrough": {
@@ -1322,7 +1322,7 @@ mod tests {
         let sub_config: SubscriptionConfig = serde_json::from_value(serde_json::json!({
             "mode": {
                 "callback": {
-                    "public_url": "http://localhost:4000",
+                    "public_url": "http://localhost:4000/subscription/callback",
                     "path": "/subscription/callback",
                     "subgraphs": ["test"]
                 }

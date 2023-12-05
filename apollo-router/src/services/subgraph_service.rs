@@ -356,7 +356,6 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                     }
                     Some(SubscriptionMode::Callback(CallbackMode {
                         public_url,
-                        path,
                         heartbeat_interval,
                         ..
                     })) => {
@@ -396,10 +395,16 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
 
                         // If not then put the subscription_id in the extensions for callback mode and continue
                         // Do this if the topic doesn't already exist
-                        let callback_url = public_url.join(&format!(
-                            "{}/{subscription_id}",
-                            path.as_deref().unwrap_or("/callback")
-                        ))?;
+                        let mut callback_url = public_url.clone();
+                        if callback_url.path_segments_mut().is_err() {
+                            callback_url = callback_url.join(&subscription_id)?;
+                        } else {
+                            callback_url
+                                .path_segments_mut()
+                                .expect("can't happen because we checked before")
+                                .push(&subscription_id);
+                        }
+
                         // Generate verifier
                         let verifier = create_verifier(&subscription_id).map_err(|err| {
                             FetchError::SubrequestHttpError {
@@ -1849,7 +1854,7 @@ mod tests {
             enabled: true,
             mode: SubscriptionModeConfig {
                 callback: Some(CallbackMode {
-                    public_url: Url::parse("http://localhost:4000").unwrap(),
+                    public_url: Url::parse("http://localhost:4000/testcallback").unwrap(),
                     listen: None,
                     path: Some("/testcallback".to_string()),
                     subgraphs: vec![String::from("testbis")].into_iter().collect(),
