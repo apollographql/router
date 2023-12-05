@@ -1800,6 +1800,25 @@ expression: "&schema"
           "description": "Expose query plan",
           "type": "boolean"
         },
+        "experimental.record": {
+          "description": "Request recording configuration.",
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "The recording plugin is disabled by default.",
+              "type": "boolean"
+            },
+            "storage_path": {
+              "description": "The path to the directory where recordings will be stored. Defaults to the current working directory.",
+              "type": "string",
+              "nullable": true
+            }
+          },
+          "additionalProperties": false
+        },
         "experimental.restricted": {
           "description": "Restricted plugin (for testing purposes only)",
           "type": "object",
