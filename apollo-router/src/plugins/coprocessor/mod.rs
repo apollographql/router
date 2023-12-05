@@ -37,6 +37,7 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services;
+use crate::services::external::externalize_header_map;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
@@ -44,7 +45,8 @@ use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::router;
 use crate::services::subgraph;
-use crate::tracer::TraceId;
+use crate::services::trust_dns_connector::new_async_http_connector;
+use crate::services::trust_dns_connector::AsyncHyperResolver;
 
 #[cfg(test)]
 mod test;
@@ -53,15 +55,18 @@ mod supergraph;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 const POOL_IDLE_TIMEOUT_DURATION: Option<Duration> = Some(Duration::from_secs(5));
+const COPROCESSOR_ERROR_EXTENSION: &str = "ERROR";
+const COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
-type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
+type HTTPClientService =
+    tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>;
 
 #[async_trait::async_trait]
 impl Plugin for CoprocessorPlugin<HTTPClientService> {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let mut http_connector = HttpConnector::new();
+        let mut http_connector = new_async_http_connector()?;
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
@@ -252,7 +257,7 @@ pub(super) struct SubgraphResponseConf {
 }
 
 /// Configures the externalization plugin
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Conf {
     /// The url you'd like to offload processing to
@@ -574,7 +579,7 @@ where
     let payload = Externalizable::router_builder()
         .stage(PipelineStep::RouterRequest)
         .control(Control::default())
-        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .id(request.context.id.clone())
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)
@@ -595,7 +600,7 @@ where
     );
 
     tracing::debug!(?co_processor_result, "co-processor returned");
-    let co_processor_output = co_processor_result?;
+    let mut co_processor_output = co_processor_result?;
 
     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterRequest)?;
     // unwrap is safe here because validate_coprocessor_output made sure control is available
@@ -611,21 +616,29 @@ where
         // At this point our body is a String. Try to get a valid JSON value from it
         let body_as_value = co_processor_output
             .body
-            .and_then(|b| serde_json::from_str(&b).ok())
+            .as_ref()
+            .and_then(|b| serde_json::from_str(b).ok())
             .unwrap_or(serde_json::Value::Null);
         // Now we have some JSON, let's see if it's the right "shape" to create a graphql_response.
         // If it isn't, we create a graphql error response
-        let graphql_response: crate::graphql::Response = serde_json::from_value(body_as_value)
-            .unwrap_or_else(|error| {
+        let graphql_response: crate::graphql::Response = match body_as_value {
+            serde_json::Value::Null => crate::graphql::Response::builder()
+                .errors(vec![Error::builder()
+                    .message(co_processor_output.body.take().unwrap_or_default())
+                    .extension_code(COPROCESSOR_ERROR_EXTENSION)
+                    .build()])
+                .build(),
+            _ => serde_json::from_value(body_as_value).unwrap_or_else(|error| {
                 crate::graphql::Response::builder()
                     .errors(vec![Error::builder()
                         .message(format!(
                             "couldn't deserialize coprocessor output body: {error}"
                         ))
-                        .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
+                        .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
                         .build()])
                     .build()
-            });
+            }),
+        };
 
         let res = router::Response::builder()
             .errors(graphql_response.errors)
@@ -730,7 +743,7 @@ where
 
     let payload = Externalizable::router_builder()
         .stage(PipelineStep::RouterResponse)
-        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .id(response.context.id.clone())
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)
@@ -798,6 +811,7 @@ where
             let generator_coprocessor_url = coprocessor_url.clone();
             let generator_map_context = map_context.clone();
             let generator_sdl_to_send = sdl_to_send.clone();
+            let generator_id = map_context.id.clone();
 
             async move {
                 let bytes = deferred_response.to_vec();
@@ -814,7 +828,7 @@ where
                 // providing them will be a source of confusion.
                 let payload = Externalizable::router_builder()
                     .stage(PipelineStep::RouterResponse)
-                    .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+                    .id(generator_id)
                     .and_body(body_to_send)
                     .and_context(context_to_send)
                     .and_sdl(generator_sdl_to_send)
@@ -901,7 +915,7 @@ where
     let payload = Externalizable::subgraph_builder()
         .stage(PipelineStep::SubgraphRequest)
         .control(Control::default())
-        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .id(request.context.id.clone())
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)
@@ -936,17 +950,24 @@ where
 
         let res = {
             let graphql_response: crate::graphql::Response =
-                serde_json::from_value(co_processor_output.body.unwrap_or(serde_json::Value::Null))
-                    .unwrap_or_else(|error| {
+                match co_processor_output.body.unwrap_or(serde_json::Value::Null) {
+                    serde_json::Value::String(s) => crate::graphql::Response::builder()
+                        .errors(vec![Error::builder()
+                            .message(s)
+                            .extension_code(COPROCESSOR_ERROR_EXTENSION)
+                            .build()])
+                        .build(),
+                    value => serde_json::from_value(value).unwrap_or_else(|error| {
                         crate::graphql::Response::builder()
                             .errors(vec![Error::builder()
                                 .message(format!(
                                     "couldn't deserialize coprocessor output body: {error}"
                                 ))
-                                .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
+                                .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
                                 .build()])
                             .build()
-                    });
+                    }),
+                };
 
             let mut http_response = http::Response::builder()
                 .status(code)
@@ -1040,7 +1061,7 @@ where
 
     let payload = Externalizable::subgraph_builder()
         .stage(PipelineStep::SubgraphResponse)
-        .and_id(TraceId::maybe_new().map(|id| id.to_string()))
+        .id(response.context.id.clone())
         .and_headers(headers_to_send)
         .and_body(body_to_send)
         .and_context(context_to_send)
@@ -1120,19 +1141,6 @@ fn validate_coprocessor_output<T>(
         )));
     }
     Ok(())
-}
-
-/// Convert a HeaderMap into a HashMap
-pub(crate) fn externalize_header_map(
-    input: &HeaderMap<HeaderValue>,
-) -> Result<HashMap<String, Vec<String>>, BoxError> {
-    let mut output = HashMap::new();
-    for (k, v) in input {
-        let k = k.as_str().to_owned();
-        let v = String::from_utf8(v.as_bytes().to_vec()).map_err(|e| e.to_string())?;
-        output.entry(k).or_insert_with(Vec::new).push(v)
-    }
-    Ok(output)
 }
 
 /// Convert a HashMap into a HeaderMap

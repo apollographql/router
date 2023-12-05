@@ -38,6 +38,11 @@ enum Action {
         from: String,
         to: String,
     },
+    Change {
+        path: String,
+        from: Value,
+        to: Value,
+    },
 }
 
 const REMOVAL_VALUE: &str = "__PLEASE_DELETE_ME";
@@ -126,6 +131,17 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                     // Deleting isn't actually supported by protus so we add a magic value to delete later
                     transformer_builder = transformer_builder.add_action(
                         Parser::parse(REMOVAL_EXPRESSION, from).expect("migration must be valid"),
+                    );
+                }
+            }
+            Action::Change { path, from, to } => {
+                if !jsonpath_lib::select(config, &format!("$.{path} == {from}"))
+                    .unwrap_or_default()
+                    .is_empty()
+                {
+                    transformer_builder = transformer_builder.add_action(
+                        Parser::parse(&format!(r#"const({to})"#), path)
+                            .expect("migration must be valid"),
                     );
                 }
             }
@@ -420,6 +436,22 @@ mod test {
             "changed: bar\nstable: 1.0\ndeleted: gone",
             "changed: bif\nstable: 1.0\nadded: new",
             false
+        )
+        .expect("expected successful migration"));
+    }
+
+    #[test]
+    fn change_field() {
+        insta::assert_json_snapshot!(apply_migration(
+            &source_doc(),
+            &Migration::builder()
+                .action(Action::Change {
+                    path: "obj.field1".to_string(),
+                    from: Value::Number(1u64.into()),
+                    to: Value::String("a".into()),
+                })
+                .description("change field1")
+                .build(),
         )
         .expect("expected successful migration"));
     }

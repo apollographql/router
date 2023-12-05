@@ -1,12 +1,12 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
-use futures::channel::mpsc;
 use futures::future;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::Value;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tower::ServiceExt;
 use tracing_futures::Instrument;
 
@@ -84,7 +84,7 @@ impl SubscriptionNode {
         parameters: &'a ExecutionParameters<'a>,
         current_dir: &'a Path,
         parent_value: &'a Value,
-        sender: futures::channel::mpsc::Sender<Response>,
+        sender: tokio::sync::mpsc::Sender<Response>,
     ) -> future::BoxFuture<Vec<Error>> {
         if parameters.subscription_handle.is_none() {
             tracing::error!("No subscription handle provided for a subscription");
@@ -151,7 +151,7 @@ impl SubscriptionNode {
                         client_sender: sender,
                         subscription_handle,
                         subscription_config,
-                        stream_rx: rx_handle,
+                        stream_rx: rx_handle.into(),
                         service_name: self.service_name.clone(),
                     };
 
@@ -244,6 +244,7 @@ impl SubscriptionNode {
             )
             .operation_kind(OperationKind::Subscription)
             .context(parameters.context.clone())
+            .subgraph_name(self.service_name.clone())
             .subscription_stream(tx_gql)
             .and_connection_closed_signal(parameters.subscription_handle.as_ref().map(|s| s.closed_signal.resubscribe()))
             .build();

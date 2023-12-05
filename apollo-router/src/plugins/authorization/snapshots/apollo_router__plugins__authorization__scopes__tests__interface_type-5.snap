@@ -19,7 +19,7 @@ query:
 extracted_scopes: {"a", "b", "c", "d", "itf"}
 request scopes: ["itf", "a", "b"]
 filtered:
-query {
+{
   test
   itf {
     ... on A {

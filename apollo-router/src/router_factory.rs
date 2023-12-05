@@ -40,7 +40,7 @@ use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::router_service::RouterCreator;
+use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::transport;
 use crate::services::HasConfig;
@@ -722,7 +722,7 @@ mod test {
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
         assert_eq!(
-            &config.apollo.unwrap().schema_id,
+            &config.apollo.schema_id,
             "ba573b479c8b3fa273f439b26b9eda700152341d897f18090d52cd073b15f909"
         );
     }

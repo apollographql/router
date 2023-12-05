@@ -1,4 +1,4 @@
-use apollo_compiler::hir;
+use apollo_compiler::executable;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
@@ -42,8 +42,8 @@ pub(crate) enum Selection {
 
 impl Selection {
     pub(crate) fn from_hir(
-        selection: &hir::Selection,
-        current_type: &FieldType,
+        selection: &executable::Selection,
+        current_type: &str,
         schema: &Schema,
         mut count: usize,
         defer_stats: &mut DeferStats,
@@ -59,99 +59,61 @@ impl Selection {
         count += 1;
         Ok(match selection {
             // Spec: https://spec.graphql.org/draft/#Field
-            hir::Selection::Field(field) => {
-                let include_skip = IncludeSkip::parse(field.directives());
+            executable::Selection::Field(field) => {
+                let include_skip = IncludeSkip::parse(&field.directives);
                 if include_skip.statically_skipped() {
                     return Ok(None);
                 }
-                let field_type = match field.name() {
-                    TYPENAME => FieldType::new_named("String"),
-                    "__schema" => FieldType::new_named("__Schema"),
-                    "__type" => FieldType::new_named("__Type"),
-                    field_name => {
-                        let name = current_type
-                            .inner_type_name()
-                            .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?;
-                        let definitions = &schema.type_system.definitions;
-                        //looking into object types
-                        definitions
-                            .objects
-                            .get(name)
-                            .and_then(|ty| ty.fields().find(|f| f.name() == field_name))
-                            // otherwise, it might be an interface
-                            .or_else(|| {
-                                definitions
-                                    .interfaces
-                                    .get(name)
-                                    .and_then(|ty| ty.fields().find(|f| f.name() == field_name))
-                            })
-                            .ok_or_else(|| {
-                                SpecError::InvalidField(
-                                    field_name.to_owned(),
-                                    current_type
-                                        .inner_type_name()
-                                        .map(ToString::to_string)
-                                        .unwrap_or_else(|| current_type.to_string()),
-                                )
-                            })?
-                            .ty()
-                            .into()
-                    }
-                };
+                let field_type = FieldType::from(field.ty());
 
-                let alias = field.alias().map(|x| x.0.as_str().into());
+                let alias = field.alias.as_ref().map(|x| x.as_str().into());
 
-                let selection_set = if field_type.is_builtin_scalar() {
+                let selection_set = if field.selection_set.selections.is_empty() {
                     None
                 } else {
-                    let selection = field.selection_set().selection();
-                    if selection.is_empty() {
-                        None
-                    } else {
-                        Some(
-                            selection
-                                .iter()
-                                .filter_map(|selection| {
-                                    Selection::from_hir(
-                                        selection,
-                                        &field_type,
-                                        schema,
-                                        count,
-                                        defer_stats,
-                                    )
-                                    .transpose()
-                                })
-                                .collect::<Result<_, _>>()?,
-                        )
-                    }
+                    Some(
+                        field
+                            .selection_set
+                            .selections
+                            .iter()
+                            .filter_map(|selection| {
+                                Selection::from_hir(
+                                    selection,
+                                    field_type.0.inner_named_type(),
+                                    schema,
+                                    count,
+                                    defer_stats,
+                                )
+                                .transpose()
+                            })
+                            .collect::<Result<_, _>>()?,
+                    )
                 };
 
                 Some(Self::Field {
                     alias,
-                    name: field.name().into(),
+                    name: field.name.as_str().into(),
                     selection_set,
                     field_type,
                     include_skip,
                 })
             }
             // Spec: https://spec.graphql.org/draft/#InlineFragment
-            hir::Selection::InlineFragment(inline_fragment) => {
-                let include_skip = IncludeSkip::parse(inline_fragment.directives());
+            executable::Selection::InlineFragment(inline_fragment) => {
+                let include_skip = IncludeSkip::parse(&inline_fragment.directives);
                 if include_skip.statically_skipped() {
                     return Ok(None);
                 }
-                let (defer, defer_label) = parse_defer(inline_fragment.directives(), defer_stats);
+                let (defer, defer_label) = parse_defer(&inline_fragment.directives, defer_stats);
 
                 let type_condition = inline_fragment
-                    .type_condition()
-                    .map(|s| s.to_owned())
-                    // if we can't get a type name from the current type, that means we're applying
-                    // a fragment onto a scalar
-                    .or_else(|| current_type.inner_type_name().map(|s| s.to_string()))
-                    .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?;
+                    .type_condition
+                    .as_ref()
+                    .map(|s| s.as_str())
+                    .unwrap_or(current_type)
+                    .to_owned();
 
-                let fragment_type = FieldType::new_named(type_condition.clone());
-                let known_type = current_type.inner_type_name().map(|s| s.to_string());
+                let fragment_type = &type_condition;
 
                 // this is the type we pass when extracting the fragment's selections
                 // If the type condition is a union or interface and the current type implements it, then we want
@@ -163,31 +125,34 @@ impl Selection {
                     debug_assert!(
                         schema.is_subtype(
                             type_condition.as_str(),
-                            current_type.inner_type_name().unwrap_or("")
+                            current_type
                         ) || schema.is_implementation(
                             type_condition.as_str(),
-                            current_type.inner_type_name().unwrap_or(""))
+                            current_type
+                        )
                      ||
                         // if the current type and the type condition are both the same interface, it is still valid
                         type_condition.as_str()
-                            == current_type.inner_type_name().unwrap_or("")
+                            == current_type
                     );
-                    let relevant_type = schema.most_precise(current_type, &fragment_type);
+                    let relevant_type = schema.most_precise(current_type, fragment_type);
                     debug_assert!(relevant_type.is_some());
-                    relevant_type.unwrap_or(&fragment_type)
+                    relevant_type.unwrap_or(fragment_type)
                 } else {
-                    &fragment_type
+                    fragment_type
                 };
 
                 let selection_set = inline_fragment
-                    .selection_set()
-                    .selection()
+                    .selection_set
+                    .selections
                     .iter()
                     .filter_map(|selection| {
                         Selection::from_hir(selection, relevant_type, schema, count, defer_stats)
                             .transpose()
                     })
                     .collect::<Result<_, _>>()?;
+
+                let known_type = Some(inline_fragment.selection_set.ty.as_str().to_owned());
 
                 Some(Self::InlineFragment {
                     type_condition,
@@ -199,15 +164,16 @@ impl Selection {
                 })
             }
             // Spec: https://spec.graphql.org/draft/#FragmentSpread
-            hir::Selection::FragmentSpread(fragment_spread) => {
-                let include_skip = IncludeSkip::parse(fragment_spread.directives());
+            executable::Selection::FragmentSpread(fragment_spread) => {
+                let include_skip = IncludeSkip::parse(&fragment_spread.directives);
                 if include_skip.statically_skipped() {
                     return Ok(None);
                 }
-                let (defer, defer_label) = parse_defer(fragment_spread.directives(), defer_stats);
+                let (defer, defer_label) = parse_defer(&fragment_spread.directives, defer_stats);
+
                 Some(Self::FragmentSpread {
-                    name: fragment_spread.name().to_owned(),
-                    known_type: current_type.inner_type_name().map(|s| s.to_string()),
+                    name: fragment_spread.fragment_name.as_str().to_owned(),
+                    known_type: Some(current_type.to_owned()),
                     include_skip,
                     defer,
                     defer_label,
@@ -319,54 +285,60 @@ pub(crate) enum Condition {
 
 /// Returns the `if` condition and the `label`
 fn parse_defer(
-    directives: &[hir::Directive],
+    directives: &executable::Directives,
     defer_stats: &mut DeferStats,
 ) -> (Condition, Option<String>) {
-    for directive in directives {
-        if directive.name() == DEFER_DIRECTIVE_NAME {
-            let condition = Condition::parse(directive).unwrap_or(Condition::Yes);
-            match &condition {
-                Condition::Yes => {
-                    defer_stats.has_defer = true;
-                    defer_stats.has_unconditional_defer = true;
-                }
-                Condition::No => {}
-                Condition::Variable(name) => {
-                    defer_stats.has_defer = true;
-                    defer_stats
-                        .conditional_defer_variable_names
-                        .insert(name.clone());
-                }
+    if let Some(directive) = directives.get(DEFER_DIRECTIVE_NAME) {
+        let condition = Condition::parse(directive).unwrap_or(Condition::Yes);
+        match &condition {
+            Condition::Yes => {
+                defer_stats.has_defer = true;
+                defer_stats.has_unconditional_defer = true;
             }
-            let label = if condition != Condition::No {
-                directive
-                    .argument_by_name("label")
-                    .and_then(|value| value.as_str())
-                    .map(|str| str.to_owned())
-            } else {
-                None
-            };
-            return (condition, label);
+            Condition::No => {}
+            Condition::Variable(name) => {
+                defer_stats.has_defer = true;
+                defer_stats
+                    .conditional_defer_variable_names
+                    .insert(name.clone());
+            }
         }
+        let label = if condition != Condition::No {
+            directive
+                .argument_by_name("label")
+                .and_then(|value| value.as_str())
+                .map(|str| str.to_owned())
+        } else {
+            None
+        };
+        (condition, label)
+    } else {
+        (Condition::No, None)
     }
-    (Condition::No, None)
 }
 
 impl IncludeSkip {
-    pub(crate) fn parse(directives: &[hir::Directive]) -> Self {
+    pub(crate) fn parse(directives: &executable::Directives) -> Self {
         let mut include = None;
         let mut skip = None;
-        for directive in directives {
-            if include.is_none() && directive.name() == "include" {
+        for directive in &directives.0 {
+            if include.is_none() && directive.name == "include" {
                 include = Condition::parse(directive)
             }
-            if skip.is_none() && directive.name() == "skip" {
+            if skip.is_none() && directive.name == "skip" {
                 skip = Condition::parse(directive)
             }
         }
         Self {
             include: include.unwrap_or(Condition::Yes),
             skip: skip.unwrap_or(Condition::No),
+        }
+    }
+
+    pub(crate) fn default() -> Self {
+        Self {
+            include: Condition::Yes,
+            skip: Condition::No,
         }
     }
 
@@ -383,11 +355,13 @@ impl IncludeSkip {
 }
 
 impl Condition {
-    pub(crate) fn parse(directive: &hir::Directive) -> Option<Self> {
-        match directive.argument_by_name("if")? {
-            hir::Value::Boolean { value: true, .. } => Some(Condition::Yes),
-            hir::Value::Boolean { value: false, .. } => Some(Condition::No),
-            hir::Value::Variable(variable) => Some(Condition::Variable(variable.name().to_owned())),
+    pub(crate) fn parse(directive: &executable::Directive) -> Option<Self> {
+        match directive.argument_by_name("if")?.as_ref() {
+            executable::Value::Boolean(true) => Some(Condition::Yes),
+            executable::Value::Boolean(false) => Some(Condition::No),
+            executable::Value::Variable(variable) => {
+                Some(Condition::Variable(variable.as_str().to_owned()))
+            }
             _ => None,
         }
     }

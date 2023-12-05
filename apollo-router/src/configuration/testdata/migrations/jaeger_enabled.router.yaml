@@ -1,0 +1,5 @@
+telemetry:
+  tracing:
+    jaeger:
+      agent:
+        endpoint: default

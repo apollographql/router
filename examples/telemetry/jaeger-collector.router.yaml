@@ -1,10 +1,12 @@
 telemetry:
-  tracing:
-    trace_config:
-      service_name: router
-    jaeger:
-      collector:
-        endpoint: "https://example.com"
-        username: "username"
-        password: "password"
+  exporters:
+    tracing:
+      common:
+        service_name: router
+      jaeger:
+        enabled: true
+        collector:
+          endpoint: "https://example.com"
+          username: "username"
+          password: "password"
 

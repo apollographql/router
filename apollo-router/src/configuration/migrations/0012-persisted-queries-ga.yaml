@@ -1,0 +1,5 @@
+description: Persisted queries are no longer preview, `preview_persisted_queries` is renamed `persisted_queries`
+actions:
+  - type: move
+    from: preview_persisted_queries
+    to: persisted_queries

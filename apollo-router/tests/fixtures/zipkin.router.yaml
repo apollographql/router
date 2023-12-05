@@ -1,6 +1,8 @@
 telemetry:
-  tracing:
-    trace_config:
-      service_name: router
-    zipkin:
-      endpoint: default
+  exporters:
+    tracing:
+      common:
+        service_name: router
+      zipkin:
+        enabled: true
+        endpoint: default

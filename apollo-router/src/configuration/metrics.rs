@@ -185,7 +185,7 @@ impl Metrics {
             opt.require_authentication,
             "$[?(@.require_authentication == true)]",
             opt.directives,
-            "$.preview_directives[?(@.enabled == true)]"
+            "$.directives[?(@.enabled == true)]"
         );
         log_usage_metrics!(
             value.apollo.router.config.coprocessor,
@@ -206,7 +206,7 @@ impl Metrics {
         );
         log_usage_metrics!(
             value.apollo.router.config.persisted_queries,
-            "$.preview_persisted_queries[?(@.enabled == true)]",
+            "$.persisted_queries[?(@.enabled == true)]",
             opt.log_unknown,
             "$[?(@.log_unknown == true)]",
             opt.safelist.require_id,
@@ -282,7 +282,7 @@ impl Metrics {
             opt.subgraph.rate_limit,
             "$[?(@.all.global_rate_limit || @.subgraphs..global_rate_limit)]",
             opt.subgraph.http2,
-            "$[?(@.all.experimental_enable_http2 == true || @.subgraphs..experimental_enable_http2 == true)]",
+            "$[?(@.all.experimental_http2 == 'enable' || @.all.experimental_http2 == 'http2only' || @.subgraphs..experimental_http2 == 'enable' || @.subgraphs..experimental_http2 == 'http2only')]",
             opt.subgraph.compression,
             "$[?(@.all.compression || @.subgraphs..compression)]",
             opt.subgraph.deduplicate_query,
@@ -299,19 +299,44 @@ impl Metrics {
         );
         log_usage_metrics!(
             value.apollo.router.config.telemetry,
-            "$.telemetry[?(@..endpoint || @.metrics.prometheus.enabled == true)]",
+            "$..telemetry[?(@..endpoint || @.metrics.prometheus.enabled == true)]",
             opt.metrics.otlp,
-            "$.metrics.otlp[?(@.endpoint)]",
+            "$..metrics.otlp[?(@.endpoint)]",
             opt.metrics.prometheus,
-            "$.metrics.prometheus[?(@.enabled==true)]",
+            "$..metrics.prometheus[?(@.enabled==true)]",
             opt.tracing.otlp,
-            "$.tracing.otlp[?(@.endpoint)]",
+            "$..tracing.otlp[?(@.enabled==true)]",
             opt.tracing.datadog,
-            "$.tracing.datadog[?(@.endpoint)]",
+            "$..tracing.datadog[?(@.enabled==true)]",
             opt.tracing.jaeger,
-            "$.tracing.jaeger[?(@..endpoint)]",
+            "$..tracing.jaeger[?(@.enabled==true)]",
             opt.tracing.zipkin,
-            "$.tracing.zipkin[?(@.endpoint)]"
+            "$..tracing.zipkin[?(@.enabled==true)]",
+            opt.events,
+            "$..events",
+            opt.instruments,
+            "$..instruments",
+            opt.spans,
+            "$..spans",
+            opt.spans.mode,
+            "$..spans.mode",
+            opt.spans.default_attribute_requirement_level,
+            "$..spans.default_attribute_requirement_level",
+            opt.spans.router,
+            "$..spans.router",
+            opt.spans.subgraph,
+            "$..spans.subgraph",
+            opt.spans.supergraph,
+            "$..spans.supergraph",
+            opt.logging.experimental_when_header,
+            "$..logging.experimental_when_header"
+        );
+
+        log_usage_metrics!(
+            value.apollo.router.config.batching,
+            "$.experimental_batching[?(@.enabled == true)]",
+            opt.mode,
+            "$.mode"
         );
     }
 }

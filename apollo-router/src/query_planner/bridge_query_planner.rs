@@ -2,11 +2,11 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::fmt::Write;
 use std::sync::Arc;
 use std::time::Instant;
 
-use apollo_compiler::ApolloCompiler;
-use apollo_compiler::InputDatabase;
+use apollo_compiler::ast;
 use futures::future::BoxFuture;
 use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanSuccess;
@@ -16,7 +16,6 @@ use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
-use tokio::sync::Mutex;
 use tower::Service;
 
 use super::PlanNode;
@@ -30,12 +29,13 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::labeler::add_defer_labels;
-use crate::services::layers::query_analysis::Compiler;
+use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
-use crate::spec::query::QUERY_EXECUTABLE;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
@@ -123,8 +123,62 @@ impl BridgeQueryPlanner {
 
         let planner = Arc::new(planner);
 
-        let api_schema = planner.api_schema().await?;
-        let api_schema = Schema::parse(&api_schema.schema, &configuration)?;
+        let api_schema_string = match configuration.experimental_api_schema_generation_mode {
+            crate::configuration::ApiSchemaMode::Legacy => {
+                let api_schema = planner.api_schema().await?;
+                api_schema.schema
+            }
+            crate::configuration::ApiSchemaMode::New => schema.create_api_schema(),
+
+            crate::configuration::ApiSchemaMode::Both => {
+                let api_schema = planner.api_schema().await?;
+                let new_api_schema = schema.create_api_schema();
+
+                if api_schema.schema != new_api_schema {
+                    tracing::warn!(
+                        monotonic_counter.apollo.router.api_schema = 1u64,
+                        generation.result = "failed",
+                        "API schema generation mismatch: apollo-federation and router-bridge write different schema"
+                    );
+
+                    let differences = diff::lines(&api_schema.schema, &new_api_schema);
+                    let mut output = String::new();
+                    for diff_line in differences {
+                        match diff_line {
+                            diff::Result::Left(l) => {
+                                let trimmed = l.trim();
+                                if !trimmed.starts_with('#') && !trimmed.is_empty() {
+                                    writeln!(&mut output, "-{l}").expect("write will never fail");
+                                } else {
+                                    writeln!(&mut output, " {l}").expect("write will never fail");
+                                }
+                            }
+                            diff::Result::Both(l, _) => {
+                                writeln!(&mut output, " {l}").expect("write will never fail");
+                            }
+                            diff::Result::Right(r) => {
+                                let trimmed = r.trim();
+                                if trimmed != "---" && !trimmed.is_empty() {
+                                    writeln!(&mut output, "+{r}").expect("write will never fail");
+                                }
+                            }
+                        }
+                    }
+                    tracing::debug!(
+                        "different API schema between apollo-federation and router-bridge:\n{}",
+                        output
+                    );
+                } else {
+                    tracing::warn!(
+                        monotonic_counter.apollo.router.api_schema = 1u64,
+                        generation.result = VALIDATION_MATCH,
+                    );
+                }
+                api_schema.schema
+            }
+        };
+        let api_schema = Schema::parse(&api_schema_string, &configuration)?;
+
         let schema = Arc::new(schema.with_api_schema(api_schema));
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await))
@@ -198,40 +252,29 @@ impl BridgeQueryPlanner {
     async fn parse_selections(
         &self,
         query: String,
-        operation_name: Option<String>,
-        compiler: Arc<Mutex<ApolloCompiler>>,
+        operation_name: Option<&str>,
+        doc: &ParsedDocument,
     ) -> Result<Query, QueryPlannerError> {
-        let compiler_guard = compiler.lock().await;
-
+        let ast = &doc.ast;
+        let executable = &doc.executable;
         crate::spec::operation_limits::check(
             &self.configuration,
             &query,
-            &compiler_guard,
-            operation_name.clone(),
+            executable,
+            operation_name,
         )?;
-        let file_id = compiler_guard
-            .db
-            .source_file(QUERY_EXECUTABLE.into())
-            .ok_or_else(|| {
-                QueryPlannerError::SpecError(SpecError::ValidationError(
-                    "missing input file for query".to_string(),
-                ))
-            })?;
-
-        Query::check_errors(&compiler_guard, file_id)?;
+        Query::check_errors(ast)?;
         let validation_error = match self.configuration.experimental_graphql_validation_mode {
             GraphQLValidationMode::Legacy => None,
             GraphQLValidationMode::New => {
-                Query::validate_query(&compiler_guard, file_id)?;
+                Query::validate_query(&self.schema, executable)?;
                 None
             }
-            GraphQLValidationMode::Both => Query::validate_query(&compiler_guard, file_id).err(),
+            GraphQLValidationMode::Both => Query::validate_query(&self.schema, executable).err(),
         };
 
         let (fragments, operations, defer_stats) =
-            Query::extract_query_information(&compiler_guard, &self.schema)?;
-
-        drop(compiler_guard);
+            Query::extract_query_information(&self.schema, executable)?;
 
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,
@@ -244,7 +287,10 @@ impl BridgeQueryPlanner {
             fragments,
             operations,
             filtered_query: None,
-            unauthorized_paths: vec![],
+            unauthorized: UnauthorizedPaths {
+                paths: vec![],
+                errors: AuthorizationPlugin::log_errors(&self.configuration),
+            },
             subselections,
             defer_stats,
             is_original: true,
@@ -273,8 +319,13 @@ impl BridgeQueryPlanner {
         original_query: String,
         filtered_query: String,
         operation: Option<String>,
+        key: CacheKeyMetadata,
         selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
+        fn is_validation_error(errors: &router_bridge::planner::PlanErrors) -> bool {
+            errors.errors.iter().all(|err| err.validation_error)
+        }
+
         /// Compare errors from graphql-js and apollo-rs validation, and produce metrics on
         /// whether they had the same result.
         ///
@@ -283,9 +334,10 @@ impl BridgeQueryPlanner {
             js_validation_error: Option<&router_bridge::planner::PlanErrors>,
             rs_validation_error: Option<&crate::error::ValidationErrors>,
         ) {
-            let is_validation_error = js_validation_error
-                .map_or(false, |js| js.errors.iter().all(|err| err.validation_error));
-            match (is_validation_error, rs_validation_error) {
+            match (
+                js_validation_error.map_or(false, is_validation_error),
+                rs_validation_error,
+            ) {
                 (false, Some(validation_error)) => {
                     tracing::warn!(
                         monotonic_counter.apollo.router.validation = 1u64,
@@ -319,22 +371,34 @@ impl BridgeQueryPlanner {
             }
         }
 
-        let planner_result = self
+        let planner_result = match self
             .planner
             .plan(filtered_query.clone(), operation.clone())
             .await
             .map_err(QueryPlannerError::RouterBridgeError)?
             .into_result()
-            .map_err(|err| {
+        {
+            Ok(mut plan) => {
+                if let Some(node) = plan.data.query_plan.node.as_mut() {
+                    node.extract_authorization_metadata(&self.schema.definitions, &key);
+                }
+                plan
+            }
+            Err(err) => {
                 if matches!(
                     self.configuration.experimental_graphql_validation_mode,
                     GraphQLValidationMode::Both
                 ) {
                     compare_validation_errors(Some(&err), selections.validation_error.as_ref());
-                }
 
-                QueryPlannerError::from(err)
-            })?;
+                    // If we had a validation error from apollo-rs, return it now.
+                    if let Some(errors) = selections.validation_error {
+                        return Err(QueryPlannerError::from(errors));
+                    }
+                }
+                return Err(QueryPlannerError::from(err));
+            }
+        };
 
         if matches!(
             self.configuration.experimental_graphql_validation_mode,
@@ -428,51 +492,39 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         let fut = async move {
             let start = Instant::now();
 
-            let compiler = match context.private_entries.lock().get::<Compiler>() {
-                None => {
-                    return Err(QueryPlannerError::SpecError(SpecError::ParsingError(
-                        "missing compiler".to_string(),
-                    )))
-                }
-                Some(c) => c.0.clone(),
+            let mut doc = match context.private_entries.lock().get::<ParsedDocument>() {
+                None => return Err(QueryPlannerError::SpecError(SpecError::UnknownFileId)),
+                Some(d) => d.clone(),
             };
-            let mut compiler_guard = compiler.lock().await;
-            let file_id = compiler_guard
-                .db
-                .source_file(QUERY_EXECUTABLE.into())
-                .ok_or(QueryPlannerError::SpecError(SpecError::ParsingError(
-                    "missing input file for query".to_string(),
-                )))?;
 
-            match add_defer_labels(file_id, &compiler_guard) {
+            let schema = &this.schema.api_schema().definitions;
+            match add_defer_labels(schema, &doc.ast) {
                 Err(e) => {
                     return Err(QueryPlannerError::SpecError(SpecError::ParsingError(
                         e.to_string(),
                     )))
                 }
                 Ok(modified_query) => {
-                    // We’ve already checked the original query against the configured token limit
-                    // when first parsing it.
-                    // We’ve now serialized a modified query (with labels added) and are about
-                    // to re-parse it, but that’s an internal detail that should not affect
-                    // which original queries are rejected because of the token limit.
-                    compiler_guard.db.set_token_limit(None);
-                    compiler_guard.update_executable(file_id, &modified_query);
+                    doc = Arc::new(ParsedDocumentInner {
+                        executable: modified_query.to_executable(schema),
+                        ast: modified_query,
+                    });
+                    context
+                        .private_entries
+                        .lock()
+                        .insert::<ParsedDocument>(doc.clone());
                 }
             }
-
-            let filtered_query = compiler_guard.db.source_code(file_id);
-            drop(compiler_guard);
 
             let res = this
                 .get(
                     QueryKey {
                         original_query,
-                        filtered_query: filtered_query.to_string(),
+                        filtered_query: doc.ast.to_string(),
                         operation_name: operation_name.to_owned(),
                         metadata,
                     },
-                    compiler,
+                    doc,
                 )
                 .await;
             let duration = start.elapsed().as_secs_f64();
@@ -510,16 +562,16 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 }
 
 // Appease clippy::type_complexity
-pub(crate) type FilteredQuery = (String, Vec<Path>, Arc<Mutex<ApolloCompiler>>);
+pub(crate) type FilteredQuery = (Vec<Path>, ast::Document);
 
 impl BridgeQueryPlanner {
     async fn get(
         &self,
         mut key: QueryKey,
-        mut compiler: Arc<Mutex<ApolloCompiler>>,
+        mut doc: ParsedDocument,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let filter_res = if self.enable_authorization_directives {
-            match AuthorizationPlugin::filter_query(&key, &self.schema) {
+            match AuthorizationPlugin::filter_query(&self.configuration, &key, &self.schema) {
                 Err(QueryPlannerError::Unauthorized(unauthorized_paths)) => {
                     let response = graphql::Response::builder()
                         .data(Object::new())
@@ -549,15 +601,18 @@ impl BridgeQueryPlanner {
         let mut selections = self
             .parse_selections(
                 key.original_query.clone(),
-                key.operation_name.clone(),
-                compiler.clone(),
+                key.operation_name.as_deref(),
+                &doc,
             )
             .await?;
 
-        if let Some((filtered_query, unauthorized_paths, new_compiler)) = filter_res {
-            key.filtered_query = filtered_query;
-            compiler = new_compiler;
-            selections.unauthorized_paths = unauthorized_paths;
+        if let Some((unauthorized_paths, new_doc)) = filter_res {
+            key.filtered_query = new_doc.to_string();
+            doc = Arc::new(ParsedDocumentInner {
+                executable: new_doc.to_executable(&self.schema.api_schema().definitions),
+                ast: new_doc,
+            });
+            selections.unauthorized.paths = unauthorized_paths;
         }
 
         if selections.contains_introspection() {
@@ -587,8 +642,8 @@ impl BridgeQueryPlanner {
             let mut filtered = self
                 .parse_selections(
                     key.filtered_query.clone(),
-                    key.operation_name.clone(),
-                    compiler,
+                    key.operation_name.as_deref(),
+                    &doc,
                 )
                 .await?;
             filtered.is_original = false;
@@ -599,6 +654,7 @@ impl BridgeQueryPlanner {
             key.original_query,
             key.filtered_query,
             key.operation_name,
+            key.metadata,
             selections,
         )
         .await
@@ -669,12 +725,8 @@ mod tests {
         .unwrap_err();
 
         match err {
-            // XXX(@goto-bus-stop): will be a SpecError in the Rust-based validation implementation
-            QueryPlannerError::PlanningErrors(plan_errors) => {
-                insta::with_settings!({sort_maps => true}, {
-                    insta::assert_json_snapshot!("plan_invalid_query_usage_reporting", plan_errors.usage_reporting);
-                });
-                insta::assert_debug_snapshot!("plan_invalid_query_errors", plan_errors.errors);
+            QueryPlannerError::OperationValidationErrors(errors) => {
+                insta::assert_debug_snapshot!("plan_invalid_query_errors", errors);
             }
             _ => {
                 panic!("invalid query planning should have failed");
@@ -699,10 +751,10 @@ mod tests {
             .await
             .unwrap();
 
-        let compiler = Query::make_compiler(query, &schema, &Configuration::default()).0;
+        let doc = Query::parse_document(query, &schema, &Configuration::default());
 
         let selections = planner
-            .parse_selections(query.to_string(), None, Arc::new(Mutex::new(compiler)))
+            .parse_selections(query.to_string(), None, &doc)
             .await
             .unwrap();
         let err =
@@ -714,6 +766,7 @@ mod tests {
                 include_str!("testdata/unknown_introspection_query.graphql").to_string(),
                 include_str!("testdata/unknown_introspection_query.graphql").to_string(),
                 None,
+                CacheKeyMetadata::default(),
                 selections,
             )
             .await
@@ -1038,7 +1091,6 @@ mod tests {
             }
         }
 
-        dbg!(query);
         let result = plan(EXAMPLE_SCHEMA, query, query, None).await.unwrap();
         if let QueryPlannerContent::Plan { plan, .. } = result {
             check_query_plan_coverage(&plan.root, &Path::empty(), None, &plan.query.subselections);
@@ -1074,7 +1126,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (compiler, _) = Query::make_compiler(
+        let doc = Query::parse_document(
             original_query,
             planner.schema().api_schema(),
             &configuration,
@@ -1088,7 +1140,7 @@ mod tests {
                     operation_name,
                     metadata: CacheKeyMetadata::default(),
                 },
-                Arc::new(Mutex::new(compiler)),
+                doc,
             )
             .await
     }

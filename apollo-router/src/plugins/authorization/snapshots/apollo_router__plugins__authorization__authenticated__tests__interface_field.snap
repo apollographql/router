@@ -13,7 +13,7 @@ query:
         }
         
 filtered:
-query {
+{
   test
   itf {
     other

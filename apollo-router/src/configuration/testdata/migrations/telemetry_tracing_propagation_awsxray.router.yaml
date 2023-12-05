@@ -1,0 +1,4 @@
+telemetry:
+  tracing:
+    propagation:
+      awsxray: true

@@ -28,6 +28,7 @@ use url::Url;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::Discussed;
+use crate::metrics::meter_provider;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router::ConfigurationSource;
@@ -468,8 +469,12 @@ impl Executable {
             None => Self::inner_start(shutdown, schema, config, license, opt).await,
         };
 
-        //We should be good to shutdown the tracer provider now as the router should have finished everything.
-        opentelemetry::global::shutdown_tracer_provider();
+        // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
+        tokio::task::spawn_blocking(move || {
+            opentelemetry::global::shutdown_tracer_provider();
+            meter_provider().shutdown();
+        })
+        .await?;
         result
     }
 
@@ -627,9 +632,21 @@ impl Executable {
             tracing::info!("Custom plugins are present. To see log messages from your plugins you must configure `RUST_LOG` or `APOLLO_ROUTER_LOG` environment variables. See the Router logging documentation for more details");
         }
 
+        let uplink_config = opt.uplink_config().ok();
+        if uplink_config
+            .clone()
+            .unwrap_or_default()
+            .endpoints
+            .unwrap_or_default()
+            .url_count()
+            == 1
+        {
+            tracing::warn!("Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists.");
+        }
+
         let router = RouterHttpServer::builder()
             .configuration(configuration)
-            .and_uplink(opt.uplink_config().ok())
+            .and_uplink(uplink_config)
             .schema(schema_source)
             .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))

@@ -8,6 +8,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
 
+use crate::configuration::BatchingMode;
 use crate::json_ext::Object;
 
 /// A GraphQL `Request` used to represent both supergraph and subgraph requests.
@@ -165,27 +166,101 @@ impl Request {
     ///
     /// An error will be produced in the event that the query string parameters
     /// cannot be turned into a valid GraphQL `Request`.
-    pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
-        let urldecoded: serde_json::Value =
-            serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
-                .map_err(serde_json::Error::custom)?;
+    pub(crate) fn batch_from_urlencoded_query(
+        url_encoded_query: String,
+    ) -> Result<Vec<Request>, serde_json::Error> {
+        let value: serde_json::Value = serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
+            .map_err(serde_json::Error::custom)?;
 
-        let operation_name = if let Some(serde_json::Value::String(operation_name)) =
-            urldecoded.get("operationName")
-        {
-            Some(operation_name.clone())
+        Request::process_query_values(&value)
+    }
+
+    /// Convert Bytes into a GraphQL [`Request`].
+    ///
+    /// An error will be produced in the event that the query string parameters
+    /// cannot be turned into a valid GraphQL `Request`.
+    pub(crate) fn batch_from_bytes(bytes: &[u8]) -> Result<Vec<Request>, serde_json::Error> {
+        let value: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(serde_json::Error::custom)?;
+
+        Request::process_batch_values(&value)
+    }
+
+    fn allocate_result_array(value: &serde_json::Value) -> Vec<Request> {
+        match value.as_array() {
+            Some(array) => Vec::with_capacity(array.len()),
+            None => Vec::with_capacity(1),
+        }
+    }
+
+    fn process_batch_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
+        let mut result = Request::allocate_result_array(value);
+
+        if value.is_array() {
+            tracing::info!(
+                histogram.apollo_router.operations.batching.size = result.len() as f64,
+                mode = %BatchingMode::BatchHttpLink // Only supported mode right now
+            );
+
+            tracing::info!(
+                monotonic_counter.apollo_router.operations.batching = 1u64,
+                mode = %BatchingMode::BatchHttpLink // Only supported mode right now
+            );
+            for entry in value
+                .as_array()
+                .expect("We already checked that it was an array")
+            {
+                let bytes = serde_json::to_vec(entry)?;
+                result.push(Request::deserialize_from_bytes(&bytes.into())?);
+            }
         } else {
-            None
-        };
+            let bytes = serde_json::to_vec(value)?;
+            result.push(Request::deserialize_from_bytes(&bytes.into())?);
+        }
+        Ok(result)
+    }
 
-        let query = if let Some(serde_json::Value::String(query)) = urldecoded.get("query") {
+    fn process_query_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
+        let mut result = Request::allocate_result_array(value);
+
+        if value.is_array() {
+            tracing::info!(
+                histogram.apollo_router.operations.batching.size = result.len() as f64,
+                mode = "batch_http_link" // Only supported mode right now
+            );
+
+            tracing::info!(
+                monotonic_counter.apollo_router.operations.batching = 1u64,
+                mode = "batch_http_link" // Only supported mode right now
+            );
+            for entry in value
+                .as_array()
+                .expect("We already checked that it was an array")
+            {
+                result.push(Request::process_value(entry)?);
+            }
+        } else {
+            result.push(Request::process_value(value)?)
+        }
+        Ok(result)
+    }
+
+    fn process_value(value: &serde_json::Value) -> Result<Request, serde_json::Error> {
+        let operation_name =
+            if let Some(serde_json::Value::String(operation_name)) = value.get("operationName") {
+                Some(operation_name.clone())
+            } else {
+                None
+            };
+
+        let query = if let Some(serde_json::Value::String(query)) = value.get("query") {
             Some(query.as_str())
         } else {
             None
         };
-        let variables: Object = get_from_urldecoded(&urldecoded, "variables")?.unwrap_or_default();
+        let variables: Object = get_from_urlencoded_value(value, "variables")?.unwrap_or_default();
         let extensions: Object =
-            get_from_urldecoded(&urldecoded, "extensions")?.unwrap_or_default();
+            get_from_urlencoded_value(value, "extensions")?.unwrap_or_default();
 
         let request_builder = Self::builder()
             .variables(variables)
@@ -200,9 +275,22 @@ impl Request {
 
         Ok(request)
     }
+
+    /// Convert encoded URL query string parameters (also known as "search
+    /// params") into a GraphQL [`Request`].
+    ///
+    /// An error will be produced in the event that the query string parameters
+    /// cannot be turned into a valid GraphQL `Request`.
+    pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
+        let urldecoded: serde_json::Value =
+            serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
+                .map_err(serde_json::Error::custom)?;
+
+        Request::process_value(&urldecoded)
+    }
 }
 
-fn get_from_urldecoded<'a, T: Deserialize<'a>>(
+fn get_from_urlencoded_value<'a, T: Deserialize<'a>>(
     object: &'a serde_json::Value,
     key: &str,
 ) -> Result<Option<T>, serde_json::Error> {

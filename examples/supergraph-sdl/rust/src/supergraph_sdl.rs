@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use apollo_compiler::ApolloCompiler;
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Schema;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
@@ -9,11 +10,10 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-#[derive(Default)]
 // Global state for our plugin would live here.
-// We keep our supergraph sdl here as a string.
+// We keep our parsed supergraph schema in a reference-counted pointer
 struct SupergraphSDL {
-    supergraph_sdl: Arc<String>,
+    schema: Arc<Schema>,
 }
 
 #[async_trait::async_trait]
@@ -23,13 +23,13 @@ impl Plugin for SupergraphSDL {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(SupergraphSDL {
-            supergraph_sdl: init.supergraph_sdl,
+            schema: Arc::new(Schema::parse(&*init.supergraph_sdl, "schema.graphql")),
         })
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        // Clone our supergraph_sdl for use in map_request
-        let supergraph_sdl = self.supergraph_sdl.clone();
+        // Clone our parsed schema for use in map_request
+        let schema = self.schema.clone();
         // `ServiceBuilder` provides us with `map_request` and `map_response` methods.
         //
         // These allow basic interception and transformation of request and response messages.
@@ -37,16 +37,14 @@ impl Plugin for SupergraphSDL {
             .map_request(move |req: supergraph::Request| {
                 // If we have a query
                 if let Some(query) = &req.supergraph_request.body().query {
-                    // Compile our supergraph_sdl and query
-                    let mut ctx = ApolloCompiler::new();
-                    ctx.add_type_system(&supergraph_sdl, "supergraph_sdl");
-                    ctx.add_executable(query, "query");
+                    // Parse our query against the schema
+                    let doc = ExecutableDocument::parse(&schema, query, "query.graphql");
                     // Do we have any diagnostics we'd like to print?
-                    let diagnostics = ctx.validate();
-                    for diagnostic in diagnostics {
-                        tracing::warn!(%diagnostic, "compiler diagnostics");
+                    if let Err(diagnostics) = doc.validate(&schema) {
+                        let diagnostics = diagnostics.to_string_no_color();
+                        tracing::warn!(%diagnostics, "validation diagnostics");
                     }
-                    // TODO: Whatever else we want to do with our compiler context
+                    // TODO: Whatever else we want to do with our parsed schema and document
                 }
                 req
             })

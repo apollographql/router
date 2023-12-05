@@ -1,6 +1,8 @@
 telemetry:
-  tracing:
-    trace_config:
-      service_name: router
-    otlp:
-      endpoint: default
+  exporters:
+    tracing:
+      common:
+        service_name: router
+      otlp:
+        enabled: true
+        endpoint: default

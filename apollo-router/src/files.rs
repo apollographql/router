@@ -2,7 +2,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use futures::channel::mpsc;
 use futures::prelude::*;
 use notify::event::DataChange;
 use notify::event::MetadataKind;
@@ -12,6 +11,8 @@ use notify::EventKind;
 use notify::PollWatcher;
 use notify::RecursiveMode;
 use notify::Watcher;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 
 #[cfg(not(test))]
 const DEFAULT_WATCH_DURATION: Duration = Duration::from_secs(3);
@@ -38,7 +39,8 @@ fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()
     let config_file_path = PathBuf::from(path);
     let watched_path = config_file_path.clone();
 
-    let (mut watch_sender, watch_receiver) = mpsc::channel(1);
+    let (watch_sender, watch_receiver) = mpsc::channel(1);
+    let watch_receiver_stream = tokio_stream::wrappers::ReceiverStream::new(watch_receiver);
     // We can't use the recommended watcher, because there's just too much variation across
     // platforms and file systems. We use the Poll Watcher, which is implemented consistently
     // across all platforms. Less reactive than other mechanisms, but at least it's predictable
@@ -66,7 +68,7 @@ fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()
                                     "could not process file watch notification. {}",
                                     err.to_string()
                                 );
-                                if err.is_full() {
+                                if matches!(err, TrySendError::Full(_)) {
                                     std::thread::sleep(Duration::from_millis(50));
                                 } else {
                                     panic!("event channel failed: {err}");
@@ -87,7 +89,7 @@ fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()
     // Tell watchers once they should read the file once,
     // then listen to fs events.
     stream::once(future::ready(()))
-        .chain(watch_receiver)
+        .chain(watch_receiver_stream)
         .chain(stream::once(async move {
             // This exists to give the stream ownership of the hotwatcher.
             // Without it hotwatch will get dropped and the stream will terminate.

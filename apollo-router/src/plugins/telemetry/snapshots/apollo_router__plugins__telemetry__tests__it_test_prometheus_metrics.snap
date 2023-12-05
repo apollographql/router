@@ -1,8 +1,17 @@
 ---
 source: apollo-router/src/plugins/telemetry/mod.rs
-expression: prom_metrics
+expression: prometheus_metrics
 ---
-apollo_router_http_request_duration_seconds_count{another_test="my_default_value",error="400 Bad Request",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="400",otel_scope_name="apollo/router",otel_scope_version=""} 1
-apollo_router_http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",otel_scope_name="apollo/router",otel_scope_version=""} 1
-apollo_router_http_request_duration_seconds_count{error="INTERNAL_SERVER_ERROR",my_key="my_custom_attribute_from_context",query_from_request="query { test }",service_name="apollo-router",status="200",subgraph="my_subgraph_name",unknown_data="default_value",otel_scope_name="apollo/router",otel_scope_version=""} 1
-apollo_router_http_request_duration_seconds_count{message="cannot contact the subgraph",service_name="apollo-router",status="500",subgraph="my_subgraph_name_error",subgraph_error_extended_code="SUBREQUEST_HTTP_ERROR",otel_scope_name="apollo/router",otel_scope_version=""} 1
+apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="+Inf"} 1
+apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="0.001"} 1
+apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="0.005"} 1
+apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="0.015"} 1
+apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="0.05"} 1
+apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="0.1"} 1
+apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="0.2"} 1
+apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="0.3"} 1
+apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="0.4"} 1
+apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="0.5"} 1
+apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="1"} 1
+apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="10"} 1
+apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="5"} 1

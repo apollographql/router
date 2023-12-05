@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
+use apollo_compiler::ast::Document;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -10,7 +11,7 @@ use tracing::Instrument;
 
 use super::execution::ExecutionParameters;
 use super::rewrites;
-use super::selection::select_object;
+use super::selection::execute_selection_set;
 use super::selection::Selection;
 use crate::error::Error;
 use crate::error::FetchError;
@@ -22,6 +23,8 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
+use crate::plugins::authorization::AuthorizationPlugin;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::SubgraphRequest;
 use crate::spec::Schema;
 
@@ -61,6 +64,26 @@ impl OperationKind {
     }
 }
 
+impl From<OperationKind> for apollo_compiler::ast::OperationType {
+    fn from(value: OperationKind) -> Self {
+        match value {
+            OperationKind::Query => apollo_compiler::ast::OperationType::Query,
+            OperationKind::Mutation => apollo_compiler::ast::OperationType::Mutation,
+            OperationKind::Subscription => apollo_compiler::ast::OperationType::Subscription,
+        }
+    }
+}
+
+impl From<apollo_compiler::ast::OperationType> for OperationKind {
+    fn from(value: apollo_compiler::ast::OperationType) -> Self {
+        match value {
+            apollo_compiler::ast::OperationType::Query => OperationKind::Query,
+            apollo_compiler::ast::OperationType::Mutation => OperationKind::Mutation,
+            apollo_compiler::ast::OperationType::Subscription => OperationKind::Subscription,
+        }
+    }
+}
+
 /// A fetch node.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -93,6 +116,10 @@ pub(crate) struct FetchNode {
 
     // Optionally describes a number of "rewrites" to apply to the data that received from a fetch (and before it is applied to the current in-memory results).
     pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
+
+    // authorization metadata for the subgraph query
+    #[serde(default)]
+    pub(crate) authorization: Arc<CacheKeyMetadata>,
 }
 
 pub(crate) struct Variables {
@@ -126,18 +153,17 @@ impl Variables {
             let mut values: IndexSet<Value> = IndexSet::new();
 
             data.select_values_and_paths(schema, current_dir, |path, value| {
-                if let Value::Object(content) = value {
-                    if let Ok(Some(mut value)) = select_object(content, requires, schema) {
-                        rewrites::apply_rewrites(schema, &mut value, input_rewrites);
-                        match values.get_index_of(&value) {
-                            Some(index) => {
-                                inverted_paths[index].push(path.clone());
-                            }
-                            None => {
-                                inverted_paths.push(vec![path.clone()]);
-                                values.insert(value);
-                                debug_assert!(inverted_paths.len() == values.len());
-                            }
+                let mut value = execute_selection_set(value, requires, schema, None);
+                if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
+                    rewrites::apply_rewrites(schema, &mut value, input_rewrites);
+                    match values.get_index_of(&value) {
+                        Some(index) => {
+                            inverted_paths[index].push(path.clone());
+                        }
+                        None => {
+                            inverted_paths.push(vec![path.clone()]);
+                            values.insert(value);
+                            debug_assert!(inverted_paths.len() == values.len());
                         }
                     }
                 }
@@ -220,7 +246,7 @@ impl FetchNode {
             }
         };
 
-        let subgraph_request = SubgraphRequest::builder()
+        let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
             .subgraph_request(
                 http_ext::Request::builder()
@@ -246,9 +272,11 @@ impl FetchNode {
                     .build()
                     .expect("it won't fail because the url is correct and already checked; qed"),
             )
+            .subgraph_name(self.service_name.clone())
             .operation_kind(*operation_kind)
             .context(parameters.context.clone())
             .build();
+        subgraph_request.authorization = self.authorization.clone();
 
         let service = parameters
             .service_factory
@@ -433,5 +461,22 @@ impl FetchNode {
 
     pub(crate) fn operation_kind(&self) -> &OperationKind {
         &self.operation_kind
+    }
+
+    pub(crate) fn extract_authorization_metadata(
+        &mut self,
+        schema: &apollo_compiler::Schema,
+        global_authorisation_cache_key: &CacheKeyMetadata,
+    ) {
+        let doc = Document::parse(&self.operation, "query.graphql");
+        let subgraph_query_cache_key =
+            AuthorizationPlugin::generate_cache_metadata(&doc, schema, !self.requires.is_empty());
+
+        // we need to intersect the cache keys because the global key already takes into account
+        // the scopes and policies from the client request
+        self.authorization = Arc::new(AuthorizationPlugin::intersect_cache_keys_subgraph(
+            global_authorisation_cache_key,
+            &subgraph_query_cache_key,
+        ));
     }
 }

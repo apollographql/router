@@ -1,0 +1,47 @@
+```yaml title="router.yaml"
+coprocessor:
+  url: http://127.0.0.1:8081 # Required. Replace with the URL of your coprocessor's HTTP endpoint.
+  timeout: 2s # The timeout for all coprocessor requests. Defaults to 1 second (1s)
+  router: # This coprocessor hooks into the `RouterService`
+    request: # By including this key, the `RouterService` sends a coprocessor request whenever it first receives a client request.
+      headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
+      body: false
+      context: false
+      sdl: false
+      path: false
+      method: false
+    response: # By including this key, the `RouterService` sends a coprocessor request whenever it's about to send response data to a client (including incremental data via @defer).
+      headers: true
+      body: false
+      context: false
+      sdl: false
+      status_code: false
+  supergraph: # This coprocessor hooks into the `SupergraphService`
+    request: # By including this key, the `SupergraphService` sends a coprocessor request whenever it first receives a client request.
+      headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
+      body: false
+      context: false
+      sdl: false
+      method: false
+    response: # By including this key, the `SupergraphService` sends a coprocessor request whenever it's about to send response data to a client (including incremental data via @defer).
+      headers: true
+      body: false
+      context: false
+      sdl: false
+      status_code: false
+  subgraph:
+    all:
+      request: # By including this key, the `SubgraphService` sends a coprocessor request whenever it is about to make a request to a subgraph.
+        headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
+        body: false
+        context: false
+        uri: false
+        method: false
+        service_name: false
+      response: # By including this key, the `SubgraphService` sends a coprocessor request whenever receives a subgraph response.
+        headers: true
+        body: false
+        context: false
+        service_name: false
+        status_code: false
+```

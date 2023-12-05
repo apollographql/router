@@ -5,10 +5,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::RwLock;
 
-use apollo_parser::ast;
-use apollo_parser::ast::AstNode;
-use apollo_parser::Parser;
-use apollo_parser::SyntaxTree;
+use apollo_compiler::ast;
 use futures::prelude::*;
 use reqwest::Client;
 use serde::Deserialize;
@@ -63,7 +60,7 @@ impl FreeformGraphQLBehavior {
     fn action_for_freeform_graphql(
         &self,
         body_from_request: &str,
-        ast: SyntaxTree,
+        ast: &ast::Document,
     ) -> FreeformGraphQLAction {
         match self {
             FreeformGraphQLBehavior::AllowAll { .. } => FreeformGraphQLAction::Allow,
@@ -137,12 +134,13 @@ impl FreeformGraphQLSafelist {
     }
 
     fn insert_from_manifest(&mut self, body_from_manifest: &str) {
-        self.normalized_bodies.insert(
-            self.normalize_body(body_from_manifest, Parser::new(body_from_manifest).parse()),
-        );
+        self.normalized_bodies.insert(self.normalize_body(
+            body_from_manifest,
+            &ast::Document::parse(body_from_manifest, "from_manifest"),
+        ));
     }
 
-    fn is_allowed(&self, body_from_request: &str, ast: SyntaxTree) -> bool {
+    fn is_allowed(&self, body_from_request: &str, ast: &ast::Document) -> bool {
         // Note: consider adding an LRU cache that caches this function's return
         // value based solely on body_from_request without needing to normalize
         // the body.
@@ -150,55 +148,39 @@ impl FreeformGraphQLSafelist {
             .contains(&self.normalize_body(body_from_request, ast))
     }
 
-    fn normalize_body(&self, body_from_request: &str, ast: SyntaxTree) -> String {
-        if ast.errors().peekable().peek().is_some() {
+    fn normalize_body(&self, body_from_request: &str, ast: &ast::Document) -> String {
+        if ast.check_parse_errors().is_err() {
             // If we can't parse the operation (whether from the PQ list or the
             // incoming request), then we can't normalize it. We keep it around
             // unnormalized, so that it at least works as a byte-for-byte
-            // safelist entry. (We also do this if we get any other errors
-            // below.)
+            // safelist entry.
             body_from_request.to_string()
         } else {
-            let mut encoder_document = apollo_encoder::Document::new();
-
             let mut operations = vec![];
             let mut fragments = vec![];
 
-            for definition in ast.document().syntax().children() {
-                if ast::OperationDefinition::can_cast(definition.kind()) {
-                    operations.push(ast::OperationDefinition::cast(definition).unwrap())
-                } else if ast::FragmentDefinition::can_cast(definition.kind()) {
-                    fragments.push(ast::FragmentDefinition::cast(definition).unwrap())
+            for definition in &ast.definitions {
+                match definition {
+                    ast::Definition::OperationDefinition(def) => operations.push(def.clone()),
+                    ast::Definition::FragmentDefinition(def) => fragments.push(def.clone()),
+                    _ => {}
                 }
             }
 
-            // First include operation definitions, sorted by name.
-            operations.sort_by_key(|x| x.name().map(|n| n.text().to_string()));
-            for parser_operation in operations {
-                let encoder_operation = match parser_operation.try_into() {
-                    Ok(op) => op,
-                    Err(_) => return body_from_request.to_string(),
-                };
+            let mut new_document = ast::Document::new();
 
-                encoder_document.operation(encoder_operation)
-            }
+            // First include operation definitions, sorted by name.
+            operations.sort_by_key(|x| x.name.clone());
+            new_document
+                .definitions
+                .extend(operations.into_iter().map(Into::into));
 
             // Next include fragment definitions, sorted by name.
-            fragments.sort_by_key(|x| {
-                x.fragment_name()
-                    .and_then(|n| n.name())
-                    .map(|n| n.text().to_string())
-            });
-            for parser_fragment in fragments {
-                let encoder_fragment = match parser_fragment.try_into() {
-                    Ok(op) => op,
-                    Err(_) => return body_from_request.to_string(),
-                };
-
-                encoder_document.fragment(encoder_fragment)
-            }
-
-            encoder_document.to_string()
+            fragments.sort_by_key(|x| x.name.clone());
+            new_document
+                .definitions
+                .extend(fragments.into_iter().map(Into::into));
+            new_document.to_string()
         }
     }
 }
@@ -296,7 +278,7 @@ impl PersistedQueryManifestPoller {
     pub(crate) fn action_for_freeform_graphql(
         &self,
         query: &str,
-        ast: SyntaxTree,
+        ast: &ast::Document,
     ) -> FreeformGraphQLAction {
         let state = self
             .state
@@ -398,19 +380,18 @@ async fn poll_uplink(
     while let Some(event) = uplink_executor.next().await {
         match event {
             ManifestPollEvent::NewManifest(new_manifest) => {
-                let freeform_graphql_behavior = if config.preview_persisted_queries.safelist.enabled
-                {
-                    if config.preview_persisted_queries.safelist.require_id {
+                let freeform_graphql_behavior = if config.persisted_queries.safelist.enabled {
+                    if config.persisted_queries.safelist.require_id {
                         FreeformGraphQLBehavior::DenyAll {
-                            log_unknown: config.preview_persisted_queries.log_unknown,
+                            log_unknown: config.persisted_queries.log_unknown,
                         }
                     } else {
                         FreeformGraphQLBehavior::AllowIfInSafelist {
                             safelist: FreeformGraphQLSafelist::new(&new_manifest),
-                            log_unknown: config.preview_persisted_queries.log_unknown,
+                            log_unknown: config.persisted_queries.log_unknown,
                         }
                     }
-                } else if config.preview_persisted_queries.log_unknown {
+                } else if config.persisted_queries.log_unknown {
                     FreeformGraphQLBehavior::LogUnlessInSafelist {
                         safelist: FreeformGraphQLSafelist::new(&new_manifest),
                         apq_enabled: config.apq.enabled,
@@ -680,7 +661,7 @@ mod tests {
         ]));
 
         let is_allowed =
-            |body: &str| -> bool { safelist.is_allowed(body, Parser::new(body).parse()) };
+            |body: &str| -> bool { safelist.is_allowed(body, &ast::Document::parse(body, "")) };
 
         // Precise string matches.
         assert!(is_allowed(

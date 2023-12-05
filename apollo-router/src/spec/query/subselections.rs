@@ -211,7 +211,7 @@ impl Shared<'_> {
                 alias: None,
                 selection_set: Some(selection_set),
                 field_type: path_type.clone(),
-                include_skip: IncludeSkip::parse(&[]),
+                include_skip: IncludeSkip::default(),
             }];
         }
         selection_set
@@ -288,7 +288,7 @@ fn collect_from_selection_set<'a>(
                         },
                         SubSelectionValue {
                             selection_set: shared.reconstruct_up_to_root(nested),
-                            type_name: fragment_type.0.name(),
+                            type_name: fragment_type.0.inner_named_type().as_str().to_owned(),
                         },
                     );
                 } else {

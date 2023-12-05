@@ -45,6 +45,7 @@ The most important goal is usability, so do break the rules if it makes sense, b
 8. [Don't use negative options](#dont-use-negative-options).
 9. [Document your configuration options](#document-your-configuration-options).
 10. [Plan for the future](#plan-for-the-future).
+11. [General naming](#general-naming-guidelines).
 
 ### Avoid empty config
 
@@ -398,3 +399,7 @@ telemetry:
 ```
 
 
+### General naming guidelines
+1. Use snake case for field names and enum variants.
+2. Use terminology that is consistent with the feature that you are implementing. e.g. telemetry should use otel terminology.
+3. Split terms with underscore. e.g. `export_url` not `exporturl`. Note that even though `url` is an acronym it is still split from `export`.
