@@ -14,6 +14,7 @@ pub mod error;
 pub mod link;
 pub mod merge;
 pub mod query_graph;
+pub mod query_plan;
 pub mod schema;
 pub mod subgraph;
 
