@@ -318,10 +318,10 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         FA: RouterSuperServiceFactory,
     {
         let report = {
-            let parsed_schema = Schema::make_compiler(&schema)
+            let ast = Schema::parse_ast(&schema)
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?;
             // Check the license
-            LicenseEnforcementReport::build(&configuration, &parsed_schema)
+            LicenseEnforcementReport::build(&configuration, &ast)
         };
 
         match license {

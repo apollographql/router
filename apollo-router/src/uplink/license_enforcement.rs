@@ -88,7 +88,7 @@ impl LicenseEnforcementReport {
 
     pub(crate) fn build(
         configuration: &Configuration,
-        schema: &apollo_compiler::schema::Schema,
+        schema: &apollo_compiler::ast::Document,
     ) -> LicenseEnforcementReport {
         LicenseEnforcementReport {
             restricted_config_in_use: Self::validate_configuration(
@@ -128,14 +128,14 @@ impl LicenseEnforcementReport {
     }
 
     fn validate_schema(
-        schema: &apollo_compiler::schema::Schema,
+        schema: &apollo_compiler::ast::Document,
         schema_restrictions: &Vec<SchemaRestriction>,
     ) -> Vec<SchemaRestriction> {
         let feature_urls = schema
-            .schema_definition
-            .directives
+            .definitions
             .iter()
-            .filter(|dir| dir.name.as_str() == LINK_DIRECTIVE_NAME)
+            .filter_map(|def| def.as_schema_definition())
+            .flat_map(|def| def.directives.get_all(LINK_DIRECTIVE_NAME))
             .filter_map(|link| {
                 link.argument_by_name(LINK_URL_ARGUMENT)
                     .and_then(|value| value.as_str().map(|s| s.to_string()))
@@ -398,8 +398,7 @@ mod test {
 
     fn check(router_yaml: &str, supergraph_schema: &str) -> LicenseEnforcementReport {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
-        let schema =
-            Schema::make_compiler(supergraph_schema).expect("supergraph schema must be valid");
+        let schema = Schema::parse_ast(supergraph_schema).expect("supergraph schema must be valid");
         LicenseEnforcementReport::build(&config, &schema)
     }
 

@@ -2,6 +2,7 @@
 //!
 
 use apollo_compiler::ast;
+use apollo_compiler::name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use tower::BoxError;
@@ -11,7 +12,7 @@ use crate::spec::query::transform;
 use crate::spec::query::transform::document;
 use crate::spec::query::transform::Visitor;
 
-const LABEL_NAME: &str = "label";
+const LABEL_NAME: ast::Name = name!("label");
 
 /// go through the query and adds labels to defer fragments that do not have any
 ///
@@ -90,7 +91,7 @@ fn directives(
         if !has_label {
             directive.arguments.push(
                 ast::Argument {
-                    name: LABEL_NAME.into(),
+                    name: LABEL_NAME,
                     value: visitor.generate_label().into(),
                 }
                 .into(),
@@ -109,8 +110,8 @@ mod tests {
     fn large_float_written_as_int() {
         let schema = "type Query { field(id: Float): String! }";
         let query = r#"{ field(id: 1234567890123) }"#;
-        let schema = apollo_compiler::Schema::parse(schema, "schema.graphql");
-        let doc = apollo_compiler::ast::Document::parse(query, "query.graphql");
+        let schema = apollo_compiler::Schema::parse(schema, "schema.graphql").unwrap();
+        let doc = apollo_compiler::ast::Document::parse(query, "query.graphql").unwrap();
         let result = add_defer_labels(&schema, &doc).unwrap().to_string();
         insta::assert_snapshot!(result);
     }

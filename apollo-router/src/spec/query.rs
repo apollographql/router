@@ -7,9 +7,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
 use derivative::Derivative;
 use indexmap::IndexSet;
@@ -21,6 +21,7 @@ use tracing::level_filters::LevelFilter;
 use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
+use crate::configuration::GraphQLValidationMode;
 use crate::error::FetchError;
 use crate::error::ValidationErrors;
 use crate::graphql::Error;
@@ -269,14 +270,36 @@ impl Query {
         let parser = &mut apollo_compiler::Parser::new()
             .recursion_limit(configuration.limits.parser_max_recursion)
             .token_limit(configuration.limits.parser_max_tokens);
-        let ast = parser.parse_ast(query, "query.graphql");
-        let executable = ast.to_executable(&schema.api_schema().definitions);
+        let (ast, parse_errors) = match parser.parse_ast(query, "query.graphql") {
+            Ok(ast) => (ast, None),
+            Err(WithErrors { partial, errors }) => (partial, Some(errors)),
+        };
+        let schema = &schema.api_schema().definitions;
+        let validate =
+            configuration.experimental_graphql_validation_mode != GraphQLValidationMode::Legacy;
+        // Stretch the meaning of "assume valid" to "we’ll check later"
+        let (executable, validation_errors) = if validate {
+            match ast.to_executable_validate(schema) {
+                Ok(doc) => (doc.into_inner(), None),
+                Err(WithErrors { partial, errors }) => (partial, Some(errors)),
+            }
+        } else {
+            match ast.to_executable(schema) {
+                Ok(doc) => (doc, None),
+                Err(WithErrors { partial, .. }) => (partial, None),
+            }
+        };
 
         // Trace log recursion limit data
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        Arc::new(ParsedDocumentInner { ast, executable })
+        Arc::new(ParsedDocumentInner {
+            ast,
+            executable,
+            parse_errors,
+            validation_errors,
+        })
     }
 
     pub(crate) fn parse(
@@ -287,7 +310,7 @@ impl Query {
         let query = query.into();
 
         let doc = Self::parse_document(&query, schema, configuration);
-        Self::check_errors(&doc.ast)?;
+        Self::check_errors(&doc)?;
         let (fragments, operations, defer_stats) =
             Self::extract_query_information(schema, &doc.executable)?;
 
@@ -305,20 +328,19 @@ impl Query {
     }
 
     /// Check for parse errors in a query in the compiler.
-    pub(crate) fn check_errors(document: &ast::Document) -> Result<(), SpecError> {
-        document
-            .check_parse_errors()
-            .map_err(|errors| SpecError::ParsingError(errors.to_string_no_color()))
+    pub(crate) fn check_errors(document: &ParsedDocument) -> Result<(), SpecError> {
+        match document.parse_errors.clone() {
+            Some(errors) => Err(SpecError::ParsingError(errors.to_string_no_color())),
+            None => Ok(()),
+        }
     }
 
     /// Check for validation errors in a query in the compiler.
-    pub(crate) fn validate_query(
-        schema: &Schema,
-        document: &ExecutableDocument,
-    ) -> Result<(), ValidationErrors> {
-        document
-            .validate(&schema.api_schema().definitions)
-            .map_err(|errors| ValidationErrors { errors })
+    pub(crate) fn validate_query(document: &ParsedDocument) -> Result<(), ValidationErrors> {
+        match document.validation_errors.clone() {
+            Some(errors) => Err(ValidationErrors { errors }),
+            None => Ok(()),
+        }
     }
 
     /// Extract serializable data structures from the apollo-compiler HIR.
@@ -856,7 +878,9 @@ impl Query {
                         input,
                         output,
                         path,
-                        &FieldType::new_named(type_condition).0,
+                        // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
+                        #[allow(clippy::unwrap_used)]
+                        &FieldType::new_named(type_condition.try_into().unwrap()).0,
                     )?;
                 }
                 Selection::FragmentSpread {
@@ -890,7 +914,9 @@ impl Query {
                             input,
                             output,
                             path,
-                            &FieldType::new_named(root_type_name).0,
+                            // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
+                            #[allow(clippy::unwrap_used)]
+                            &FieldType::new_named(root_type_name.try_into().unwrap()).0,
                         )?;
                     } else {
                         // the fragment should have been already checked with the schema
@@ -1091,11 +1117,11 @@ pub(crate) struct Variable {
 
 impl Operation {
     pub(crate) fn from_hir(
-        operation: executable::OperationRef<'_>,
+        operation: &executable::Operation,
         schema: &Schema,
         defer_stats: &mut DeferStats,
     ) -> Result<Self, SpecError> {
-        let name = operation.name().map(|s| s.as_str().to_owned());
+        let name = operation.name.as_ref().map(|s| s.as_str().to_owned());
         let kind = operation.operation_type.into();
         let type_name = schema.root_operation_name(kind).to_owned();
         let selection_set = operation
