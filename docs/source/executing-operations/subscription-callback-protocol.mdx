@@ -90,7 +90,7 @@ With initialization complete, the protocol commences its [main loop](#main-loop)
 
 The protocol's main loop remains active for the duration of the subscription. During the main loop, all of the following occur:
 
-- If heartbeat is enabled (`heartbeatIntervalMs` > 0). Every `heartbeatIntervalMs` milliseconds (value coming from the initial payload sent in `extensions` from the **Router**), **Emitter** must send a [`check` message](#check) to **Router** to confirm that **Router** is still listening.
+- If heartbeats are enabled (`heartbeatIntervalMs` > 0), within every period of `heartbeatIntervalMs` milliseconds, **Emitter** must send a [`check` message](#check) to **Router** to confirm that **Router** is still listening. (Note, the value of `heartbeatIntervalMs` is set by the initial payload sent in `extensions` from the **Router**.)
 - Whenever new subscription data is available, **Emitter** sends a [`next` message](#next) to **Router** containing the new data.
 - If an error occurs and the subscription must be terminated, **Emitter** sends a [`complete` message](#complete) to **Router** and includes the `errors` field.
 - If the subscription reaches the end of its stream and no new data is forthcoming, **Emitter** sends a [`complete` message](#complete) to **Router** and _omits_ the `errors` field.
