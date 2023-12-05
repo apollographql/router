@@ -63,7 +63,7 @@ executors:
   windows_test: &windows_test_executor
     machine:
       image: "windows-server-2019-vs2019:stable"
-    resource_class: windows.large
+    resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
 
 # We don't use {{ arch }} because on windows it is unstable https://discuss.circleci.com/t/value-of-arch-unstable-on-windows/40079
