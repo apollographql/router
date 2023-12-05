@@ -1,16 +1,16 @@
 ---
-source: apollo-router/tests/tracing_tests.rs
+source: apollo-router/tests/tracing_test.rs
 expression: get_spans()
 ---
 {
-  "name": "tracing_tests::root",
+  "name": "tracing_test::root",
   "record": {
     "entries": [],
     "metadata": {
       "name": "root",
-      "target": "tracing_tests",
+      "target": "tracing_test",
       "level": "ERROR",
-      "module_path": "tracing_tests",
+      "module_path": "tracing_test",
       "fields": {
         "names": []
       }

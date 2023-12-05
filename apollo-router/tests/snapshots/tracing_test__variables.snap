@@ -1,16 +1,16 @@
 ---
-source: apollo-router/tests/tracing_tests.rs
+source: apollo-router/tests/tracing_test.rs
 expression: get_spans()
 ---
 {
-  "name": "tracing_tests::root",
+  "name": "tracing_test::root",
   "record": {
     "entries": [],
     "metadata": {
       "name": "root",
-      "target": "tracing_tests",
+      "target": "tracing_test",
       "level": "ERROR",
-      "module_path": "tracing_tests",
+      "module_path": "tracing_test",
       "fields": {
         "names": []
       }
@@ -50,8 +50,12 @@ expression: get_spans()
             "query"
           ],
           [
+            "graphql.operation.name",
+            "ExampleQuery"
+          ],
+          [
             "otel.name",
-            "query"
+            "query ExampleQuery"
           ]
         ],
         "metadata": {
@@ -109,7 +113,7 @@ expression: get_spans()
               ],
               [
                 "otel.status_code",
-                "Ok"
+                "Error"
               ]
             ],
             "metadata": {
@@ -136,22 +140,6 @@ expression: get_spans()
             }
           },
           "children": {
-            "apollo_router::services::router::service::receive_body": {
-              "name": "apollo_router::services::router::service::receive_body",
-              "record": {
-                "entries": [],
-                "metadata": {
-                  "name": "receive_body",
-                  "target": "apollo_router::services::router::service",
-                  "level": "DEBUG",
-                  "module_path": "apollo_router::services::router::service",
-                  "fields": {
-                    "names": []
-                  }
-                }
-              },
-              "children": {}
-            },
             "apollo_router::services::layers::query_analysis::parse_query": {
               "name": "apollo_router::services::layers::query_analysis::parse_query",
               "record": {
@@ -185,7 +173,7 @@ expression: get_spans()
                   ],
                   [
                     "graphql.document",
-                    "{ topProducts { name name2:name } }"
+                    "query ExampleQuery($topProductsFirst: Int, $reviewsForAuthorAuthorId: ID!) {\n                topProducts(first: $topProductsFirst) {\n                    name\n                    reviewsForAuthor(authorID: $reviewsForAuthorAuthorId) {\n                        body\n                        author {\n                            id\n                            name\n                        }\n                    }\n                }\n            }"
                   ],
                   [
                     "apollo_private.field_level_instrumentation_ratio",
@@ -196,8 +184,12 @@ expression: get_spans()
                     "{}"
                   ],
                   [
+                    "graphql.operation.name",
+                    "ExampleQuery"
+                  ],
+                  [
                     "apollo_private.operation_signature",
-                    "# -\n{topProducts{name name}}"
+                    "# ExampleQuery\nquery ExampleQuery($reviewsForAuthorAuthorId:ID!,$topProductsFirst:Int){topProducts(first:$topProductsFirst){name reviewsForAuthor(authorID:$reviewsForAuthorAuthorId){author{id name}body}}}"
                   ]
                 ],
                 "metadata": {
@@ -280,161 +272,6 @@ expression: get_spans()
                     }
                   },
                   "children": {}
-                },
-                "apollo_router::plugins::telemetry::execution": {
-                  "name": "apollo_router::plugins::telemetry::execution",
-                  "record": {
-                    "entries": [
-                      [
-                        "otel.kind",
-                        "INTERNAL"
-                      ],
-                      [
-                        "graphql.operation.type",
-                        "query"
-                      ]
-                    ],
-                    "metadata": {
-                      "name": "execution",
-                      "target": "apollo_router::plugins::telemetry",
-                      "level": "INFO",
-                      "module_path": "apollo_router::plugins::telemetry",
-                      "fields": {
-                        "names": [
-                          "otel.kind",
-                          "graphql.operation.type"
-                        ]
-                      }
-                    }
-                  },
-                  "children": {
-                    "apollo_router::query_planner::execution::fetch": {
-                      "name": "apollo_router::query_planner::execution::fetch",
-                      "record": {
-                        "entries": [
-                          [
-                            "otel.kind",
-                            "INTERNAL"
-                          ],
-                          [
-                            "apollo.subgraph.name",
-                            "products"
-                          ],
-                          [
-                            "apollo_private.sent_time_offset",
-                            0
-                          ]
-                        ],
-                        "metadata": {
-                          "name": "fetch",
-                          "target": "apollo_router::query_planner::execution",
-                          "level": "INFO",
-                          "module_path": "apollo_router::query_planner::execution",
-                          "fields": {
-                            "names": [
-                              "otel.kind",
-                              "apollo.subgraph.name",
-                              "apollo_private.sent_time_offset"
-                            ]
-                          }
-                        }
-                      },
-                      "children": {
-                        "apollo_router::query_planner::fetch::make_variables": {
-                          "name": "apollo_router::query_planner::fetch::make_variables",
-                          "record": {
-                            "entries": [],
-                            "metadata": {
-                              "name": "make_variables",
-                              "target": "apollo_router::query_planner::fetch",
-                              "level": "DEBUG",
-                              "module_path": "apollo_router::query_planner::fetch",
-                              "fields": {
-                                "names": []
-                              }
-                            }
-                          },
-                          "children": {}
-                        },
-                        "apollo_router::plugins::telemetry::span_factory::subgraph": {
-                          "name": "apollo_router::plugins::telemetry::span_factory::subgraph",
-                          "record": {
-                            "entries": [
-                              [
-                                "apollo.subgraph.name",
-                                "products"
-                              ],
-                              [
-                                "graphql.document",
-                                "{topProducts{name name2:name}}"
-                              ],
-                              [
-                                "graphql.operation.name",
-                                ""
-                              ],
-                              [
-                                "otel.kind",
-                                "INTERNAL"
-                              ],
-                              [
-                                "otel.status_code",
-                                "Ok"
-                              ]
-                            ],
-                            "metadata": {
-                              "name": "subgraph",
-                              "target": "apollo_router::plugins::telemetry::span_factory",
-                              "level": "INFO",
-                              "module_path": "apollo_router::plugins::telemetry::span_factory",
-                              "fields": {
-                                "names": [
-                                  "apollo.subgraph.name",
-                                  "graphql.document",
-                                  "graphql.operation.name",
-                                  "otel.kind",
-                                  "apollo_private.ftv1",
-                                  "otel.status_code"
-                                ]
-                              }
-                            }
-                          },
-                          "children": {}
-                        },
-                        "apollo_router::query_planner::fetch::response_insert": {
-                          "name": "apollo_router::query_planner::fetch::response_insert",
-                          "record": {
-                            "entries": [],
-                            "metadata": {
-                              "name": "response_insert",
-                              "target": "apollo_router::query_planner::fetch",
-                              "level": "DEBUG",
-                              "module_path": "apollo_router::query_planner::fetch",
-                              "fields": {
-                                "names": []
-                              }
-                            }
-                          },
-                          "children": {}
-                        }
-                      }
-                    },
-                    "apollo_router::services::execution::service::format_response": {
-                      "name": "apollo_router::services::execution::service::format_response",
-                      "record": {
-                        "entries": [],
-                        "metadata": {
-                          "name": "format_response",
-                          "target": "apollo_router::services::execution::service",
-                          "level": "DEBUG",
-                          "module_path": "apollo_router::services::execution::service",
-                          "fields": {
-                            "names": []
-                          }
-                        }
-                      },
-                      "children": {}
-                    }
-                  }
                 }
               }
             }
