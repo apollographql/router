@@ -2,7 +2,6 @@ use apollo_router::services::supergraph;
 use apollo_router::TestHarness;
 use insta::_macro_support::Content;
 use insta::_macro_support::Redaction;
-use serde_json::json;
 use test_span::prelude::test_span;
 use tower_service::Service;
 
@@ -17,12 +16,7 @@ macro_rules! assert_trace_snapshot {
 async fn make_request(request: supergraph::Request) {
     let mut router = TestHarness::builder()
         .with_subgraph_network_requests()
-        .configuration_json(json!({"telemetry": {
-            "apollo": {
-                "field_level_instrumentation_sampler": "always_off"
-            }
-        }
-        }))
+        .configuration_yaml(include_str!("fixtures/deprecated_spans.router.yaml"))
         .expect("configuration must be valid")
         .build_router()
         .await

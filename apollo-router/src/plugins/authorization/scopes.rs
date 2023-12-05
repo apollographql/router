@@ -26,6 +26,7 @@ pub(crate) struct ScopeExtractionVisitor<'a> {
     fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
     pub(crate) extracted_scopes: HashSet<String>,
     requires_scopes_directive_name: String,
+    entity_query: bool,
 }
 
 pub(crate) const REQUIRES_SCOPES_DIRECTIVE_NAME: &str = "requiresScopes";
@@ -33,9 +34,14 @@ pub(crate) const REQUIRES_SCOPES_SPEC_URL: &str = "https://specs.apollo.dev/requ
 
 impl<'a> ScopeExtractionVisitor<'a> {
     #[allow(dead_code)]
-    pub(crate) fn new(schema: &'a schema::Schema, executable: &'a ast::Document) -> Option<Self> {
+    pub(crate) fn new(
+        schema: &'a schema::Schema,
+        executable: &'a ast::Document,
+        entity_query: bool,
+    ) -> Option<Self> {
         Some(Self {
             schema,
+            entity_query,
             fragments: transform::collect_fragments(executable),
             extracted_scopes: HashSet::new(),
             requires_scopes_directive_name: Schema::directive_name(
@@ -60,6 +66,38 @@ impl<'a> ScopeExtractionVisitor<'a> {
         self.extracted_scopes.extend(scopes_argument(
             ty.directives().get(&self.requires_scopes_directive_name),
         ));
+    }
+
+    fn entities_operation(&mut self, node: &ast::OperationDefinition) -> Result<(), BoxError> {
+        use crate::spec::query::traverse::Visitor;
+
+        if node.selection_set.len() != 1 {
+            return Err("invalid number of selections for _entities query".into());
+        }
+
+        match node.selection_set.first() {
+            Some(ast::Selection::Field(field)) => {
+                if field.name.as_str() != "_entities" {
+                    return Err("expected _entities field".into());
+                }
+
+                for selection in &field.selection_set {
+                    match selection {
+                        ast::Selection::InlineFragment(f) => {
+                            match f.type_condition.as_ref() {
+                                None => {
+                                    return Err("expected type condition".into());
+                                }
+                                Some(condition) => self.inline_fragment(condition.as_str(), f)?,
+                            };
+                        }
+                        _ => return Err("expected inline fragment".into()),
+                    }
+                }
+                Ok(())
+            }
+            _ => Err("expected _entities field".into()),
+        }
     }
 }
 
@@ -90,7 +128,11 @@ impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
             ));
         }
 
-        traverse::operation(self, root_type, node)
+        if !self.entity_query {
+            traverse::operation(self, root_type, node)
+        } else {
+            self.entities_operation(node)
+        }
     }
 
     fn field(
@@ -249,11 +291,6 @@ impl<'a> ScopeFilteringVisitor<'a> {
         field_def: &ast::FieldDefinition,
         node: &ast::Field,
     ) -> bool {
-        println!(
-            "implementors with different requirements for {:?}, node name={}",
-            field_def.name,
-            node.name.as_str()
-        );
         // we can request __typename outside of fragments even if the types have different
         // authorization requirements
         if node.name.as_str() == TYPENAME {
@@ -673,7 +710,7 @@ mod tests {
         let doc = Document::parse(query, "query.graphql");
         schema.validate().unwrap();
         doc.to_executable(&schema).validate(&schema).unwrap();
-        let mut visitor = ScopeExtractionVisitor::new(&schema, &doc).unwrap();
+        let mut visitor = ScopeExtractionVisitor::new(&schema, &doc, false).unwrap();
         traverse::document(&mut visitor, &doc).unwrap();
 
         visitor.extracted_scopes.into_iter().collect()

@@ -1,0 +1,5 @@
+description: Authorization is no longer preview, `preview_directives` is renamed `directives`
+actions:
+  - type: move
+    from: preview_directives
+    to: directives

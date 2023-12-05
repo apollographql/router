@@ -1,0 +1,14 @@
+supergraph:
+  listen: 1.2.3.4:5
+telemetry:
+  tracing:
+    common:
+      service_name: "test_tracing"
+
+  metrics:
+    common:
+      service_name: "test_metrics"
+
+  logging:
+    common:
+      service_name: "test_logging"
