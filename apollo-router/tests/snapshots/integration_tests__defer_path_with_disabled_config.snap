@@ -9,12 +9,6 @@ expression: stream.next().await.unwrap().unwrap()
       "extensions": {
         "code": "GRAPHQL_VALIDATION_FAILED"
       }
-    },
-    {
-      "message": "compiler error: cannot find directive `defer` in this document",
-      "extensions": {
-        "code": "GRAPHQL_VALIDATION_FAILED"
-      }
     }
   ]
 }

@@ -4,8 +4,6 @@ use std::sync::Arc;
 use displaydoc::Display;
 use lazy_static::__Deref;
 use router_bridge::introspect::IntrospectionError;
-use router_bridge::planner::PlanError;
-use router_bridge::planner::PlanErrorExtensions;
 use router_bridge::planner::PlannerError;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
@@ -488,22 +486,6 @@ pub(crate) struct PlanErrors {
     /// Usage reporting related data such as the
     /// operation signature and referenced fields
     pub(crate) usage_reporting: UsageReporting,
-}
-
-impl PlanErrors {
-    pub(crate) fn add_validation_errors(&mut self, v: ValidationErrors) {
-        let mut errors = (*self.errors).clone();
-        errors.extend(v.errors.iter().map(|diagnostic| PlanError {
-            message: Some(diagnostic.message().to_string()),
-            extensions: Some(PlanErrorExtensions {
-                code: "GRAPHQL_VALIDATION_FAILED".to_string(),
-                exception: None,
-            }),
-            validation_error: true,
-        }));
-
-        self.errors = Arc::new(errors);
-    }
 }
 
 impl From<router_bridge::planner::PlanErrors> for PlanErrors {

@@ -385,7 +385,7 @@ impl BridgeQueryPlanner {
                 plan
             }
             Err(err) => {
-                let mut plan_errors: PlanErrors = err.into();
+                let plan_errors: PlanErrors = err.into();
                 if matches!(
                     self.configuration.experimental_graphql_validation_mode,
                     GraphQLValidationMode::Both
@@ -394,11 +394,6 @@ impl BridgeQueryPlanner {
                         Some(&plan_errors),
                         selections.validation_error.as_ref(),
                     );
-
-                    // If we had a validation error from apollo-rs, merge it with existing errors
-                    if let Some(errors) = selections.validation_error {
-                        plan_errors.add_validation_errors(errors);
-                    }
                 }
                 return Err(QueryPlannerError::from(plan_errors));
             }
